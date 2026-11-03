@@ -11,18 +11,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 from urllib.parse import urlparse
 
-from consts.const import ASSET_OWNER_ATTACHMENTS_PREFIX, MINIO_DEFAULT_BUCKET, PERMISSION_EDIT
-from database.attachment_db import delete_file, get_file_size_from_minio_strict
-from database.knowledge_db import get_knowledge_record
-from database.knowledge_storage_object_db import (
-    COMMITTED_STATUS,
-    aggregate_committed_bytes_by_kb,
-    commit_storage_object,
-    get_committed_source_bytes_by_object_names,
-    get_storage_object_by_identity,
-    get_tenant_committed_bytes,
-    mark_storage_object_deleted,
-)
+from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, PERMISSION_EDIT
+from contracts.constants.environment import MINIO_DEFAULT_BUCKET
+from management.db.file.attachment import delete_file, get_file_size_from_minio_strict
+from management.db.knowledge_base.repository import get_knowledge_record
+from contracts.constants.constants import COMMITTED_STATUS
+from management.db.knowledge_base.storage_object import aggregate_committed_bytes_by_kb, commit_storage_object, get_committed_source_bytes_by_object_names, get_storage_object_by_identity, get_tenant_committed_bytes, mark_storage_object_deleted
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -552,7 +553,7 @@ select_images_from_components() {
   for component in $components; do
     normalized="$(deployment_trim "$component")"
     case "$normalized" in
-      ""|infrastructure|supabase|monitoring)
+      ""|infrastructure|monitoring)
         ;;
       application)
         add_image_if_missing main

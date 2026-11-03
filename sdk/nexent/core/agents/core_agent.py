@@ -3,7 +3,6 @@
 import ast
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -24,7 +23,7 @@ from smolagents.agents import (
     RunResult,
     handle_agent_output_types,
 )
-from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
+from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep
 from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT, MessageRole
 from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
@@ -40,14 +39,13 @@ from ..utils.model_output_diagnostics import (
     bounded_rejected_output_preview,
     rejected_output_preview_enabled,
 )
-from jinja2 import Template, StrictUndefined
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
-from ...consts.mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
+from ...consts.mcp_errors import classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message, propagate_mcp_timeout
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -1441,12 +1439,6 @@ Additional Args:
                 raise RuntimeFinalAnswer(
                     self._empty_model_response_hint(), "empty_model_output"
                 ) from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
-                raise ModelOutputProtocolError(
-                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                    protocol=getattr(self, "output_protocol", "code_action"),
-                    logger=self.logger,
-                ) from terminal_error
             raise
         except Exception as e:
             if self.stop_event.is_set():
@@ -1724,6 +1716,23 @@ Additional Args:
                     Group(Text("Execution logs:", style="bold"), Text(partial_logs)), level=LogLevel.INFO,
                 )
             error_msg, _ = self._screen_execution_output(str(e), code_action)
+            category, leaf = classify_mcp_failure(e)
+            if category:
+                # This text becomes the ReAct observation: keep it short and
+                # actionable; the full exception tree goes to the log only.
+                error_msg = mcp_failure_message(
+                    category,
+                    getattr(getattr(self, "observer", None), "lang", "en"),
+                    server=find_mcp_server_url(e),
+                    leaf=leaf,
+                )
+                logger.error(
+                    "event=mcp_code_execution_failure agent=%s step=%s category=%s",
+                    self.name,
+                    memory_step.step_number,
+                    category,
+                    exc_info=True,
+                )
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,

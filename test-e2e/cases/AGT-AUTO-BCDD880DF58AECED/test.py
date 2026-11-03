@@ -103,7 +103,7 @@ def _minimal_agent_info():
 
 
 def _setup_memory_runtime(monkeypatch, provider):
-    import agents.create_agent_info as mod
+    import management.services.agent.preparation.compiler as mod
 
     run_blocking_spy = _RunBlockingSpy()
     fixed_tool_spy = _FixedSearchToolSpy()
@@ -120,12 +120,6 @@ def _setup_memory_runtime(monkeypatch, provider):
     monkeypatch.setattr(mod, '_get_skills_for_template', lambda *args, **kwargs: [])
     monkeypatch.setattr(mod, '_get_skill_script_tools', lambda *args, **kwargs: [])
 
-    async def _no_prompt_templates(*args, **kwargs):
-        # AgentConfig.prompt_templates is a mapping.  Returning a list makes
-        # the fixture fail Pydantic validation before memory pre-search runs.
-        return {}
-
-    monkeypatch.setattr(mod, 'prepare_prompt_templates', _no_prompt_templates)
     monkeypatch.setattr(mod, 'get_local_python_authorized_imports', lambda: [])
 
     def _memory_context(*args, **kwargs):
@@ -168,7 +162,7 @@ def _setup_memory_runtime(monkeypatch, provider):
 
 
 async def _run_create_agent_config(monkeypatch, provider, query):
-    import agents.create_agent_info as mod
+    import management.services.agent.preparation.compiler as mod
 
     handle = _setup_memory_runtime(monkeypatch, provider)
     config = await mod.create_agent_config(

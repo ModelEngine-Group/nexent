@@ -6,16 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from consts.agent_repository import STATUS_REJECTED, STATUS_SHARED
-from consts.exceptions import NotFoundException
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_APPROVED,
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    EVENT_TYPE_REPOSITORY_REVIEW_REJECTED,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-    SCOPE_TENANT_ADMIN,
-    SCOPE_USER,
-)
+from contracts.constants.constants import STATUS_REJECTED, STATUS_SHARED
+from contracts.errors.exceptions import NotFoundException
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED, RESOURCE_TYPE_AGENT_REPOSITORY, SCOPE_TENANT_ADMIN, SCOPE_USER
 from management.services.notification import service as service
 
 

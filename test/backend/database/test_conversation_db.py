@@ -38,6 +38,7 @@ sa_mod.text = MagicMock(name="text")
 sa_mod.String = MagicMock(name="String")
 sa_mod.cast = MagicMock(name="cast")
 sa_mod.or_ = MagicMock(name="or_")
+sa_mod.exists = MagicMock(name="exists")
 orm_mod = types.ModuleType("sqlalchemy.orm")
 orm_mod.Session = MagicMock(name="Session")
 sys.modules["sqlalchemy.orm"] = orm_mod
@@ -100,17 +101,23 @@ sa_mod.update = _create_update_mock()
 sys.modules["sqlalchemy"] = sa_mod
 
 
-# Stub database.client
-client_mod = types.ModuleType("database.client")
+# Stub management.db.client
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.db_client = MagicMock(name="db_client")
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # Stub db_models with attributes referenced by the module
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class ConversationRecord:
@@ -189,13 +196,14 @@ db_models_mod.ConversationSourceSearch = ConversationSourceSearch
 db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
+db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
 
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-# Stub database.utils with the tracking helpers used by conversation_db
-utils_mod = types.ModuleType("database.utils")
+# Stub management.utils.audit_fields with the tracking helpers used by conversation_db
+utils_mod = types.ModuleType("management.utils.audit_fields")
 
 
 def _add_creation_tracking(data, user_id):
@@ -213,61 +221,15 @@ def _add_update_tracking(data, user_id):
 
 utils_mod.add_creation_tracking = _add_creation_tracking
 utils_mod.add_update_tracking = _add_update_tracking
-sys.modules["database.utils"] = utils_mod
-sys.modules["backend.database.utils"] = utils_mod
+sys.modules["management.utils.audit_fields"] = utils_mod
+sys.modules["management.utils.audit_fields"] = utils_mod
 
 
 # Import module under test after stubbing
-from backend.database.conversation_db import (
-    HistorySummaryPersistenceError,
-    _parse_history_summary_content,
-    create_conversation,
-    create_conversation_message,
-    create_message_unit,
-    create_message_units,
-    create_source_image,
-    create_source_search,
-    delete_conversation,
-    delete_conversations_batch,
-    delete_source_image,
-    delete_source_search,
-    fail_streaming_assistant_messages,
-    get_conversation,
-    get_conversation_history,
-    get_historical_context,
-    get_conversation_list,
-    get_conversation_list_page,
-    get_conversation_messages,
-    get_last_unit_for_message,
-    get_latest_assistant_message,
-    get_latest_assistant_message_id,
-    get_message,
-    get_message_id_by_index,
-    get_message_units,
-    get_source_images_by_conversation,
-    get_source_images_by_message,
-    get_source_searches_by_conversation,
-    get_source_searches_by_message,
-    persist_assistant_run_batch,
-    rename_conversation,
-    resolve_conversation_runtime_metadata,
-    save_history_summary,
-    soft_delete_all_conversations_by_user,
-    update_conversation_agent_id,
-    update_conversation_chat_mode,
-    update_conversation_knowledge_scope,
-    update_conversation_message_content,
-    update_conversation_message_status,
-    update_message_minio_files,
-    update_message_opinion,
-    update_message_unit_content,
-    update_message_unit_status,
-)
-from consts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    RuntimeMetadataVersionConflict,
-)
+
+from contracts.errors.exceptions import HistorySummaryPersistenceError
+from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, fail_streaming_assistant_messages, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
 
 
 def test_fail_streaming_assistant_messages_returns_runtime_identities(
@@ -286,7 +248,7 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     ]
     query.update.return_value = 2
     session.query.return_value = query
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     rows = fail_streaming_assistant_messages()
 
@@ -308,7 +270,7 @@ def test_fail_streaming_assistant_messages_returns_empty_without_rows(
     query.with_for_update.return_value = query
     query.all.return_value = []
     session.query.return_value = query
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     assert fail_streaming_assistant_messages() == []
     query.update.assert_not_called()
@@ -321,8 +283,8 @@ def test_ut_be_wb_027_joint_conflict_has_no_partial_mutation(
     """UT-BE-WB-027: either version conflict prevents all joint mutations."""
     from copy import deepcopy
     from types import SimpleNamespace
-    from backend.database.conversation_db import replace_conversation_workbench_and_metadata
-    from backend.database.conversation_db import WorkbenchConfigVersionConflict
+    from management.db.conversation.repository import replace_conversation_workbench_and_metadata
+    from management.db.conversation.repository import WorkbenchConfigVersionConflict
 
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
@@ -334,7 +296,7 @@ def test_ut_be_wb_027_joint_conflict_has_no_partial_mutation(
     )
     before = deepcopy(vars(record))
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     with pytest.raises((WorkbenchConfigVersionConflict, RuntimeMetadataVersionConflict)):
         replace_conversation_workbench_and_metadata(
             1, "user", {"agent_mounts": [{"agent_id": 8}]}, config_version,
@@ -349,10 +311,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
     """UT-BE-WB-027: identical config still checks its independent version."""
     from copy import deepcopy
     from types import SimpleNamespace
-    from backend.database.conversation_db import (
-        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
-        WorkbenchConfigVersionConflict,
-    )
+    from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, WorkbenchConfigVersionConflict
 
     session, ctx = mock_session_ctx
     config = {"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
@@ -362,7 +321,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
         agent_id=7, knowledge_scope=None,
     )
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     before = deepcopy(vars(record))
     def commit(version):
         if joint:
@@ -372,7 +331,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
     query = MagicMock()
     query.where.return_value = query
     query.with_for_update.return_value = query
-    monkeypatch.setattr("backend.database.conversation_db.select", lambda *_args: query)
+    monkeypatch.setattr("management.db.conversation.repository.select", lambda *_args: query)
     with pytest.raises(WorkbenchConfigVersionConflict):
         commit(1)
     assert vars(record) == before
@@ -390,9 +349,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
 def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypatch, mock_session_ctx, joint):
     from copy import deepcopy
     from types import SimpleNamespace
-    from backend.database.conversation_db import (
-        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
-    )
+    from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
         workbench_config={"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
@@ -400,7 +357,7 @@ def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypa
         agent_id=7, knowledge_scope=None,
     )
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     config = {
         **deepcopy(record.workbench_config),
         "mode": "multi_agent_chat",
@@ -420,10 +377,7 @@ def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypa
 def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_session_ctx, joint):
     from copy import deepcopy
     from types import SimpleNamespace
-    from backend.database.conversation_db import (
-        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
-        WorkbenchError,
-    )
+    from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, WorkbenchError
 
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
@@ -433,7 +387,7 @@ def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_sess
     )
     before = deepcopy(vars(record))
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     config = {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}
     with pytest.raises(WorkbenchError) as raised:
         if joint:
@@ -447,7 +401,7 @@ def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_sess
 
 def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_session_ctx):
     from types import SimpleNamespace
-    from backend.database.conversation_db import replace_conversation_workbench_config, WorkbenchError
+    from management.db.conversation.repository import replace_conversation_workbench_config, WorkbenchError
 
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
@@ -455,7 +409,7 @@ def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_sess
         workbench_config_version=1, agent_id=None,
     )
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(WorkbenchError) as raised:
         replace_conversation_workbench_config(
@@ -503,7 +457,7 @@ def test_soft_delete_all_conversations_by_user_none(monkeypatch, mock_session_ct
     """Return 0 and do no writes when user has no conversations."""
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     count = soft_delete_all_conversations_by_user("user-1")
 
@@ -516,7 +470,7 @@ def test_soft_delete_all_conversations_by_user_some(monkeypatch, mock_session_ct
     """Soft-delete across all related tables when conversations exist."""
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = [101, 102, 103]
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     count = soft_delete_all_conversations_by_user("user-2")
 
@@ -539,7 +493,7 @@ def test_delete_conversation_success(monkeypatch, mock_session_ctx):
     conversation_result.rowcount = 1
     session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_conversation(123, user_id="actor")
 
@@ -555,7 +509,7 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
     conversation_result.rowcount = 0
     session.execute.side_effect = [conversation_result, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_conversation(999)
 
@@ -575,7 +529,7 @@ def test_delete_conversations_batch_success(monkeypatch, mock_session_ctx):
     select_result.all.return_value = [(101,), (102,)]
     session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     deleted = delete_conversations_batch([101, 102, 999], user_id="user-1")
 
@@ -591,7 +545,7 @@ def test_delete_conversations_batch_none_owned(monkeypatch, mock_session_ctx):
     select_result.all.return_value = []
     session.execute.return_value = select_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     deleted = delete_conversations_batch([999], user_id="user-1")
 
@@ -603,7 +557,7 @@ def test_delete_conversations_batch_none_owned(monkeypatch, mock_session_ctx):
 def test_delete_conversations_batch_empty_input(monkeypatch, mock_session_ctx):
     """delete_conversations_batch returns [] without hitting the DB when input is empty."""
     session, ctx = mock_session_ctx
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     deleted = delete_conversations_batch([], user_id="user-1")
 
@@ -618,7 +572,7 @@ def test_delete_conversations_batch_without_user_id(monkeypatch, mock_session_ct
     select_result.all.return_value = [(101,), (102,)]
     session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     deleted = delete_conversations_batch([101, 102])
 
@@ -644,8 +598,8 @@ def test_rename_conversation_success_ascii(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(123, "New Title", user_id="actor")
 
@@ -666,8 +620,8 @@ def test_rename_conversation_success_chinese(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(456, "测试会话标题", user_id="user-1")
 
@@ -688,8 +642,8 @@ def test_rename_conversation_success_mixed(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(789, "Project 项目 Alpha", user_id="developer")
 
@@ -709,8 +663,8 @@ def test_rename_conversation_not_found(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(999, "Nonexistent Title")
 
@@ -730,8 +684,8 @@ def test_rename_conversation_without_user_id(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(123, "Title Only")
 
@@ -751,8 +705,8 @@ def test_rename_conversation_conversation_id_as_string(monkeypatch, mock_session
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation("456", "String ID Title")
 
@@ -772,8 +726,8 @@ def test_rename_conversation_with_emoji(monkeypatch, mock_session_ctx):
         side_effect=lambda data: {k: v for k, v in data.items()}
     )
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.db_client", test_db_client)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.db_client", test_db_client)
 
     ok = rename_conversation(123, "Hello World 🌍", user_id="user-1")
 
@@ -802,7 +756,7 @@ def test_create_conversation_success(monkeypatch, mock_session_ctx):
     mock_record.update_time = 1234567890.456
     session.execute.return_value.fetchone.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = create_conversation("Test Title", user_id="user-1", agent_id=7)
 
@@ -820,9 +774,9 @@ def test_create_conversation_rejects_user_history_limit(monkeypatch, mock_sessio
     session, ctx = mock_session_ctx
     session.scalar.return_value = 1
     monkeypatch.setattr(
-        "backend.database.conversation_db.MAX_CONVERSATIONS_PER_USER", 1
+        "management.db.conversation.repository.MAX_CONVERSATIONS_PER_USER", 1
     )
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
         create_conversation("At limit", user_id="user-1")
@@ -854,7 +808,7 @@ def test_create_conversation_allows_user_below_history_limit(monkeypatch, mock_s
         update_time=1000.0,
     )
     session.execute.return_value.fetchone.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = create_conversation("Below limit", user_id="user-1")
 
@@ -877,7 +831,7 @@ def test_create_conversation_without_user_id(monkeypatch, mock_session_ctx):
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = create_conversation("No User Title")
 
@@ -891,7 +845,7 @@ def test_resolve_runtime_metadata_replaces_and_increments(monkeypatch, mock_sess
     record.runtime_metadata = {"old": True}
     record.runtime_metadata_version = 3
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     request_metadata = {"nested": {"value": 1}}
     result = resolve_conversation_runtime_metadata(
@@ -926,7 +880,7 @@ def test_create_conversation_with_runtime_metadata_starts_at_version_one(
     record.create_time = 1000.0
     record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = create_conversation(
         "Metadata Title",
@@ -946,7 +900,7 @@ def test_resolve_runtime_metadata_rejects_stale_version(monkeypatch, mock_sessio
     record.runtime_metadata = {"current": True}
     record.runtime_metadata_version = 4
     session.scalars.return_value.first.return_value = record
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(RuntimeMetadataVersionConflict) as exc_info:
         resolve_conversation_runtime_metadata(
@@ -965,7 +919,7 @@ def test_resolve_runtime_metadata_rejects_stale_version(monkeypatch, mock_sessio
 def test_resolve_runtime_metadata_raises_conversation_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(ConversationNotFoundError):
         resolve_conversation_runtime_metadata(
@@ -990,7 +944,7 @@ def test_create_conversation_message_forwards_status(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     message_id = create_conversation_message(
         {
@@ -1016,8 +970,8 @@ def test_create_conversation_message_rejects_turn_limit(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.MAX_CONVERSATION_TURNS", 1)
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.MAX_CONVERSATION_TURNS", 1)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(AppException) as exc_info:
         create_conversation_message(
@@ -1049,7 +1003,7 @@ def test_create_conversation_message_with_minio_files(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     message_id = create_conversation_message(
         {
@@ -1076,7 +1030,7 @@ def test_create_conversation_message_default_status(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     message_id = create_conversation_message(
         {
@@ -1105,7 +1059,7 @@ def test_create_message_unit_inserts_single_row(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = create_message_unit(
         message_id=1,
@@ -1135,7 +1089,7 @@ def test_create_message_unit_serializes_structured_content(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = create_message_unit(
         message_id=1,
@@ -1159,7 +1113,7 @@ def test_create_message_unit_without_user_id(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = create_message_unit(
         message_id=1,
@@ -1189,7 +1143,7 @@ def test_create_message_units_batch(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_ids = create_message_units(
         [
@@ -1209,7 +1163,7 @@ def test_create_message_units_batch(monkeypatch):
 def test_create_message_units_empty_list(monkeypatch):
     """create_message_units returns empty list when given empty input."""
     ctx = MagicMock()
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = create_message_units([], message_id=1, conversation_id=2)
 
@@ -1244,7 +1198,7 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
     ctx.__exit__.return_value = None
     session_factory = MagicMock(return_value=ctx)
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         session_factory,
     )
 
@@ -1315,7 +1269,7 @@ def test_persist_assistant_run_batch_rejects_finalized_parent(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1357,7 +1311,7 @@ def test_persist_assistant_run_batch_rejects_invalid_terminal_status(monkeypatch
     """Only terminal assistant states may be persisted."""
     session_factory = MagicMock()
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         session_factory,
     )
 
@@ -1377,7 +1331,7 @@ def test_persist_assistant_run_batch_rejects_missing_parent(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1396,7 +1350,7 @@ def test_persist_assistant_run_batch_accepts_empty_output(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1424,7 +1378,7 @@ def test_persist_assistant_run_batch_rejects_missing_search_unit(monkeypatch):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1445,7 +1399,7 @@ def test_persist_assistant_run_batch_rejects_missing_automation_unit(monkeypatch
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1472,7 +1426,7 @@ def test_persist_assistant_run_batch_rejects_missing_automation_proposal(monkeyp
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1519,7 +1473,7 @@ def test_persist_assistant_run_batch_normalizes_existing_skill_files(
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1548,7 +1502,7 @@ def test_persist_assistant_run_batch_initializes_empty_proposal_task(monkeypatch
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.conversation_db.get_db_session",
+        "management.db.conversation.repository.get_db_session",
         lambda: ctx,
     )
 
@@ -1579,7 +1533,7 @@ def test_update_conversation_message_status(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_conversation_message_status(7, "completed", user_id="actor")
 
@@ -1594,7 +1548,7 @@ def test_update_conversation_message_status_without_user(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_conversation_message_status(7, "failed")
 
@@ -1609,7 +1563,7 @@ def test_update_message_unit_status(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_message_unit_status(42, "completed", user_id="actor")
 
@@ -1624,7 +1578,7 @@ def test_update_conversation_message_content(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_conversation_message_content(7, "new text", user_id="actor")
 
@@ -1639,7 +1593,7 @@ def test_update_message_unit_content_serializes_structured_content(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_message_unit_content(42, {"status": "ready"}, user_id="editor")
 
@@ -1653,7 +1607,7 @@ def test_update_message_unit_content(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     update_message_unit_content(42, "updated content", user_id="editor")
 
@@ -1671,7 +1625,7 @@ def test_update_message_opinion(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = update_message_opinion(7, "Y", user_id="actor")
 
@@ -1699,8 +1653,8 @@ def test_get_conversation_found(monkeypatch, mock_session_ctx):
             "conversation_title": record.conversation_title,
         }
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation(42, user_id="user-1")
 
@@ -1713,7 +1667,7 @@ def test_get_conversation_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_conversation(999)
 
@@ -1731,8 +1685,8 @@ def test_get_conversation_without_user_id(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"conversation_id": record.conversation_id}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation(1)
 
@@ -1753,8 +1707,8 @@ def test_get_conversation_messages(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"message_id": id(record)}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_messages(42)
 
@@ -1767,7 +1721,7 @@ def test_get_conversation_messages_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_conversation_messages(42)
 
@@ -1788,8 +1742,8 @@ def test_get_message_units(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"unit_id": id(record)}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_message_units(7)
 
@@ -1801,7 +1755,7 @@ def test_get_message_units_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_message_units(7)
 
@@ -1835,8 +1789,8 @@ def test_get_conversation_list(monkeypatch, mock_session_ctx):
             "update_time": record.update_time,
         }
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_list()
 
@@ -1864,8 +1818,8 @@ def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
             "update_time": record.update_time,
         }
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_list(user_id="specific-user")
 
@@ -1886,9 +1840,9 @@ def test_get_conversation_list_applies_pagination_with_stable_order(monkeypatch,
     stmt.limit.return_value = stmt
     stmt.offset.return_value = stmt
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
-    monkeypatch.setattr("backend.database.conversation_db.desc", desc_mock)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.select", select_mock)
+    monkeypatch.setattr("management.db.conversation.repository.desc", desc_mock)
 
     result = get_conversation_list(user_id="user-1", limit=10, offset=20)
 
@@ -1912,8 +1866,8 @@ def test_get_conversation_list_applies_offset_without_limit(monkeypatch, mock_se
     select_mock.return_value.where.return_value.order_by.return_value = stmt
     stmt.offset.return_value = stmt
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.select", select_mock)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.select", select_mock)
 
     result = get_conversation_list(offset=20)
 
@@ -1938,7 +1892,7 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
         def __lt__(self, _value):
             return MagicMock()
 
-    from backend.database import conversation_db
+    from management.db.conversation import repository as conversation_db
 
     monkeypatch.setattr(
         conversation_db.func.extract.return_value.__mul__,
@@ -1960,7 +1914,7 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
             older=20,
         )
     ]
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_conversation_list_page(
         "user-1",
@@ -2003,7 +1957,7 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
         def __lt__(self, _value):
             return MagicMock()
 
-    from backend.database import conversation_db
+    from management.db.conversation import repository as conversation_db
 
     monkeypatch.setattr(
         conversation_db.func.extract.return_value.__mul__,
@@ -2011,7 +1965,7 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
         ComparableTimestamp(),
     )
     session.execute.return_value = []
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_conversation_list_page(
         "user-1",
@@ -2028,14 +1982,14 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
 
 
 @pytest.mark.parametrize("conversation_type, predicate", [
-    ("agent_chat", "is_"),
+    ("agent_chat", "is_not"),
     ("workbench", "is_not"),
 ])
 def test_conversation_page_filters_origin_before_pagination(
     monkeypatch, mock_session_ctx, conversation_type, predicate
 ):
     """The source predicate is applied in SQL so counts and pages stay scoped."""
-    from backend.database import conversation_db
+    from management.db.conversation import repository as conversation_db
 
     class ComparableTimestamp:
         def label(self, _name):
@@ -2083,7 +2037,7 @@ def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):
     update_result.rowcount = 1
     session.execute.return_value = update_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_conversation_agent_id("123", "45", user_id="user-1")
 
@@ -2098,7 +2052,7 @@ def test_update_conversation_agent_id_not_found(monkeypatch, mock_session_ctx):
     update_result.rowcount = 0
     session.execute.return_value = update_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_conversation_agent_id(123, 45)
 
@@ -2115,7 +2069,7 @@ def test_update_conversation_chat_mode_rejects_invalid_mode(monkeypatch, mock_se
     """Reject invalid chat modes before opening a database session."""
     _, ctx = mock_session_ctx
     get_session = MagicMock(return_value=ctx)
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", get_session)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", get_session)
 
     with pytest.raises(ValueError, match="Invalid chat_mode 'invalid'"):
         update_conversation_chat_mode(123, "invalid")
@@ -2129,7 +2083,7 @@ def test_update_conversation_chat_mode_success(monkeypatch, mock_session_ctx, fr
     update_result = MagicMock()
     update_result.rowcount = 1
     session.execute.return_value = update_result
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_conversation_chat_mode("123", "planning", user_id="user-1")
 
@@ -2146,7 +2100,7 @@ def test_update_conversation_chat_mode_not_found(monkeypatch, mock_session_ctx, 
     update_result = MagicMock()
     update_result.rowcount = 0
     session.execute.return_value = update_result
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_conversation_chat_mode(123, "execution")
 
@@ -2172,8 +2126,8 @@ def test_get_message_found(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"message_id": record.message_id, "message_content": record.message_content}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_message(42)
 
@@ -2186,7 +2140,7 @@ def test_get_message_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_message(999)
 
@@ -2203,7 +2157,7 @@ def test_get_message_id_by_index_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.scalar.return_value = 42
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_message_id_by_index(1, 0)
 
@@ -2215,7 +2169,7 @@ def test_get_message_id_by_index_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.scalar.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_message_id_by_index(999, 99)
 
@@ -2232,7 +2186,7 @@ def test_get_latest_assistant_message_id_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.scalar.return_value = 42
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message_id(1)
 
@@ -2244,7 +2198,7 @@ def test_get_latest_assistant_message_id_not_found(monkeypatch, mock_session_ctx
     session, ctx = mock_session_ctx
     session.execute.return_value.scalar.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message_id(999)
 
@@ -2265,7 +2219,7 @@ def test_get_latest_assistant_message_found(monkeypatch, mock_session_ctx):
     mock_result.message_content = "Hello"
     session.execute.return_value.first.return_value = mock_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message(1)
 
@@ -2280,7 +2234,7 @@ def test_get_latest_assistant_message_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message(999)
 
@@ -2303,7 +2257,7 @@ def test_get_last_unit_for_message_found(monkeypatch, mock_session_ctx):
     mock_result.unit_status = "completed"
     session.execute.return_value.first.return_value = mock_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_last_unit_for_message(42)
 
@@ -2318,7 +2272,7 @@ def test_get_last_unit_for_message_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_last_unit_for_message(999)
 
@@ -2343,7 +2297,7 @@ def test_create_source_image_success(monkeypatch, fresh_insert_mock):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     image_id = create_source_image(
         {"message_id": 7, "image_url": "http://example.com/image.png"},
@@ -2369,7 +2323,7 @@ def test_delete_source_image_success(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_image(42, user_id="actor")
 
@@ -2385,7 +2339,7 @@ def test_delete_source_image_not_found(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_image(999)
 
@@ -2404,7 +2358,7 @@ def test_create_source_search_success(monkeypatch, fresh_insert_mock):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     search_id = create_source_search(
         {
@@ -2432,7 +2386,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     search_id = create_source_search(
         {
@@ -2472,7 +2426,7 @@ def test_delete_source_search_success(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_search(42, user_id="actor")
 
@@ -2488,7 +2442,7 @@ def test_delete_source_search_not_found(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_search(999)
 
@@ -2509,8 +2463,8 @@ def test_get_source_images_by_message(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"image_id": id(record)}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_images_by_message(7)
 
@@ -2531,8 +2485,8 @@ def test_get_source_images_by_conversation(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"image_id": id(record)}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_images_by_conversation(1)
 
@@ -2565,8 +2519,8 @@ def test_get_source_searches_by_conversation(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"search_id": id(record)}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_searches_by_conversation(1)
 
@@ -2591,7 +2545,7 @@ def test_get_conversation_history_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.execute.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_conversation_history(999)
 
@@ -2610,7 +2564,7 @@ def test_update_message_minio_files_success(monkeypatch, mock_session_ctx):
     mock_record.minio_files = '[]'
     session.scalars.return_value.first.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_message_minio_files(42, [{"name": "new.pdf"}])
 
@@ -2624,7 +2578,7 @@ def test_update_message_minio_files_not_found(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = None
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_message_minio_files(999, [{"name": "file.pdf"}])
 
@@ -2647,8 +2601,8 @@ def test_get_conversation_with_user_id_filter(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"conversation_id": record.conversation_id, "conversation_title": record.conversation_title}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation(42, user_id="specific-user")
 
@@ -2659,10 +2613,10 @@ def test_get_conversation_with_user_id_filter(monkeypatch, mock_session_ctx):
 def test_get_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     tenant_lookup = MagicMock(return_value={"user_id": "user-1", "tenant_id": "tenant-1"})
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         tenant_lookup,
     )
 
@@ -2676,7 +2630,7 @@ def test_get_conversation_filters_by_user_and_tenant(monkeypatch, mock_session_c
 def test_get_conversation_rejects_cross_tenant_identity(monkeypatch, mock_session_ctx):
     session, _ = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda user_id: {"user_id": user_id, "tenant_id": "tenant-2"},
     )
 
@@ -2687,9 +2641,9 @@ def test_get_conversation_rejects_cross_tenant_identity(monkeypatch, mock_sessio
 def test_get_conversation_accepts_legacy_asset_owner_tenant(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.first.return_value = MagicMock()
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "", "user_role": "ASSET_OWNER"},
     )
 
@@ -2719,8 +2673,8 @@ def test_get_message_with_user_id_filter(monkeypatch, mock_session_ctx):
     def as_dict_side_effect(record):
         return {"message_id": record.message_id, "message_content": record.message_content}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_message(42, user_id="owner-user")
 
@@ -2737,7 +2691,7 @@ def test_get_latest_assistant_message_with_user_id(monkeypatch, mock_session_ctx
     mock_result.message_content = "Hello"
     session.execute.return_value.first.return_value = mock_result
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message(1, user_id="owner-user")
 
@@ -2750,7 +2704,7 @@ def test_get_latest_assistant_message_id_with_user_id(monkeypatch, mock_session_
     session, ctx = mock_session_ctx
     session.execute.return_value.scalar.return_value = 42
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_latest_assistant_message_id(1, user_id="owner-user")
 
@@ -2765,7 +2719,7 @@ def test_create_source_image_duplicate_returns_minus_one(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     image_id = create_source_image(
         {"message_id": 7, "image_url": "http://example.com/image.png"},
@@ -2787,7 +2741,7 @@ def test_create_source_image_with_conversation_id(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     image_id = create_source_image(
         {"message_id": 7, "conversation_id": 10, "image_url": "http://example.com/image.png"},
@@ -2805,7 +2759,7 @@ def test_create_source_search_with_unit_id(monkeypatch, fresh_insert_mock):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     search_id = create_source_search(
         {
@@ -2837,7 +2791,7 @@ def test_create_source_search_with_published_date(monkeypatch, fresh_insert_mock
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     from datetime import datetime
     published = datetime(2024, 1, 15)
@@ -2870,7 +2824,7 @@ def test_update_message_opinion_returns_false_when_not_found(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = update_message_opinion(999, "Y", user_id="actor")
 
@@ -2886,7 +2840,7 @@ def test_update_message_opinion_without_user(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = update_message_opinion(7, "N")
 
@@ -2902,7 +2856,7 @@ def test_update_message_minio_files_with_existing_files(monkeypatch, mock_sessio
     mock_record.minio_files = '[{"name": "existing.pdf"}]'
     session.scalars.return_value.first.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_message_minio_files(42, [{"name": "new.pdf"}])
 
@@ -2918,7 +2872,7 @@ def test_update_message_minio_files_with_invalid_json(monkeypatch, mock_session_
     mock_record.minio_files = "not valid json {"
     session.scalars.return_value.first.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = update_message_minio_files(42, [{"name": "new.pdf"}])
 
@@ -2935,8 +2889,8 @@ def test_get_source_images_by_message_with_user_id(monkeypatch, mock_session_ctx
     def as_dict_side_effect(record):
         return {"image_id": 1}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_images_by_message(7, user_id="owner-user")
 
@@ -2952,8 +2906,8 @@ def test_get_source_images_by_conversation_with_user_id(monkeypatch, mock_sessio
     def as_dict_side_effect(record):
         return {"image_id": 1}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_images_by_conversation(1, user_id="owner-user")
 
@@ -2969,8 +2923,8 @@ def test_get_source_searches_by_message_with_user_id(monkeypatch, mock_session_c
     def as_dict_side_effect(record):
         return {"search_id": 1}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_searches_by_message(7, user_id="owner-user")
 
@@ -2986,8 +2940,8 @@ def test_get_source_searches_by_conversation_with_user_id(monkeypatch, mock_sess
     def as_dict_side_effect(record):
         return {"search_id": 1}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_source_searches_by_conversation(1, user_id="owner-user")
 
@@ -3001,7 +2955,7 @@ def test_create_conversation_message_with_string_minio_files(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     message_id = create_conversation_message(
         {
@@ -3029,7 +2983,7 @@ def test_delete_source_image_without_user_id(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_image(42)
 
@@ -3046,7 +3000,7 @@ def test_delete_source_search_without_user_id(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = delete_source_search(42)
 
@@ -3059,7 +3013,7 @@ def test_get_source_images_by_message_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_source_images_by_message(7)
 
@@ -3071,7 +3025,7 @@ def test_get_source_images_by_conversation_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_source_images_by_conversation(1)
 
@@ -3083,7 +3037,7 @@ def test_get_source_searches_by_message_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_source_searches_by_message(7)
 
@@ -3095,7 +3049,7 @@ def test_get_source_searches_by_conversation_empty(monkeypatch, mock_session_ctx
     session, ctx = mock_session_ctx
     session.scalars.return_value.all.return_value = []
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_source_searches_by_conversation(1)
 
@@ -3166,8 +3120,8 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
             }
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     sa_mod.func.extract.reset_mock()
 
@@ -3188,7 +3142,7 @@ def test_create_message_units_creates_all_units_with_user_id(monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_ids = create_message_units(
         [
@@ -3223,8 +3177,8 @@ def test_get_message_units_with_records(monkeypatch, mock_session_ctx):
             "unit_content": record.unit_content,
         }
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_message_units(7)
 
@@ -3293,8 +3247,8 @@ def test_get_conversation_history_sorts_units_by_index(monkeypatch, mock_session
             return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_history(1)
 
@@ -3363,8 +3317,8 @@ def test_get_conversation_history_parses_minio_files_json_string(monkeypatch, mo
             return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_history(1)
 
@@ -3427,8 +3381,8 @@ def test_get_conversation_history_minio_files_non_string_kept_as_is(monkeypatch,
             return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_history(1)
 
@@ -3487,8 +3441,8 @@ def test_get_conversation_history_minio_files_invalid_json_kept(monkeypatch, moc
             return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_history(1)
 
@@ -3545,8 +3499,8 @@ def test_get_conversation_history_units_empty_list(monkeypatch, mock_session_ctx
             return {"conversation_id": record.conversation_id, "create_time": record.create_time}
         return {}
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
-    monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.as_dict", as_dict_side_effect)
 
     result = get_conversation_history(1)
 
@@ -3571,7 +3525,7 @@ def test_parse_history_summary_requires_summary_and_positive_boundary():
 
 def test_save_history_summary_rejects_cross_tenant_before_database(monkeypatch):
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "tenant-b"})
     with pytest.raises(HistorySummaryPersistenceError, match="not accessible"):
         save_history_summary(1, "user-a", "tenant-a", {}, 24)
@@ -3582,7 +3536,7 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     from types import SimpleNamespace
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "tenant-a"})
     message_index_column = MagicMock()
     message_index_column.__gt__.return_value = MagicMock()
@@ -3598,7 +3552,7 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     insert_result.scalar_one.return_value = 1001
     session.execute.side_effect = [owner_result, covered_result, insert_result]
     session.scalar.side_effect = [0, 4]
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     unit_id = save_history_summary(
         1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
@@ -3630,7 +3584,7 @@ def test_save_history_summary_rejects_incomplete_covered_range(
     from types import SimpleNamespace
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "tenant-a"})
     message_index_column = MagicMock()
     message_index_column.__gt__.return_value = MagicMock()
@@ -3644,7 +3598,7 @@ def test_save_history_summary_rejects_incomplete_covered_range(
         status="completed")
     session.execute.side_effect = [owner_result, covered_result]
     session.scalar.return_value = 1
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     with pytest.raises(HistorySummaryPersistenceError, match="completed messages only"):
         save_history_summary(1, "user-a", "tenant-a", {}, 24)
@@ -3652,7 +3606,7 @@ def test_save_history_summary_rejects_incomplete_covered_range(
 
 def test_get_historical_context_rejects_cross_tenant(monkeypatch):
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "tenant-b"})
     assert get_historical_context(1, 25, "user-a", "tenant-a") is None
 
@@ -3662,7 +3616,7 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
     from types import SimpleNamespace
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.conversation_db._get_user_tenant",
+        "management.db.conversation.repository._get_user_tenant",
         lambda _user_id: {"tenant_id": "tenant-a"})
     index_column = MagicMock()
     index_column.__lt__.return_value = MagicMock()
@@ -3691,7 +3645,7 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
     ]
     session.execute.side_effect = [
         current_result, candidates_result, boundary_result, messages_result]
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")
 
@@ -3731,7 +3685,7 @@ def test_create_conversation_with_knowledge_scope(monkeypatch, mock_session_ctx,
     mock_record.update_time = 1000.0
     session.execute.return_value.fetchone.return_value = mock_record
 
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     scope = {
         "local": {"mode": "override", "index_names": ["idx-a"]},
@@ -3753,7 +3707,7 @@ def test_update_conversation_knowledge_scope_success(monkeypatch, mock_session_c
     result_mock = MagicMock()
     result_mock.rowcount = 1
     session.execute.return_value = result_mock
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     scope = {"local": {"mode": "inherit"}}
     ok = update_conversation_knowledge_scope(999, scope, user_id="user-1")
@@ -3769,7 +3723,7 @@ def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_sessi
     result_mock = MagicMock()
     result_mock.rowcount = 0
     session.execute.return_value = result_mock
-    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     ok = update_conversation_knowledge_scope(
         404,

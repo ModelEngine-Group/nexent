@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -23,6 +25,7 @@ import {
 import { Upload as UploadIcon, Trash2, MessageCircle, Box } from "lucide-react";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
+import { conversationService } from "@/services/conversationService";
 import { type SkillFormData, type SkillFileContent } from "@/types/skill";
 import {
   fetchSkillsList,
@@ -160,6 +163,8 @@ export default function SkillBuildModal({
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
   const [form] = Form.useForm<SkillFormData>();
   const isEditMode = Boolean(editingSkill);
+  const creationConversationId = useRef<string | undefined>(undefined);
+  const savedCreatorSkillId = useRef<number | undefined>(undefined);
   const isAdmin = !!user?.role && CAN_EDIT_ALL_ROLES.has(user.role);
   const isCreator =
     !isEditMode ||
@@ -299,6 +304,8 @@ export default function SkillBuildModal({
 
   useEffect(() => {
     if (!isOpen) {
+      creationConversationId.current = undefined;
+      savedCreatorSkillId.current = undefined;
       setActiveTab(initialTab);
       setUploadFile(null);
       setInteractiveSkillName("");
@@ -510,9 +517,13 @@ export default function SkillBuildModal({
         onSuccess,
         closeModal,
         t,
-        isEditMode && editingSkill?.skill_id
-          ? { mode: "edit", skillId: editingSkill.skill_id }
-          : { mode: "create" }
+        (editingSkill?.skill_id ?? savedCreatorSkillId.current)
+          ? {
+              mode: "edit",
+              skillId: editingSkill?.skill_id ?? savedCreatorSkillId.current,
+              onSaved: bindSavedSkill,
+            }
+          : { mode: "create", onSaved: bindSavedSkill }
       );
     } catch (error) {
       log.error("Skill create/update error:", error);
@@ -895,9 +906,23 @@ export default function SkillBuildModal({
       </div>
     );
   };
+  const bindSavedSkill = async (id: number) => {
+    savedCreatorSkillId.current = id;
+    if (creationConversationId.current) {
+      await conversationService.bindTarget(Number(creationConversationId.current), {
+        type: "skill",
+        id,
+      });
+    }
+  };
+
   const renderChatPanel = () => (
     <Nl2SkillChatPanel
       getDraftSnapshot={getDraftSnapshot}
+      targetSkillId={editingSkill?.skill_id}
+      onConversationId={(id) => {
+        creationConversationId.current = id;
+      }}
       onStreamEvent={handleNl2SkillStreamEvent}
       language={i18n.language?.startsWith("en") ? "en" : "zh"}
       availableFiles={skillTabs.filter(

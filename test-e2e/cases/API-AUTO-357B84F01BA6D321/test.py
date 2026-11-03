@@ -52,7 +52,7 @@ def _inspect_deployment(container):
 def configured_product_elasticsearch():
     """Use the deployed ES from pytest's host without copying a key to disk."""
     from elasticsearch import Elasticsearch
-    from consts import const as product_constants
+    import contracts.constants.environment as product_constants
     from management.services.knowledge_base import common
 
     host = os.environ.get('NEXENT_TEST_ELASTICSEARCH_URL', '').strip()
@@ -130,7 +130,7 @@ class FailingProjectionCore:
 
 
 def create_local_knowledge_base(identity):
-    from database.knowledge_db import create_knowledge_record
+    from management.db.knowledge_base.repository import create_knowledge_record
     from management.services.knowledge_base.common import get_vector_db_core
 
     run_id = uuid.uuid4().hex
@@ -177,7 +177,7 @@ def query_projection_chunk(resource_id):
 
 
 def cleanup_knowledge_base(index_name):
-    from database.knowledge_db import delete_knowledge_record
+    from management.db.knowledge_base.repository import delete_knowledge_record
     from management.services.knowledge_base.common import get_vector_db_core
 
     try:
@@ -342,7 +342,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         )
         assert aidp_matched == []
 
-        from database.tag_management_db import TagManagementDB
+        from management.db.tag.repository import TagManagementDB
 
         failed_document_id = uuid.uuid4().hex + '.txt'
         failed_resource_id = encode_document_resource_id(
@@ -374,7 +374,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         observed_backoff = failed_status['next_attempt_at'] - failed_status['last_attempt_at']
         assert abs(observed_backoff.total_seconds() - expected_backoff.total_seconds()) < 5
 
-        from database import document_tag_projection_db
+        from management.db.tag import projection as document_tag_projection_db
         from management.services.knowledge_base.tag_projection import retry_pending_document_projections
 
         state = document_tag_projection_db.get_projection_state(

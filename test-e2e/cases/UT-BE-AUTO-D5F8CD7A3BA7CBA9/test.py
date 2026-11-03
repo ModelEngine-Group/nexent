@@ -11,7 +11,7 @@ import pytest
 
 from nexent.core.concurrency import ManagedThreadSpec
 
-import management.services.evaluation.maintenance as em
+from management.services.evaluation import maintenance as em
 
 
 _SECRET_RE = re.compile(

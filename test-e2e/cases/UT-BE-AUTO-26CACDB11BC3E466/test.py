@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-import management.services.repository.agent.listing as svc
+from management.services.repository.agent import listing as svc
 
 
 CASE_ID = 'UT-BE-AUTO-26CACDB11BC3E466'

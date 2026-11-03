@@ -2,12 +2,12 @@
 
 from typing import Any
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from consts.error_code import ErrorCode
-from consts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from consts.evaluation_status import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from consts.exceptions import AppException
-from consts.model import AgentRequest
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.errors.codes import ErrorCode
+from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
+from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
+from contracts.errors.exceptions import AppException
+from contracts.agent import AgentRequest
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
 
 try:
@@ -27,35 +27,14 @@ from math import isfinite
 from statistics import mean
 
 from adapters.exception import JiuwenSDKUnavailableError
-from consts.evaluation_limits import (
-    MAX_CONCURRENT_RUNS,
-    MAX_EVALUATORS_PER_RUN,
-    MAX_TOTAL_RUNS,
-    MAX_TURNS_PER_SESSION,
-)
-from consts.evaluation_status import MAX_FAILURE_EXAMPLES
-from database.agent_evaluation_db import (
-    count_active_runs,
-    count_total_runs,
-    create_agent_evaluation,
-    create_agent_evaluation_cases,
-    get_agent_evaluation,
-    get_evaluation_case_scores,
-    hard_delete_agent_evaluation,
-    list_agent_evaluation_cases,
-    list_agent_evaluations_by_agent,
-    update_agent_evaluation_analysis_report,
-    update_agent_evaluation_case_result,
-    update_agent_evaluation_status,
-)
-from database.client import get_db_session
-from database.db_models import ModelRecord
-from database.evaluation_set_db import (
-    get_evaluation_set_cases_all,
-    materialize_virtual_evaluation_set_for_run,
-)
-from database.evaluator_db import get_evaluator
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import MAX_CONCURRENT_RUNS, MAX_EVALUATORS_PER_RUN, MAX_TOTAL_RUNS, MAX_TURNS_PER_SESSION
+from contracts.constants.constants import MAX_FAILURE_EXAMPLES
+from management.db.evaluation.runs import count_active_runs, count_total_runs, create_agent_evaluation, create_agent_evaluation_cases, get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent, update_agent_evaluation_analysis_report, update_agent_evaluation_case_result, update_agent_evaluation_status
+from management.db.client import get_db_session
+from management.db.models import ModelRecord
+from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
+from management.db.evaluation.evaluator import get_evaluator
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from infrastructure.concurrency import config_thread_manager, runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
@@ -78,7 +57,7 @@ from nexent.core.agents.prompt.evaluation import (
     render_analysis_stats,
     render_evaluation_section,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 

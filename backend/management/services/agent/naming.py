@@ -6,8 +6,8 @@ import logging
 
 from nexent.core.agent_names import AGENT_NAME_MAX_LENGTH, validate_agent_name
 
-from consts.const import LANGUAGE
-from database.agent_db import query_all_agent_info_by_tenant_id
+from contracts.constants.constants import LANGUAGE
+from management.db.agent.repository import query_all_agent_info_by_tenant_id
 from management.services.agent.prompt import (
     load_default_generation_prompt,
 )

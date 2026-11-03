@@ -261,7 +261,7 @@ def test_list_audits_delegates(monkeypatch):
 
 
 def test_get_memory_dreaming_service_singleton(monkeypatch):
-    import management.services.memory.dreaming.service as mod
+    from management.services.memory.dreaming import service as mod
     monkeypatch.setattr(mod, "_service", None)
 
     svc1 = mod.get_memory_dreaming_service()

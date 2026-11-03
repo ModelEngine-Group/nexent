@@ -8,10 +8,10 @@ import pytest
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.prompts import load_prompt
 
-from backend.management.services.agent.prompt import (
+from management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.management.services.agent.context import (
+from management.services.agent.context import (
     build_context_inputs,
 )
 
@@ -221,7 +221,8 @@ def test_ut_be_dpr_008_templates_expose_dynamic_policy_sections(language, is_man
 def test_ut_be_dpr_007_backend_uses_canonical_sandbox_configuration():
     """UT-BE-DPR-007: prompt assembly consumes the const-owned sandbox level."""
     source = (
-        Path(__file__).parents[3] / "backend" / "agents" / "create_agent_info.py"
+        Path(__file__).parents[3]
+        / "backend/management/services/agent/preparation/compiler.py"
     ).read_text(encoding="utf-8")
 
     assert 'os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL"' not in source

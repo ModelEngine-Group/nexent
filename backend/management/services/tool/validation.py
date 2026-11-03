@@ -7,29 +7,12 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
-)
-from consts.exceptions import (
-    MCPConnectionError,
-    NotFoundException,
-    ToolExecutionException,
-)
-from consts.model import ToolSourceEnum, ToolValidateRequest
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_server_by_name_and_tenant,
-)
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from contracts.tool import ToolSourceEnum, ToolValidateRequest
+from management.db.client import minio_client
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_server_by_name_and_tenant
 from fastmcp import Client
 from management.services.file.service import validate_urls_access
 from management.services.knowledge_base.service import (
@@ -44,6 +27,10 @@ from management.services.tool.common import (
 )
 from management.services.tool.langchain import discover_langchain_modules
 from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.constants import (
+    AIDP_SEARCH_TOOL_NAME, AIDP_SEARCH_TOOL_NAMES, INDEPENDENT_AIDP_SEARCH_TOOL_NAME,
+)
+from nexent.core.ext_components.aidp.retrieval_config import validate_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
 
@@ -332,7 +319,9 @@ def _validate_local_tool(
                 if k not in ["rerank_model", "rerank", "rerank_model_name"]
             }
             tool_instance = tool_class(**filtered_params)
-        elif tool_name in ("haotian_search", "aidp_search", "ind_aidp_search"):
+        elif tool_name in ("haotian_search", *AIDP_SEARCH_TOOL_NAMES):
+            if tool_name in AIDP_SEARCH_TOOL_NAMES:
+                validate_config(params or {})
             # Haotian and AIDP share the same instantiation shape: drop the
             # backend-only rerank keys and explicitly set observer=None
             # (otherwise Python falls back to the FieldInfo default, which
@@ -344,7 +333,7 @@ def _validate_local_tool(
                 if k not in ["observer", "rerank_model", "rerank"]
             }
             filtered_params["observer"] = None
-            if tool_name == "ind_aidp_search":
+            if tool_name == INDEPENDENT_AIDP_SEARCH_TOOL_NAME:
                 # Older UI builds incorrectly sent the independent AIDP KDS
                 # selection under the local-search name ``index_names``.
                 # Normalize that alias without ever replacing the independent
@@ -352,8 +341,8 @@ def _validate_local_tool(
                 legacy_index_names = filtered_params.pop("index_names", None)
                 if not filtered_params.get("kds_list") and legacy_index_names:
                     filtered_params["kds_list"] = legacy_index_names
-            if tool_name == "aidp_search":
-                # AIDP credentials are sourced from ``consts.const`` (i.e. the
+            if tool_name == AIDP_SEARCH_TOOL_NAME:
+                # AIDP credentials are sourced from ``contracts.constants.environment`` (i.e. the
                 # process environment). Inject them here exactly as
                 # ``create_agent_info`` does at runtime, so validation builds
                 # the same tool instance shape. Never trust client-submitted

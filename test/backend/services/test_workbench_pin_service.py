@@ -4,7 +4,7 @@
 
 import pytest
 
-from consts.exceptions import ConversationNotFoundError, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, UnauthorizedError, ValidationError
 from management.services.conversation import pins as service
 
 

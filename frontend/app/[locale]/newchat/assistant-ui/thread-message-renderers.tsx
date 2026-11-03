@@ -17,6 +17,7 @@ interface UserRenderProps {
 
 interface AssistantRenderProps {
   agent: Agent | PublishedAgent;
+  showAgentCreationResult?: boolean;
   readOnly?: boolean;
   onSkillFileSelect?: (path: string) => void;
 }
@@ -58,11 +59,17 @@ function StableUserMessage() {
 }
 
 function StableAssistantMessage() {
-  const { AssistantMessage, agent, readOnly, onSkillFileSelect } =
-    useMessageRenderState();
+  const {
+    AssistantMessage,
+    agent,
+    readOnly,
+    onSkillFileSelect,
+    showAgentCreationResult,
+  } = useMessageRenderState();
   return (
     <AssistantMessage
       agent={agent}
+      showAgentCreationResult={showAgentCreationResult}
       readOnly={readOnly}
       onSkillFileSelect={onSkillFileSelect}
     />

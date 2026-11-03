@@ -1,0 +1,28 @@
+{{- if default false .Values.global.businessPaused }}
+{{- $pod := include "nexent-config.podSpec" . | fromYaml -}}
+{{- $_ := set $pod "restartPolicy" "Never" -}}
+{{- $container := index $pod.containers 0 -}}
+{{- range $key := list "ports" "startupProbe" "livenessProbe" "readinessProbe" -}}
+{{- $_ := unset $container $key -}}
+{{- end -}}
+{{- $_ := set $container "command" (list "sh" "-c" "set -eu\ncd /opt/backend\ntest -r management/services/agent/system_initialize.py\ntest -r management/services/agent/system_release.py\ntouch /tmp/nexent-bootstrap-ready\nwhile [ ! -f /tmp/nexent-bootstrap-start ]; do sleep 1; done\nexec /opt/nexent/scripts/start-backend.sh sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'") -}}
+{{- $_ := set $container "readinessProbe" (dict "exec" (dict "command" (list "sh" "-c" "test -f /tmp/nexent-bootstrap-ready")) "periodSeconds" 1) -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-system-bootstrap-%d" (.Release.Name | trunc 36) (int .Release.Revision) }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-system-bootstrap
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ default 1800 .Values.global.systemBootstrapTimeoutSeconds }}
+  template:
+    metadata:
+      labels:
+        app: nexent-system-bootstrap
+        app.kubernetes.io/instance: {{ .Release.Name | quote }}
+    spec:
+{{ toYaml $pod | indent 6 }}
+{{- end }}

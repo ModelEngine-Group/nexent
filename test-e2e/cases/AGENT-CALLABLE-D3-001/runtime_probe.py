@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 
 import docker
-from agents.create_agent_info import create_model_config_list
+from management.services.model.run_bindings import create_model_config_list
 from final_answers import final_answer_text
 from nexent.core import agent_names
 from nexent.core.agents import a2a_agent_proxy, nexent_agent, sandbox

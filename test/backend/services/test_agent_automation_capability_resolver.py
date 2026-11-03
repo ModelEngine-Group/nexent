@@ -4,11 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from management.services.automation import capabilities as capability_resolver
-from contracts.automation import (
-    CapabilityBinding,
-    CapabilityResolution,
-    CapabilityType,
-)
+from contracts.automation import CapabilityBinding, CapabilityResolution, CapabilityType
 
 
 def test_binding_helpers_preserve_runtime_identity_and_metadata():
@@ -80,7 +76,7 @@ async def test_resolve_agent_capabilities_collects_all_configured_sources(monkey
         captured.update(kwargs)
         return agent_config
 
-    monkeypatch.setattr("agents.create_agent_info.create_agent_config", fake_create_agent_config)
+    monkeypatch.setattr('management.services.agent.preparation.compiler.create_agent_config', fake_create_agent_config)
     monkeypatch.setattr(
         "management.services.skill.service.SkillService.get_enabled_skills_for_agent",
         lambda self, **kwargs: [{"name": "enabled-skill", "description": "Enabled skill"}],
@@ -140,7 +136,7 @@ async def test_resolve_agent_capabilities_reports_missing_requirements_and_toler
     def raise_skill_error(self, **kwargs):
         raise RuntimeError("skill service unavailable")
 
-    monkeypatch.setattr("agents.create_agent_info.create_agent_config", fake_create_agent_config)
+    monkeypatch.setattr('management.services.agent.preparation.compiler.create_agent_config', fake_create_agent_config)
     monkeypatch.setattr(
         "management.services.skill.service.SkillService.get_enabled_skills_for_agent",
         raise_skill_error,

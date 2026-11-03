@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from consts.model import TagAssignmentFilter
-from database.tag_management_db import TagManagementDB
+from contracts.tag import TagAssignmentFilter
+from management.db.tag.repository import TagManagementDB
 from management.services.tag.library import TagManagementService
 
 
@@ -48,7 +48,7 @@ def test_filter_uses_or_within_definition_and_and_across_definitions(monkeypatch
         ]
     )
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: _SessionContext(session)
+        "management.db.tag.repository.get_db_session", lambda: _SessionContext(session)
     )
 
     result = TagManagementService.filter_authorized_resource_ids(
@@ -69,7 +69,7 @@ def test_filter_with_no_predicates_returns_unique_authorized_ids_without_queryin
     def fail_if_opened():
         pytest.fail("an empty filter list must not query assignments")
 
-    monkeypatch.setattr("database.tag_management_db.get_db_session", fail_if_opened)
+    monkeypatch.setattr("management.db.tag.repository.get_db_session", fail_if_opened)
 
     result = TagManagementService.filter_authorized_resource_ids(
         "tenant-a", "tool", ["resource-1", "resource-1", "resource-2"], []
@@ -81,7 +81,7 @@ def test_filter_with_no_predicates_returns_unique_authorized_ids_without_queryin
 def test_filter_never_expands_beyond_authorized_candidates(monkeypatch):
     session = _Session([[('resource-1',), ('resource-3',)]])
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: _SessionContext(session)
+        "management.db.tag.repository.get_db_session", lambda: _SessionContext(session)
     )
 
     result = TagManagementDB.filter_authorized_resource_ids(

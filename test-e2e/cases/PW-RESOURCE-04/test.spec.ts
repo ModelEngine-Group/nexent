@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -102,7 +103,7 @@ journey("PW-RESOURCE-04", async (context) => {
       },
       async () => { await locateInTab("模型", "搜索模型名称", names["模型"]); return "Models tab listed the target tenant model"; },
       async () => { for (const [tab, placeholder] of [["智能体", "搜索智能体名称"], ["MCP", "搜索MCP名称"], ["Skills", "搜索技能名称"]]) await locateInTab(tab, placeholder, names[tab]); return "Agents, MCP and Skills tabs listed their target resources"; },
-      async () => { const actions = (await resource.findResource("模型", names["模型"])).getByRole("button"); await expect(actions).toHaveCount(3); await actions.nth(1).click(); const dialog = page.getByRole("dialog", { name: /编辑模型/ }); await expect(dialog).toBeVisible(); await page.keyboard.press("Escape"); await expect(dialog).toHaveCount(0); return "opened and closed the selected model edit dialog without changes"; },
+      async () => { const actions = (await resource.findResource("模型", names["模型"])).getByRole("button"); await expect(actions).toHaveCount(3); await actions.nth(1).click(); const dialog = page.getByRole("dialog", { name: /编辑模型/ }); await expect(dialog).toBeVisible(); await dialog.getByRole("button", { name: "取消", exact: true }).click(); await expect(dialog).toHaveCount(0); return "opened and cancelled the selected model edit dialog without changes"; },
       async () => { await resource.selectTenant(other); for (const [tab, name] of Object.entries(names)) await expect(await resource.findResource(tab, name)).toHaveCount(0); return "other tenant did not expose target resources on any list page"; },
       async () => { await resource.selectTenant(target); await page.reload({ waitUntil: "domcontentloaded" }); await resource.selectTenant(target); await locateInTab("模型", "搜索模型名称", names["模型"]); return "switch-back plus refresh loaded the correct tenant list"; },
     ],

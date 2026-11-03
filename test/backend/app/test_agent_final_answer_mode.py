@@ -17,8 +17,8 @@ def test_internal_northbound_forwards_answer_mode(query, expected):
     async def events():
         yield "data: done\n\n"
 
-    with patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("user", "tenant")), \
-            patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock) as run:
+    with patch("runtime.api.agent.execution.verify_internal_runtime_jwt", return_value=("user", "tenant")), \
+            patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
         run.return_value = StreamingResponse(events(), media_type="text/event-stream")
         response = runtime_client.post("/agent/internal/northbound/run" + query,
                                        json={"agent_id": 1, "query": "hello"})
@@ -29,7 +29,7 @@ def test_internal_northbound_forwards_answer_mode(query, expected):
 
 
 def test_internal_northbound_rejects_invalid_mode_before_running():
-    with patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock) as run:
+    with patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
         response = runtime_client.post("/agent/internal/northbound/run?final_answer_mode=invalid",
                                        json={"agent_id": 1, "query": "hello"})
     assert response.status_code == 422
@@ -40,8 +40,8 @@ def test_native_route_does_not_opt_in_to_complete_mode():
     async def events():
         yield "data: done\n\n"
 
-    with patch("apps.agent_app.get_current_user_id", return_value=("user", "tenant")), \
-            patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock) as run:
+    with patch("runtime.api.agent.execution.get_current_user_id", return_value=("user", "tenant")), \
+            patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock) as run:
         run.return_value = StreamingResponse(events(), media_type="text/event-stream")
         response = runtime_client.post("/agent/run", json={"agent_id": 1, "query": "hello"})
     assert response.status_code == 200

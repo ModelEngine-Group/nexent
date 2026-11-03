@@ -5,9 +5,9 @@ from typing import Dict, Iterable, Optional, Tuple
 
 from sqlalchemy import or_, select
 
-from consts.const import ASSET_OWNER_TENANT_ID
-from database.client import get_db_session
-from database.db_models import AgentInfo
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from management.db.client import get_db_session
+from management.db.models import AgentInfo
 
 
 AgentReference = Tuple[int, int]

@@ -41,7 +41,7 @@ def verify_deployment(cfg):
         assert "ReadSkillConfigTool" in deployed["NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS"].split(",")
     script = (
         "import hashlib,json; from pathlib import Path; import nexent; "
-        "from consts.const import AGENT_WORKSPACE_ROOT,NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT; "
+        "from contracts.constants.environment import AGENT_WORKSPACE_ROOT,NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT; "
         "from nexent.core.agents.sandbox_workspace import SandboxWorkspace; "
         "root=Path(nexent.__file__).parent; "
         f"sources={{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in {SOURCES!r}}}; "

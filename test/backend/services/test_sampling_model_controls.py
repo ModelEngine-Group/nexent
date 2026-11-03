@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 from nexent.core.agents.agent_model import ModelConfig
 
-from consts.model import WorkbenchGenerationConfig, RuntimeGenerationOverrides, NL2SkillRunRequest
-from consts.exceptions import RunModelControlsError
+from contracts.agent import WorkbenchGenerationConfig, RuntimeGenerationOverrides, NL2SkillRunRequest
+from contracts.errors.exceptions import RunModelControlsError
 from management.services.model.run_controls import overlay_root_model
 from management.services.agent.stream import sampling_configuration_error_payload, safe_agent_stream_error_chunk
 

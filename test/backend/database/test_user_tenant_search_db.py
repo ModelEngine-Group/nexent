@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session, registry
 
-from database import user_tenant_db as user_db
+from management.db.identity import user_tenant as user_db
 
 
 @pytest.fixture

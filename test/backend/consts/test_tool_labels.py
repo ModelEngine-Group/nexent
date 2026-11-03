@@ -1,6 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for the built-in tool labels constants module."""
 
 import importlib
+from pathlib import Path
 import sys
 
 import pytest
@@ -8,11 +11,11 @@ import pytest
 
 def _load_builtin_label_map():
     """Load the real BUILTIN_LABEL_MAP even if consts has been mocked."""
-    # Ensure the real consts.tool_labels module is loaded
+    # Ensure the real contracts.constants.constants module is loaded
     for key in list(sys.modules):
         if key.startswith('consts'):
             del sys.modules[key]
-    from consts.tool_labels import BUILTIN_LABEL_MAP
+    from contracts.constants.constants import BUILTIN_LABEL_MAP
     return BUILTIN_LABEL_MAP
 
 
@@ -43,12 +46,12 @@ class TestBuiltinLabelMap:
             for label in labels:
                 assert isinstance(label, str)
 
-    def test_keep_in_sync_reference_in_docstring(self):
-        """Docstring references the correct migration SQL path."""
+    def test_keep_in_sync_reference_in_comments(self):
+        """The consolidated comments retain the correct migration SQL path."""
         for key in list(sys.modules):
             if key.startswith('consts'):
                 del sys.modules[key]
-        import consts.tool_labels
-        doc = consts.tool_labels.__doc__
+        import contracts.constants.constants
+        doc = Path(contracts.constants.constants.__file__).read_text(encoding="utf-8")
         assert doc is not None
         assert "deploy/sql/migrations/v2.3_merged_migrations.sql" in doc

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Isolated share fixtures: real uploaded file, two distinct share scopes.
 
 Only message seeding uses the product DB helper, because no public API exposes
@@ -21,9 +23,10 @@ def product_db():
 
 def revoke_owned_share(token, identity):
     product_db()
-    from database.conversation_share_db import revoke_conversation_share
-    from database.client import as_dict, get_db_session
-    from database.db_models import ConversationShare
+    from management.db.conversation.share import revoke_conversation_share
+    from management.utils.orm import as_dict
+    from management.db.client import get_db_session
+    from management.db.models import ConversationShare
     from sqlalchemy import select
     # Ownership validation must not depend on the public expiry filter. A share
     # may already be expired (or have a timezone incompatible with that filter).
@@ -45,7 +48,7 @@ async def prepare_share_assets(identity):
         'service':'config','identity':identity.id,'method':'DELETE',
         'path':f'/file/storage/{quote(object_name,safe="/")}','allowed_statuses':[200,404]})
     product_db()
-    from database.conversation_db import create_conversation_message
+    from management.db.conversation.repository import create_conversation_message
     scopes=[]
     for role in ('bound','other'):
         conversation=await _create_conversation(identity,'Isolated share '+role)

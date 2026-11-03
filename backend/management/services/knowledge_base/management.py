@@ -16,33 +16,19 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    IS_SPEED_MODE,
-    PERMISSION_PRIVATE,
-)
-from consts.exceptions import AppException, DuplicateError
-from database.agent_db import query_knowledge_binding_agents
-from database.attachment_db import get_file_stream
-from database.client import get_db_session
-from database.conversation_db import remove_conversation_knowledge_bindings
-from database.group_db import query_group_ids_by_user
-from database.knowledge_db import (
-    create_knowledge_record,
-    delete_knowledge_record,
-    get_knowledge_info_by_tenant_id,
-    get_knowledge_record,
-    update_embedding_model_by_index_name,
-    update_knowledge_record,
-    update_last_doc_update_time,
-    update_model_name_by_index_name,
-)
-from database.knowledge_file_lifecycle_db import (
-    delete_file_records_for_knowledge_base,
-)
-from database.model_management_db import get_model_by_model_id
-from database.tool_db import remove_tool_knowledge_references
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
+from contracts.constants.environment import IS_SPEED_MODE
+from contracts.errors.exceptions import AppException, DuplicateError
+from management.db.agent.repository import query_knowledge_binding_agents
+from management.db.file.attachment import get_file_stream
+from management.db.client import get_db_session
+from management.db.conversation.repository import remove_conversation_knowledge_bindings
+from management.db.identity.group import query_group_ids_by_user
+from management.db.knowledge_base.repository import create_knowledge_record, delete_knowledge_record, get_knowledge_info_by_tenant_id, get_knowledge_record, update_embedding_model_by_index_name, update_knowledge_record, update_last_doc_update_time, update_model_name_by_index_name
+from management.db.knowledge_base.file_lifecycle import delete_file_records_for_knowledge_base
+from management.db.model.repository import get_model_by_model_id
+from management.db.tool.repository import remove_tool_knowledge_references
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from fastapi import Body, Depends, Path, Query
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
@@ -84,7 +70,7 @@ from management.services.permission.asset_owner import postprocess_knowledge_vis
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.db.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.serialization import convert_list_to_string, convert_string_to_list
 
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):

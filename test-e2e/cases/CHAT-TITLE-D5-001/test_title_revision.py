@@ -28,13 +28,10 @@ with patch(
     "nexent.storage.storage_client_factory.create_storage_client_from_config",
     return_value=MagicMock(),
 ), patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None):
-    from apps import conversation_management_app as routes
-    from database import conversation_db as db
-    from database import user_tenant_db
-    from database.db_models import (
-        ConversationMessage, ConversationMessageUnit, ConversationRecord,
-        ConversationSourceImage, ConversationSourceSearch, UserTenant,
-    )
+    from management.api.conversation import conversation_management as routes
+    from management.db.conversation import repository as db
+    from management.db.identity import user_tenant as user_tenant_db
+    from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch, UserTenant
     from management.services.conversation import service
 
 pytestmark = [pytest.mark.case_id("CHAT-TITLE-D5-001"), pytest.mark.stage("D5")]

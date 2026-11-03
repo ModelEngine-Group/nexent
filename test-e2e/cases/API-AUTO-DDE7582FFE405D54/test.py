@@ -25,13 +25,13 @@ async def test_name_fallback_http_contract(monkeypatch):
     from fastapi import FastAPI
     with patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()), \
             patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None):
-        from apps import agent_app
+        from management.api.agent import agent as agent_app
         from management.services.agent import service
     app = FastAPI()
     app.include_router(agent_app.agent_config_router)
     agents = [{'agent_id': 1, 'name': 'occupied', 'display_name': 'Occupied'},
               {'agent_id': 2, 'name': 'occupied_1', 'display_name': 'Occupied_1'}]
-    monkeypatch.setattr(service, 'get_current_user_info', lambda authorization: ('owner', 'isolated', 'ADMIN'))
+    monkeypatch.setattr(agent_app, 'get_current_user_id', lambda authorization: ('owner', 'isolated'))
     monkeypatch.setattr(service, 'query_all_agent_info_by_tenant_id', lambda tenant_id: agents)
     monkeypatch.setattr(service.tenant_config_manager, 'get_model_config', lambda **kwargs: {'model_id': 1})
     provider = AsyncMock(side_effect=RuntimeError('Controlled provider outage'))

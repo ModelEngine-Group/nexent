@@ -11,20 +11,13 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_RECOVERY_GRACE_SECONDS = 30 * 60
 _upload_cleanup_tasks: set[asyncio.Task] = set()
-_system_agent_backfill_tasks: set[asyncio.Task] = set()
 
 
 def recover_runtime_tasks() -> dict[str, int]:
     """Fail work that was owned by the previous runtime process."""
-    from database.agent_automation_db import (
-        recover_orphaned_runs,
-        release_all_task_locks,
-    )
-    from database.agent_evaluation_db import (
-        list_evaluation_tenant_ids,
-        reap_stale_runs,
-    )
-    from database.conversation_db import fail_streaming_assistant_messages
+    from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
+    from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
+    from management.db.conversation.repository import fail_streaming_assistant_messages
     from management.services.agent.run_state import runtime_state_service
 
     messages = fail_streaming_assistant_messages()
@@ -54,13 +47,10 @@ def recover_runtime_tasks() -> dict[str, int]:
 
 def recover_config_tasks() -> dict[str, int]:
     """Fail config-owned background work lost during process restart."""
-    from database.agent_evaluation_db import fail_interrupted_no_set_runs_on_startup
-    from database.evaluation_set_db import (
-        cleanup_orphaned_virtual_evaluation_sets,
-        recover_interrupted_generations,
-    )
-    from database.model_management_db import fail_detecting_models_on_startup
-    from database.memory_dreaming_db import recover_stale
+    from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup
+    from management.db.evaluation.sets import cleanup_orphaned_virtual_evaluation_sets, recover_interrupted_generations
+    from management.db.model.repository import fail_detecting_models_on_startup
+    from management.db.memory.dreaming import recover_stale
 
     result = {
         "agent_evaluation_setups": fail_interrupted_no_set_runs_on_startup(),
@@ -75,7 +65,7 @@ def recover_config_tasks() -> dict[str, int]:
 
 def recover_data_process_tasks() -> dict[str, int]:
     """Fail tasks that had started in the previous data-process worker set."""
-    from database.knowledge_file_lifecycle_db import fail_interrupted_file_tasks
+    from management.db.knowledge_base.file_lifecycle import fail_interrupted_file_tasks
     from management.services.knowledge_base.task_state import get_redis_service
 
     records = fail_interrupted_file_tasks()
@@ -98,7 +88,7 @@ def recover_data_process_tasks() -> dict[str, int]:
 
 def recover_northbound_tasks() -> dict[str, int]:
     """Fail protocol tasks owned by the previous northbound process."""
-    from database.a2a_agent_db import fail_active_tasks_on_startup
+    from management.db.a2a.repository import fail_active_tasks_on_startup
 
     result = {"a2a_tasks": fail_active_tasks_on_startup()}
     logger.info("Northbound startup recovery completed: %s", result)
@@ -107,12 +97,9 @@ def recover_northbound_tasks() -> dict[str, int]:
 
 def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int:
     """Fail old uploads owned by a restarted service and remove partial objects."""
-    from database.attachment_db import delete_file
-    from database.client import minio_client
-    from database.knowledge_file_lifecycle_db import (
-        list_uploading_files_created_before,
-        transition_file_record,
-    )
+    from management.db.file.attachment import delete_file
+    from management.db.client import minio_client
+    from management.db.knowledge_base.file_lifecycle import list_uploading_files_created_before, transition_file_record
 
     failed = 0
     for record in list_uploading_files_created_before(
@@ -188,19 +175,3 @@ async def schedule_interrupted_upload_cleanup(upload_owner_service: str) -> None
     task = asyncio.create_task(_delayed_cleanup())
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
-
-
-def schedule_workbench_main_backfill() -> None:
-    """Run historical tenant system-Agent bootstrap without blocking startup."""
-
-    async def _backfill() -> None:
-        from management.services.permission.identity.tenants import backfill_workbench_main_agents
-
-        try:
-            await asyncio.to_thread(backfill_workbench_main_agents)
-        except Exception:
-            logger.exception("Workbench system Agent backfill failed")
-
-    task = asyncio.create_task(_backfill())
-    _system_agent_backfill_tasks.add(task)
-    task.add_done_callback(_system_agent_backfill_tasks.discard)

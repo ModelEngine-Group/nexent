@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -19,11 +21,7 @@ _SOURCE_WITHOUT_TERMS = "source-without-highlight-terms"
 
 
 def _seed(user_id: str) -> int:
-    from database.conversation_db import (
-        create_conversation,
-        create_conversation_message,
-        create_source_search,
-    )
+    from management.db.conversation.repository import create_conversation, create_conversation_message, create_source_search
 
     conversation = create_conversation("d2-retrieval-highlight-terms", user_id)
     conversation_id = int(conversation["conversation_id"])

@@ -17,7 +17,8 @@ consts_mock.const.OAUTH_CA_BUNDLE = ""
 consts_mock.const.OAUTH_LOGIN_MODE = "button"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
+consts_mock.const.GET_OAUTH_SETTING.side_effect = lambda name, default="": os.getenv(name, default)
 
 
 class _OAuthProviderError(Exception):
@@ -31,17 +32,17 @@ class _OAuthLinkError(Exception):
 exceptions_mock = MagicMock()
 exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
-sys.modules["consts.exceptions"] = exceptions_mock
+sys.modules["contracts.errors.exceptions"] = exceptions_mock
 
 oauth_account_db_mock = MagicMock()
-sys.modules["database.oauth_account_db"] = oauth_account_db_mock
+sys.modules["management.db.identity.oauth_account"] = oauth_account_db_mock
 
 db_pkg = MagicMock()
 db_pkg.oauth_account_db = oauth_account_db_mock
 sys.modules["database"] = db_pkg
 
 user_tenant_db_mock = MagicMock()
-sys.modules["database.user_tenant_db"] = user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = user_tenant_db_mock
 db_pkg.user_tenant_db = user_tenant_db_mock
 
 model_mock = MagicMock()
@@ -57,7 +58,7 @@ class _FakeOAuthProviderDefinition:
 
 
 model_mock.OAuthProviderDefinition = _FakeOAuthProviderDefinition
-sys.modules["consts.model"] = model_mock
+sys.modules["contracts.identity"] = model_mock
 
 GITHUB_DEF = _FakeOAuthProviderDefinition(
     name="github",
@@ -257,21 +258,22 @@ oauth_providers_mock.is_provider_enabled = _is_provider_enabled
 oauth_providers_mock.get_all_provider_definitions = _get_all_provider_definitions
 oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
-sys.modules["consts.oauth_providers"] = oauth_providers_mock
+sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
 
 import management.services.permission.identity.oauth as oauth_service_module
+oauth_service_module.DEFAULT_TENANT_ID = "default-tenant-id"
+from gateway.authentication.auth import parse_state, parse_pending_oauth_token
 from management.services.permission.identity.oauth import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
     exchange_code_for_provider_token,
-    find_supabase_user_id_by_email,
+    find_account_user_id_by_email,
     get_authorize_url,
     get_enabled_providers,
     get_oauth_config,
     get_provider_user_info,
     get_supported_providers,
     list_linked_accounts,
-    parse_state,
     unlink_account,
     _resolve_field,
     _build_ssl_context,
@@ -696,73 +698,19 @@ class TestEnsureUserTenantExists(unittest.TestCase):
         }
 
 
-class TestFindSupabaseUserIdByEmail(unittest.TestCase):
-    def test_returns_none_without_email(self):
-        admin_client = MagicMock()
+class TestFindLocalAccountUserIdByEmail(unittest.TestCase):
+    def test_missing_email_returns_none(self):
+        self.assertIsNone(find_account_user_id_by_email(""))
 
-        result = find_supabase_user_id_by_email(admin_client, "")
-
-        self.assertIsNone(result)
-        admin_client.auth.admin.list_users.assert_not_called()
-
-    def test_finds_user_from_supabase_users_response(self):
-        existing_user = MagicMock()
-        existing_user.id = "existing-user-id"
-        existing_user.email = "Existing@Example.com"
-
-        response = MagicMock()
-        response.users = [existing_user]
-
-        admin_client = MagicMock()
-        admin_client.auth.admin.list_users.return_value = response
-
-        result = find_supabase_user_id_by_email(admin_client, "existing@example.com")
-
-        self.assertEqual(result, "existing-user-id")
-        admin_client.auth.admin.list_users.assert_called_once_with(page=1, per_page=100)
-
-    def test_finds_user_on_second_page(self):
-        page1_users = []
-        for index in range(100):
-            user = MagicMock()
-            user.id = f"user-{index}"
-            user.email = f"user-{index}@example.com"
-            page1_users.append(user)
-
-        target_user = MagicMock()
-        target_user.id = "target-user-id"
-        target_user.email = "target@example.com"
-
-        page1 = MagicMock()
-        page1.users = page1_users
-        page2 = MagicMock()
-        page2.users = [target_user]
-
-        admin_client = MagicMock()
-        admin_client.auth.admin.list_users.side_effect = [page1, page2]
-
-        result = find_supabase_user_id_by_email(admin_client, "target@example.com")
-
-        self.assertEqual(result, "target-user-id")
-        self.assertEqual(admin_client.auth.admin.list_users.call_count, 2)
-        admin_client.auth.admin.list_users.assert_any_call(page=1, per_page=100)
-        admin_client.auth.admin.list_users.assert_any_call(page=2, per_page=100)
-
-    def test_stops_when_page_has_less_than_page_size(self):
-        other_user = MagicMock()
-        other_user.id = "other-user-id"
-        other_user.email = "other@example.com"
-
-        response = MagicMock()
-        response.users = [other_user]
-
-        admin_client = MagicMock()
-        admin_client.auth.admin.list_users.return_value = response
-
-        result = find_supabase_user_id_by_email(admin_client, "missing@example.com")
-
-        self.assertIsNone(result)
-        admin_client.auth.admin.list_users.assert_called_once_with(page=1, per_page=100)
+    def test_lookup_uses_local_account_store(self):
+        from unittest.mock import patch
+        with patch.dict(sys.modules, {"management.db.identity.account": MagicMock()}) as modules:
+            lookup = modules["management.db.identity.account"].get_account_by_email
+            lookup.return_value = {"user_id": "stable-user"}
+            self.assertEqual(find_account_user_id_by_email("existing@example.com"), "stable-user")
+            lookup.assert_called_once_with("existing@example.com")
+            lookup.return_value = None
+            self.assertIsNone(find_account_user_id_by_email("missing@example.com"))
 
 
 class TestListLinkedAccounts(unittest.TestCase):

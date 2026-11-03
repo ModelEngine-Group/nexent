@@ -11,9 +11,9 @@ import pytest
 from nexent.core.agents.core_agent import CoreAgent
 from pydantic import ValidationError
 
-from agents.nl2agent_agent import build_nl2agent_system_prompt
-from consts.exceptions import AgentDraftEditError
-from consts.model import AgentInfoRequest
+from management.services.agent.creation import build_nl2agent_system_prompt
+from contracts.errors.exceptions import AgentDraftEditError
+from contracts.agent import AgentInfoRequest
 from services import nl2agent_service as service
 from tool_collection.mcp import nl2agent_mcp_tools as tools
 

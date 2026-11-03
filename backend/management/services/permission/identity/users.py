@@ -6,18 +6,15 @@ User service layer - handles user-related business logic
 import logging
 from typing import Any, Dict, List, Optional
 
-from database.user_tenant_db import (
-    get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
-    soft_delete_user_tenant_by_user_id
-)
-from database.group_db import remove_user_from_all_groups, query_groups_by_users
-from database.memory_config_db import soft_delete_all_configs_by_user_id
-from database.conversation_db import soft_delete_all_conversations_by_user
-from database.knowledge_db import get_private_knowledge_info_by_creator
-from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
-from consts.const import IS_SPEED_MODE
-from consts.exceptions import ForbiddenError, NotFoundException
-from management.services.permission.identity.authentication_helpers import get_supabase_admin_client
+from management.db.identity.user_tenant import get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id, soft_delete_user_tenant_by_user_id
+from management.db.identity.group import remove_user_from_all_groups, query_groups_by_users
+from management.db.memory.config import soft_delete_all_configs_by_user_id
+from management.db.conversation.repository import soft_delete_all_conversations_by_user
+from management.db.knowledge_base.repository import get_private_knowledge_info_by_creator
+from management.db.identity.oauth_account import soft_delete_all_oauth_accounts_by_user_id
+from contracts.constants.environment import IS_SPEED_MODE
+from contracts.errors.exceptions import ForbiddenError, NotFoundException
+from management.db.identity.account import delete_account
 from management.services.permission.identity.display import enrich_cas_usernames
 
 logger = logging.getLogger(__name__)
@@ -258,7 +255,7 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     2) Soft-delete memory user configs and all conversations
     3) Clear user-level memories in memory store
     4) Delete personal KBs created by the user
-    5) Permanently delete user from Supabase
+    5) Disable the local authentication account
 
     Args:
         user_id (str): User ID to delete
@@ -266,9 +263,6 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
     """
     try:
         logger.debug(f"Start permanently deleting user {user_id} and all related data...")
-        user_tenant = get_user_tenant_by_user_id(user_id)
-        has_supabase_identity = bool(user_tenant and user_tenant.get("user_email"))
-
         # 1) Core user deletion (soft-delete user-tenant and groups)
         try:
             tenant_deleted = soft_delete_user_tenant_by_user_id(user_id, user_id)
@@ -307,24 +301,15 @@ async def delete_user_and_cleanup(user_id: str, tenant_id: str) -> None:
 
         # 6) Revoke all API keys before the identity is removed.
         try:
-            from database.token_db import soft_delete_tokens_by_user
+            from management.db.identity.token import soft_delete_tokens_by_user
 
             soft_delete_tokens_by_user(user_id, user_id)
             logger.debug("\tUser API keys revoked.")
         except Exception as e:
             logger.error(f"Failed revoking API keys for user {user_id}: {e}")
 
-        # 7) Delete from Supabase
-        if has_supabase_identity:
-            try:
-                admin_client = get_supabase_admin_client()
-                if admin_client and hasattr(admin_client.auth, "admin"):
-                    admin_client.auth.admin.delete_user(user_id)
-                    logger.debug("\tSupabase user deleted.")
-                else:
-                    raise RuntimeError("Supabase admin client not available")
-            except Exception as e:
-                logger.error(f"Failed deleting Supabase user {user_id}: {e}")
+        # Disable credentials even if a preceding best-effort resource cleanup failed.
+        delete_account(user_id)
 
         # 7) Delete PRIVATE personal KBs created by the user. Shared KBs
         # created by the user are intentionally left untouched.

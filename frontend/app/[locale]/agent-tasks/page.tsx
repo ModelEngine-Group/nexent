@@ -240,7 +240,9 @@ export default function AgentTasksPage() {
   const loadRequestIdRef = useRef(0);
   // Inline expand state for the "View Result" panel on each task row.
   const [expandedTaskIds, setExpandedTaskIds] = useState<number[]>([]);
-  const [expandLoadingTaskIds, setExpandLoadingTaskIds] = useState<number[]>([]);
+  const [expandLoadingTaskIds, setExpandLoadingTaskIds] = useState<number[]>(
+    []
+  );
   const [latestRunByTask, setLatestRunByTask] = useState<
     Record<number, AgentAutomationRun | null>
   >({});
@@ -291,6 +293,53 @@ export default function AgentTasksPage() {
     });
   };
 
+  const resultRequestIdRef = useRef<Record<number, number>>({});
+  const expandedTaskIdsRef = useRef(expandedTaskIds);
+  useEffect(() => {
+    expandedTaskIdsRef.current = expandedTaskIds;
+  }, [expandedTaskIds]);
+
+  const loadTaskResult = useCallback(
+    async (task: AgentAutomationTask) => {
+      const taskId = task.task_id;
+      const requestId = (resultRequestIdRef.current[taskId] || 0) + 1;
+      resultRequestIdRef.current[taskId] = requestId;
+      setExpandLoadingTaskIds((current) => [
+        ...current.filter((id) => id !== taskId),
+        taskId,
+      ]);
+      try {
+        const [runsPage, conversationResponse] = await Promise.all([
+          agentAutomationService.runs(taskId, { page: 1, pageSize: 1 }),
+          conversationService.getDetail(task.conversation_id),
+        ]);
+        const latestRun = runsPage.items[0] || null;
+        const messages = conversationResponse.data?.[0]?.message || [];
+        if (resultRequestIdRef.current[taskId] !== requestId) return;
+        setLatestRunByTask((current) => ({ ...current, [taskId]: latestRun }));
+        setConversationMessagesByTask((current) => ({
+          ...current,
+          [taskId]: messages,
+        }));
+      } catch (error: unknown) {
+        if (resultRequestIdRef.current[taskId] !== requestId) return;
+        message.error(
+          getAutomationErrorMessage(
+            error,
+            t,
+            "agentAutomation.page.historyLoadFailed"
+          )
+        );
+      } finally {
+        if (resultRequestIdRef.current[taskId] !== requestId) return;
+        setExpandLoadingTaskIds((current) =>
+          current.filter((id) => id !== taskId)
+        );
+      }
+    },
+    [t]
+  );
+
   const loadTasks = useCallback(async () => {
     const requestId = ++loadRequestIdRef.current;
     setLoading(true);
@@ -307,6 +356,11 @@ export default function AgentTasksPage() {
         setTaskTotal(loadedTasks.total);
         setTaskPage(loadedTasks.page);
         setTaskPageSize(loadedTasks.page_size);
+        for (const task of loadedTasks.items) {
+          if (expandedTaskIdsRef.current.includes(task.task_id)) {
+            void loadTaskResult(task);
+          }
+        }
       }
     } catch (error: unknown) {
       if (requestId === loadRequestIdRef.current) {
@@ -325,11 +379,18 @@ export default function AgentTasksPage() {
     taskNameSearch,
     taskPage,
     taskPageSize,
+    loadTaskResult,
     t,
   ]);
 
   useEffect(() => {
-    void loadTasks();
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) void loadTasks();
+    });
+    return () => {
+      active = false;
+    };
   }, [loadTasks]);
 
   const handleTableChange: TableProps<AgentAutomationTask>["onChange"] = (
@@ -477,8 +538,16 @@ export default function AgentTasksPage() {
       )
     );
     try {
-      await agentAutomationService.run(task.task_id);
-      message.success(t("agentAutomation.page.runSuccess"));
+      const result = await agentAutomationService.run(task.task_id);
+      if (result.status === "SUCCEEDED") {
+        message.success(t("agentAutomation.page.runSuccess"));
+      } else if (result.status === "FAILED" || result.status === "TIMEOUT") {
+        message.error(t(`agentAutomation.runStatus.${result.status}`));
+      } else {
+        message.info(t(`agentAutomation.runStatus.${result.status}`));
+      }
+      resultRequestIdRef.current[task.task_id] =
+        (resultRequestIdRef.current[task.task_id] || 0) + 1;
       // Invalidate cached run result so the next expand refetches.
       setLatestRunByTask((current) => {
         const next = { ...current };
@@ -504,43 +573,12 @@ export default function AgentTasksPage() {
 
   const handleToggleExpand = async (task: AgentAutomationTask) => {
     const taskId = task.task_id;
-    const isExpanded = expandedTaskIds.includes(taskId);
-    if (isExpanded) {
-      setExpandedTaskIds((current) =>
-        current.filter((id) => id !== taskId)
-      );
+    if (expandedTaskIds.includes(taskId)) {
+      setExpandedTaskIds((current) => current.filter((id) => id !== taskId));
       return;
     }
-    // Expand the row immediately; data will fill in after fetch.
     setExpandedTaskIds((current) => [...current, taskId]);
-    // Skip refetch when cached data already exists.
-    if (latestRunByTask[taskId] !== undefined) return;
-    setExpandLoadingTaskIds((current) => [...current, taskId]);
-    try {
-      const [runsPage, conversationResponse] = await Promise.all([
-        agentAutomationService.runs(taskId, { page: 1, pageSize: 1 }),
-        conversationService.getDetail(task.conversation_id),
-      ]);
-      const latestRun = runsPage.items[0] || null;
-      const messages = conversationResponse.data?.[0]?.message || [];
-      setLatestRunByTask((current) => ({ ...current, [taskId]: latestRun }));
-      setConversationMessagesByTask((current) => ({
-        ...current,
-        [taskId]: messages,
-      }));
-    } catch (error: unknown) {
-      message.error(
-        getAutomationErrorMessage(
-          error,
-          t,
-          "agentAutomation.page.historyLoadFailed"
-        )
-      );
-    } finally {
-      setExpandLoadingTaskIds((current) =>
-        current.filter((id) => id !== taskId)
-      );
-    }
+    await loadTaskResult(task);
   };
 
   const pauseTask = async (task: AgentAutomationTask) => {
@@ -1228,10 +1266,7 @@ function RunResultPanel({
           <span className="text-gray-400">
             {t("agentAutomation.page.status")}:
           </span>{" "}
-          <Tag
-            color={isFailed ? "red" : "green"}
-            style={{ marginLeft: 0 }}
-          >
+          <Tag color={isFailed ? "red" : "green"} style={{ marginLeft: 0 }}>
             {formatRunStatus(run.status)}
           </Tag>
         </span>

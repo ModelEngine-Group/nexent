@@ -1,7 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { Form } from "antd";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { StrictMode } from "react";
 import AgentPrompt from "../../app/[locale]/agents/[agentId]/components/agent-prompt";
@@ -72,10 +78,6 @@ vi.mock("@/components/resource-picker/ModelParamsModal", () => ({
   ModelParamsModal: () => null,
 }));
 vi.mock("@/components/common/ExpandEditModal", () => ({ default: () => null }));
-vi.mock(
-  "../../app/[locale]/agents/[agentId]/components/HighFidelityPromptEditModal",
-  () => ({ default: () => null })
-);
 
 beforeEach(() => {
   mocks.focus = null;
@@ -87,6 +89,7 @@ beforeEach(() => {
   mocks.readOnly = false;
   mocks.agentId = 157;
   mocks.updateAgent.mockReset();
+  mocks.updateDraft.mockReset();
 });
 
 function renderEditor() {
@@ -257,4 +260,60 @@ test("saved prompt focus targets the complete editor without opening a legacy mo
     expect(screen.getByDisplayValue(mocks.agent.prompt)).toHaveFocus()
   );
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test.each(["", "Long prompt\n".repeat(1000)])(
+  "expands the current prompt and confirms edits without losing content",
+  async (content) => {
+    renderEditor();
+    fireEvent.click(
+      screen.getByRole("button", { name: "systemPrompt.button.expand" })
+    );
+    const dialog = await screen.findByRole("dialog");
+    const input = within(dialog).getByRole("textbox");
+    expect(input).toHaveValue(mocks.agent.prompt);
+    fireEvent.change(input, { target: { value: content } });
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "common.confirm" })
+    );
+    expect(mocks.updateDraft).toHaveBeenCalledExactlyOnceWith({
+      prompt: content,
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  }
+);
+
+test.each(["common.cancel", "common.close"])(
+  "discards modal edits on %s and reopens with the current prompt",
+  async (action) => {
+    renderEditor();
+    const expand = screen.getByRole("button", {
+      name: "systemPrompt.button.expand",
+    });
+    fireEvent.click(expand);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), {
+      target: { value: "Unsaved edits" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: action }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(mocks.updateDraft).not.toHaveBeenCalled();
+    fireEvent.click(expand);
+    expect(
+      within(await screen.findByRole("dialog")).getByRole("textbox")
+    ).toHaveValue(mocks.agent.prompt);
+  }
+);
+
+test("disables prompt expansion for read-only Agents", () => {
+  mocks.readOnly = true;
+  renderEditor();
+  const expand = screen.getByRole("button", {
+    name: "systemPrompt.button.expand",
+  });
+  expect(expand).toBeDisabled();
+  fireEvent.click(expand);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(mocks.updateDraft).not.toHaveBeenCalled();
 });

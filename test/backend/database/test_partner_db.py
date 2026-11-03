@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 from unittest.mock import MagicMock
 import pytest
@@ -9,7 +11,7 @@ import pytest
 # the unit-test environment.
 # ---------------------------------------------------------------------------
 
-# 1) Stub for `database.db_models` providing a minimal `PartnerMappingId` model.
+# 1) Stub for `management.db.models` providing a minimal `PartnerMappingId` model.
 class _PartnerMappingId:
     """Lightweight stand-in for the real SQLAlchemy model.
     It simply keeps every kwarg as an attribute so tests can later introspect
@@ -36,11 +38,15 @@ class _PartnerMappingId:
 
 db_models_mock = MagicMock()
 db_models_mock.PartnerMappingId = _PartnerMappingId
-sys.modules['database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
-# 2) Stub for `database.client` so that the module under test can import it.
+# 2) Stub for `management.db.client` so that the module under test can import it.
 client_mock = MagicMock()
-sys.modules['database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # 3) Provide a dummy SQLAlchemyError so that the except clause in the module
 #    works without having to install SQLAlchemy in the CI environment.
@@ -54,7 +60,7 @@ sys.modules['sqlalchemy.exc'].SQLAlchemyError = _SQLAlchemyError
 # ---------------------------------------------------------------------------
 # Now we can safely import the module under test.
 # ---------------------------------------------------------------------------
-from backend.database import partner_db  # noqa: E402, isort:skip
+from management.db.identity import partner as partner_db
 
 # Patch the module-level SQLAlchemyError reference so tests can raise it easily.
 partner_db.SQLAlchemyError = _SQLAlchemyError

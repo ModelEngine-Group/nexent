@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from consts.model import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat
+from contracts.agent import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat
+from contracts.authentication import AuthenticatedIdentity
 from tool_collection.mcp.nl2agent_mcp_tools import AgentDraftFields
 
 
@@ -39,7 +40,7 @@ async def test_import_rejects_invalid_name_before_loading_dependencies(mocker, n
         provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
     )
     bundle = ExportAndImportDataFormat(agent_id=1, agent_info={"1": agent}, mcp_info=[])
-    mocker.patch.object(transfer, "get_current_user_info", return_value=("owner", "tenant", "en"))
+    identity = AuthenticatedIdentity(user_id="owner", tenant_id="tenant", language="en")
     tools = mocker.patch.object(transfer, "query_all_tools")
     writes = mocker.patch.object(transfer, "create_agent")
     skills = mocker.patch.object(transfer.skill_db, "list_skills")
@@ -47,9 +48,9 @@ async def test_import_rejects_invalid_name_before_loading_dependencies(mocker, n
         if entry == "child":
             await transfer.import_agent_by_agent_id(agent, "tenant", "owner")
         elif entry == "with_skills":
-            await transfer.import_agent_with_skills_impl(bundle, [], "token")
+            await transfer.import_agent_with_skills_impl(bundle, [], identity)
         else:
-            await transfer.import_agent_impl(bundle, "token")
+            await transfer.import_agent_impl(bundle, identity)
     tools.assert_not_called()
     writes.assert_not_called()
     skills.assert_not_called()

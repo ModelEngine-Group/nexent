@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.memory_retrieval_hit_db`` (Phase 2)."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.memory.retrieval_hit`` (Phase 2)."""
 
 import sys
 import types
@@ -15,12 +17,18 @@ sys.path.insert(
 )
 
 
-# Stub database.client
-client_mod = types.ModuleType("database.client")
+# Stub management.db.client
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = lambda data, _model: dict(data)
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # Stub SQLAlchemy
@@ -37,7 +45,7 @@ sys.modules["sqlalchemy"] = sqlalchemy_mod
 
 
 # Stub db_models
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class _Column:
@@ -93,11 +101,11 @@ class MemoryRetrievalHit:
 
 
 db_models_mod.MemoryRetrievalHit = MemoryRetrievalHit
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-from backend.database import memory_retrieval_hit_db
+from management.db.memory import retrieval_hit as memory_retrieval_hit_db
 
 
 @pytest.fixture
@@ -112,7 +120,7 @@ def mock_session_ctx():
 def test_insert_retrieval_hits_appends_rows(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     rows = [
@@ -146,7 +154,7 @@ def test_insert_retrieval_hits_appends_rows(monkeypatch, mock_session_ctx):
 def test_insert_retrieval_hits_empty(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     count = memory_retrieval_hit_db.insert_retrieval_hits([])
@@ -163,7 +171,7 @@ def test_count_hits_since(monkeypatch, mock_session_ctx):
     session.query.return_value = query
 
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     count = memory_retrieval_hit_db.count_hits_since("t1", user_id="u1")
@@ -178,7 +186,7 @@ def test_delete_hits_before(monkeypatch, mock_session_ctx):
     query.delete.return_value = 3
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     from datetime import datetime
@@ -192,7 +200,7 @@ def test_insert_retrieval_hits_defaults_and_rolls_back_on_error(monkeypatch, moc
     session, ctx = mock_session_ctx
     session.add_all.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     count = memory_retrieval_hit_db.insert_retrieval_hits(
@@ -215,7 +223,7 @@ def test_count_hits_since_applies_all_filters(monkeypatch, mock_session_ctx):
     query.scalar.return_value = None
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     from datetime import datetime
@@ -232,7 +240,7 @@ def test_count_hits_since_rolls_back_on_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     assert memory_retrieval_hit_db.count_hits_since("t1") == 0
@@ -268,7 +276,7 @@ def test_list_hits_for_memory_with_since_serializes_rows(monkeypatch, mock_sessi
     query.all.return_value = [_make_hit()]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     from datetime import datetime
@@ -288,7 +296,7 @@ def test_list_hits_for_memory_rolls_back_on_error(monkeypatch, mock_session_ctx)
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     assert memory_retrieval_hit_db.list_hits_for_memory(7) == []
@@ -304,7 +312,7 @@ def test_list_hits_for_user_with_since(monkeypatch, mock_session_ctx):
     query.all.return_value = [_make_hit()]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     from datetime import datetime
@@ -322,7 +330,7 @@ def test_list_hits_for_user_rolls_back_on_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     assert memory_retrieval_hit_db.list_hits_for_user("t1", "u1") == []
@@ -339,7 +347,7 @@ def test_aggregate_memory_stats_applies_scope_and_collects_dimensions(
     query.all.return_value = [(7, 3, 2), (None, 1, 1)]
     session.query.return_value = query
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
     monkeypatch.setattr(
         memory_retrieval_hit_db,
@@ -375,7 +383,7 @@ def test_aggregate_memory_stats_rolls_back_on_error(monkeypatch, mock_session_ct
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     assert memory_retrieval_hit_db.aggregate_memory_stats("t1") == []
@@ -386,7 +394,7 @@ def test_delete_hits_before_rolls_back_on_error(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.side_effect = RuntimeError("database unavailable")
     monkeypatch.setattr(
-        "backend.database.memory_retrieval_hit_db.get_db_session", lambda: ctx
+        "management.db.memory.retrieval_hit.get_db_session", lambda: ctx
     )
 
     assert memory_retrieval_hit_db.delete_hits_before(object()) == 0

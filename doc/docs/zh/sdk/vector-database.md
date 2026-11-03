@@ -7,7 +7,7 @@
 1. 安装依赖:
 
 ```bash
-pip install elasticsearch
+uv pip install elasticsearch
 ```
 
 2. 连接凭据通过构造函数参数传入（SDK 不读取环境变量，环境变量由服务层读取后传给 SDK）：

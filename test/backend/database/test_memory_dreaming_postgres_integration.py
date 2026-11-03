@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Opt-in PostgreSQL integration coverage for Dreaming advisory locks."""
 
 import os
@@ -10,8 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
-from database.db_models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryLongTermVersion
-from database.memory_dreaming_db import advisory_lock_key
+from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryLongTermVersion
+from management.db.memory.dreaming import advisory_lock_key
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",

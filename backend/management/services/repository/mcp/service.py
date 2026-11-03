@@ -3,59 +3,28 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from consts.exceptions import (
-    MCPConnectionError,
-    McpNameConflictError,
-    McpNotFoundError,
-    McpValidationError,
-    UnauthorizedError,
-)
-from consts.mcp_market import (
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_MARKET_STATUSES,
-)
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_MCP_REPOSITORY,
-)
-from database.market_mcp_db import (
-    check_mcp_market_name_exists,
-    create_mcp_market_record,
-    delete_mcp_market_record_by_id,
-    get_mcp_market_record_by_id,
-    get_mcp_market_records,
-    get_mcp_market_tag_stats_by_tenant,
-    increment_mcp_market_download_count,
-    list_mcp_market_records_by_status,
-    list_mcp_market_records_by_tenant_and_user,
-    update_mcp_market_record,
-    update_mcp_market_status,
-)
-from database.remote_mcp_db import (
-    clear_mcp_record_market_id,
-    update_mcp_record_market_id_by_id,
-    update_mcp_record_manage_fields_by_id,
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.group_db import query_group_ids_by_user
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
+from contracts.constants.constants import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_MARKET_STATUSES
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_MCP_REPOSITORY
+from management.db.mcp.market import check_mcp_market_name_exists, create_mcp_market_record, delete_mcp_market_record_by_id, get_mcp_market_record_by_id, get_mcp_market_records, get_mcp_market_tag_stats_by_tenant, increment_mcp_market_download_count, list_mcp_market_records_by_status, list_mcp_market_records_by_tenant_and_user, update_mcp_market_record, update_mcp_market_status
+from management.db.mcp.remote import clear_mcp_record_market_id, update_mcp_record_market_id_by_id, update_mcp_record_manage_fields_by_id
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.identity.group import query_group_ids_by_user
 from management.services.notification.service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
     deactivate_notifications,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.db.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.serialization import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
 
 
 def get_mcp_record_by_id_and_tenant(*args, **kwargs):
     """Load a source MCP record through the database module boundary."""
-    from database.remote_mcp_db import get_mcp_record_by_id_and_tenant as load_record
+    from management.db.mcp.remote import get_mcp_record_by_id_and_tenant as load_record
 
     return load_record(*args, **kwargs)
 

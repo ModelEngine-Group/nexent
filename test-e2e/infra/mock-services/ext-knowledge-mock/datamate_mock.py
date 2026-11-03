@@ -14,7 +14,7 @@ Contract mirrored from:
   - sdk/nexent/datamate/datamate_client.py — list (auto-paginates on
     ``data.totalPages``), files, info, retrieve; download URLs are built by
     plain concatenation ``{base}/api/data-management/datasets/{ds}/files/{fid}/download``.
-  - backend/apps/file_management_app.py — the download proxy normalizes
+  - backend/management/api/file/file_management.py — the download proxy normalizes
     datamate URLs (``_normalize_datamate_download_url`` /
     ``_build_datamate_url_from_parts``).
   - sdk/nexent/core/tools/datamate_search_tool.py — retrieve results carry

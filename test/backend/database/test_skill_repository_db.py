@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Focused unit tests for skill repository database helpers."""
 
+from test.common.contract_stubs import install_shared_contract_stub
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -9,13 +12,17 @@ import pytest
 
 agent_repository_consts = MagicMock()
 agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
-sys.modules["consts.agent_repository"] = agent_repository_consts
+install_shared_contract_stub(agent_repository_consts, 'agent_repository')
 
 client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock(side_effect=lambda record: record.payload)
 client_mock.filter_property = MagicMock(side_effect=lambda payload, _model: payload)
-sys.modules["database.client"] = client_mock
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 class _SkillRepositoryModel:
@@ -44,9 +51,9 @@ class _SkillRepositoryModel:
 
 db_models_mock = MagicMock()
 db_models_mock.SkillRepository = _SkillRepositoryModel
-sys.modules["database.db_models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
 
-from backend.database import skill_repository_db as repo_db
+from management.db.skill import catalog as repo_db
 
 
 def _session_context(session):

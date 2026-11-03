@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Reconcile partial KB creation using exact, batch-unique ownership only."""
 from shared.asset_registry import register_asset
 from shared.http import client,assert_status,MODEL_TIMEOUT
@@ -34,8 +36,8 @@ def register_partial_knowledge(identity, name, *, owner, role):
     # arbitrary error strings as IDs or enumerate unrelated tenant resources.
     from shared.factories.sharing import product_db
     product_db()
-    from database.client import get_db_session
-    from database.db_models import KnowledgeRecord
+    from management.db.client import get_db_session
+    from management.db.models import KnowledgeRecord
     from sqlalchemy import select
     with get_db_session() as session:
         records=session.execute(select(KnowledgeRecord).where(

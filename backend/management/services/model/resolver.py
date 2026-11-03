@@ -4,9 +4,9 @@
 import logging
 from typing import Any, Optional
 
-from consts.model import ModelConnectStatusEnum
+from contracts.model import ModelConnectStatusEnum
 from contracts.model import ModelDescriptor
-from database.model_management_db import get_model_by_model_id, get_model_records
+from management.db.model.repository import get_model_by_model_id, get_model_records
 from management.services.model.adapter import build_adapter_fresh
 from management.services.configuration.tenant.settings import tenant_config_manager
 
@@ -34,6 +34,13 @@ def is_model_available(model: dict | None) -> bool:
         ModelConnectStatusEnum.get_value(model.get("connect_status"))
         == ModelConnectStatusEnum.AVAILABLE.value
     )
+
+
+def is_model_configured(model: dict | None) -> bool:
+    """Allow explicit LLM choices independently of a cached connectivity probe."""
+    return bool(model) and model.get("delete_flag") != "Y" and model.get(
+        "model_type", "llm"
+    ) in {"llm", "chat"}
 
 
 def get_model_descriptor(model_id: int | None, tenant_id: str) -> ModelDescriptor:
@@ -149,7 +156,7 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
         return None
 
 from typing import Optional
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 
 
@@ -164,5 +171,5 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 
 
 from typing import Optional
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager

@@ -19,8 +19,8 @@ from management.services.knowledge_base.quota import (
     DEFAULT_CRITICAL_THRESHOLD,
     _usage_cache,
 )
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, PlatformQuotaConflictError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 
 
 @pytest.fixture
@@ -493,14 +493,14 @@ class TestPlatformQuota:
 
     def test_get_platform_capacity_returns_none_when_not_set(self):
         # get_platform_capacity imports get_single_config_info inside the method
-        with patch("database.tenant_config_db.get_single_config_info") as mock_get:
+        with patch("management.db.configuration.tenant.get_single_config_info") as mock_get:
             mock_get.return_value = {}
             result = QuotaService.get_platform_capacity()
             assert result["capacity_bytes"] is None
             assert result["capacity_readable"] is None
 
     def test_get_platform_capacity_reads_stored(self):
-        with patch("database.tenant_config_db.get_single_config_info") as mock_get:
+        with patch("management.db.configuration.tenant.get_single_config_info") as mock_get:
             mock_get.return_value = {"config_value": str(500 * GB), "tenant_config_id": 1}
             result = QuotaService.get_platform_capacity()
             assert result["capacity_bytes"] == 500 * GB
@@ -508,7 +508,7 @@ class TestPlatformQuota:
 
     def test_get_platform_capacity_ignores_invalid_stored_value(self):
         with patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             return_value={"config_value": "invalid"},
         ):
             result = QuotaService.get_platform_capacity()
@@ -608,13 +608,13 @@ class TestPlatformQuota:
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
     def test_allocation_state_excludes_virtual_tenants(self):
-        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         with patch(
-            "database.tenant_config_db.get_all_tenant_ids",
+            "management.db.configuration.tenant.get_all_tenant_ids",
             return_value=["tenant-1", DEFAULT_TENANT_ID, "", ASSET_OWNER_TENANT_ID],
         ), patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             return_value={"config_value": str(20 * GB)},
         ) as mock_get_config:
             result = QuotaService._get_allocation_state(ASSET_OWNER_TENANT_ID)
@@ -645,7 +645,7 @@ class TestPlatformQuota:
                 "warning_enabled": True,
                 "tenant_warning_level": "normal",
             },
-        ), patch("database.tenant_config_db.get_single_config_info", return_value={}):
+        ), patch("management.db.configuration.tenant.get_single_config_info", return_value={}):
             result = QuotaService.get_platform_overview()
 
         assert result["remaining_allocatable_bytes"] == 60 * GB
@@ -665,10 +665,10 @@ class TestPlatformQuota:
             "get_platform_capacity",
             return_value={"capacity_bytes": None, "capacity_readable": None},
         ), patch(
-            "database.tenant_config_db.get_all_tenant_ids",
+            "management.db.configuration.tenant.get_all_tenant_ids",
             return_value=["tenant-1"],
         ), patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             side_effect=[
                 {"config_value": str(100 * GB)},
                 {"config_value": "Tenant 1"},
@@ -705,7 +705,7 @@ class TestPlatformQuota:
         ), patch.object(
             QuotaService, "get_usage", side_effect=RuntimeError("usage failed")
         ), patch(
-            "database.tenant_config_db.get_single_config_info", return_value={}
+            "management.db.configuration.tenant.get_single_config_info", return_value={}
         ):
             result = QuotaService.get_platform_overview()
 
@@ -745,7 +745,7 @@ class TestPlatformQuota:
                 },
             ],
         ), patch(
-            "database.tenant_config_db.get_single_config_info", return_value={}
+            "management.db.configuration.tenant.get_single_config_info", return_value={}
         ):
             result = QuotaService.get_platform_overview()
 

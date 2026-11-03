@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused unit tests for skill repository service."""
 
+from test.common.contract_stubs import install_shared_contract_stub
 import base64
 import sys
 import types
@@ -18,14 +19,14 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 _MOCKED_MODULE_NAMES = [
-    "database.skill_repository_db",
-    "database.group_db",
-    "database.skill_db",
-    "database.tag_management_db",
-    "database.user_tenant_db",
+    "management.db.skill.catalog",
+    "management.db.identity.group",
+    "management.db.skill.repository",
+    "management.db.tag.repository",
+    "management.db.identity.user_tenant",
     "management.services.skill.service",
     "management.services.notification.service",
-    "management.db.serialization",
+    "management.utils.serialization",
 ]
 _ORIGINAL_MODULES = {
     name: sys.modules.get(name)
@@ -36,8 +37,8 @@ _consts_package = sys.modules.get("consts")
 if _consts_package is not None and not hasattr(_consts_package, "__path__"):
     _consts_package.__path__ = []
 
-if "consts.agent_repository" not in sys.modules:
-    consts_agent_repository_mock = types.ModuleType("consts.agent_repository")
+if "contracts.constants.constants" not in sys.modules:
+    consts_agent_repository_mock = types.ModuleType("contracts.constants.constants")
     consts_agent_repository_mock.OWNERSHIP_ALL = "all"
     consts_agent_repository_mock.OWNERSHIP_CREATED = "created"
     consts_agent_repository_mock.OWNERSHIP_OTHERS = "others"
@@ -56,9 +57,9 @@ if "consts.agent_repository" not in sys.modules:
         "rejected",
         "shared",
     }
-    sys.modules["consts.agent_repository"] = consts_agent_repository_mock
+    install_shared_contract_stub(consts_agent_repository_mock, 'agent_repository')
 
-consts_const_module = sys.modules.get("consts.const")
+consts_const_module = sys.modules.get("contracts.constants.environment")
 if consts_const_module is not None:
     if not hasattr(consts_const_module, "CAN_EDIT_ALL_USER_ROLES"):
         consts_const_module.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
@@ -79,13 +80,13 @@ _skill_repo_db_mock.list_skill_repository_summaries = MagicMock()
 _skill_repo_db_mock.reset_skill_repository_status = MagicMock(return_value=0)
 _skill_repo_db_mock.update_skill_repository_by_id = MagicMock(return_value=1)
 _skill_repo_db_mock.update_skill_repository_status_by_id = MagicMock(return_value=1)
-sys.modules["database.skill_repository_db"] = _skill_repo_db_mock
+sys.modules["management.db.skill.catalog"] = _skill_repo_db_mock
 
 _group_db_mock = MagicMock()
 _group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
-sys.modules["database.group_db"] = _group_db_mock
+sys.modules["management.db.identity.group"] = _group_db_mock
 
-_utils_str_utils_mock = types.ModuleType("management.db.serialization")
+_utils_str_utils_mock = types.ModuleType("management.utils.serialization")
 _utils_str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda value: [
         int(item)
@@ -93,13 +94,13 @@ _utils_str_utils_mock.convert_string_to_list = MagicMock(
         if item.strip().isdigit()
     ]
 )
-sys.modules["management.db.serialization"] = _utils_str_utils_mock
+sys.modules["management.utils.serialization"] = _utils_str_utils_mock
 
 _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)
-sys.modules["database.skill_db"] = _skill_db_mock
+sys.modules["management.db.skill.repository"] = _skill_db_mock
 
-_tag_management_db_mock = types.ModuleType("database.tag_management_db")
+_tag_management_db_mock = types.ModuleType("management.db.tag.repository")
 _tag_management_db_mock.TagManagementDB = MagicMock()
 _tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids = MagicMock(
     return_value=[]
@@ -107,11 +108,11 @@ _tag_management_db_mock.TagManagementDB.filter_authorized_resource_ids = MagicMo
 _tag_management_db_mock.TagManagementDB.list_resource_assignment_display_values_by_ids = (
     MagicMock(return_value={})
 )
-sys.modules["database.tag_management_db"] = _tag_management_db_mock
+sys.modules["management.db.tag.repository"] = _tag_management_db_mock
 
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock()
-sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 
 
 class _SkillServiceMock:
@@ -187,7 +188,7 @@ sys.modules["management.services.skill.service"] = _skill_service_module_mock
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
-import consts.exceptions as exceptions_module
+from contracts.errors import exceptions as exceptions_module
 
 
 def _ensure_exception(name):
@@ -215,10 +216,7 @@ if not _has_duplicate_names:
 
 from services import skill_repository_service as srs
 
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_SKILL_REPOSITORY,
-)
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
 
 
 @pytest.fixture(autouse=True)

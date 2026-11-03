@@ -3,12 +3,7 @@
 import logging
 from typing import FrozenSet, Tuple
 
-from consts.agent_repository import (
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-)
+from contracts.constants.constants import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
 
 logger = logging.getLogger("agent_repository_service")
 
@@ -79,8 +74,8 @@ def _repository_image_id(icon_url: str, agent_id: int, version_no: int) -> str:
 
 from typing import Any, Dict
 
-from consts.exceptions import UnauthorizedError
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.errors.exceptions import UnauthorizedError
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 
 
 def _get_user_role(user_id: str) -> str:
@@ -112,10 +107,10 @@ def _validate_create_listing_permission(
 
 from typing import Any, Dict, List, Optional
 
-from consts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED
-from consts.const import SYSTEM_TENANT_ID
-from database.agent_repository_db import reset_agent_repository_status
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED
+from contracts.constants.constants import SYSTEM_TENANT_ID
+from management.db.agent.catalog import reset_agent_repository_status
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.permission.identity.display import repository_identity_fields
 
 

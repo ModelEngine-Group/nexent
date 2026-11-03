@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from database import conversation_db as db
+from management.db.conversation import repository as db
 
 
 @pytest.fixture

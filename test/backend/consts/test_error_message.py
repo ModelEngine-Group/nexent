@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Error Message definitions.
 
 Tests the ErrorMessage class and its methods for getting error messages.
 """
 import pytest
-from backend.consts.error_code import ErrorCode
-from backend.consts.error_message import ErrorMessage
+from contracts.errors.codes import ErrorCode
+from contracts.errors.messages import ErrorMessage
 
 
 @pytest.mark.parametrize(

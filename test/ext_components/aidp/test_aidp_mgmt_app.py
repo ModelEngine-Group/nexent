@@ -71,14 +71,14 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules[mod.__name__] = mod
 
-# Register non-prefixed ``database`` / ``database.client`` stubs so that
-# production modules (which import as ``from database.client import ...``)
+# Register non-prefixed ``database`` / ``management.db.client`` stubs so that
+# production modules (which import as ``from management.db.client import ...``)
 # resolve to these mocks rather than loading real Minio/Postgres clients.
 # Previous ``backend.*``-prefixed keys caused Python to create parallel
 # module objects that broke mock patching.
 _db_pkg = sys.modules.get("database") or _mod("database")
 _db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-_db_client = _mod("database.client")
+_db_client = _mod("management.db.client")
 _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
@@ -95,7 +95,7 @@ from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     UpdateKbRequest,
     aidp_mgmt_router,
 )
-from apps.app_factory import register_exception_handlers  # noqa: E402
+from management.utils.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
@@ -149,8 +149,8 @@ def test_creation_requires_embedding_and_trims_description():
     ({"description": "New description"}, True),
 ])
 def test_unified_save_commits_permissions_before_optional_aidp(monkeypatch, metadata, remote_fails):
-    from consts.error_code import ErrorCode
-    from consts.exceptions import AppException
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
     from ext_components.aidp.apps import aidp_mgmt_app
     from ext_components.aidp.services import aidp_kb_update_service as service
 
@@ -681,7 +681,7 @@ class TestListKnowledgeBases:
              patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
-            from consts.error_code import ErrorCode as _E  # noqa
+            from contracts.errors.codes import ErrorCode as _E
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         body = response.json()
@@ -811,8 +811,8 @@ class TestListKnowledgeBases:
 
 # Use a lazy import for AppException at module load to avoid breaking the
 # fastapi exception handler fixture.
-from consts.exceptions import AppException  # noqa: E402
-from consts.error_code import ErrorCode  # noqa: E402
+from contracts.errors.exceptions import AppException
+from contracts.errors.codes import ErrorCode
 
 
 # --- Update KB ------------------------------------------------------------
@@ -1408,7 +1408,7 @@ class TestAuthEdgeCases:
     def test_unauthorized_error_from_get_current_user_id_returns_401(self, monkeypatch):
         """get_current_user_id raises UnauthorizedError -> _auth catches and returns 401."""
         from ext_components.aidp.apps import aidp_mgmt_app
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         monkeypatch.setattr(
             aidp_mgmt_app.auth_utils_module, "get_current_user_id",

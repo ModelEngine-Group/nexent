@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import unittest
@@ -10,17 +11,17 @@ from enum import Enum
 # Ensure backend modules can be imported and avoid real MinIO init
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-# Stub consts.model for MemoryAgentShareMode
-consts_model = types.ModuleType("consts.model")
+# Stub contracts.agent for MemoryAgentShareMode
+consts_model = types.ModuleType("contracts.agent")
 class MemoryAgentShareMode(str, Enum):
     ALWAYS = "always"
     ASK = "ask"
     NEVER = "never"
 consts_model.MemoryAgentShareMode = MemoryAgentShareMode
-sys.modules["consts.model"] = consts_model
+install_business_contract_stubs(consts_model)
 
-# Stub consts.const values used by service
-consts_const = types.ModuleType("consts.const")
+# Stub contracts.constants.environment values used by service
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
 consts_const.DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 consts_const.MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
@@ -31,7 +32,8 @@ consts_const.DEFAULT_DREAMING_SWITCH_KEY = "Y"
 consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
 consts_const.EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
+install_business_constant_stubs(consts_const)
 
 # Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
@@ -60,8 +62,8 @@ agent_model_mod.MemoryUserConfig = MemoryUserConfig
 agent_model_mod.MemoryContext = MemoryContext
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Fake out database.client to prevent boto3/MinIO side effects and provide needed APIs
-fake_client = types.ModuleType("database.client")
+# Fake out management.db.client to prevent boto3/MinIO side effects and provide needed APIs
+fake_client = types.ModuleType("management.db.client")
 
 def _filter_property(data, model_class):
     try:
@@ -104,11 +106,15 @@ def _get_db_session(db_session=None):
 
 fake_client.filter_property = _filter_property
 fake_client.get_db_session = _get_db_session
-sys.modules["database.client"] = fake_client
+sys.modules["management.db.client"] = fake_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['boto3'] = MagicMock()
 
-# Stub database.memory_config_db to avoid importing SQLAlchemy models at import time
-memcfg_db = types.ModuleType("database.memory_config_db")
+# Stub management.db.memory.config to avoid importing SQLAlchemy models at import time
+memcfg_db = types.ModuleType("management.db.memory.config")
 
 def _noop(*args, **kwargs):
     return True
@@ -121,7 +127,7 @@ memcfg_db.get_memory_config_info = _return_empty_list
 memcfg_db.insert_config = _noop
 memcfg_db.delete_config_by_config_id = _noop
 memcfg_db.update_config_by_id = _noop
-sys.modules["database.memory_config_db"] = memcfg_db
+sys.modules["management.db.memory.config"] = memcfg_db
 
 # Stub utils.memory_utils to ensure import works even if not patched
 utils_memory_utils = types.ModuleType("utils.memory_utils")

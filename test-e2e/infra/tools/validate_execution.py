@@ -61,7 +61,8 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
             record["acceptance"] = case["acceptance"]
         if not execution_path.is_file():
             if phase == "implementation" and case.get("status") == "active" and case.get("automation") == "automated":
-                issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml"))
+                issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml",
+                                              "CASE_EXECUTION_MISSING", case_id))
             continue
         raw = __import__("yaml").safe_load(execution_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict) or set(raw) - EXECUTION_FIELDS or raw.get("schema_version") != "1.0":
@@ -78,11 +79,12 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
             issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
             issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
-        if (phase == "implementation" and case_id in require_preparation_cases
+        if (phase == "implementation"
                 and stage != "D1" and case.get("status") == "active"
                 and "preparation" not in raw):
             issues.append(ValidationIssue(execution_path, "preparation",
-                                          "Active online case requires an explicit preparation declaration"))
+                                          "Active online case requires an explicit preparation declaration",
+                                          "CASE_PREPARATION_MISSING", case_id))
         implementations = raw.get("implementations")
         if not isinstance(implementations, list) or not implementations:
             issues.append(ValidationIssue(execution_path, "implementations", "At least one implementation is required"))
@@ -105,11 +107,13 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
                 issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Script path escapes its allowed directory"))
                 continue
             if not resolved.is_file():
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Implementation file does not exist"))
+                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Implementation file does not exist",
+                                              "CASE_SCRIPT_MISSING", case_id))
                 continue
             content = resolved.read_text(encoding="utf-8", errors="replace")
             if index == 0 and item["selector"] not in content:
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Primary script lacks its selector"))
+                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Primary script lacks its selector",
+                                              "CASE_SELECTOR_MISSING", case_id))
             relative = resolved.relative_to(root).as_posix()
             if index == 0:
                 previous = entrypoints.setdefault(relative, case_id)

@@ -10,7 +10,7 @@ import pytest_asyncio
 from shared.auth import sign_in
 from shared.config import load_yaml
 from shared.http import assert_status, client, response_message
-from database import group_db
+from management.db.identity import group as group_db
 from ext_components.aidp.database import aidp_permission_db
 from shared.factories.aidp_permission import create_owned_permission, delete_owned_permission
 from shared.factories.tenant import isolated_accounts

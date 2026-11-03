@@ -14,15 +14,15 @@ import pytest
 pytestmark = [pytest.mark.case_id("AGENT-PROMPT-D5-001"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
-MERGED_MIGRATION = ROOT / "deploy/sql/migrations/v2.7.0_merged_migrations.sql"
+MERGED_MIGRATION = ROOT / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
 
 
 def migration_section(filename):
     """Execute exact production sections while keeping fault tests isolated."""
     source = MERGED_MIGRATION.read_text(encoding="utf-8")
     start = source.index(f"-- Source migration: {filename}\n")
-    end = source.index(f"-- End source migration: {filename}", start)
-    return source[start:end]
+    end = source.find("-- Source migration: ", start + len("-- Source migration: "))
+    return source[start:] if end == -1 else source[start:end]
 
 
 MIGRATION = migration_section("v2.7.1_005_unify_agent_prompts.sql")
@@ -45,14 +45,15 @@ def postgres():
            "--env", "POSTGRES_HOST_AUTH_METHOD=trust", "postgres:15-alpine")
     try:
         for _ in range(40):
-            ready = subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres"], capture_output=True)
+            # The entrypoint's temporary initialization server accepts only Unix sockets.
+            ready = subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True, timeout=10)
             if ready.returncode == 0:
                 break
             time.sleep(0.25)
         else:
             pytest.fail("Temporary PostgreSQL did not become ready")
         def sql(source):
-            return docker("exec", "--interactive", name, "psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", input=source)
+            return docker("exec", "--interactive", name, "psql", "-h", "127.0.0.1", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", input=source)
         sql("CREATE SCHEMA nexent; CREATE TABLE nexent.ag_tenant_agent_t (id int PRIMARY KEY, tenant_id text, version_no int, delete_flag text, duty_prompt text, constraint_prompt text, few_shots_prompt text, description text);")
         yield sql
     finally:
@@ -288,7 +289,9 @@ def test_agent_prompt_column_rename_ddl_failure_rolls_back(postgres):
 def test_merged_prompt_sections_run_in_deployment_order_and_repeat(postgres):
     source = MERGED_MIGRATION.read_text(encoding="utf-8")
     start = source.index("-- Source migration: v2.7.1_005_unify_agent_prompts.sql\n")
-    merged = source[start:]
+    end_marker = "-- End source migration: v2.7.1_009_rename_agent_prompt_column.sql"
+    end = source.index(end_marker, start) + len(end_marker)
+    merged = source[start:end]
     postgres("INSERT INTO nexent.ag_tenant_agent_t VALUES (1,'tenant-a',0,'N','Duty','Rule','Example','Metadata');")
     query = seed_marketplace(postgres, [{"agent_info": {"1": {"duty_prompt": "Frozen", "constraint_prompt": "Published rule"}}}])
     postgres(merged)

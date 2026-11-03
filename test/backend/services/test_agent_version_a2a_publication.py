@@ -4,7 +4,7 @@
 
 def test_ordinary_publish_preserves_last_a2a_version(mocker):
     from management.services.agent import versions as module
-    from database import a2a_agent_db
+    from management.db.a2a import repository as a2a_agent_db
 
     draft = {"agent_id": 7, "tenant_id": "tenant", "name": "Agent", "is_a2a": True}
     mocker.patch.object(module, "is_system_agent", return_value=False)
@@ -13,7 +13,7 @@ def test_ordinary_publish_preserves_last_a2a_version(mocker):
     for name in ("insert_agent_snapshot", "insert_tool_snapshot", "insert_relation_snapshot",
                  "insert_skill_snapshot", "insert_version", "update_agent_current_version"):
         mocker.patch.object(module, name, return_value=1)
-    mocker.patch("database.skill_db.query_skill_instances_by_agent_id", return_value=[])
+    mocker.patch("management.db.skill.repository.query_skill_instances_by_agent_id", return_value=[])
     registration = {"agent_id": 7, "endpoint_id": "stable-endpoint", "version": None}
     lookup = mocker.patch.object(a2a_agent_db, "get_server_agent_by_agent_id", return_value=registration)
 

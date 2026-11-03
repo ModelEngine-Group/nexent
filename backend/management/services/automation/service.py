@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
 
-from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS, AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
-from database import agent_automation_db
-from database.conversation_db import get_conversation
+from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS, AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
+from management.db.automation import repository as agent_automation_db
+from management.db.conversation.repository import get_conversation
 from management.services.conversation.service import (
     create_new_conversation,
     update_conversation_agent_id_service,
@@ -15,27 +15,9 @@ from management.services.conversation.service import (
 from management.services.automation import agent_identity as agent_identity_adapter
 from management.services.automation.capabilities import resolve_agent_capabilities, validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
-from consts.exceptions import (
-    AutomationCapabilityBindingInvalidError,
-    AutomationCapabilityNotReadyError,
-    AutomationConversationAlreadyBoundError,
-    AutomationNotFoundError,
-    AutomationScheduleInvalidError,
-)
+from contracts.errors.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
 from management.services.automation.intent import AutomationIntentContext, automation_intent_analyzer
-from contracts.automation import (
-    AutomationProposalConfirmRequest,
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationProposalStatus,
-    AutomationRunStatus,
-    AutomationSource,
-    AutomationTaskCreateRequest,
-    AutomationTaskPatchRequest,
-    AutomationTaskStatus,
-    CapabilityBinding,
-    ScheduleTrigger,
-)
+from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationProposalStatus, AutomationRunStatus, AutomationSource, AutomationTaskCreateRequest, AutomationTaskPatchRequest, AutomationTaskStatus, CapabilityBinding, ScheduleTrigger
 from management.services.automation.prompt import (
     AutomationPromptContext,
     AutomationTaskContent,
@@ -792,20 +774,13 @@ class AgentAutomationFacade:
         if run["status"] not in {AutomationRunStatus.QUEUED.value, AutomationRunStatus.RUNNING.value}:
             return run
 
-        self._request_conversation_stop(run["conversation_id"], user_id)
-        canceled = agent_automation_db.cancel_run(
-            run_id,
-            tenant_id,
-            user_id,
-            "Automation run was canceled by user.",
-        )
-        agent_automation_db.update_task(run["task_id"], tenant_id, user_id, {
-            "last_run_status": AutomationRunStatus.CANCELED.value,
-            "last_error": "Automation run was canceled by user.",
-            "lock_owner": None,
-            "lock_until": None,
-        })
-        return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
+        from management.services.automation.runner import agent_automation_runner
+        task = self.get_task(run["task_id"], tenant_id, user_id)
+        canceled, won = agent_automation_runner.cancel_run_by_user(run, task)
+        # Only the transition winner requests a stop, fenced to this execution.
+        if won:
+            self._request_conversation_stop(run["conversation_id"], user_id, run_id)
+        return canceled
 
     def delete_run(self, run_id: int, tenant_id: str, user_id: str) -> bool:
         run = agent_automation_db.get_run(run_id, tenant_id, user_id)
@@ -863,10 +838,13 @@ class AgentAutomationFacade:
         self._request_conversation_stop(conversation_id, user_id)
         agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, reason)
 
-    def _request_conversation_stop(self, conversation_id: int, user_id: str) -> None:
+    def _request_conversation_stop(self, conversation_id: int, user_id: str, run_id=None) -> None:
         try:
             from management.services.automation.runner import agent_automation_runner
-            agent_automation_runner.cancel_for_conversation(conversation_id, user_id)
+            if run_id is None:
+                agent_automation_runner.cancel_for_conversation(conversation_id, user_id)
+            else:
+                agent_automation_runner.cancel_for_conversation(conversation_id, user_id, run_id)
         except Exception:
             pass
 

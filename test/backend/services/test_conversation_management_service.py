@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_business_contract_stubs
 from pathlib import Path
 import sys
 import types
@@ -11,7 +12,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-# Note: backend.database.client.MinioClient patch is handled later with full module stubs
+# Note: management.db.client.MinioClient patch is handled later with full module stubs
 # Skipping the direct patch here since we stub the entire backend.database module
 
 # Mock boto3 before any imports
@@ -36,7 +37,7 @@ _stub_nexent_openai_model()
 # Exercise the real Jinja renderer used by SDK prompt assembly.
 import jinja2
 
-# Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
+# Stub nexent.core.agents.agent_model to satisfy imports in contracts.agent and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
@@ -50,13 +51,12 @@ agent_context_mod.ContextManager = object
 agent_context_mod.ContextManagerConfig = object
 sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
 
-# Stub backend.agents.agent_run_manager to avoid importing the real module
-agent_run_manager_mod = types.ModuleType("backend.agents.agent_run_manager")
+# Stub management.services.agent.lifecycle to avoid importing the real module
+agent_run_manager_mod = types.ModuleType("management.services.agent.lifecycle")
 mock_agent_run_manager = MagicMock()
 agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
 agent_run_manager_mod.AgentRunManager = object
-sys.modules["backend.agents"] = types.ModuleType("backend.agents")
-sys.modules["backend.agents.agent_run_manager"] = agent_run_manager_mod
+sys.modules["management.services.agent.lifecycle"] = agent_run_manager_mod
 # Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
 observer_mod = types.ModuleType("nexent.core.utils.observer")
 observer_mod.MessageObserver = lambda *a, **k: types.SimpleNamespace(add_model_new_token=lambda t: None, add_model_reasoning_content=lambda r: None, flush_remaining_tokens=lambda: None)
@@ -70,8 +70,8 @@ embedding_mod.OpenAICompatibleEmbedding = object
 embedding_mod.JinaEmbedding = object
 sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
-# Stub consts.model to avoid pydantic/email-validator heavy imports during tests.
-consts_model_mod = types.ModuleType("consts.model")
+# Stub contracts.agent to avoid pydantic/email-validator heavy imports during tests.
+consts_model_mod = types.ModuleType("contracts.agent")
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -112,16 +112,16 @@ consts_model_mod.MessageRequest = MessageRequest
 
 
 def filter_extra_params(model_type, extra_params):
-    """Minimal stub mirroring consts.model.filter_extra_params for import-chain compat."""
+    """Minimal stub mirroring contracts.model.filter_extra_params for import-chain compat."""
     if not extra_params:
         return extra_params
     return dict(extra_params)
 
 
 consts_model_mod.filter_extra_params = filter_extra_params
-sys.modules["consts.model"] = consts_model_mod
-# Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
-sys.modules["backend.consts.model"] = consts_model_mod
+install_business_contract_stubs(consts_model_mod)
+# Also ensure contracts.agent resolves to our stub for tests that import via contracts.agent
+install_business_contract_stubs(consts_model_mod)
 
 
 class HistoryItem:
@@ -134,8 +134,8 @@ class HistoryItem:
 
 consts_model_mod.HistoryItem = HistoryItem
 
-# Stub database.client to avoid import-time DB helpers
-db_client_stub = types.ModuleType("database.client")
+# Stub management.db.client to avoid import-time DB helpers
+db_client_stub = types.ModuleType("management.db.client")
 db_client_stub.as_dict = lambda obj: {}
 
 # Minimal dummy db_client with clean_string_values and session_maker to satisfy imports.
@@ -160,7 +160,11 @@ class _DummySessionCM:
         return False
 
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
-sys.modules["database.client"] = db_client_stub
+sys.modules["management.db.client"] = db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Stub management.services.agent.prompt to avoid requiring PyYAML
 prompt_mod = types.ModuleType("management.services.agent.prompt")
@@ -178,20 +182,23 @@ class _DummyMinIOStorageConfig:
 minio_config_mod.MinIOStorageConfig = _DummyMinIOStorageConfig
 sys.modules["nexent.storage.minio_config"] = minio_config_mod
 
-# Stub backend.database module so patch can find backend.database.client
+# Stub backend.database module so patch can find management.db.client
 backend_database_mod = types.ModuleType("backend.database")
 
-# Create backend.database.client stub
-backend_database_client_mod = types.ModuleType("backend.database.client")
+# Create management.db.client stub
+backend_database_client_mod = db_client_stub
 backend_database_client_mod.MinioClient = lambda *a, **k: minio_client_mock
-sys.modules["backend.database.client"] = backend_database_client_mod
+sys.modules["management.db.client"] = backend_database_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 # Add 'client' attribute to backend.database module
 backend_database_mod.client = backend_database_client_mod
 
 sys.modules["backend.database"] = backend_database_mod
 
-from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
-from consts.exceptions import ValidationError
+from contracts.conversation import MessageRequest, MessageUnit
+from contracts.agent import AgentRequest
+from contracts.errors.exceptions import ValidationError
 import unittest
 import json
 import asyncio
@@ -1455,7 +1462,7 @@ class TestUpdateConversationTitle(unittest.TestCase):
         """Should raise ConversationNotFoundError when conversation doesn't exist."""
         mock_rename.return_value = False
         from management.services.conversation.service import update_conversation_title
-        from consts.exceptions import ConversationNotFoundError
+        from contracts.errors.exceptions import ConversationNotFoundError
 
         with self.assertRaises(ConversationNotFoundError):
             update_conversation_title(123, "New Title", "user-1")
@@ -2034,7 +2041,7 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
 
 def test_missing_message_raises_not_found_domain_error():
     import pytest
-    from consts.exceptions import ConversationNotFoundError
+    from contracts.errors.exceptions import ConversationNotFoundError
 
     with patch('management.services.conversation.service.update_message_opinion', return_value=False):
         with pytest.raises(ConversationNotFoundError):

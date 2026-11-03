@@ -10,46 +10,22 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from database import skill_db
-from database.tenant_config_db import (
-    create_tenant_with_default_group,
-    get_single_config_info,
-    insert_config,
-    update_config_by_tenant_config_id,
-    get_all_tenant_ids,
-    delete_config_by_tenant_config_id,
-    get_all_configs_by_tenant_id,
-)
-from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from management.db.skill import repository as skill_db
+from management.db.configuration.tenant import create_tenant_with_default_group, get_single_config_info, insert_config, update_config_by_tenant_config_id, get_all_tenant_ids, delete_config_by_tenant_config_id, get_all_configs_by_tenant_id
+from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
 from management.services.permission.identity.users import delete_user_and_cleanup
-from database.group_db import query_groups_by_tenant, remove_group
-from database.model_management_db import get_model_records, delete_model_record
-from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
-from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
-from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
-from database.invitation_db import query_invitations_by_tenant, remove_invitation
-from database.tool_db import delete_tools_by_agent_id
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    CONTAINER_SKILLS_PATH,
-    DEFAULT_GROUP_ID,
-    DEFAULT_TENANT_ID,
-    TENANT_ID,
-    TENANT_NAME,
-    IS_SPEED_MODE,
-    ENABLE_AGENT_WORKBENCH,
-)
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    UserRegistrationException,
-    ValidationError,
-)
+from management.db.identity.group import query_groups_by_tenant, remove_group
+from management.db.model.repository import get_model_records, delete_model_record
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
+from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
+from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
+from management.db.tool.repository import delete_tools_by_agent_id
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE
+from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
-from management.services.agent.system import (
-    ensure_workbench_main_agent,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -232,48 +208,6 @@ def get_tenants_paginated_for_user(
     return get_tenants_paginated(page=page, page_size=page_size)
 
 
-def backfill_workbench_main_agents() -> Dict[str, int]:
-    """Ensure the tenant-scoped workbench Agent for every existing real tenant.
-
-    The operation is deliberately reentrant. Each tenant is isolated so that a
-    malformed or temporarily unavailable tenant does not prevent the remaining
-    tenants from being upgraded.
-    """
-    if not ENABLE_AGENT_WORKBENCH:
-        return {"total": 0, "succeeded": 0, "failed": 0}
-
-    tenant_ids = [
-        tenant_id
-        for tenant_id in get_all_tenant_ids()
-        if _is_displayable_tenant_id(tenant_id)
-    ]
-    succeeded = 0
-    failed = 0
-
-    for tenant_id in tenant_ids:
-        try:
-            ensure_workbench_main_agent(
-                tenant_id=tenant_id,
-                user_id="system",
-            )
-            succeeded += 1
-        except Exception as exc:
-            failed += 1
-            logger.warning(
-                "Failed to backfill workbench_main for tenant %s: %s",
-                tenant_id,
-                exc,
-            )
-
-    result = {
-        "total": len(tenant_ids),
-        "succeeded": succeeded,
-        "failed": failed,
-    }
-    logger.info("Workbench system Agent backfill completed: %s", result)
-    return result
-
-
 def create_tenant(
     tenant_name: str,
     created_by: Optional[str] = None,
@@ -342,22 +276,6 @@ def create_tenant(
             except Exception as e:
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
-
-        if ENABLE_AGENT_WORKBENCH:
-            try:
-                ensure_workbench_main_agent(
-                    tenant_id=tenant_id,
-                    user_id=created_by or "system",
-                    locale=locale,
-                )
-            except Exception as e:
-                # Tenant creation remains recoverable because Workbench runtime also
-                # calls the provider lazily before using the system Agent.
-                logger.warning(
-                    "Failed to provision workbench_main for tenant %s: %s",
-                    tenant_id,
-                    e,
-                )
 
         tenant_info = {
             "tenant_id": tenant_id,
@@ -520,7 +438,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
-        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
             tenant_id, page=1, page_size=10000, email_required=False)

@@ -63,14 +63,16 @@ backend_module = sys.modules.get("backend") or types.ModuleType("backend")
 backend_module.__path__ = [backend_dir]
 backend_database_module = types.ModuleType("backend.database")
 backend_database_module.__path__ = [os.path.join(backend_dir, "database")]
-backend_database_client_module = types.ModuleType("backend.database.client")
+backend_database_client_module = types.ModuleType("management.db.client")
 backend_database_client_module.MinioClient = MagicMock()
 backend_module.database = backend_database_module
 backend_database_module.client = backend_database_client_module
 
 sys.modules["backend"] = backend_module
 sys.modules["backend.database"] = backend_database_module
-sys.modules["backend.database.client"] = backend_database_client_module
+sys.modules["management.db.client"] = backend_database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock the storage client factory BEFORE importing any backend modules that depend on it.
 # This prevents MinIO connection attempts during module import.
@@ -93,20 +95,20 @@ def _mock_create_storage_client_from_config(config):
 # Apply the mock to the SDK module where create_storage_client_from_config is defined
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
            side_effect=_mock_create_storage_client_from_config):
-    # Also mock the MinIO client initialization in database.client
-    with patch('backend.database.client.MinioClient') as MockMinioClient:
+    # Also mock the MinIO client initialization in management.db.client
+    with patch('management.db.client.MinioClient') as MockMinioClient:
         mock_minio_instance = MagicMock()
         MockMinioClient.return_value = mock_minio_instance
 
         # Now it's safe to import backend modules
-        from backend.apps.idata_app import router
-        from backend.apps.app_factory import register_exception_handlers
+        from management.api.knowledge_base.idata import router
+        from management.utils.app_factory import register_exception_handlers
         # Import ErrorCode and AppException the same way as the endpoint function does
-        # The endpoint uses: from consts.error_code import ErrorCode
-        # The endpoint uses: from consts.exceptions import AppException
+        # The endpoint uses: from contracts.errors.codes import ErrorCode
+        # The endpoint uses: from contracts.errors.exceptions import AppException
         # So we import them the same way to ensure type matching
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
+        from contracts.errors.exceptions import AppException
         from management.services.knowledge_base.providers.idata import (
             fetch_idata_knowledge_spaces_impl,
             fetch_idata_datasets_impl,
@@ -135,7 +137,7 @@ class TestFetchIdataKnowledgeSpacesApi:
             {"id": "space-2", "name": "Knowledge Space 2"},
         ]
 
-        with patch('backend.apps.idata_app.fetch_idata_knowledge_spaces_impl') as mock_fetch:
+        with patch('management.api.knowledge_base.idata.fetch_idata_knowledge_spaces_impl') as mock_fetch:
             mock_fetch.return_value = expected_result
 
             response = client.get(
@@ -165,7 +167,7 @@ class TestFetchIdataKnowledgeSpacesApi:
             {"id": "space-1", "name": "Knowledge Space 1"},
         ]
 
-        with patch('backend.apps.idata_app.fetch_idata_knowledge_spaces_impl') as mock_fetch:
+        with patch('management.api.knowledge_base.idata.fetch_idata_knowledge_spaces_impl') as mock_fetch:
             mock_fetch.return_value = expected_result
 
             response = client.get(
@@ -189,7 +191,7 @@ class TestFetchIdataKnowledgeSpacesApi:
     @pytest.mark.asyncio
     async def test_fetch_knowledge_spaces_url_normalization_exception(self):
         """Test exception handling during URL normalization."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         # Since we can't patch str.rstrip (str is immutable), we'll directly test
         # the exception handling logic by patching the endpoint function to simulate
@@ -228,7 +230,7 @@ class TestFetchIdataKnowledgeSpacesApi:
     @pytest.mark.asyncio
     async def test_fetch_knowledge_spaces_app_exception_re_raise(self):
         """Test that AppException is re-raised and handled by global middleware."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         app_exception = AppException(
             ErrorCode.IDATA_CONFIG_INVALID,
@@ -236,7 +238,7 @@ class TestFetchIdataKnowledgeSpacesApi:
         )
 
         # Patch the service implementation to raise AppException
-        with patch('backend.apps.idata_app.fetch_idata_knowledge_spaces_impl', side_effect=app_exception):
+        with patch('management.api.knowledge_base.idata.fetch_idata_knowledge_spaces_impl', side_effect=app_exception):
             # Call the endpoint function directly to verify exception is re-raised
             with pytest.raises(AppException) as exc_info:
                 await idata_app.fetch_idata_knowledge_spaces_api(
@@ -255,11 +257,11 @@ class TestFetchIdataKnowledgeSpacesApi:
     @pytest.mark.asyncio
     async def test_fetch_knowledge_spaces_generic_exception(self):
         """Test handling of generic exceptions."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         # Patch the service implementation to raise a generic exception
-        with patch('backend.apps.idata_app.fetch_idata_knowledge_spaces_impl', side_effect=RuntimeError("Service unavailable")), \
-                patch('backend.apps.idata_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.idata.fetch_idata_knowledge_spaces_impl', side_effect=RuntimeError("Service unavailable")), \
+                patch('management.api.knowledge_base.idata.logger') as mock_logger:
             # Call the endpoint function directly to verify exception is converted
             with pytest.raises(AppException) as exc_info:
                 await idata_app.fetch_idata_knowledge_spaces_api(
@@ -348,7 +350,7 @@ class TestFetchIdataDatasetsApi:
             ]
         }
 
-        with patch('backend.apps.idata_app.fetch_idata_datasets_impl') as mock_fetch:
+        with patch('management.api.knowledge_base.idata.fetch_idata_datasets_impl') as mock_fetch:
             mock_fetch.return_value = expected_result
 
             response = client.get(
@@ -393,7 +395,7 @@ class TestFetchIdataDatasetsApi:
             ]
         }
 
-        with patch('backend.apps.idata_app.fetch_idata_datasets_impl') as mock_fetch:
+        with patch('management.api.knowledge_base.idata.fetch_idata_datasets_impl') as mock_fetch:
             mock_fetch.return_value = expected_result
 
             response = client.get(
@@ -419,7 +421,7 @@ class TestFetchIdataDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_datasets_url_normalization_exception(self):
         """Test exception handling during URL normalization."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         # Since we can't patch str.rstrip (str is immutable), we'll directly test
         # the exception handling logic by patching the endpoint function to simulate
@@ -460,7 +462,7 @@ class TestFetchIdataDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_datasets_app_exception_re_raise(self):
         """Test that AppException is re-raised and handled by global middleware."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         app_exception = AppException(
             ErrorCode.IDATA_AUTH_ERROR,
@@ -468,7 +470,7 @@ class TestFetchIdataDatasetsApi:
         )
 
         # Patch the service implementation to raise AppException
-        with patch('backend.apps.idata_app.fetch_idata_datasets_impl', side_effect=app_exception):
+        with patch('management.api.knowledge_base.idata.fetch_idata_datasets_impl', side_effect=app_exception):
             # Call the endpoint function directly to verify exception is re-raised
             with pytest.raises(AppException) as exc_info:
                 await idata_app.fetch_idata_datasets_api(
@@ -488,11 +490,11 @@ class TestFetchIdataDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_datasets_generic_exception(self):
         """Test handling of generic exceptions."""
-        from backend.apps import idata_app
+        from management.api.knowledge_base import idata as idata_app
 
         # Patch the service implementation to raise a generic exception
-        with patch('backend.apps.idata_app.fetch_idata_datasets_impl', side_effect=RuntimeError("Service unavailable")), \
-                patch('backend.apps.idata_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.idata.fetch_idata_datasets_impl', side_effect=RuntimeError("Service unavailable")), \
+                patch('management.api.knowledge_base.idata.logger') as mock_logger:
             # Call the endpoint function directly to verify exception is converted
             with pytest.raises(AppException) as exc_info:
                 await idata_app.fetch_idata_datasets_api(

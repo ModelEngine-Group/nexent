@@ -8,7 +8,7 @@ import pytest
 
 
 conversation_db = __import__(
-    "backend.database.conversation_db", fromlist=["create_conversation"]
+    "management.db.conversation.repository", fromlist=["create_conversation"]
 )
 
 
@@ -51,16 +51,23 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
     )
     session.execute.return_value.fetchone.return_value = record
 
+    preferences = {"17": {"temperature": 0, "enable_thinking": False}}
     result = conversation_db.create_conversation(
         "Workbench",
         "user-a",
         agent_id=7,
         workbench_config={"schema_version": 3, "mode": "single_agent_chat"},
+        model_parameter_preferences=preferences,
+        selected_model_id=17,
     )
 
     assert result["workbench_config_version"] == 1
     assert result["workbench_config"]["mode"] == "single_agent_chat"
     assert insert_values["workbench_config_version"] == 1
+    assert insert_values["selected_model_id"] == 17
+    assert insert_values["model_parameter_preferences"] == preferences
+    assert insert_values["model_parameter_preferences"] is not preferences
+    assert "model_parameter_preferences_version" not in insert_values
     assert insert_values["workbench_config"] == {
         "schema_version": 3,
         "mode": "single_agent_chat",
@@ -123,3 +130,31 @@ def test_rebind_conversation_agent_id_reports_compare_and_swap_result(
         conversation_db.rebind_conversation_agent_id(42, 7, 8, "user-a")
         is expected
     )
+
+
+@pytest.mark.parametrize("joint", [False, True])
+@pytest.mark.parametrize("changed", [False, True])
+def test_persisted_workbench_contract_roundtrips_for_replacement(monkeypatch, joint, changed):
+    from copy import deepcopy
+    from contracts.agent import WorkbenchSessionConfig
+
+    current = WorkbenchSessionConfig(mode="generic_chat").model_dump(mode="json")
+    proposed = WorkbenchSessionConfig(mode="generic_chat", model_id=17 if changed else None).model_dump(mode="json")
+    assert current["schema_version"] == proposed["schema_version"] == 3
+    record = SimpleNamespace(workbench_config=deepcopy(current), workbench_config_version=2,
+                             runtime_metadata={"label": "old"}, runtime_metadata_version=5,
+                             agent_id=7, knowledge_scope=None)
+    session = _session(monkeypatch)
+    session.scalars.return_value.first.return_value = record
+    if joint:
+        result = conversation_db.replace_conversation_workbench_and_metadata(
+            42, "owner", proposed, 2, {"label": "new"}, 5,
+        )
+        assert result["runtime_metadata"] == {"label": "new"}
+        assert result["runtime_metadata_version"] == 6
+    else:
+        result = conversation_db.replace_conversation_workbench_config(42, "owner", proposed, 2, only_if_changed=True)
+        assert record.runtime_metadata_version == 5
+    assert result["workbench_config"] == proposed
+    assert result["workbench_config_version"] == 2 + int(changed)
+    assert session.flush.call_count == int(joint or changed)

@@ -126,7 +126,7 @@ async def _runtime_lifecycle(identity) -> None:
     async with client("runtime", token=identity.access_token) as api:
         automations = await api.get("/agent/automations", params={"page": 1, "page_size": 1})
     assert_status(automations, 200)
-    source = (repo_root() / "backend" / "apps" / "runtime_app.py").read_text(encoding="utf-8")
+    source = (repo_root() / "backend" / 'runtime' / 'api' / 'application.py').read_text(encoding="utf-8")
     assert "cleanup_orphaned_agent_workspaces()" in source
     assert "await agent_automation_scheduler.start()" in source
     assert "await agent_automation_scheduler.stop()" in source

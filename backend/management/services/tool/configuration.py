@@ -12,63 +12,19 @@ from urllib.parse import urljoin
 
 import jsonref
 import requests
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    LOCAL_MCP_SERVER,
-    MCP_MANAGEMENT_API,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
-)
-from consts.error_message import ErrorMessage
-from consts.exceptions import (
-    AgentDraftEditError,
-    MCPConnectionError,
-    NotFoundException,
-    ResourceBindingError,
-    ToolExecutionException,
-    ValidationError,
-)
-from consts.model import (
-    ToolInfo,
-    ToolInstanceInfoRequest,
-    ToolSourceEnum,
-    ToolValidateRequest,
-)
-from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
-from consts.tool_param_constraints import (
-    TOOL_PARAM_CONSTRAINT_KEYS,
-    TOOL_PARAM_CONSTRAINT_RULES,
-)
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.outer_api_tool_db import (
-    delete_openapi_service as db_delete_openapi_service,
-)
-from database.outer_api_tool_db import (
-    query_openapi_services_by_tenant,
-    upsert_openapi_service,
-)
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_records_by_tenant,
-    get_mcp_server_by_name_and_tenant,
-)
-from database.tool_db import (
-    check_tool_list_initialized,
-    create_or_update_tool_by_tool_info,
-    query_all_tools,
-    query_tool_instances_by_id,
-    query_tools_by_ids,
-    query_tools_by_labels,
-    search_last_tool_instance_by_tool_id,
-    update_tool_table_from_scan_tool_list,
-)
-from database.user_tenant_db import get_user_email_map
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError, NotFoundException, ResourceBindingError, ToolExecutionException, ValidationError
+from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
+from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
+from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
+from management.db.client import minio_client
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
+from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_records_by_tenant, get_mcp_server_by_name_and_tenant
+from management.db.tool.repository import check_tool_list_initialized, create_or_update_tool_by_tool_info, query_all_tools, query_tool_instances_by_id, query_tools_by_ids, query_tools_by_labels, search_last_tool_instance_by_tool_id, update_tool_table_from_scan_tool_list
+from management.db.identity.user_tenant import get_user_email_map
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from infrastructure.http.client import create_httpx_client
@@ -93,6 +49,8 @@ from management.services.tool.common import (
 from management.services.tool.langchain import discover_langchain_modules
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_NAMES
+from nexent.core.ext_components.aidp.retrieval_config import prepare_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
 
@@ -232,6 +190,17 @@ def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
         )
 
 
+def prepare_tool_params(tool, params):
+    """Prepare submitted tool parameters once before persistence."""
+    if tool["name"] in AIDP_SEARCH_TOOL_NAMES:
+        try:
+            return {**params, **prepare_config(params, {})}
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+    _validate_tool_param_ranges(tool["tool_id"], params)
+    return params
+
+
 def update_tool_info_impl(
     tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str
 ):
@@ -344,10 +313,7 @@ def update_tool_info_impl(
             raise ValidationError("Invalid DeepSeek Search configuration; check the key and parameter ranges.") from None
         tool_info.params = params
 
-    _validate_tool_param_ranges(
-        tool_info.tool_id,
-        dict(getattr(tool_info, "params", None) or {}),
-    )
+    tool_info.params = prepare_tool_params(tool, tool_info.params)
 
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no

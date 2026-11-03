@@ -3,8 +3,8 @@
 import uuid
 from typing import Dict
 
-from database.agent_db import search_agent_info_by_agent_id
-from database.agent_repository_db import get_agent_repository_by_agent_id
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.agent.catalog import get_agent_repository_by_agent_id
 from management.services.agent.icon import read_icon_image, upload_icon_image
 
 

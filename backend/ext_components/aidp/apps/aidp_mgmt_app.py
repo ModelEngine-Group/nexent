@@ -32,10 +32,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, UnauthorizedError
-from database.user_tenant_db import get_user_role_by_tenant
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
+from management.db.identity.user_tenant import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbNotFoundError,
@@ -78,7 +78,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from management.services.permission.identity import authentication_helpers as auth_utils_module
+import gateway.authentication.auth as auth_utils_module
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")

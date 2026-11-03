@@ -4,18 +4,12 @@ from collections import defaultdict
 from math import isfinite
 from typing import Any
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from consts.error_code import ErrorCode
-from consts.evaluation_status import EvalPassStatus
-from consts.exceptions import AppException
-from database.agent_evaluation_db import (
-    get_agent_evaluation,
-    get_evaluation_case_scores,
-    hard_delete_agent_evaluation,
-    list_agent_evaluation_cases,
-    list_agent_evaluations_by_agent,
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.errors.codes import ErrorCode
+from contracts.evaluation import EvalPassStatus
+from contracts.errors.exceptions import AppException
+from management.db.evaluation.runs import get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.evaluation.common import (
     logger,
 )
@@ -200,7 +194,7 @@ def delete_agent_evaluation_run_impl(
         "no_set_mode"
     ):
         try:
-            from database.evaluation_set_db import hard_delete_evaluation_set
+            from management.db.evaluation.sets import hard_delete_evaluation_set
 
             hard_delete_evaluation_set(run["evaluation_set_id"], tenant_id)
         except Exception as exc:  # noqa: BLE001

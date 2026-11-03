@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-RETIRED-PROMPT-20261026
+  change_type: test-fix
+  title: Delete explicitly retired standalone prompt-generation Cases at user request
+  description: >-
+    Delete AGT-006, AGT-007 and AGT-008 definitions, independent scripts and retired
+    execution bindings. These D3 Cases exercised the removed standalone
+    /prompt/generate endpoint; generation now belongs to the active NL2Agent flow.
+    Preserve the retired F-046 Feature as product history, clear its obsolete
+    stage declaration, and remove dangling structured Case references from prior
+    change records while retaining descriptive history. The shared scenario dispatcher
+    already excludes these Cases and is unchanged. Regenerate navigation, registry
+    and Excel views. Do not change historical reports or reinterpret retirement as PASS.
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: [F-046]
+    retired: []
+  affected_cases:
+    existing: [AGT-009, AGT-010, AGT-011, AGT-012, NL2AGENT-PROTOCOL-D4-001]
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: Three already-retired Cases are explicitly deleted, not retained as placeholders; active NL2Agent and optimization Cases are unchanged.

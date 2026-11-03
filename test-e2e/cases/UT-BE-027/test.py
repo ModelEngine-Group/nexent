@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for tags, HITL, model catalog, logging and sandbox cleanup."""
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-027")
 def test_legacy_hitl_fields_are_rejected_and_normal_query_remains_valid() -> None:
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
 
     assert AgentRequest(query="continue safely").query == "continue safely"
     for legacy_field, value in (

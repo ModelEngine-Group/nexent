@@ -45,18 +45,18 @@ sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
 # Patch storage client factory before imports
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=MagicMock()).start()
+patch('management.db.client.MinioClient', return_value=MagicMock()).start()
 
 # Mock database functions before importing the service
-patch('database.user_tenant_db.get_users_by_tenant_id').start()
-patch('database.user_tenant_db.update_user_tenant_role').start()
-patch('database.user_tenant_db.get_user_tenant_by_user_id').start()
-patch('database.user_tenant_db.soft_delete_user_tenant_by_user_id').start()
-patch('database.group_db.remove_user_from_all_groups').start()
-patch('database.group_db.query_groups_by_users', return_value={}).start()
+patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()
+patch('management.db.identity.user_tenant.update_user_tenant_role').start()
+patch('management.db.identity.user_tenant.get_user_tenant_by_user_id').start()
+patch('management.db.identity.user_tenant.soft_delete_user_tenant_by_user_id').start()
+patch('management.db.identity.group.remove_user_from_all_groups').start()
+patch('management.db.identity.group.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
-from consts.exceptions import ForbiddenError, NotFoundException
+from contracts.errors.exceptions import ForbiddenError, NotFoundException
 from management.services.permission.identity.users import (
     delete_user_and_cleanup,
     get_users,
@@ -713,7 +713,7 @@ class TestDeleteUserAndCleanup:
             return_value=0
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "management.services.permission.identity.users.delete_account"
         )
 
         # Setup mock admin client
@@ -732,8 +732,7 @@ class TestDeleteUserAndCleanup:
         mock_soft_delete_configs.assert_called_once_with(user_id, actor=user_id)
         mock_soft_delete_convs.assert_called_once_with(user_id)
         mock_soft_delete_oauth.assert_called_once_with(user_id, user_id)
-        mock_get_admin.assert_called_once()
-        mock_admin.auth.admin.delete_user.assert_called_once_with(user_id)
+        mock_get_admin.assert_called_once_with(user_id)
 
     @pytest.mark.asyncio
     async def test_delete_user_and_cleanup_best_effort(self, mocker):
@@ -760,8 +759,8 @@ class TestDeleteUserAndCleanup:
             side_effect=Exception("oauth failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client",
-            side_effect=Exception("admin failed")
+            "management.services.permission.identity.users.delete_account",
+            return_value=None
         )
 
         user_id = "user123"
@@ -791,7 +790,7 @@ class TestDeleteUserAndCleanup:
             return_value=0,
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "management.services.permission.identity.users.delete_account"
         )
         mock_admin = MagicMock()
         mock_admin.auth.admin.delete_user = MagicMock()
@@ -971,17 +970,17 @@ class TestCoverageGaps:
         mock_update.assert_awaited_once_with("user-2", {"role": "USER"}, "su-1")
 
     @pytest.mark.asyncio
-    async def test_cleanup_handles_missing_supabase_admin_client(self, mocker):
+    async def test_cleanup_disables_local_account(self, mocker):
         mocker.patch(
             "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mocker.patch("management.services.permission.identity.users.get_supabase_admin_client", return_value=None)
+        mocker.patch("management.services.permission.identity.users.delete_account", return_value=None)
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
     @pytest.mark.asyncio
-    async def test_cleanup_revokes_api_keys_and_skips_supabase_without_email(self, mocker):
+    async def test_cleanup_revokes_api_keys_and_disables_account_without_email(self, mocker):
         mocker.patch(
             "management.services.permission.identity.users.get_user_tenant_by_user_id",
             return_value={"user_id": "user-1", "user_email": None},
@@ -990,13 +989,13 @@ class TestCoverageGaps:
             "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mock_revoke = mocker.patch("database.token_db.soft_delete_tokens_by_user")
-        mock_get_admin = mocker.patch("management.services.permission.identity.users.get_supabase_admin_client")
+        mock_revoke = mocker.patch("management.db.identity.token.soft_delete_tokens_by_user")
+        mock_get_admin = mocker.patch("management.services.permission.identity.users.delete_account")
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
         mock_revoke.assert_called_once_with("user-1", "user-1")
-        mock_get_admin.assert_not_called()
+        mock_get_admin.assert_called_once_with("user-1")
 
 
 # Run tests when executed directly

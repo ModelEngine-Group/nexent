@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Update
 
-from consts.exceptions import ConversationNotFoundError
-from database import workbench_pin_db as pins
+from contracts.errors.exceptions import ConversationNotFoundError
+from management.db.conversation import pins as pins
 
 STAMP = datetime(2026, 10, 1, tzinfo=timezone.utc)
 NEW_STAMP = datetime(2026, 10, 2, tzinfo=timezone.utc)
@@ -56,8 +56,10 @@ def test_list_serializes_metadata_and_filters_owned_active_pins(session, convers
     for predicate in ("created_by = 'user'", "delete_flag = 'N'",
                       "workbench_pinned_at IS NOT NULL"):
         assert predicate in query
-    assert "workbench_config IS NOT NULL" not in query
-    assert "CASE WHEN (nexent.conversation_record_t.workbench_config IS NULL) THEN 'agent_chat' ELSE 'workbench' END" in query
+    assert "workbench_config" not in query.rsplit("WHERE ", 1)[-1]
+    assert "CASE WHEN" in query and "THEN 'workbench' ELSE 'agent_chat' END" in query
+    assert "nl2agent_main" in query and "nl2skill_main" in query
+    assert "agent_origin = 'SYSTEM'" in query
     assert "JOIN" not in query and "conversation_workbench_pin_t" not in query
     assert "ORDER BY nexent.conversation_record_t.workbench_pinned_at DESC, nexent.conversation_record_t.conversation_id DESC" in query
     session.add.assert_not_called()

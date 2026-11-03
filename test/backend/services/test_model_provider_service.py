@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for model_provider_service.py and related providers.
 
@@ -19,8 +21,8 @@ import pytest
 # CRITICAL: Set up mocks BEFORE any imports to prevent side effects
 # This must be done before importing management.services.model.provider
 # to avoid triggering MinioClient initialization during test collection.
-# The mock for database.client MUST be set up BEFORE any import that might
-# trigger the import chain leading to database.client.MiniClient() being called.
+# The mock for management.db.client MUST be set up BEFORE any import that might
+# trigger the import chain leading to management.db.client.MiniClient() being called.
 # ============================================================================
 
 # First, mock the SDK modules that have side effects at import time
@@ -37,7 +39,7 @@ for module_path in sdk_modules_to_mock:
 
 # Create a mock MinioStorageClient class that returns itself when instantiated
 # This is CRITICAL to prevent _ensure_bucket_exists from being called
-# during import of database.client.MiniClient
+# during import of management.db.client.MiniClient
 
 
 class MockMinioStorageClient(mock.MagicMock):
@@ -57,7 +59,7 @@ class MockMinioStorageClient(mock.MagicMock):
 
 
 # Set the mock class in the module BEFORE any imports that might trigger
-# database.client.MiniClient() instantiation
+# management.db.client.MiniClient() instantiation
 sys.modules["nexent.storage.minio"].MinioStorageClient = MockMinioStorageClient
 
 # Also mock the storage client factory function BEFORE import
@@ -72,16 +74,16 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 )
 
 # ============================================================================
-# CRITICAL: Mock database.client module BEFORE any import that might trigger it
-# The problem is that when database.client is imported, it immediately runs
+# CRITICAL: Mock management.db.client module BEFORE any import that might trigger it
+# The problem is that when management.db.client is imported, it immediately runs
 # `minio_client = MinioClient()` which tries to connect to MinIO.
 #
 # To fix this, we need to:
 # 1. Create a mock MinioClient class that returns itself when instantiated
-# 2. Replace MinioClient in the database.client module namespace
+# 2. Replace MinioClient in the management.db.client module namespace
 # 3. Replace minio_client instance with a mock
 #
-# This must happen BEFORE database.client is imported by any module.
+# This must happen BEFORE management.db.client is imported by any module.
 # ============================================================================
 
 # Create mock MinioClient class that returns itself to prevent singleton instantiation
@@ -105,15 +107,19 @@ class MockMinioClientClass(mock.MagicMock):
 # Create mock instance that will be used as minio_client
 mock_minio_client_instance = MockMinioClientClass()
 
-# Pre-create the database.client mock module and set it in sys.modules
-# BEFORE any import can trigger the real database.client import
+# Pre-create the management.db.client mock module and set it in sys.modules
+# BEFORE any import can trigger the real management.db.client import
 mock_database_client_module = mock.MagicMock()
 mock_database_client_module.MinioClient = MockMinioClientClass
 mock_database_client_module.minio_client = mock_minio_client_instance
 mock_database_client_module.as_dict = mock.MagicMock()
 mock_database_client_module.db_client = mock.MagicMock()
 mock_database_client_module.get_db_session = mock.MagicMock()
-sys.modules["database.client"] = mock_database_client_module
+sys.modules["management.db.client"] = mock_database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Also mock the database package and model_management_db module
 mock_database_module = mock.MagicMock()
@@ -121,17 +127,17 @@ mock_database_module.client = mock_database_client_module
 mock_database_module.model_management_db = mock.MagicMock()
 sys.modules["database"] = mock_database_module
 
-sys.modules["database.model_management_db"] = mock.MagicMock()
-sys.modules["database.model_management_db"].get_models_by_tenant_factory_type = mock.MagicMock()
+sys.modules["management.db.model.repository"] = mock.MagicMock()
+sys.modules["management.db.model.repository"].get_models_by_tenant_factory_type = mock.MagicMock()
 
 # Mock other project dependencies (ONLY the modules that need mocking for import safety)
 # NOTE: Do NOT mock services module or its submodules - they are tested directly
 for module_path in [
     "consts",
-    "consts.provider",
-    "consts.model",
-    "consts.const",
-    "consts.exceptions",
+    "contracts.constants.constants",
+    "contracts.model",
+    "contracts.constants.environment",
+    "contracts.errors.exceptions",
     "utils",
     "management.services.model.names",
     "management.services.model.probe",
@@ -170,22 +176,22 @@ sys.modules["management.services.model.names"].split_repo_name = _real_split_rep
 # in the tests that need them
 
 # Provide concrete attributes required by the module under test
-sys.modules["consts.provider"].SILICON_GET_URL = "https://silicon.com"
-sys.modules["consts.provider"].DASHSCOPE_GET_URL = (
+sys.modules["contracts.constants.constants"].SILICON_GET_URL = "https://silicon.com"
+sys.modules["contracts.constants.constants"].DASHSCOPE_GET_URL = (
     "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
 )
-sys.modules["consts.provider"].TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
-sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL = (
+sys.modules["contracts.constants.constants"].TOKENPONY_GET_URL = "https://api.tokenpony.cn/v1/models"
+sys.modules["contracts.constants.constants"].DASHSCOPE_REALTIME_BASE_URL = (
     "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 )
-sys.modules["consts.provider"].DASHSCOPE_STT_BASE_URL = (
-    sys.modules["consts.provider"].DASHSCOPE_REALTIME_BASE_URL
+sys.modules["contracts.constants.constants"].DASHSCOPE_STT_BASE_URL = (
+    sys.modules["contracts.constants.constants"].DASHSCOPE_REALTIME_BASE_URL
 )
 
 # Mock constants for token and chunk sizes
-sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS = 4096
-sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
-sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
+sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS = 4096
+sys.modules["contracts.constants.constants"].DEFAULT_EXPECTED_CHUNK_SIZE = 1024
+sys.modules["contracts.constants.constants"].DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # Mock ProviderEnum for get_provider_models tests
 
@@ -197,7 +203,7 @@ class _ProviderEnumStub:
     TOKENPONY = mock.Mock(value="tokenpony")
 
 
-sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
+sys.modules["contracts.model"].ProviderEnum = _ProviderEnumStub
 
 # Minimal ModelConnectStatusEnum stub so that prepare_model_dict can access
 # `ModelConnectStatusEnum.NOT_DETECTED.value` without importing the real enum.
@@ -210,8 +216,8 @@ class _EnumStub:
     FAILED = mock.Mock(value="failed")
 
 
-sys.modules["consts.model"].ModelConnectStatusEnum = _EnumStub
-sys.modules["consts.model"].ModelRequest = mock.MagicMock()
+sys.modules["contracts.model"].ModelConnectStatusEnum = _EnumStub
+sys.modules["contracts.model"].ModelRequest = mock.MagicMock()
 
 # Mock exception classes
 
@@ -221,7 +227,7 @@ class _TimeoutExceptionStub(Exception):
     pass
 
 
-sys.modules["consts.exceptions"].TimeoutException = _TimeoutExceptionStub
+sys.modules["contracts.errors.exceptions"].TimeoutException = _TimeoutExceptionStub
 
 # ============================================================================
 # NOW import the module under test (after all mocks are set up)
@@ -316,7 +322,7 @@ async def test_get_models_llm_success():
                 "id": "gpt-4",
                 "model_tag": "chat",
                 "model_type": "llm",
-                "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+                "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             }
         ]
         mock_client_instance.get.assert_called_once_with(
@@ -430,7 +436,7 @@ async def test_prepare_model_dict_llm():
             "model_name": "gpt-4",
             "model_type": "llm",
             "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "openai/gpt-4",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -440,7 +446,7 @@ async def test_prepare_model_dict_llm():
         model = {
             "id": "openai/gpt-4",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
@@ -535,7 +541,7 @@ async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates(
             "model_name": "gpt-4",
             "model_type": "llm",
             "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "openai/gpt-4",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -544,7 +550,7 @@ async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates(
         model = {
             "id": "openai/gpt-4",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "context_window_tokens": 128000,
             "max_output_tokens": 16384,
             "tokenizer_family": "o200k_base",
@@ -676,7 +682,7 @@ async def test_prepare_model_dict_vlm():
             "model_name": "gpt-4-vision",
             "model_type": "vlm",
             "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "openai/gpt-4-vision",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -686,7 +692,7 @@ async def test_prepare_model_dict_vlm():
         model = {
             "id": "openai/gpt-4-vision",
             "model_type": "vlm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
         base_url = "https://api.openai.com/v1"
         api_key = "test-key"
@@ -731,7 +737,7 @@ async def test_prepare_model_dict_vlm_keeps_factory_when_inference_yields_none()
             "model_name": "qwen-vl-plus",
             "model_type": "vlm3",
             "api_key": "test-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "tokenpony/qwen-vl-plus",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -741,7 +747,7 @@ async def test_prepare_model_dict_vlm_keeps_factory_when_inference_yields_none()
         model = {
             "id": "tokenpony/qwen-vl-plus",
             "model_type": "vlm3",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
         base_url = "https://api.tokenpony.cn/v1/"
         api_key = "test-key"
@@ -815,8 +821,8 @@ async def test_prepare_model_dict_embedding():
         # will be updated by embedding_dimension_check later
         assert kwargs["max_tokens"] == 0
         assert kwargs["display_name"] == "openai/text-embedding-ada-002"
-        assert kwargs["expected_chunk_size"] == sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE
-        assert kwargs["maximum_chunk_size"] == sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE
+        assert kwargs["expected_chunk_size"] == sys.modules["contracts.constants.constants"].DEFAULT_EXPECTED_CHUNK_SIZE
+        assert kwargs["maximum_chunk_size"] == sys.modules["contracts.constants.constants"].DEFAULT_MAXIMUM_CHUNK_SIZE
         mock_emb_dim_check.assert_called_once_with(dump_dict)
 
         expected = dump_dict | {
@@ -940,8 +946,8 @@ async def test_prepare_model_dict_multi_embedding_defaults():
         )
 
         _, kwargs = mock_model_request.call_args
-        assert kwargs["expected_chunk_size"] == sys.modules["consts.const"].DEFAULT_EXPECTED_CHUNK_SIZE
-        assert kwargs["maximum_chunk_size"] == sys.modules["consts.const"].DEFAULT_MAXIMUM_CHUNK_SIZE
+        assert kwargs["expected_chunk_size"] == sys.modules["contracts.constants.constants"].DEFAULT_EXPECTED_CHUNK_SIZE
+        assert kwargs["maximum_chunk_size"] == sys.modules["contracts.constants.constants"].DEFAULT_MAXIMUM_CHUNK_SIZE
         mock_emb_dim_check.assert_called_once_with(dump_dict)
 
         expected = dump_dict | {
@@ -1382,7 +1388,7 @@ def test_merge_existing_model_tokens_successful_merge():
         {
             "model_repo": "openai",
             "model_name": "gpt-3.5-turbo",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         },
         # Note: claude-3 is not in existing models, so it won't get max_tokens
     ]
@@ -1398,7 +1404,7 @@ def test_merge_existing_model_tokens_successful_merge():
         # Check that max_tokens were merged correctly
         assert result[0]["max_tokens"] == 8192  # gpt-4
         # gpt-3.5-turbo
-        assert result[1]["max_tokens"] == sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS
+        assert result[1]["max_tokens"] == sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS
         assert "max_tokens" not in result[2]  # claude-3 (no existing model)
 
         # Verify original model_list was not modified
@@ -1532,7 +1538,7 @@ async def test_get_provider_models_silicon_success():
             "id": "gpt-4",
             "model_tag": "chat",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
     ]
 
@@ -1799,7 +1805,7 @@ async def test_modelengine_get_models_llm_success():
         assert result[0]["id"] == "gpt-4"
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
-        assert result[0]["max_tokens"] == sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS
+        assert result[0]["max_tokens"] == sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS
         assert result[0]["base_url"] == "https://model-engine.com"
         assert result[0]["api_key"] == "test-key"
 
@@ -1977,7 +1983,7 @@ async def test_prepare_model_dict_modelengine_llm():
             "model_name": "gpt-4",
             "model_type": "llm",
             "api_key": "me-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "modelengine/gpt-4",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -1988,7 +1994,7 @@ async def test_prepare_model_dict_modelengine_llm():
         model = {
             "id": "modelengine/gpt-4",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "base_url": "https://120.253.225.102:50001",  # Raw URL without /open/router/v1
             "api_key": "me-key",
         }
@@ -2092,7 +2098,7 @@ async def test_prepare_model_dict_modelengine_base_url_stripping():
             "model_name": "gpt-4",
             "model_type": "llm",
             "api_key": "me-key",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "display_name": "modelengine/gpt-4",
         }
         mock_model_req_instance.model_dump.return_value = dump_dict
@@ -2103,7 +2109,7 @@ async def test_prepare_model_dict_modelengine_base_url_stripping():
         model = {
             "id": "modelengine/gpt-4",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
             "base_url": "https://120.253.225.102:50001",  # Raw URL without /open/ paths
             "api_key": "me-key",
         }
@@ -2131,7 +2137,7 @@ async def test_get_provider_models_modelengine_success():
             "id": "gpt-4",
             "model_tag": "chat",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
     ]
 
@@ -2612,7 +2618,7 @@ async def test_get_provider_models_dashscope_success():
             "id": "qwen-turbo",
             "model_tag": "chat",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
     ]
 
@@ -2671,7 +2677,7 @@ async def test_get_provider_models_tokenpony_success():
             "id": "gpt-4",
             "model_tag": "chat",
             "model_type": "llm",
-            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "max_tokens": sys.modules["contracts.constants.constants"].DEFAULT_LLM_MAX_TOKENS,
         }
     ]
 

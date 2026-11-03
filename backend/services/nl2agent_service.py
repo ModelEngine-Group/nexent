@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Business logic for the ephemeral NL2Agent runtime."""
+"""Business logic for request-scoped NL2Agent runs."""
 
 import ast
 import asyncio
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 import re
 import threading
@@ -20,34 +21,28 @@ from nexent.core.agents.context import (
     ContextItemType,
     ContextManagerConfig,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.concurrency import run_blocking
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_context_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import (
-    TOKEN,
-    ENABLE_AIDP_KNOWLEDGE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    MODEL_CONFIG_MAPPING,
-)
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.agent.creation import create_nl2agent_agent_config
+from management.services.agent.system import system_agent_provider
+from management.db.agent.repository import search_agent_info_by_agent_id
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import (
-    query_all_agent_info_by_tenant_id,
-    update_agent_draft_fields,
-)
-from database.skill_db import query_enabled_skill_instances
-from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from consts.exceptions import AgentDraftEditError
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
+from contracts.tool import ToolSourceEnum
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
+from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
@@ -69,7 +64,6 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.agent.context import (
     build_authorized_context_input,
@@ -1447,16 +1441,21 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    user_id, authenticated_tenant_id = get_current_user_id(authorization)
-    if authenticated_tenant_id != tenant_id:
+    if identity.tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    user_id = identity.user_id
+    if not user_id or not tenant_id:
+        raise PermissionError("Authenticated user and tenant are required")
     preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
@@ -1470,7 +1469,12 @@ async def build_nl2agent_run_info(
         language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
-    agent_config = create_nl2agent_agent_config(language)
+    system_ref = system_ref or await run_blocking("load-nl2agent-identity", system_agent_provider.get_nl2agent_main_ref, tenant_id)
+    snapshot = await run_blocking(
+        "load-nl2agent-definition", search_agent_info_by_agent_id,
+        system_ref.agent_id, system_ref.tenant_id, system_ref.version_no,
+    )
+    agent_config = create_nl2agent_agent_config(language, snapshot=snapshot)
     agent_config.context_items = [
         *(agent_config.context_items or []),
         binding_context,
@@ -1567,20 +1571,35 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AsyncIterator[str]:
-    """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
+    """Create an SSE-compatible stream for one isolated NL2Agent run."""
 
     run_info = await build_nl2agent_run_info(
         request=request,
         tenant_id=tenant_id,
         language=language,
+        identity=identity,
+        system_ref=system_ref,
         authorization=authorization,
     )
 
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
+            if isinstance(run_info.agent_config.agent_id, int):
+                yield "data: " + json.dumps({
+                    "type": "other",
+                    "content": json.dumps({
+                        "event": "system_agent_run",
+                        "agent_id": run_info.agent_config.agent_id,
+                        "version_no": run_info.agent_config.version_no,
+                        "system_key": "nl2agent_main",
+                    }),
+                }) + "\n\n"
             async for chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,

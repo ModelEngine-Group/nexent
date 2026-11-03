@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for split Agent policies and direct SDK resource loading."""
 
 import hashlib
@@ -209,7 +211,7 @@ def test_ut_sdk_fps_012_tool_policy_registry_is_active_not_a_prompt_alias():
     assert set(result.tools) == {"visible"}
     assert set(result.execution_tools) == {"visible", "hidden"}
     assert result.audit["policy_version"] == "p1"
-    assert "prompt_registry" in (ROOT / "backend/agents/create_agent_info.py").read_text(encoding="utf-8")
+    assert "prompt_registry" in (ROOT / "backend/management/services/agent/preparation/compiler.py").read_text(encoding="utf-8")
     assert "prompt_registry" in (ROOT / "sdk/nexent/core/agents/nexent_agent.py").read_text(encoding="utf-8")
 
 

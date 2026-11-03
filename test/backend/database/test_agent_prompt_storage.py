@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import insert, select, update
 from sqlalchemy.dialects import postgresql
 
-from database.db_models import AgentInfo
+from management.db.models import AgentInfo
 
 
 def test_agent_orm_queries_and_writes_use_only_the_unified_prompt():

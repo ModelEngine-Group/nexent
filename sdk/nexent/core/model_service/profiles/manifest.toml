@@ -1,0 +1,342 @@
+schema_version = 1
+source_schema_ref = "models_dev_authored_v1"
+upstream_url = "https://github.com/anomalyco/models.dev"
+upstream_revision = "e69e1844210e5cfe7c7e7f68d57328bc7451a51c"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.5-27b.toml"
+content_sha256 = "15e1c86123b937d3152f69e87650f3b3bbfd9600f8bbfbc5361a6f5e9f69fc16"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.5-35b-a3b.toml"
+content_sha256 = "50a139d95791c9c5e145f4a0f115f18c3d38840202c7683e8861f05fe4ffc6be"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.5-397b-a17b.toml"
+content_sha256 = "d064d5959f3dca64beb7108a38280877719e89709db7775f932a5ee791e3924e"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.5-flash.toml"
+content_sha256 = "39a4329d9772432e58cf92044f143bd7e1445b434ee65830acad958b72322d5c"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.5-plus.toml"
+content_sha256 = "15c6b3b7f334219ee6d43c76d1a004e57469e4a4e780e4b254c91474d5cb1bd4"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.8-27b.toml"
+content_sha256 = "5a7c7ec1b513c3268756c02fa240f09ba438bce594cbb7d34ebb4f71c4a448e0"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.8-2.4t-a95b.toml"
+content_sha256 = "067a17c3a34382a3e286414e8f6ef4ad31844716ed85af41fdab7061ba44add4"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.8-flash.toml"
+content_sha256 = "7fc097dbfdcbcf827fc28c17e23bafda6d695ce5d16d96fb65612e4cae581dcc"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.8-max.toml"
+content_sha256 = "ee87c9af3b4188b86dc8ee3d045e9a18a0b611b5db1e47cfc3f88b1672164634"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3-coder-next.toml"
+content_sha256 = "1f4175a40524b382f1e9efac28e4454b477a2f4ccf5a460134b9ed12cb829229"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.1.toml"
+content_sha256 = "8c7069a86e0ef764d2a1d0ebb30156abed0cf7b27e5b972c224a5cd9aee27b40"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.2.toml"
+content_sha256 = "6ed303f1feeaed5496e919b6c7ae999e2743505a22ed97062b5c833adf37ce13"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.3.toml"
+content_sha256 = "8022f2c087c0ad8bdf9f8ed4fe950fda5f7f37ef2a121c577e87fbe28d159c29"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.3-flash.toml"
+content_sha256 = "7cdb7a1cfea9ab7e7c3e3392f0fdad0ac9c3f9c92e2f71a2d109788c5d02f843"
+
+[[sources]]
+kind = "model"
+path = "models/deepseek/deepseek-v4-flash.toml"
+content_sha256 = "02ae90fe9be99047c373f3862afe72367c7a96a7aef7f43864c0bcd9e22da194"
+
+[[sources]]
+kind = "model"
+path = "models/deepseek/deepseek-v4-pro.toml"
+content_sha256 = "bd08e3df5404ff5f795ac91b44ef34ac7c29a6911de0bd9fded3739501e47996"
+
+[[sources]]
+kind = "model"
+path = "models/deepseek/deepseek-v4-flash-0731.toml"
+content_sha256 = "cb0133fb9f376da44fc6ee512c8a3ba0399626bb026805f608f265e504511c4e"
+
+[[sources]]
+kind = "model"
+path = "models/deepseek/deepseek-v4-pro-0813.toml"
+content_sha256 = "e005b286813f8bcf39ecc4397b36a99895532c97bbc2c83f21a94dbaa85455ea"
+
+[[sources]]
+kind = "model"
+path = "models/deepseek/deepseek-v4.1-flash.toml"
+content_sha256 = "ef594fbed1c96863ff728e31530dbc1987d8862e36c5f1b5f08e5376d631aee0"
+
+[[sources]]
+kind = "model"
+path = "models/minimax/MiniMax-M2.7.toml"
+content_sha256 = "c63b15b0f281e217f466b973439cfd1876b23d636288cd4f7102ef28a57df761"
+
+[[sources]]
+kind = "model"
+path = "models/minimax/MiniMax-M3.toml"
+content_sha256 = "a1d815dc34328bd0719fc557794d696205a7506a06515f8e2d84c24f3bce1b1e"
+
+[[sources]]
+kind = "provider"
+path = "providers/alibaba-cn/provider.toml"
+content_sha256 = "0060172cf93a8db8b8427021030a3ad5c388c919f7fc47df9723ba8b08d5f54b"
+
+[[sources]]
+kind = "provider"
+path = "providers/volcengine/provider.toml"
+content_sha256 = "b504a2ab81fccb036105dde4a626f486d82e37ceaf348249baaf0b5c8e234377"
+
+[[sources]]
+kind = "provider"
+path = "providers/volcengine-coding-plan/provider.toml"
+content_sha256 = "15439498a42304ac424f73810fdf8593ee87d19c05bff271c64383afe6b06ee8"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.5-397b-a17b.toml"
+content_sha256 = "59342059889eac4ab4829384b954db58c72104f9ffc682441d7b39b319b80fb9"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.5-flash.toml"
+content_sha256 = "48d81041f3babeb002b73184e151df0bb4304b1679137c12e396951bbe9c16fe"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.5-plus.toml"
+content_sha256 = "5bd06ed609ab5ceeeecf8012a4ea587d5365fcd49c17f10bfb729f1a436fee0e"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.8-flash.toml"
+content_sha256 = "f496c5f293e2196f69bcd2f705cbb12548f14a1923d6b35d10400cbc7a1c817b"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.8-max.toml"
+content_sha256 = "1b1b47992952fb615bdce07fdeea93bdf445b36375acae6e5e812e6aecb9bd08"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/glm-5.1.toml"
+content_sha256 = "f49b1f19c24db0d339b7bafb8c909c15bdaf5dc3765f9befef66b1166e10c520"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/glm-5.2.toml"
+content_sha256 = "dbfbc406418c60aa33f33eed147f8d47a98f544b6f5cb50bf96e20fb5c38a2c2"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/glm-5.3.toml"
+content_sha256 = "6ce1f84a6cd1af13f823e846b750e4f39d90aa4f008178091a118f88765dfe2f"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/deepseek-v4-flash.toml"
+content_sha256 = "b7f6b5d17332d596883c8d5ac7de1c9e885dc4df8e9fc2ea996420e202a7febb"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/deepseek-v4-pro.toml"
+content_sha256 = "db39defdd8ed98cf27ccb03f9884431c1e52f1b5d6a88591888d5801bb1e0ac3"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/deepseek-v4.1-flash.toml"
+content_sha256 = "fe4c026f77d2a2b837d390dcef3da521b5dc3298eafb1e06199360cc0c6cd5d0"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/MiniMax/MiniMax-M2.7.toml"
+content_sha256 = "d14f335b07a27d36e697d350d2aac28d6f9215e6ad4c2912ff9fe8bd5ac7c2f4"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/deepseek-v4-flash-ga-260731.toml"
+content_sha256 = "8012bc8a96ff1a96a56b64721e5e144d4ff997b70985c34483b95c7469de13c1"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/deepseek-v4-pro-ga-260813.toml"
+content_sha256 = "444e6d130d11e3132d34e3afe4d878f96120beef51db5946f206d96bc8dfdec8"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/glm-5-2-260617.toml"
+content_sha256 = "092fcf694c283b90a71cde982d4231d63e4a53544665d4a481e306b4cb1bed1a"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/glm-5-3-flash-260828.toml"
+content_sha256 = "34b35e1742e663e54d1231baa5282fc1497b255d60764df21e018c8a78da04a2"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/deepseek-v4-flash.toml"
+content_sha256 = "be24a803ea861218c4ad9fc60025a424cb275b95e7c02507699776ce37869a99"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/deepseek-v4-pro.toml"
+content_sha256 = "b359870df413e10509083d9b56a62453c530e0f600ca5628ae3279043df2ee57"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/glm-5.3.toml"
+content_sha256 = "6fb6ebfb16a106cfb22e5f887326d661b96c1b67df4f826fdf6d02cceded4782"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/glm-5.3-flash.toml"
+content_sha256 = "8ca9644166cb0cdc479049a0f7467a6cebded93cd0d3bef00a66e462b77111f3"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/minimax-m3.toml"
+content_sha256 = "c2998f64873231e71f62be2da7983afd4c1af76e7a129f232007e65a58c24e24"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.7-max.toml"
+content_sha256 = "45e9afba10e6b6164914fff61758d748643d2b64a4be0bb54afc4fc33e91cb86"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.7-plus.toml"
+content_sha256 = "a6929b11d1652ee69c1c43dbe81f83beb959bcef9366deb4bc92118e8fca6fa2"
+
+[[sources]]
+kind = "model"
+path = "models/bytedance-seed/seed-2.1-pro.toml"
+content_sha256 = "e617184014aea6221241eb84ed1cabda001564c3dd8e7a3878fded7915433915"
+
+[[sources]]
+kind = "model"
+path = "models/moonshotai/kimi-k3.toml"
+content_sha256 = "6391cda163821bd0f6ae07b8ad26baa0d9c356da5e0584c37dd64b721a1a5513"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.toml"
+content_sha256 = "efce81254124e5a529f9dc59fb8969fcb3b26189e0f292a17c03f8b60712f881"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/glm-5.toml"
+content_sha256 = "f422ddc5053de0db7134e21b4dc1491004b787dc660b95c81ef84c83bff79d63"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/kimi-k3.toml"
+content_sha256 = "d2622cbdc17360a200a292468ae8c4192a97b1e6191a4f811014511e23ba57a3"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.7-max.toml"
+content_sha256 = "b9cec088349a5b29fefb61d6cc471495f7f1a9a9c7b82747abfb94425c1f1610"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.7-plus.toml"
+content_sha256 = "d0c2a5b15e0bd7ac8c140a142063558c9fa43ead040fe99513f3851f532e0203"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-flash.toml"
+content_sha256 = "d5e811b4af967dd239b008c62b55c7924de2bdb36cd53c75324c98a42796db8d"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-v4-flash.toml"
+content_sha256 = "b1910724c0240130f4676a90719ee321aa16d73ee354dbefb2ade27ce2e0c917"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-v4-pro.toml"
+content_sha256 = "0e4d752d27934327150916fbf5b62fa17b21a3fa6857a460988f89a16c7072a5"
+
+[[sources]]
+kind = "provider"
+path = "providers/deepseek/provider.toml"
+content_sha256 = "3f2fbc840041ce2d9dc1a44cf9a7b82011e312bc8e71d973b3a3113f601817c2"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/Pro/zai-org/GLM-5.1.toml"
+content_sha256 = "eca714ad1e4ca589ab5a065e10b1dbf0ded78241a8cf2d3614127f971731a963"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/Pro/zai-org/GLM-5.toml"
+content_sha256 = "5947afc8c482ae9582875efb8bcbea2245eec898f92838e03ae36bfa192c206e"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/deepseek-ai/DeepSeek-V4-Flash.toml"
+content_sha256 = "925beb91bea20c55ecc4752e3e2e712785ec1e11468853587f1d5fe688b55b4c"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/deepseek-ai/DeepSeek-V4-Pro.toml"
+content_sha256 = "59f2b4a5da97e4daf237ce295908258487ca592d1428158937e0b657981a43bf"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/zai-org/GLM-5.2.toml"
+content_sha256 = "4967aa9c9948ce58b52d65599cb54ee7288ca80932f86b59b6bdae0842ab873d"
+
+[[sources]]
+kind = "provider"
+path = "providers/siliconflow-cn/provider.toml"
+content_sha256 = "805d38042cf90ca3d94f944d3e218dde1b3f5babdf657d677d3ef4df566bae36"
+
+[[sources]]
+kind = "provider"
+path = "providers/tokenpony/provider.toml"
+content_sha256 = "6eb8ed0f1b8d5af7887edaa983ade429d872e10ca495487d45cbda49ae4c8fd0"
+origin = "nexent"
+source_revision = "nexent_tokenpony_provider_v1"
+source_url = "https://docs.tokenpony.cn/"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/kimi-k3.toml"
+content_sha256 = "dd4ea5240577cfe3a6dfc7860eb1e6cf558349ec562aa83bcd82519831368e0c"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/doubao-seed-2-1-pro-260628.toml"
+content_sha256 = "4a9deef53960bd716d4b6078adfcc05719b9ef3491c1c41363ee31a3e4173bf4"

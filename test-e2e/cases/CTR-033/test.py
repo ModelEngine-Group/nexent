@@ -26,7 +26,7 @@ async def test_discovery_timeout_and_recovery(tenant_a_admin):
             assert len(wire) == 1 and all(row['scenario'] == 'invocation-timeout' for row in wire)
             assert 9 <= elapsed < 15, 'observe the product retry deadline, not a test-client timeout'
             assert_status(failed, 504)
-            assert "timed out after 10 seconds" in failed.json()["detail"]
+            assert "timed out after 10 seconds" in failed.json()["message"]
             after = await api.get('/a2a/client/agents')
             assert_status(after, 200)
             assert {row['id'] for row in after.json()['data']} == ids

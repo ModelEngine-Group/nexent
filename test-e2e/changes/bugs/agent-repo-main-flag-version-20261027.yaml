@@ -1,0 +1,68 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-REPO-MAIN-FLAG-VERSION-20261027
+  change_type: bugfix
+  bug_id: BUG-AGENT-REPO-MAIN-FLAG-DRAFT
+  title: Resolve the repository main-agent badge from the published agent version
+  description: >-
+    Repository listing cards and the listing detail overrode is_main_agent with a live lookup of the
+    editable draft row (version_no = 0). Re-publishing an already-listed agent keeps the frozen version
+    label, yet toggling the main-agent option still changed the card. Resolve the flag from the published
+    version frozen in ag_agent_repository_t.version_no instead, with no schema or data migration.
+  observed_behavior: >-
+    After an agent was published to the repository, switching its main-agent option in the agent
+    configuration immediately changed the repository card badge even though the card version stayed frozen.
+  expected_behavior: >-
+    The card badge reflects the is_main_agent value of the published version recorded on the repository
+    row; draft edits only take effect once that edit is published as a new version. A missing version row
+    or an unavailable lookup keeps the existing main-agent default instead of failing the listing request.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      The D4 browser case feeds is_main_agent through mock HTTP fixtures, so it cannot observe which database
+      row supplies the flag, and the existing service UT asserted the draft-keyed lookup contract. No test
+      fixed the source of truth to the published version, which let the draft-based override escape review.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+      - AGENT-REPO-SORT-MAIN-TAG
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Listing cards read the main-agent flag for the published (agent_id, version_no) pair, so a draft toggle does not change an already-published card.
+      - The listing detail resolves the same published-version flag and still exposes it as is_main_agent.
+      - An unavailable flag lookup or a record without a usable version degrades to the main-agent default instead of failing the listing.
+      - The version-keyed database helper returns an (agent_id, version_no) map and short-circuits on empty or incomplete pairs.
+    test_selectors:
+      - test/backend/services/test_agent_repository_service.py::test_list_repository_listings_reads_flag_from_published_version
+      - test/backend/services/test_agent_repository_service.py::test_list_repository_listings_exposes_main_agent_flag
+      - test/backend/services/test_agent_repository_service.py::test_get_agent_repository_listing_detail_exposes_main_agent_flag
+      - test/backend/services/test_agent_repository_service.py::test_apply_agent_main_flags_degrades_to_default_on_lookup_error
+      - test/backend/services/test_agent_repository_service.py::test_apply_agent_main_flags_skips_records_without_usable_version
+      - test/backend/database/test_agent_db.py::test_batch_get_agent_version_main_flags_returns_flag_map
+      - test/backend/database/test_agent_db.py::test_batch_get_agent_version_main_flags_returns_empty_without_pairs
+      - test/backend/database/test_agent_repository_db.py::test_list_agent_repository_summaries_returns_expected_shape
+    reason: >-
+      The defect is a persistence/query contract, so traditional UT is the proof boundary that can observe
+      which version row is read. The new list test asserts the lookup key is the repository's published
+      version and that the published flag wins over the draft value; the DB test pins the version-keyed map.
+  no_case_change_reason: >-
+    The existing D4 case proves badge rendering from a frozen API response and cannot distinguish the draft
+    row from the published version row. Formal coverage already exists for the visible badge, so zero new
+    Cases are added; the clarified business rule keeps its Case binding.
+  notes: >-
+    Feature AGENT-REPO-SORT-MAIN-TAG RULE-002 now names the published version as the badge source. The
+    sibling nexent-doc repository is not present in this checkout, so the lightweight bugfix design content
+    (context, functional scope, AC and UT/D1-D5 matrix) is recorded here and in the Feature rule instead of
+    docs/Developing/. No schema change: ag_tenant_agent_t already stores is_main_agent per (agent_id,
+    version_no), and ag_agent_repository_t already stores the frozen version_no. Official bundles publish
+    version 1 rows, and deleted or missing version rows fall back to the pre-existing main-agent default.

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from consts.a2a_models import DiscoverFromUrlRequest
+from contracts.a2a import DiscoverExternalAgentFromUrlRequest as DiscoverFromUrlRequest
 from management.services.agent.a2a import catalog
 
 

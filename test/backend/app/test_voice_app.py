@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import pytest
@@ -8,10 +10,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from consts.exceptions import (
-    VoiceServiceException,
-    STTConnectionException,
-)
+from contracts.errors.exceptions import VoiceServiceException, STTConnectionException
 
 
 class MockVoiceService:
@@ -22,7 +21,8 @@ class MockVoiceService:
         self.check_voice_connectivity = AsyncMock(return_value=True)
 
 
-from apps.voice_app import voice_runtime_router, voice_config_router
+from runtime.api.voice.streaming import voice_runtime_router
+from management.api.voice.voice import voice_config_router
 
 
 class TestVoiceApp:
@@ -37,7 +37,7 @@ class TestVoiceApp:
 
     def test_stt_websocket_success(self):
         """Test successful STT WebSocket connection."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_get_service.return_value = mock_service
 
@@ -49,7 +49,7 @@ class TestVoiceApp:
 
     def test_stt_websocket_bytes_config(self):
         """Test STT WebSocket with bytes message containing config."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_get_service.return_value = mock_service
 
@@ -63,7 +63,7 @@ class TestVoiceApp:
 
     def test_stt_websocket_bytes_config_parse_error(self):
         """Test STT WebSocket with invalid bytes config."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_get_service.return_value = mock_service
 
@@ -75,7 +75,7 @@ class TestVoiceApp:
 
     def test_stt_websocket_stt_connection_error(self):
         """Test STT WebSocket with STT connection error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.start_stt_streaming_session.side_effect = STTConnectionException("STT connection failed")
             mock_get_service.return_value = mock_service
@@ -88,7 +88,7 @@ class TestVoiceApp:
 
     def test_stt_websocket_general_error(self):
         """Test STT WebSocket with general error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.start_stt_streaming_session.side_effect = Exception("General error")
             mock_get_service.return_value = mock_service
@@ -101,7 +101,7 @@ class TestVoiceApp:
 
     def test_check_voice_connectivity_success(self):
         """Test successful voice connectivity check."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.check_voice_connectivity.return_value = True
             mock_get_service.return_value = mock_service
@@ -119,7 +119,7 @@ class TestVoiceApp:
 
     def test_check_voice_connectivity_failure(self):
         """Test voice connectivity check failure."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.check_voice_connectivity.return_value = False
             mock_get_service.return_value = mock_service
@@ -137,7 +137,7 @@ class TestVoiceApp:
 
     def test_check_voice_connectivity_voice_service_error(self):
         """Test voice connectivity check with VoiceServiceException."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.check_voice_connectivity.side_effect = VoiceServiceException("Invalid model type")
             mock_get_service.return_value = mock_service
@@ -153,7 +153,7 @@ class TestVoiceApp:
 
     def test_check_voice_connectivity_stt_connection_error(self):
         """Test voice connectivity check with STTConnectionException."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.check_voice_connectivity.side_effect = STTConnectionException("STT service unavailable")
             mock_get_service.return_value = mock_service
@@ -169,7 +169,7 @@ class TestVoiceApp:
 
     def test_check_voice_connectivity_unexpected_error(self):
         """Test voice connectivity check with unexpected error."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = MockVoiceService()
             mock_service.check_voice_connectivity.side_effect = Exception("Unexpected error")
             mock_get_service.return_value = mock_service
@@ -214,7 +214,7 @@ class TestVoiceAppIntegration:
 
     def test_voice_connectivity_real_logic_stt(self):
         """Test voice connectivity with real service logic for STT."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('management.api.voice.voice.get_voice_service') as mock_get_service:
             mock_service = Mock()
             mock_service.check_voice_connectivity = AsyncMock(return_value=True)
             mock_get_service.return_value = mock_service
@@ -233,7 +233,7 @@ class TestVoiceAppIntegration:
 
     def test_stt_websocket_real_logic(self):
         """Test STT WebSocket with real service logic."""
-        with patch('apps.voice_app.get_voice_service') as mock_get_service:
+        with patch('runtime.api.voice.streaming.get_voice_service') as mock_get_service:
             mock_service = Mock()
             mock_service.start_stt_streaming_session = AsyncMock()
             mock_get_service.return_value = mock_service

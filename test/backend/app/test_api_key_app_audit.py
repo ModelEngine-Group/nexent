@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Audit entries recorded on successful platform API key operations.
 
 Feature-scoped companion to ``test_api_key_app.py``.
@@ -9,7 +11,7 @@ from http import HTTPStatus
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.api_key_app import router
+from management.api.identity.api_key import router
 
 app = FastAPI()
 app.include_router(router)
@@ -25,9 +27,9 @@ def _audit_messages(caplog):
 
 def test_refresh_api_key_success_records_audit_entry(caplog, mocker):
     """Refreshing a target user's key records the operator, never the new plaintext key."""
-    mocker.patch("apps.api_key_app.get_current_user_context",
+    mocker.patch("management.api.identity.api_key.get_current_user_context",
                  return_value=("admin-1", "tenant-1", "ADMIN"))
-    mocker.patch("apps.api_key_app.refresh_user_api_key", return_value={
+    mocker.patch("management.api.identity.api_key.refresh_user_api_key", return_value={
         "user_id": "user-1",
         "email": "api.user@example.com",
         "api_key": "nexent-secret-key",
@@ -57,9 +59,9 @@ def test_refresh_api_key_success_records_audit_entry(caplog, mocker):
 
 def test_revoke_api_keys_success_records_audit_entry(caplog, mocker):
     """Revoking a target user's keys records the operator and the revoked count."""
-    mocker.patch("apps.api_key_app.get_current_user_context",
+    mocker.patch("management.api.identity.api_key.get_current_user_context",
                  return_value=("admin-1", "tenant-1", "ADMIN"))
-    mocker.patch("apps.api_key_app.revoke_user_api_keys", return_value={
+    mocker.patch("management.api.identity.api_key.revoke_user_api_keys", return_value={
         "user_id": "user-1",
         "email": None,
         "api_key": None,

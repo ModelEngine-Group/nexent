@@ -485,7 +485,7 @@ def test_main_builds_runtime_configuration_and_dispatches_experiment(
 ):
     import agent_runner
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
     from runtime import exa_replay
 
     config_path = tmp_path / "agent.yaml"

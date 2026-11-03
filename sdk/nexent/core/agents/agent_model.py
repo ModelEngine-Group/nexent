@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from ..model_service.profiles.resolved_profile import ResolvedModelProfile
 from ..models.capacity_budget import ContextBudgetSnapshot
 from ..models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from ..utils.observer import MessageObserver
@@ -46,13 +47,15 @@ def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
     return deepcopy(config, memo)
 
 
-# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+# Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    resolved_profile: Optional[ResolvedModelProfile] = Field(default=None, repr=False)
     diagnostic_chunks_enabled: bool = Field(
         default=False, description="Capture bounded content-free response chunk structure"
     )

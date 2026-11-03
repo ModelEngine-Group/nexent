@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -52,11 +54,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-012")
 def test_datamate_url_normalization_and_parts_builder() -> None:
-    from apps.file_management_app import (
-        _build_datamate_url_from_parts,
-        _ensure_http_scheme,
-        _normalize_datamate_download_url,
-    )
+    from management.utils.file_http import _build_datamate_url_from_parts, _ensure_http_scheme, _normalize_datamate_download_url
 
     with pytest.raises(HTTPException, match="must start with http"):
         _ensure_http_scheme("host:8080")

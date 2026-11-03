@@ -43,10 +43,7 @@ change:
     added: []
     modified:
     - AGENT-PROMPT-D5-001
-    retired:
-    - AGT-006
-    - AGT-007
-    - AGT-008
+    retired: []
   traditional_ut:
     decision: strengthen
     behaviors:
@@ -119,4 +116,6 @@ change:
   notes: 'SPEC: nexent-doc/docs/Developing/chat-nl2agent-unified-prompt. 2026-10-22
     follow-up removes runtime compatibility; existing API/model/browser regressions
     are retained. Deployment Case adds market snapshot migration proof with isolated
-    synthetic data.'
+    synthetic data. The retired standalone-generation Cases AGT-006, AGT-007 and
+    AGT-008 were subsequently deleted at user request by REMOVE-RETIRED-PROMPT-20261026;
+    their original retirement history remains in Git and execution reports.'

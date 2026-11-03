@@ -1,5 +1,7 @@
 FROM python:3.11-slim
 
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
+
 ARG MIRROR
 ARG APT_MIRROR
 ARG TARGETARCH
@@ -51,17 +53,16 @@ RUN --mount=type=cache,id=nexent-mcp-nodejs-${TARGETARCH},target=/var/cache/node
     tar -C /usr/local --strip-components=1 -xJf "$node_tarball" && \
     node -v && npm -v
 
-# Optional pip mirror for Python packages
-RUN if [ -n "$MIRROR" ]; then pip config set global.index-url "$MIRROR"; fi
+# Optional package mirror is passed directly to uv.
 
 ARG MCP_PROXY_VERSION
 
 WORKDIR /opt
 
 # Install mcp-proxy from PyPI (optionally pinned)
-RUN --mount=type=cache,id=nexent-mcp-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
+RUN --mount=type=cache,id=nexent-mcp-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     if [ -n "$MCP_PROXY_VERSION" ]; then \
-        pip install "mcp-proxy==$MCP_PROXY_VERSION"; \
+        uv pip install --system --link-mode copy "mcp-proxy==$MCP_PROXY_VERSION" $(test -n "$MIRROR" && echo "--default-index $MIRROR"); \
     else \
-        pip install mcp-proxy; \
+        uv pip install --system --link-mode copy mcp-proxy $(test -n "$MIRROR" && echo "--default-index $MIRROR"); \
     fi

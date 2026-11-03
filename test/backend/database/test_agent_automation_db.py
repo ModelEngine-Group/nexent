@@ -1,13 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from database import agent_automation_db
-from database.db_models import (
-    AgentAutomationProposal,
-    AgentAutomationRun,
-    AgentAutomationTask,
-)
+from management.db.automation import repository as agent_automation_db
+from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
 
 AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4_merged_migrations.sql")
 AGENT_AUTOMATION_TOOL_MIGRATION = AGENT_AUTOMATION_MIGRATION
@@ -78,8 +76,8 @@ def _install_recording_session(monkeypatch, result):
     session = _RecordingSession(result)
 
     @contextmanager
-    def fake_get_db_session():
-        yield session
+    def fake_get_db_session(db_session=None):
+        yield db_session if db_session is not None else session
 
     monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
     monkeypatch.setattr(agent_automation_db, "as_dict", lambda value: value)

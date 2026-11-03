@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Policy precedence and SDK validation at the backend configuration boundary."""
 
 import pytest
-from agents.sandbox_config import resolve_sandbox_config
+from runtime.adapters.nexent.sandbox import resolve_sandbox_config
 from nexent.core.agents.sandbox import SandboxLevel, SandboxScope
 
 

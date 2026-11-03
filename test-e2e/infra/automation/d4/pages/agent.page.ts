@@ -317,18 +317,13 @@ export class AgentPage {
   }
 
   async ensureGuardrailRule(pattern: string): Promise<void> {
-    await this.openAdvanced();
-    // Guardrail rules moved behind the 更多配置 icon action on the
-    // run-strategy card (aria-label 更多配置), which opens the modal.
-    await this.page.getByRole("button", { name: "更多配置", exact: true }).click();
-    const modal = this.page.getByRole("dialog").filter({ hasText: "安全护栏" });
-    await expect(modal).toBeVisible();
-    // The modal also carries the protocol-repair switch; the guardrail enable
-    // switch is the one sharing the 安全护栏 title row.
-    const guardrailSwitch = modal
-      .getByText("安全护栏", { exact: true })
-      .locator("xpath=ancestor::div[1]")
-      .getByRole("switch");
+    const section = this.page.getByTestId("agent-config-card-guardrail");
+    const toggle = section.getByRole("button", { name: /安全护栏/ });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+      await toggle.click();
+    }
+    await expect(section).toBeVisible();
+    const guardrailSwitch = section.getByRole("switch");
     if ((await guardrailSwitch.getAttribute("aria-checked")) !== "true") {
       const enabled = this.page.waitForResponse(
         (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
@@ -336,19 +331,15 @@ export class AgentPage {
       await guardrailSwitch.click();
       if (!(await enabled).ok()) throw new Error("guardrail enable autosave failed");
     }
-    await modal.getByRole("button", { name: "添加规则", exact: true }).last().click();
+    await section.getByRole("button", { name: "添加规则", exact: true }).last().click();
     const saved = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
     );
-    const patternInput = modal.getByPlaceholder("如 \\d{17}[\\dXx]").first();
+    const patternInput = section.getByPlaceholder("如 \\d{17}[\\dXx]").first();
     await patternInput.fill(pattern);
     await patternInput.blur();
     if (!(await saved).ok()) throw new Error("guardrail rule autosave failed");
     await expect(patternInput).toHaveValue(pattern);
-    // Close the modal so the header actions (e.g. the debug toggle) become
-    // clickable again. antd ignores Escape here, so use its close control.
-    await modal.locator(".ant-modal-close").click();
-    await expect(modal).toBeHidden();
   }
 
   async selectModel(displayName: string): Promise<void> {
@@ -401,11 +392,12 @@ export class AgentPage {
       const payload = await response.json();
       const tools = Array.isArray(payload) ? payload : payload.data || payload.tools || [];
       const owned = tools.filter((tool: any) => tool.source === "mcp" &&
-        tool.usage === serviceName && (tool.origin_name || tool.name) === toolName);
+        tool.usage === serviceName && [tool.origin_name, tool.name].includes(toolName));
       expect(owned).toHaveLength(1);
       expectedToolId = Number(owned[0].tool_id || owned[0].id);
     }
-    const row = dialog.getByRole("option", { name: toolName, exact: true });
+    const scope = serviceName ? dialog.getByRole("region", { name: serviceName, exact: true }) : dialog;
+    const row = scope.getByRole("option", { name: toolName, exact: true });
     await expect(row).toHaveCount(1);
     if ((await row.getAttribute("aria-selected")) !== "true") await row.click();
     await expect(row).toHaveAttribute("aria-selected", "true");
@@ -672,15 +664,15 @@ export class AgentPage {
     return id;
   }
 
-  /** Switch the debug pane between single and compare modes via its header menu. */
+  /** Switch the debug pane between single and compare modes via its header toggle. */
   private async setDebugCompareMode(enabled: boolean): Promise<void> {
     const debugPanel = this.debugPanel();
-    await debugPanel.getByRole("button", { name: "调试选项", exact: true }).click();
-    const item = this.page
-      .getByRole("menuitem", { name: enabled ? "对比模式" : "默认模式", exact: true })
-      .last();
-    await expect(item).toBeVisible();
-    await item.click();
+    const toggle = debugPanel.getByRole("button", { name: "切换对比模式", exact: true });
+    await expect(toggle).toBeVisible();
+    if ((await toggle.getAttribute("aria-pressed")) !== String(enabled)) {
+      await toggle.click();
+    }
+    await expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
   }
 
   async openDebugCompare(): Promise<void> {
@@ -699,9 +691,12 @@ export class AgentPage {
     // old and new replies after the first round, so count each column separately.
     const selectors = debugPanel.getByRole("combobox");
     await expect(selectors).toHaveCount(2);
-    const columns = [0, 1].map((index) => selectors.nth(index).locator(
-      "xpath=ancestor::div[contains(@class, 'flex h-full w-full flex-col')][1]",
-    ));
+    const results = debugPanel.getByTestId("compare-results");
+    const columns = [
+      results.getByTestId("compare-result-left"),
+      results.getByTestId("compare-result-right"),
+    ];
+    for (const column of columns) await expect(column).toHaveCount(1);
     const histories = columns.map((column) => column.locator("[data-slot='aui_assistant-message-root']:visible"));
     const before = await Promise.all(histories.map((history) => history.count()));
     const composer = this.debugComposer();

@@ -12,11 +12,9 @@ import {
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 
+import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { StandardTour } from "@/components/common/StandardTour";
-import {
-  completeAgentCreationGuide,
-  hasCompletedAgentCreationGuide,
-} from "@/lib/agentCreationGuide";
+import { hasCompletedAgentCreationGuide } from "@/lib/agentCreationGuide";
 
 const TARGETS = ["assistant", "core", "resources", "workflow"] as const;
 const PLACEMENTS = ["right", "bottomLeft", "topLeft", "bottomRight"] as const;
@@ -31,6 +29,10 @@ export function AgentCreationGuide({
   workspaceRef,
 }: AgentCreationGuideProps) {
   const { t } = useTranslation("common");
+  const { dismiss: dismissPreference } = useGuidePreference(
+    "agent-creation",
+    preferenceKey
+  );
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(0);
   // The local anchor is available before the parent's workspace ref is attached.
@@ -59,14 +61,14 @@ export function AgentCreationGuide({
   );
 
   const dismiss = useCallback(() => {
-    completeAgentCreationGuide(preferenceKey);
+    dismissPreference();
     setOpen(false);
     window.requestAnimationFrame(() => {
       findTarget("assistant")
         ?.querySelector<HTMLTextAreaElement>("textarea")
         ?.focus({ preventScroll: true });
     });
-  }, [findTarget, preferenceKey]);
+  }, [findTarget, dismissPreference]);
 
   useEffect(() => {
     if (!open) return;

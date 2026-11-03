@@ -58,7 +58,7 @@ def test_webhook_rejects_unsupported_config_prompts_before_execution(
     mocker, caplog, unsupported_prompt_config,
 ):
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
 
     langfuse = mocker.patch("langfuse.Langfuse").return_value
     mocker.patch.object(evaluators, "resolve_evaluators", return_value=[])

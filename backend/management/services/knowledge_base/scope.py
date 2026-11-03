@@ -9,29 +9,22 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
+from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
 
-from agents.create_agent_info import _resolve_runtime_tool_records
-from consts.exceptions import ValidationError
-from consts.model import (
-    ConversationKnowledgeScopeRequest,
-    ToolParamsRequest,
-)
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no
-from database.knowledge_db import (
-    get_knowledge_info_by_ids_and_tenant,
-    get_knowledge_info_by_tenant_id,
-    get_knowledge_name_map_by_index_names,
-)
+from management.services.agent.preparation.tools import _get_agent_tool_overrides
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
+from contracts.errors.exceptions import ValidationError
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.tool import ToolParamsRequest
+from management.db.agent.repository import query_sub_agent_relations, resolve_sub_agent_version_no, search_agent_info_by_agent_id
+from management.db.agent.version import query_current_version_no
+from management.db.knowledge_base.repository import get_knowledge_info_by_ids_and_tenant, get_knowledge_info_by_tenant_id, get_knowledge_name_map_by_index_names
 from management.services.knowledge_base.service import ElasticSearchService
 
 
 LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"
-AIDP_TOOL_CLASS = "AidpSearchTool"
+AIDP_TOOL_CLASS = AIDP_SEARCH_TOOL_CLASS
 LOCAL_RANGE_PARAM = "index_names"
 AIDP_RANGE_PARAM = "kds_list"
 LOCAL_MAX_SELECT = 50
@@ -101,7 +94,7 @@ def _filter_accessible_aidp_ids(
 
 def _resolve_aidp_access_snapshot(user_id: str, tenant_id: str):
     """Resolve AIDP access lazily so deployments without the extension still import."""
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_access_service import (
         resolve_current_aidp_access,
     )
@@ -159,6 +152,33 @@ def snapshot_runtime_knowledge_tree(
 ) -> List[Dict[str, Any]]:
     """Freeze the knowledge-capable static tree for one request."""
     return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
+
+
+def prepare_tool_retrieval_overrides(
+    tenant_id: str, *, agent_id: int, tool_params=None, version_no=None, is_debug=False,
+) -> None:
+    """Prepare request-level AIDP overrides against the executing Agent's defaults."""
+    if tool_params is None or not any(
+        CONFIG_KEYS.intersection(params)
+        for agent in tool_params.agents.values() for tool_name, params in agent.tools.items()
+        if tool_name in (AIDP_SEARCH_TOOL_NAME, AIDP_TOOL_CLASS)
+    ):
+        return
+    version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
+    tree = snapshot_runtime_knowledge_tree(agent_id, tenant_id, version)
+    try:
+        for node in tree:
+            overrides = _get_agent_tool_overrides(tool_params, node.get("agent_name"))
+            for tool in node["tools"]:
+                if tool.get("class_name") != AIDP_TOOL_CLASS:
+                    continue
+                params = overrides.get(tool.get("name"), overrides.get(AIDP_TOOL_CLASS))
+                if params is None or not CONFIG_KEYS.intersection(params):
+                    continue
+                inherited = {param["name"]: param.get("default") for param in tool.get("params", [])}
+                params.update(prepare_config(params, inherited))
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def get_agent_knowledge_capabilities(
@@ -226,16 +246,8 @@ def get_agent_knowledge_capabilities(
         for node in agent_tree
         if node.get("has_static_scope_reference")
     ]
-    from management.services.knowledge_base.mount import RESERVED
-
-    def root_parameters(class_name):
-        return {param["name"]: deepcopy(param.get("default"))
-                for tool in agent_tree[0]["tools"] if tool.get("class_name") == class_name
-                for param in tool.get("params") or [] if param["name"] not in RESERVED} if agent_tree else {}
-
     sources = {
         "local": {
-            "default_retrieval_config": root_parameters(LOCAL_TOOL_CLASS),
             "enabled": local_enabled,
             "max_select": LOCAL_MAX_SELECT,
             "requires_same_embedding_model": True,
@@ -244,7 +256,6 @@ def get_agent_knowledge_capabilities(
             "default_range_values": local_default_indices,
         },
         "aidp": {
-            "default_retrieval_config": root_parameters(AIDP_TOOL_CLASS),
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
             "default_summary": "Follow each agent's default configuration",

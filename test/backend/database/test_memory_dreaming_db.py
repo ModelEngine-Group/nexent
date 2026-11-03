@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for memory_dreaming_db CRUD and audit functions."""
 
 from contextlib import contextmanager
@@ -6,13 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from database import memory_dreaming_db
-from database.db_models import (
-    MemoryDreamingAudit,
-    MemoryDreamingDecision,
-    MemoryDreamingSchedule,
-    MemoryLongTermVersion,
-)
+from management.db.memory import dreaming as memory_dreaming_db
+from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryDreamingSchedule, MemoryLongTermVersion
 
 
 def _mock_session(monkeypatch):
