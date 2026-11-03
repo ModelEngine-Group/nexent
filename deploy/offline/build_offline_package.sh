@@ -502,10 +502,24 @@ save_image_to_tar() {
   if docker save "${save_args[@]}" "$image"; then
     echo "✅ Saved: $output_file"
     return 0
-  else
-    echo "❌ Failed to save image: $image"
-    return 1
   fi
+
+  # Legacy single-platform images (e.g. supabase/postgres:15.8.1.060) carry a
+  # platform annotation that does not match linux/amd64 or linux/arm64 exactly,
+  # so `docker pull --platform` silently lands the only available variant while
+  # `docker save --platform` rejects it with "no suitable export target".
+  # Retry without the platform filter: the pull step already pinned the
+  # variant, so the local image is the one this package intends to ship.
+  if docker_supports_save_platform; then
+    echo "⚠️  Platform-filtered export failed, retrying without --platform: $image"
+    if docker save -o "$output_file" "$image"; then
+      echo "✅ Saved: $output_file"
+      return 0
+    fi
+  fi
+
+  echo "❌ Failed to save image: $image"
+  return 1
 }
 
 save_all_images() {

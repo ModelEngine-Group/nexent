@@ -41,6 +41,9 @@ if arguments[0] == "save":
     if os.environ["FAKE_REQUIRE_PLATFORM"] == "true" and "--platform" not in arguments:
         print("unable to create manifests file: amd64 content digest not found", file=sys.stderr)
         sys.exit(1)
+    if os.environ["FAKE_PLATFORM_SAVE_FAILS"] == "true" and "--platform" in arguments:
+        print("no suitable export target found: image was found but does not provide the specified platform", file=sys.stderr)
+        sys.exit(1)
     if int(os.environ["FAKE_SAVE_STATUS"]):
         print("synthetic image export failure", file=sys.stderr)
         sys.exit(int(os.environ["FAKE_SAVE_STATUS"]))
@@ -51,7 +54,8 @@ sys.exit(2)
     docker.chmod(0o755)
 
     def run(platform="arm64", client_api="1.54", server_api="1.54", *,
-            version_status=0, save_status=0, require_platform=False):
+            version_status=0, save_status=0, require_platform=False,
+            platform_save_fails=False):
         log_path = tmp_path / "docker.jsonl"
         output = tmp_path / "offline images.tar"
         environment = os.environ.copy()
@@ -63,6 +67,7 @@ sys.exit(2)
             FAKE_VERSION_STATUS=str(version_status),
             FAKE_SAVE_STATUS=str(save_status),
             FAKE_REQUIRE_PLATFORM=str(require_platform).lower(),
+            FAKE_PLATFORM_SAVE_FAILS=str(platform_save_fails).lower(),
         )
         result = subprocess.run(
             ["bash", "-c", functions + '\nPLATFORM="$1"\nsave_image_to_tar "$2" "$3"',
@@ -141,3 +146,33 @@ def test_export_failure_is_reported_without_an_unrestricted_retry(export_image, 
     saves = [call for call in calls if call[0] == "save"]
     assert len(saves) == 1
     assert ("--platform" in saves[0]) is has_platform
+
+
+@pytest.mark.parametrize("platform", ["arm64", "amd64"])
+def test_platform_export_falls_back_to_unrestricted_save_for_legacy_images(export_image, platform):
+    # Legacy single-platform images (e.g. supabase/postgres:15.8.1.060) fail a
+    # platform-filtered export even though the pinned pull already landed the
+    # only available variant, so the save must fall back to an unfiltered export.
+    result, calls, output = export_image(platform, platform_save_fails=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    saves = [call for call in calls if call[0] == "save"]
+    assert len(saves) == 2
+    assert "--platform" in saves[0]
+    assert "--platform" not in saves[1]
+    assert saves[1][-1] == "nexent/nexent:v2.8.3"
+    assert "retrying without --platform" in result.stdout
+    assert output.read_bytes() == b"synthetic image tar"
+
+
+def test_unrestricted_retry_does_not_run_on_unsupported_docker(export_image):
+    # On API versions without platform-filtered export there is nothing to
+    # fall back from: a failing save must stay a single, failed attempt.
+    result, calls, output = export_image(
+        client_api="1.39", server_api="1.39", save_status=1,
+    )
+
+    assert result.returncode != 0
+    saves = [call for call in calls if call[0] == "save"]
+    assert len(saves) == 1
+    assert "--platform" not in saves[0]
