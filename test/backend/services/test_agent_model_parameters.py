@@ -196,9 +196,10 @@ def test_session_off_drops_only_inherited_agent_budget(profile, canonical):
     assert resolved.parameter_values["enable_thinking"] is False
     assert "reasoning_budget_tokens" not in resolved.parameter_values
     assert profile.model_dump() == before and entry == agent_before
-    with pytest.raises(ModelOutletValidationError, match="PARAMETER_DEPENDENCY"):
+    with pytest.raises(ModelOutletValidationError) as error:
         merge_runtime_model_parameters(profile, entry,
             {"enable_thinking": False, "reasoning_budget_tokens": 64})
+    assert error.value.category == "PARAMETER_DEPENDENCY"
 
 
 def test_preflight_applies_agent_thinking_before_session_budget(profile, monkeypatch):

@@ -35,8 +35,8 @@ def merge_runtime_model_parameters(profile, entry, preferences):
     canonical = read_agent_parameter_entry(entry)
     from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
     preferences = without_outlet_token_limits(preferences)
+    agent_view = _apply_agent_parameters(profile, canonical)
     try:
-        agent_view = _apply_agent_parameters(profile, canonical)
         session_view = merge_model_preferences(agent_view, preferences)
         # Session-disabled dependencies are inherited Agent values, not explicit session input.
         inherited = {key: value for key, value in canonical["parameter_values"].items()
