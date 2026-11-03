@@ -2,7 +2,6 @@
 
 from contracts.authentication import AuthenticatedIdentity
 import logging
-from nexent.core.concurrency import run_blocking
 from http import HTTPStatus
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request

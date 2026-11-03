@@ -12,7 +12,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agent_names import validate_agent_name
@@ -33,7 +33,7 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem

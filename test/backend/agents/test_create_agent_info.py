@@ -7,7 +7,6 @@ import sys
 import types
 import importlib.util
 from pathlib import Path
-from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace stubs.
 

@@ -4,7 +4,7 @@
 
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from management.services.model.catalog import CATALOG as CAPABILITY_CATALOG
 from management.services.configuration.tenant.settings import tenant_config_manager

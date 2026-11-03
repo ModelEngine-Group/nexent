@@ -20,7 +20,7 @@ from management.db.a2a.repository import query_external_sub_agents
 from management.db.agent.repository import batch_search_agent_display_names, create_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, search_agent_info_by_agent_id, update_agent, update_agent_icon, update_related_agents
 from management.db.agent.version import batch_query_current_version_nos, batch_search_version_names, query_current_version_no
 from management.db.model.repository import get_model_by_model_id
-from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_enabled_tool_instances, query_tool_instances_by_agent_id, query_tool_instances_by_id, query_tools_by_ids, search_tools_for_sub_agent
+from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_enabled_tool_instances, query_tool_instances_by_agent_id, query_tools_by_ids, search_tools_for_sub_agent
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import (
     read_icon_image,

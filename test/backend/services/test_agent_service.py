@@ -981,7 +981,7 @@ async def test_get_agent_info_impl_with_version_no(
 
 
 @patch('management.services.agent.service.create_or_update_tool_by_tool_info')
-@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.db.tool.repository.query_tool_instances_by_id')
 @patch('management.services.agent.transfer.query_all_tools')
 @patch('management.services.agent.service.update_agent')
 @pytest.mark.asyncio
@@ -9536,7 +9536,7 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
 
 # Tests for ingroup_permission and group_ids functionality
 @patch('management.services.agent.service.create_or_update_tool_by_tool_info')
-@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.db.tool.repository.query_tool_instances_by_id')
 @patch('management.services.agent.transfer.query_all_tools')
 @patch('management.services.agent.service.create_agent')
 @patch('management.services.agent.service.convert_list_to_string')
@@ -9576,7 +9576,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission(mock_
 
 
 @patch('management.services.agent.service.create_or_update_tool_by_tool_info')
-@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.db.tool.repository.query_tool_instances_by_id')
 @patch('management.services.agent.transfer.query_all_tools')
 @patch('management.services.agent.service.create_agent')
 @patch('management.services.agent.service._get_user_group_ids')

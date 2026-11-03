@@ -493,8 +493,8 @@ def test_single_agent_uses_tenant_model_on_workbench_root(mocker):
         },
     )
 
-    get_model = mocker.patch.object(workbench_service, "get_model_by_model_id", return_value={"model_id": 13})
-    mocker.patch.object(workbench_service, "is_model_available", return_value=True)
+    get_model = mocker.patch("management.db.model.repository.get_model_by_model_id", return_value={"model_id": 13})
+    mocker.patch("management.services.model.resolver.is_model_available", return_value=True)
     canonical, plan = workbench_service.resolve_workbench_config(
         WorkbenchSessionConfig(
             mode="single_agent_chat",

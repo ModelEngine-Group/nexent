@@ -19,11 +19,9 @@ from contracts.agent import WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
     system_agent_provider,
 )
-from management.services.model.resolver import is_model_available
 from management.services.skill.service import SkillService
 from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
 from management.db.identity.group import query_group_ids_by_user
