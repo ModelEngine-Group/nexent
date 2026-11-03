@@ -265,7 +265,7 @@ def test_banned_account_excluded_with_original_active_association_and_su_preflig
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from management.db.client import db_client
-    from infrastructure.security.account_cli import bootstrap_super_admin
+    from management.cli.account import bootstrap_super_admin
 
     old, new = historical_user(), historical_user()
     old["banned_until"] = "2999-01-01T00:00:00Z"
