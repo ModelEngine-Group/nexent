@@ -93,7 +93,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
             "field_specs": profile.parameter_rules, "config_revision": profile.config_revision, "issues": issues}
 
 
-def validate_model_preferences(preferences, tenant_id, *, allowed_model_ids=None):
+def validate_model_preferences(preferences, tenant_id, *, allowed_model_ids=None, agent_overrides=None):
     """Validate first-turn drafts with the same frozen rules as preference PATCH."""
     from contracts.errors.exceptions import ForbiddenError
     from management.db.model.outlets import get_resolved_model_record
@@ -117,7 +117,13 @@ def validate_model_preferences(preferences, tenant_id, *, allowed_model_ids=None
         forbidden = values.keys() & OUTLET_TOKEN_LIMIT_KEYS
         if forbidden:
             raise ModelOutletValidationError("FIXED_PARAMETER", "/" + sorted(forbidden)[0])
-        merge_model_preferences(profile, values)
+        entry = (agent_overrides or {}).get(key)
+        if entry:
+            from management.services.agent.model_parameters import merge_runtime_model_parameters
+
+            merge_runtime_model_parameters(profile, entry, values)
+        else:
+            merge_model_preferences(profile, values)
 
 
 def patch_model_selection(conversation_id, request, user_id, tenant_id):

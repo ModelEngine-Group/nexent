@@ -95,7 +95,9 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
         if values is not None:
             preferences = {str(model_id): values}
     try:
-        validate_model_preferences(preferences, tenant_id, allowed_model_ids=allowed)
+        overrides = (agent_record or {}).get("model_params_override") or {}
+        validate_model_preferences(preferences, tenant_id, allowed_model_ids=allowed,
+                                   **({"agent_overrides": overrides} if overrides else {}))
     except ModelOutletValidationError as error:
         raise RunModelControlsError("model_controls_invalid") from error
 
