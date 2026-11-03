@@ -2459,10 +2459,11 @@ class TestRunStreamRealExecution:
         records = [r for r in caplog.records if r.name == "model_call.core_agent"]
         assert any(r.getMessage().startswith("MODEL OUTPUT") for r in records)
 
-    def test_step_stream_turns_exhausted_empty_response_into_silent_protocol_repair(
-        self, monkeypatch
+    @pytest.mark.parametrize("protocol", ["code_action", "final_envelope"])
+    def test_step_stream_preserves_exhausted_empty_response_as_terminal(
+        self, monkeypatch, protocol
     ):
-        """Physical empty retries hand off to the hidden semantic repair loop."""
+        """An exhausted physical empty-response budget cannot start semantic repair."""
         module = core_agent_module
         CoreAgent = module.CoreAgent
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
@@ -2483,7 +2484,7 @@ class TestRunStreamRealExecution:
         agent._history_step_count = 0
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
-        agent.output_protocol = "code_action"
+        agent.output_protocol = protocol
         agent.verification_controller = None
         terminal = module.ModelInvocationTerminalError(
             module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
@@ -2493,11 +2494,11 @@ class TestRunStreamRealExecution:
         agent.model = MagicMock(side_effect=terminal)
 
         action_step = MagicMock(model_output=None)
-        with pytest.raises(module.ModelOutputProtocolError) as exc_info:
+        with pytest.raises(module.ModelInvocationTerminalError) as exc_info:
             next(agent._step_stream(action_step))
 
-        assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
-        assert exc_info.value.__cause__ is terminal
+        assert exc_info.value is terminal
+        agent.model.assert_called_once()
 
     def test_step_stream_closed_protocol_omits_legacy_provider_stop_sequences(
         self, monkeypatch

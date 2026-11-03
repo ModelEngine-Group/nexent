@@ -27,8 +27,9 @@ case:
     - two reasoning-only stops
     - tool-only stop
     - length
-    - exhausted empty then valid Agent final answer
-    - persistent empty across bounded Agent protocol repair
+    - one empty response then valid Agent final answer
+    - persistent empty terminates after two physical requests
+    - nonempty malformed output with successful and exhausted protocol repair
     sensitive_fixture: A synthetic secret appears only in rejected reasoning and tool arguments.
   steps:
   - order: 1
@@ -41,14 +42,16 @@ case:
     expected: Empty recovery is bounded; excluded responses are not retried as empty recovery. Failure logs retain
       correlation and fingerprints but disclose no content, credentials or arguments.
   - order: 3
-    action: Run real CoreAgent with repair enabled against empty HTTP responses followed by a valid final answer,
-      then against persistent empty responses.
-    expected: Corrected answer succeeds without user errors or repair instructions; persistent empty recovery terminates
-      within the existing bound and never executes tools.
+    action: Run real CoreAgent through OpenAIModel and LegacyChatModel with one empty response then a valid answer, persistent empty responses, and nonempty malformed responses.
+    expected: Empty recovery uses two identical requests and remains terminal after exhaustion; nonempty protocol repair changes correction context and is bounded to three requests. Success commits once; no scenario executes tools.
+  - order: 4
+    action: Exercise LegacyChatModel through the real ModelService, HTTP sender and loopback SSE endpoint with reasoning-only, whitespace and empty stop before a valid answer.
+    expected: Two identical wire requests occur and only the accepted answer commits; emitted speculative deltas roll back, while a truly empty first attempt creates no observer state. The shared path closes its resources.
   expected_results:
   - HTTP request controls remain immutable and successful recovery produces the expected answer exactly once.
   - Attempt bounds and structural diagnostics preserve privacy and excluded terminal outcomes.
-  - Silent Agent semantic repair preserves the final answer and existing retry bound.
+  - Agent empty recovery cannot restart its two-request budget; nonempty malformed output retains bounded silent protocol repair.
+  - Legacy shared-model empty recovery has the same single retry and immutable request boundary.
   forbidden_side_effects:
   - No external provider calls, database mutations, session snapshot rewrites, reasoning promotion or execution
     of returned tools.
@@ -65,9 +68,11 @@ case:
     steps:
     - 1
     - 2
+    - 4
     expected_results:
     - 1
     - 2
+    - 4
     forbidden_side_effects:
     - 1
   - id: AC-PRIVACY
@@ -79,8 +84,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-AGENT-REPAIR
-    description: Real Agent silently repairs exhausted empty HTTP output and retains the existing bound on persistent
-      empty responses.
+    description: Real Agent preserves the empty-response physical budget and retains silent protocol repair for nonempty malformed output.
     steps:
     - 3
     expected_results:
@@ -93,3 +97,4 @@ case:
   - Identical outgoing bodies, rollback/commit events, response correlation and private structural diagnostics
   cleanup:
   - Close the model HTTP client and shut down/join the loopback server thread.
+  # The accepted Legacy facade is a distinct entry point into the shared transport.
