@@ -3,13 +3,11 @@
 import type { Locator } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
-import { configuredModel, runToken, testAssetPath } from "../../infra/automation/d4/runner/runtime-config";
+import { configuredModel, runToken } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { ModelPage } from "../../infra/automation/d4/pages/model.page";
 import { AgentPage } from "../../infra/automation/d4/pages/agent.page";
 import { registerReadyAsset } from "../../infra/automation/d4/runner/assets";
-import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
-import { KnowledgePage } from "../../infra/automation/d4/pages/knowledge.page";
 
 journey("PW-MODEL-01", async (context) => {
   const { page, contract, expect } = context;

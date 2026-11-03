@@ -2,7 +2,7 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { creatorEntries, prepareControls, enter, chooseModel, thinking, send, composer, input, trigger, openControls, settings, labels } from "../../infra/automation/d4/fixtures/model-controls";
+import { creatorEntries, prepareControls, enter, chooseModel, thinking, send, input, trigger, openControls, settings, labels } from "../../infra/automation/d4/fixtures/model-controls";
 
 journey("CHAT-MODEL-CONTROLS-D4-001", async ({ page, contract }) => {
   await page.setViewportSize({ width: 1441, height: 1244 });

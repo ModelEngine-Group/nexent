@@ -14,7 +14,6 @@ from nexent.core.agents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.concurrency.manager import ThreadManager
 from nexent.core.concurrency.models import LanePolicy, ManagedTaskSpec
-from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
 from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
 from nexent.core.model_service.concurrency import ModelConcurrencyLimiter
 from nexent.core.model_service.contracts import (
