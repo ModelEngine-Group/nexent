@@ -233,3 +233,40 @@ def test_debug_uses_canonical_preferences_without_changing_definitions(runtime, 
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     assert not any(event.get("type") == "error" for event in events), response.text
     assert runtime.draft() == before and runtime.model_records() == models
+
+
+@pytest.mark.parametrize("workbench", [False, True])
+@pytest.mark.parametrize("outlet_enabled,session_values", [
+    (True, {"enable_thinking": False}),
+    (False, {"reasoning_budget_tokens": 1024}),
+])
+def test_agent_session_dependency_layers_reach_provider(runtime, workbench, outlet_enabled, session_values):
+    """AC-02: inherited Agent budgets and Agent-enabled session budgets keep their source."""
+    from copy import deepcopy
+    from sqlalchemy import update
+    from management.db.models import AgentInfo
+
+    runtime.set_outlet_defaults("budget-B", lambda values: {
+        **{key: value for key, value in values.items() if key != "reasoning_budget_tokens"},
+        "enable_thinking": outlet_enabled,
+        **({"reasoning_budget_tokens": 2048} if outlet_enabled else {}),
+    })
+    overrides = deepcopy(runtime.draft()["model_params_override"])
+    overrides[str(runtime.models["budget-B"])] = {"parameter_values": {
+        "enable_thinking": True, "reasoning_budget_tokens": 1024,
+    }}
+    with runtime.storage["sessions"]() as session:
+        session.execute(update(AgentInfo).where(AgentInfo.agent_id == runtime.agent_id,
+            AgentInfo.version_no == 0).values(model_params_override=overrides))
+    before, models_before = runtime.draft(), runtime.model_records()
+    response = runtime.post("/api/agent/run", label="budget-B", generation=session_values,
+                            workbench=workbench, version_no=0)
+    assert response.status_code == 200, response.text
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert not any(event.get("type") == "error" for event in events), response.text
+    wire = [row for row in runtime.provider.wire if row["model"] == "fixture-budget-B"]
+    assert wire, response.text
+    expected_enabled = session_values.get("enable_thinking", True)
+    assert all(row["enable_thinking"] is expected_enabled for row in wire)
+    assert all(row.get("thinking_budget") == (1024 if expected_enabled else None) for row in wire)
+    assert runtime.draft() == before and runtime.model_records() == models_before

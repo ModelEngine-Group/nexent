@@ -18,9 +18,9 @@ change:
     modified: []
     retired: []
   affected_cases:
-    existing: []
+    existing: [CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
     added: []
-    modified: []
+    modified: [CHAT-MODEL-CONTROLS-D3-001]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -34,4 +34,4 @@ change:
     - test/backend/services/test_conversation_service_exports.py
     - test/backend/services/test_run_model_control_boundaries.py
     - test/sdk/core/model_service/test_backend_turn_overlays.py
-  notes: User authorized PR4121 CI/review correction; PR4120 is merged and untouched. Design and evidence in nexent-doc/docs/Developing/model-access-native-agent/PR4121-REVIEW-FIXES-20261103.md. Frontend code is moved from4122 instead of introducing temporary server compatibility. Existing formal Cases remain unmodified; selected runtime regressions and actual model evidence are recorded separately.
+  notes: User authorized PR4121 CI/review correction; PR4120 is merged and untouched. Design and evidence in nexent-doc/docs/Developing/model-access-native-agent/PR4121-REVIEW-FIXES-20261103.md. Frontend code is moved from4122 instead of introducing temporary server compatibility. Existing canonical runtime fixtures are moved from4097; D3-001 strengthens AC-02 with ordinary/Workbench Agent-session dependency regressions; selected runtime regressions and actual model evidence are recorded separately.
