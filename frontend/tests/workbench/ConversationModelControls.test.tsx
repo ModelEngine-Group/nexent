@@ -105,10 +105,7 @@ it.each(["agent", "workbench"])(
     expect(result.current.canSend).toBe(true);
     act(() => result.current.onModelChange("1"));
     await waitFor(() =>
-      expect(api.patchConversationModelSelection).toHaveBeenCalledWith(
-        123,
-        1
-      )
+      expect(api.patchConversationModelSelection).toHaveBeenCalledWith(123, 1)
     );
     await waitFor(() => expect(result.current.selectedModelId).toBe("1"));
     unmount();
@@ -264,13 +261,22 @@ it.each(["agent", "workbench"])(
   }
 );
 
-
 it("AC-D1/AC-D2 prefers the tenant default over list order and keeps a later manual choice", () => {
-  const options = models.map((model) => ({ ...model, connectStatus: "available" }));
+  const options = models.map((model) => ({
+    ...model,
+    connectStatus: "available",
+  }));
   const { result, rerender } = renderHook(
     ({ defaultId }: { defaultId?: string }) =>
-      useConversationModelControls(options, "tenant-default-regression", defaultId),
-    { initialProps: { defaultId: undefined as string | undefined }, wrapper: Wrapper }
+      useConversationModelControls(
+        options,
+        "tenant-default-regression",
+        defaultId
+      ),
+    {
+      initialProps: { defaultId: undefined as string | undefined },
+      wrapper: Wrapper,
+    }
   );
   expect(result.current.snapshot).toEqual({ model_id: 1 });
   rerender({ defaultId: "2" });

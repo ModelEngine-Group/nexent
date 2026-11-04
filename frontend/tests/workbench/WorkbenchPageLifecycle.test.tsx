@@ -149,14 +149,19 @@ vi.mock("@/components/ui/sidebar", () => ({
   SidebarProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ llmModels: [], availableLlmModels: [], isLoading: false }),
+  useModelList: () => ({
+    llmModels: [],
+    availableLlmModels: [],
+    isLoading: false,
+  }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({
     modelConfig: undefined,
-    defaultLlmModelConfig: view.defaultModelId === undefined
-      ? undefined
-      : { id: view.defaultModelId },
+    defaultLlmModelConfig:
+      view.defaultModelId === undefined
+        ? undefined
+        : { id: view.defaultModelId },
   }),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
@@ -476,7 +481,9 @@ it("a version conflict bypasses shared history and preserves input and model par
   );
   expect(conversationService.getById).toHaveBeenCalledTimes(2);
   expect(runConfig().workbenchConfigVersion).toBe(999);
-  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(config.requested_output_tokens);
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(
+    config.requested_output_tokens
+  );
   expect(runtime.thread.composer.setText).toHaveBeenCalledWith(
     "Keep this question"
   );
@@ -784,15 +791,15 @@ it("restores standalone Skill history and keeps changed controls out of workbenc
   await waitFor(() => expect(runConfig().runtimeMode).toBe("nl2skill"));
   expect(runConfig().creationTarget).toEqual({ type: "skill", id: 201 });
   expect(conversationService.updateWorkbenchConfig).not.toHaveBeenCalled();
-  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty("generation_config");
+  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+    "generation_config"
+  );
   expect(runConfig().creationWorkbenchConfig).not.toHaveProperty("model_id");
 });
-
 
 it("AC-D1 forwards the tenant default as an uncontrolled Chat fallback, including delayed loading", async () => {
   view.threadId = "new-default";
   view.items = [];
-  view.bootstrap = { generic_agent: { agent_id: 100, version_no: 1 } };
   const page = render(<WorkbenchPage />);
   await screen.findByRole("textbox", { name: "workbench draft" });
   expect(view.props?.selectedModelId).toBeUndefined();
