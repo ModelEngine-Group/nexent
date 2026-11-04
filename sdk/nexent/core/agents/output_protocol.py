@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Closed output protocol for Nexent CodeAgent runtimes."""
 
 from __future__ import annotations
@@ -460,7 +462,7 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         return ClarificationForm.model_validate({"questions": ast.literal_eval(literal)})
     except ValidationError as exc:
         # Report schema locations and error types without echoing rejected values.
-        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder"}
+        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder", "creation_request"}
         issues = []
         for error in exc.errors(include_url=False, include_input=False)[:5]:
             location = ".".join(

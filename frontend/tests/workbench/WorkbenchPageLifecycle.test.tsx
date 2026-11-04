@@ -31,6 +31,9 @@ const view = vi.hoisted(() => ({
     { id: "b", remoteId: "202" },
   ],
   props: null as ComponentProps<typeof Chat> | null,
+  sidebarProps: null as { onNewConversation: () => Promise<void> } | null,
+  newThreadId: undefined as string | undefined,
+  drafts: {} as Record<string, string>,
   setRunConfig: vi.fn(),
   restoreAgent: vi.fn(),
   markGenerationCompleted: vi.fn(),
@@ -51,15 +54,28 @@ const runtime = {
     getState: () => ({ isRunning: false }),
     composer: {
       setRunConfig: view.setRunConfig,
-      getState: () => ({ text: "", attachments: [] }),
+      getState: () => ({
+        text: view.drafts[view.threadId ?? ""] ?? "",
+        attachments: [],
+      }),
       setText: vi.fn(),
     },
   },
   threads: {
-    getState: () => ({ mainThreadId: view.threadId }),
-    switchToNewThread: vi.fn(async () => {
-      view.threadId = `creation-${++view.nextThread}`;
+    getState: () => ({
+      mainThreadId: view.threadId,
+      newThreadId: view.newThreadId,
     }),
+    getItemById: (id: string) => ({
+      initialize: async () => {
+        if (view.newThreadId === id) view.newThreadId = undefined;
+      },
+    }),
+    switchToNewThread: vi.fn(async () => {
+      view.newThreadId ??= `creation-${++view.nextThread}`;
+      view.threadId = view.newThreadId;
+    }),
+    reload: vi.fn(async () => {}),
     switchToThread: vi.fn(async (id: string) => {
       view.threadId = id;
     }),
@@ -105,6 +121,10 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
         dispatch({ type: "select-mode", mode }),
       []
     );
+    const back = useCallback(() => {
+      view.back();
+      dispatch({ type: "select-mode", mode: "generic_chat" });
+    }, []);
     return {
       conversationDetails,
       runtime,
@@ -112,7 +132,7 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
       isLoadingAgents: false,
       agents: [],
       onRestoreAgent: view.restoreAgent,
-      onBack: view.back,
+      onBack: back,
       isDictationConfigured: false,
       workbenchState: state,
       workbenchBootstrap: view.bootstrap,
@@ -132,7 +152,10 @@ vi.mock("@/app/newchat/assistant-ui/composer-tools", () => ({
   ComposerDictation: () => null,
 }));
 vi.mock("@/app/newchat/assistant-ui/threadlist-sidebar", () => ({
-  ThreadListSidebar: () => null,
+  ThreadListSidebar: (props: NonNullable<typeof view.sidebarProps>) => {
+    view.sidebarProps = props;
+    return null;
+  },
 }));
 vi.mock("@/app/newchat/adapter/conversation-thread-list-adapter", () => ({
   cacheHistoricalChatMode: vi.fn(),
@@ -284,10 +307,99 @@ beforeEach(() => {
   view.initialConfigVersion = 7;
   view.defaultModelId = undefined;
   view.nextThread = 0;
+  view.newThreadId = undefined;
+  view.drafts = {};
+  runtime.thread.composer.setText.mockImplementation((text: string) => {
+    view.drafts[view.threadId ?? ""] = text;
+  });
   vi.mocked(conversationService.getById).mockImplementation(async (id) =>
     detail(Number(id))
   );
 });
+
+it.each(["agent_create", "skill_create"] as const)(
+  "new conversations cannot reuse an unsent %s handoff draft",
+  async (mode) => {
+    view.threadId = "ordinary-local";
+    view.items = [];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect(mode);
+    });
+    page.rerender(<WorkbenchPage />);
+    const creationId = view.threadId!;
+    runtime.thread.composer.setText(
+      "AI requirements and original user request"
+    );
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(creationId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().runtimeMode).toBeUndefined();
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+    expect(view.drafts[creationId]).toBe(
+      "AI requirements and original user request"
+    );
+    const firstNewId = view.threadId;
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(firstNewId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().runtimeMode).toBeUndefined();
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+    view.threadId = creationId;
+    page.rerender(<WorkbenchPage />);
+    await waitFor(() =>
+      expect(runConfig().runtimeMode).toBe(
+        mode === "agent_create" ? "nl2agent" : "nl2skill"
+      )
+    );
+    expect(runtime.thread.composer.getState().text).toBe(
+      "AI requirements and original user request"
+    );
+  }
+);
+
+it.each(["agent_create", "skill_create"] as const)(
+  "failed new conversation preserves the %s draft and allows retry",
+  async (mode) => {
+    view.threadId = "ordinary-local";
+    view.items = [];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect(mode);
+    });
+    page.rerender(<WorkbenchPage />);
+    const sourceId = view.threadId;
+    runtime.thread.composer.setText("Keep this creation request");
+    runtime.threads.switchToNewThread.mockRejectedValueOnce(
+      new Error("Switch failed")
+    );
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).toBe(sourceId);
+    expect(runtime.thread.composer.getState().text).toBe(
+      "Keep this creation request"
+    );
+    expect(runConfig().runtimeMode).toBe(
+      mode === "agent_create" ? "nl2agent" : "nl2skill"
+    );
+    expect(view.back).not.toHaveBeenCalled();
+    await act(async () => view.sidebarProps!.onNewConversation());
+    page.rerender(<WorkbenchPage />);
+    expect(view.threadId).not.toBe(sourceId);
+    expect(runtime.thread.composer.getState().text).toBe("");
+    expect(runConfig().workbenchConfig.mode).toBe("generic_chat");
+  }
+);
 
 it.each([true, false])(
   "preserves the mounted chat during metadata reload while running=%s",

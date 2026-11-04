@@ -1,0 +1,62 @@
+schema_version: '1.0'
+change:
+  change_id: WB-CREATION-INTENT-20261103
+  change_type: bugfix
+  bug_id: WB-CREATION-INTENT-20261103
+  title: Guide ordinary Workbench creation requests into explicit creation modes
+  description: Replace frontend lexical classification with main-model semantic intent, structured confirmation and persisted
+    mode entry.
+  observed_behavior: Ordinary Workbench cannot create Agents or Skills and provides no actionable mode transition when users
+    request creation in chat.
+  expected_behavior: AI interprets natural and multi-turn requests, asks a structured mode confirmation, and only a confirmed
+    allowed action opens the matching creation thread with its context summary. Decisions survive refresh. New conversations
+    must not reuse an unsent creation thread or copy its requirements and mode.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_case
+    description: Initial lexical variants passed while natural synonyms and multi-turn intent escaped. Existing generic clarification
+      persistence does not provide confirmation-only mode entry.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - WB-CREATION-INTENT-D4-001
+    - WB-CREATION-CONFIRM-D2-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Strict optional creation-request context preserves generic clarification compatibility.
+    - Only allowlisted structured creation forms and actions can navigate; permissions, stale messages, running locks and
+      failed saves prevent navigation.
+    - Owned latest-form acknowledgements are atomic and exact retries are idempotent, without invoking an LLM.
+    - Creation draft includes AI context and original user request; continuing ordinary chat retains the existing persisted
+      clarification flow.
+    - New conversations reserve the unsent creation thread, start blank in ordinary mode, and retain the original thread's draft.
+    - Explicit NL2Agent sends retain matching agent_id and structured target IDs so a runtime requiring agent_id does not return HTTP 422.
+    reason: SDK/protocol, backend persistence and frontend action UT are distinct from D2 HTTP mapping and D4 rendered stream/card/navigation
+      proof.
+    test_selectors:
+    - test/sdk/core/agents/test_creation_mode_form.py
+    - test/backend/services/test_creation_mode_confirmation.py
+    - frontend/tests/workbench/CreationModeAction.test.ts
+    - frontend/tests/workbench/CreationModeConfirmation.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbenchTransitions.test.ts
+    - frontend/tests/workbench/Nl2AgentProtocolRepair.test.ts
+  notes: Baseline ../nexent-doc/nexent/agent-workbench/specs/workbench/spec.md SC-DISP-005 and design.md WB-CREATION-INTENT-20261103.
+    Reuse existing HUMAN_INTERACTION stream and clarification-response history. Remove the obsolete uncommitted keyword implementation
+    and its UT. Preserve all existing formal D1. D2/D4 inherit WB-CONTROLS runtime ownership, use self-contained controlled
+    services, families=[], and release test clients/browser contexts. Real-model browser smoke is recorded separately from
+    Mock D4.
+    Sending after confirmation exposed an additional rolling-upgrade boundary; the old runtime requires agent_id while the
+    adapter omitted it in favor of target. Strengthen the existing adapter UT and D4 AC-04; do not change backend contracts,
+    migrate accounts/databases, or add duplicate D1/D2 Cases. The self-contained D4 owns mocked draft and creator APIs and
+    releases them with its browser context.

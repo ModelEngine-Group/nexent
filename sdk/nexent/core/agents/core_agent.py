@@ -1551,7 +1551,7 @@ Additional Args:
                 self._pending_thought_continuation = False
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
-                    {"schema_version": 1, **form.model_dump(mode="json")},
+                    {"schema_version": 1, **form.model_dump(mode="json", exclude_none=True)},
                 )
                 raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
             code_action = _remove_parallel_executor_import(code_action)
