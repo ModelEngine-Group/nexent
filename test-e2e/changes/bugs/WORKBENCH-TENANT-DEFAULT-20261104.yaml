@@ -13,7 +13,7 @@ change:
     description: Hook tests exercise a supplied default but the actual Workbench page test never asserts that tenant configuration reaches Chat.
   feature_contract_changed: false
   affected_features:
-    existing: [F-036]
+    existing: [CHAT-MODEL-CONTROLS]
     added: []
     modified: []
     retired: []
