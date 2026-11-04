@@ -52,6 +52,9 @@ case:
   - order: 9
     action: Reuse an email after historical account deletion, vary source presence/order, exclude all-inactive and banned identities, and submit genuinely conflicting active accounts.
     expected: Only eligible ordinary accounts enter user_account_t; original source/membership rows remain, SPEED is retained, inactive historical associations do not block SU preflight, and actual conflicts report account IDs while rolling back all target changes.
+  - order: 10
+    action: Execute Docker Shell orchestration without any host Python; run the packaged Python worker before application SQL, including completed/fresh targets, stopped source, failed import and preview.
+    expected: The host invokes only Shell and platform CLIs. The worker owns one atomic schema/credential transaction. Migration failure blocks rollout, source cleanup follows only committed success, and credentials are never printed or stored as snapshots.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
@@ -80,6 +83,7 @@ case:
     - 7
     - 8
     - 9
+    - 10
     expected_results:
     - 1
     - 2

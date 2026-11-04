@@ -542,27 +542,13 @@ deployment_source_root_env() {
 }
 
 deployment_upgrade_local_accounts() {
-  local mode="$1" namespace="${2:-nexent}"
-  local database="${3:-nexent-postgresql}" config="${4:-nexent-config}"
-  local common_dir script candidate interpreter="" env_file
+  local mode="$1" namespace="${2:-nexent}" database="${3:-nexent-postgresql}"
+  local common_dir env_file config="${4:-nexent-config}"
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
-  script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
-  if [ "$mode" = kubernetes ]; then
-    script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
-  fi
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
-      interpreter="$candidate"
-      break
-    fi
-  done
-  if [ -z "$interpreter" ]; then
-    echo "ERROR: Python 3.8+ is required on the deployment host for account upgrade." >&2
-    return 1
-  fi
-  "$interpreter" "$script" --deploy --apply --deployment "$mode" --namespace "$namespace" \
-    --database-target "$database" --config-target "$config" --env-file "$env_file" --wait-timeout 300
+  bash "$common_dir/../sql/tools/supabase_to_postgres/migrate.sh" \
+    --deployment "$mode" --namespace "$namespace" --database-target "$database" --config-target "$config" \
+    --env-file "$env_file" --apply --wait-timeout 300
 }
 
 deployment_env_dir() {
