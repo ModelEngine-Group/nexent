@@ -13,7 +13,7 @@ change:
     description: Existing Header tests cover local edits but not parent replacements, reset or equivalent-map rerenders.
   feature_contract_changed: false
   affected_features:
-    existing: [F-030]
+    existing: [F-032]
     added: []
     modified: []
     retired: []
