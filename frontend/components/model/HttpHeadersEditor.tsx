@@ -8,12 +8,16 @@ import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
 
 const snapshotHeaders = (value: Record<string, string | null>) =>
-  JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
+  JSON.stringify(
+    Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+  );
 
 const validHeaderNames = (rows: Array<{ name: string }>) => {
   const names = rows.map((row) => row.name.toLowerCase());
-  return rows.every((row) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(row.name)) &&
-    new Set(names).size === names.length;
+  return (
+    rows.every((row) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(row.name)) &&
+    new Set(names).size === names.length
+  );
 };
 
 /** Null means retain a named stored header; response values never reach this editor. */
