@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModelHttpConnectionSettings } from "@/components/model/ModelHttpConnectionSettings";
 import { ModelOutletForm } from "@/components/model/ModelOutletForm";
-import { App } from "antd";
+import { Alert, App } from "antd";
 import {
   Plus,
   Layers,
@@ -908,6 +908,12 @@ function BatchAddForm({
   const [timeoutSeconds, setTimeoutSeconds] = useState(120);
   const [headers, setHeaders] = useState<Record<string, string>>({});
   const [headersValid, setHeadersValid] = useState(true);
+  const hasExtendedConnectionSettings =
+    Object.keys(headers).length > 0 || !sslVerify || timeoutSeconds !== 120;
+  const connectionUnsupported = (row: FetchedRow) =>
+    hasExtendedConnectionSettings &&
+    (!!tenantId || row.model_type !== MODEL_TYPES.LLM);
+
   const [fetching, setFetching] = useState(false);
   const [fetched, setFetched] = useState<FetchedRow[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -1147,7 +1153,7 @@ function BatchAddForm({
   }
 
   async function checkRow(row: FetchedRow) {
-    if (submitting) return;
+    if (submitting || !headersValid || connectionUnsupported(row)) return;
     const generation = (generations.current[row.id] ?? 0) + 1;
     generations.current[row.id] = generation;
     const apply = (ok: boolean, issue?: ModelCheckIssue | null) => {
@@ -1211,7 +1217,14 @@ function BatchAddForm({
 
   async function checkAllSelected() {
     const rows = fetched.filter((row) => selected[row.id]);
-    if (rows.length === 0 || batchChecking || submitting) return;
+    if (
+      rows.length === 0 ||
+      batchChecking ||
+      submitting ||
+      !headersValid ||
+      rows.some(connectionUnsupported)
+    )
+      return;
     setBatchChecking(true);
     await Promise.all(rows.map((row) => checkRow(row)));
     setBatchChecking(false);
@@ -1219,7 +1232,13 @@ function BatchAddForm({
 
   async function submit() {
     const rows = fetched.filter((row) => selected[row.id]);
-    if (rows.length === 0 || submitting) return;
+    if (
+      rows.length === 0 ||
+      submitting ||
+      !headersValid ||
+      rows.some(connectionUnsupported)
+    )
+      return;
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
@@ -1487,6 +1506,14 @@ function BatchAddForm({
             />
           </ModelOutletForm>
         </details>
+        {fetched.some(connectionUnsupported) && (
+          <Alert
+            className="mt-4"
+            type="warning"
+            showIcon
+            title={t("modelProfile.legacyConnectionUnsupported")}
+          />
+        )}
         {/* Fetched list */}
         {fetched.length > 0 && (
           <div className="mt-5 overflow-hidden rounded-xl border">
@@ -1652,7 +1679,11 @@ function BatchAddForm({
                             e.stopPropagation();
                             checkRow(row);
                           }}
-                          disabled={rowCheck[row.id] === "checking"}
+                          disabled={
+                            rowCheck[row.id] === "checking" ||
+                            !headersValid ||
+                            connectionUnsupported(row)
+                          }
                         >
                           <ShieldCheck className="size-3.5" />
                         </Button>
@@ -1718,7 +1749,13 @@ function BatchAddForm({
             <Button
               size="sm"
               variant="outline"
-              disabled={batchChecking}
+              disabled={
+                batchChecking ||
+                !headersValid ||
+                fetched.some(
+                  (row) => selected[row.id] && connectionUnsupported(row)
+                )
+              }
               onClick={checkAllSelected}
             >
               {batchChecking ? (
@@ -1757,7 +1794,14 @@ function BatchAddForm({
             {t("common.cancel", { defaultValue: "取消" })}
           </Button>
           <Button
-            disabled={selectedCount === 0 || submitting || !headersValid}
+            disabled={
+              selectedCount === 0 ||
+              submitting ||
+              !headersValid ||
+              fetched.some(
+                (row) => selected[row.id] && connectionUnsupported(row)
+              )
+            }
             onClick={submit}
           >
             {submitting && <Loader2 className="size-4 animate-spin" />}

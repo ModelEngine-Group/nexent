@@ -20,6 +20,10 @@ const legacy = vi.hoisted(() => ({
   addProviderModel: vi.fn(),
   suggestCapacity: vi.fn(),
   backfillDefaults: vi.fn(),
+  verifyModelConfigConnectivity: vi.fn(),
+  addCustomModel: vi.fn(),
+  addManageProviderModel: vi.fn(),
+  createManageTenantModel: vi.fn(),
 }));
 vi.mock("../../services/modelProfileService", () => api);
 vi.mock("../../services/modelService", () => ({
@@ -476,3 +480,223 @@ it.each([false, true])(
   },
   30000
 );
+
+it.each(["headers", "tls", "timeout"])(
+  "AC-BC1/BC2 blocks unsupported %s settings on legacy rows and recovers after clearing them",
+  async (setting) => {
+    legacy.addProviderModel.mockResolvedValue([
+      { id: "embed-only", model_type: "embedding" },
+    ]);
+    legacy.verifyModelConfigConnectivity.mockResolvedValue({
+      connectivity: true,
+    });
+    legacy.addCustomModel.mockResolvedValue({});
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <App>
+          <ModelAddDialog
+            isOpen
+            initialTab="batch"
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />
+        </App>
+      </QueryClientProvider>
+    );
+    fireEvent.click(screen.getByText("modelProfile.connectionSettings"));
+    if (setting === "headers") {
+      fireEvent.click(
+        screen.getByRole("button", { name: "modelProfile.addHeader" })
+      );
+      fireEvent.change(screen.getByLabelText("modelProfile.headerName"), {
+        target: { value: "X-Gateway" },
+      });
+      fireEvent.change(screen.getByLabelText("modelProfile.headerValue"), {
+        target: { value: "controlled-header" },
+      });
+    } else if (setting === "tls") {
+      fireEvent.click(
+        screen.getByRole("switch", { name: "modelProfile.skipTlsVerify" })
+      );
+    } else {
+      fireEvent.change(
+        screen.getByRole("spinbutton", { name: "modelProfile.timeout" }),
+        { target: { value: "45" } }
+      );
+    }
+    fireEvent.change(
+      screen.getByPlaceholderText("https://api.example.com/v1"),
+      { target: { value: "https://models.invalid/v1" } }
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" })
+    );
+    await screen.findByText("embed-only");
+    expect(legacy.addProviderModel).toHaveBeenCalledWith(
+      expect.objectContaining(
+        setting === "headers"
+          ? { httpHeaders: { "x-gateway": "controlled-header" } }
+          : setting === "tls"
+            ? { sslVerify: false }
+            : { timeoutSeconds: 45 }
+      )
+    );
+    expect(
+      screen.getByRole("button", { name: "modelProfile.checkModel embed-only" })
+    ).toBeDisabled();
+    fireEvent.click(screen.getByText("modelConfig.addDialog.toggleAll"));
+    expect(
+      screen.getByRole("button", { name: "modelConfig.addDialog.batchCheck" })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" })
+    ).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "modelProfile.legacyConnectionUnsupported"
+    );
+    expect(legacy.verifyModelConfigConnectivity).not.toHaveBeenCalled();
+    expect(legacy.addCustomModel).not.toHaveBeenCalled();
+    if (setting === "headers")
+      fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    else if (setting === "tls")
+      fireEvent.click(
+        screen.getByRole("switch", { name: "modelProfile.skipTlsVerify" })
+      );
+    else
+      fireEvent.change(
+        screen.getByRole("spinbutton", { name: "modelProfile.timeout" }),
+        { target: { value: "120" } }
+      );
+    const check = screen.getByRole("button", {
+      name: "modelProfile.checkModel embed-only",
+    });
+    expect(check).toBeEnabled();
+    fireEvent.click(check);
+    await waitFor(() =>
+      expect(legacy.verifyModelConfigConnectivity).toHaveBeenCalledOnce()
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" })
+    );
+    await waitFor(() => expect(legacy.addCustomModel).toHaveBeenCalledOnce());
+  }
+);
+
+it("AC-BC3 keeps extended connection settings on LLM rows after deselecting unsupported rows", async () => {
+  legacy.addProviderModel.mockResolvedValue([
+    { id: "llm-only", model_type: "llm" },
+    { id: "embed-only", model_type: "embedding" },
+  ]);
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <App>
+        <ModelAddDialog
+          isOpen
+          initialTab="batch"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+      </App>
+    </QueryClientProvider>
+  );
+  fireEvent.click(screen.getByText("modelProfile.connectionSettings"));
+  fireEvent.click(
+    screen.getByRole("switch", { name: "modelProfile.skipTlsVerify" })
+  );
+  fireEvent.change(
+    screen.getByRole("spinbutton", { name: "modelProfile.timeout" }),
+    { target: { value: "45" } }
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelProfile.addHeader" })
+  );
+  fireEvent.change(screen.getByLabelText("modelProfile.headerName"), {
+    target: { value: "X-Gateway" },
+  });
+  fireEvent.change(screen.getByLabelText("modelProfile.headerValue"), {
+    target: { value: "controlled-header" },
+  });
+  fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+    target: { value: "https://models.invalid/v1" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" })
+  );
+  await screen.findByText("embed-only");
+  fireEvent.click(screen.getByText("modelConfig.addDialog.toggleAll"));
+  expect(
+    screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" })
+  ).toBeDisabled();
+  fireEvent.click(screen.getByText("embed-only", { exact: true }));
+  const submit = screen.getByRole("button", {
+    name: "modelConfig.addDialog.addSelected",
+  });
+  expect(submit).toBeEnabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelProfile.checkModel llm-only" })
+  );
+  await waitFor(() => expect(api.validateModelOutlet).toHaveBeenCalledOnce());
+  fireEvent.click(submit);
+  await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledOnce());
+  for (const draft of [
+    api.validateModelOutlet.mock.calls[0][0].draft,
+    api.createModelOutlet.mock.calls[0][0],
+  ]) {
+    expect(draft).toMatchObject({
+      request_model_id: "llm-only",
+      http_headers: { "x-gateway": "controlled-header" },
+      provider_info: { ssl_verify: false, timeout_seconds: 45 },
+    });
+  }
+  expect(legacy.addCustomModel).not.toHaveBeenCalled();
+});
+
+it("AC-BC4 prevents extended settings from silently entering the managed-tenant legacy LLM path", async () => {
+  legacy.addManageProviderModel.mockResolvedValue([
+    { id: "managed-llm", model_type: "llm" },
+  ]);
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <App>
+        <ModelAddDialog
+          isOpen
+          tenantId="other-tenant"
+          initialTab="batch"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+      </App>
+    </QueryClientProvider>
+  );
+  fireEvent.click(screen.getByText("modelProfile.connectionSettings"));
+  fireEvent.click(
+    screen.getByRole("switch", { name: "modelProfile.skipTlsVerify" })
+  );
+  fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+    target: { value: "https://models.invalid/v1" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" })
+  );
+  await screen.findByText("managed-llm");
+  fireEvent.click(screen.getByText("modelConfig.addDialog.toggleAll"));
+  expect(
+    screen.getByRole("button", { name: "modelProfile.checkModel managed-llm" })
+  ).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" })
+  ).toBeDisabled();
+  expect(legacy.createManageTenantModel).not.toHaveBeenCalled();
+});

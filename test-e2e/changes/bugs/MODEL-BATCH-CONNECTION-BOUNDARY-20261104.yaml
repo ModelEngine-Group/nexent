@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-BATCH-CONNECTION-BOUNDARY-20261104
+  change_type: bugfix
+  bug_id: MODEL-BATCH-CONNECTION-BOUNDARY-20261104
+  title: Prevent unsupported batch connection options from being silently discarded
+  description: Keep model discovery available while preventing legacy rows from checking or saving extended connection options they cannot honor.
+  observed_behavior: Shared Header, TLS and timeout settings reach model discovery but legacy model checks and creates discard them.
+  expected_behavior: Current-tenant LLM outlets retain full support; legacy rows explicitly reject extended settings before any check or save. Restoring defaults or deselecting legacy rows restores the applicable actions without losing drafts.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests assert discovery fields and LLM outlets but omit mixed-model and managed-tenant boundaries after discovery.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-032, V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Header, skipped TLS and nondefault timeout prevent legacy checks and saves without dropping input.
+    - Default settings and clearing extended settings preserve legacy checks and creates.
+    - Mixed selection can proceed with supported LLM rows after deselecting legacy rows; checked and saved drafts retain the same extended settings.
+    - Managed-tenant legacy LLM rows cannot silently accept extended settings.
+    reason: Real React component events and service boundary assertions prove the missing UI decision. No backend or SDK behavior changes, so no duplicate D1 or new D2/D3 is needed. Existing successful-LLM D4 assets do not prove this rejection; actual container browser verification is recorded separately.
+    test_selectors:
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelAddDialogBatchDuplicate.test.tsx
+  notes: User approved fixing the PR4097 review defect. A bounded guard is used instead of adding custom Header support to every legacy adapter. Design and AC-BC1 through AC-BC4 are in nexent-doc/docs/Developing/model-access-native-agent/PR4097-BATCH-CONNECTION-20261104.md. Discovery uses the supplied settings; persistence and inference paths are unchanged. No formal Case execution or full model-runtime acceptance is implied by component tests.
