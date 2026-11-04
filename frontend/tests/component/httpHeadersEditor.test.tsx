@@ -62,3 +62,47 @@ it("blocks blank, invalid and duplicate names until corrected", () => {
   expect(validity).toHaveBeenLastCalledWith(true);
   expect(changed).toHaveBeenLastCalledWith({ "x-auth": null, "x-extra": "" });
 });
+
+
+it("AC-H1/AC-H3 replaces external values and never submits stale headers", () => {
+  const changed = vi.fn();
+  const validity = vi.fn();
+  const props = { onChange: changed, onValidityChange: validity };
+  const page = render(<HttpHeadersEditor {...props} value={{ "x-old": null }} />);
+  page.rerender(<HttpHeadersEditor {...props} value={{ "x-new": "new-value" }} />);
+  expect(screen.getByLabelText("modelProfile.headerName")).toHaveValue("x-new");
+  expect(screen.getByLabelText("modelProfile.headerValue")).toHaveValue("new-value");
+  expect(changed).not.toHaveBeenCalled();
+  expect(validity).toHaveBeenLastCalledWith(true);
+  fireEvent.change(screen.getByLabelText("modelProfile.headerValue"), {
+    target: { value: "edited" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({ "x-new": "edited" });
+  page.rerender(<HttpHeadersEditor {...props} value={{}} />);
+  expect(screen.queryByLabelText("modelProfile.headerName")).toBeNull();
+  expect(validity).toHaveBeenLastCalledWith(true);
+});
+
+it("AC-H2 keeps invalid local rows when equivalent external maps are recreated or reordered", () => {
+  const changed = vi.fn();
+  const validity = vi.fn();
+  const page = render(<HttpHeadersEditor value={{ "x-a": null, "x-b": "" }} onChange={changed} onValidityChange={validity} />);
+  fireEvent.click(screen.getByRole("button", { name: "modelProfile.addHeader" }));
+  expect(validity).toHaveBeenLastCalledWith(false);
+  page.rerender(<HttpHeadersEditor value={{ "x-b": "", "x-a": null }} onChange={changed} onValidityChange={vi.fn()} />);
+  expect(screen.getAllByLabelText("modelProfile.headerName")).toHaveLength(3);
+  expect(screen.getAllByLabelText("modelProfile.headerName")[2]).toHaveValue("");
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it("AC-H1 reports replacement validity and clears an invalid draft on an external reset", () => {
+  const validity = vi.fn();
+  const props = { onChange: vi.fn(), onValidityChange: validity };
+  const page = render(<HttpHeadersEditor {...props} value={{ "x-stored": null }} />);
+  fireEvent.click(screen.getByRole("button", { name: "modelProfile.addHeader" }));
+  page.rerender(<HttpHeadersEditor {...props} value={{ "invalid name": "value" }} />);
+  expect(validity).toHaveBeenLastCalledWith(false);
+  page.rerender(<HttpHeadersEditor {...props} value={{}} />);
+  expect(screen.queryByLabelText("modelProfile.headerName")).toBeNull();
+  expect(validity).toHaveBeenLastCalledWith(true);
+});

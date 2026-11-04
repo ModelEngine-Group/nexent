@@ -2,10 +2,19 @@
 
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "antd";
 import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
+
+const snapshotHeaders = (value: Record<string, string | null>) =>
+  JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
+
+const validHeaderNames = (rows: Array<{ name: string }>) => {
+  const names = rows.map((row) => row.name.toLowerCase());
+  return rows.every((row) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(row.name)) &&
+    new Set(names).size === names.length;
+};
 
 /** Null means retain a named stored header; response values never reach this editor. */
 export function HttpHeadersEditor({
@@ -28,19 +37,34 @@ export function HttpHeadersEditor({
       value,
     }))
   );
+  const snapshot = snapshotHeaders(value);
+  const externalSnapshot = useRef(snapshot);
+  const emittedSnapshot = useRef(snapshot);
+  useEffect(() => {
+    if (snapshot === externalSnapshot.current) return;
+    externalSnapshot.current = snapshot;
+    if (snapshot === emittedSnapshot.current) return;
+    emittedSnapshot.current = snapshot;
+    const next = Object.entries(value).map(([name, value]) => ({
+      id: ++sequence.current,
+      name,
+      value,
+    }));
+    setRows(next);
+    onValidityChange?.(validHeaderNames(next));
+  }, [snapshot, value, onValidityChange]);
+
   function update(next: typeof rows) {
     setRows(next);
-    const names = next.map((row) => row.name.toLowerCase());
-    const valid =
-      next.every((row) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(row.name)) &&
-      new Set(names).size === names.length;
+    const valid = validHeaderNames(next);
     onValidityChange?.(valid);
-    if (valid)
-      onChange(
-        Object.fromEntries(
-          next.map((row) => [row.name.toLowerCase(), row.value])
-        )
+    if (valid) {
+      const updated = Object.fromEntries(
+        next.map((row) => [row.name.toLowerCase(), row.value])
       );
+      emittedSnapshot.current = snapshotHeaders(updated);
+      onChange(updated);
+    }
   }
   return (
     <div className="space-y-2">

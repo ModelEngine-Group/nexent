@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-HEADER-DRAFT-SYNC-20261104
+  change_type: bugfix
+  bug_id: MODEL-HEADER-DRAFT-SYNC-20261104
+  title: Synchronize externally replaced HTTP Header editor values
+  description: Synchronize changed external values while retaining incomplete local header drafts on equivalent parent updates.
+  observed_behavior: The Header editor initializes local rows once and continues to display and submit old headers after its value prop changes.
+  expected_behavior: Changed external values replace the displayed rows and validity; equivalent maps and controlled echoes preserve local drafts.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Header tests cover local edits but not parent replacements, reset or equivalent-map rerenders.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-030]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - External replacements and clears update rows and validity without submitting stale headers.
+    - Equivalent maps and controlled echoes preserve incomplete drafts and stored null values.
+    reason: Real React rerenders and input events directly prove the component state boundary; header persistence and authentication rules are unchanged. No duplicate formal D1 is needed.
+    test_selectors:
+    - frontend/tests/component/httpHeadersEditor.test.tsx
+  notes: User approved the PR4122 review correction. Design and AC-H1 to AC-H3 are in nexent-doc/docs/Developing/model-access-native-agent/PR4121-REVIEW-FIXES-20261103.md. The final onboarding edit caller remounts the form on outlet/revision changes and is not changed. This fix completes the shared component's controlled-value behavior; no API, secret storage or provider interaction changes.
