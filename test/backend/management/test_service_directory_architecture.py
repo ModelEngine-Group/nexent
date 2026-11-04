@@ -81,6 +81,7 @@ MIGRATED_MODULES = {
     'configuration/user/quotas.py',
     'conversation/agent_history.py',
     'conversation/creation_history.py',
+    'conversation/creation_mode.py',
     'conversation/creator_execution.py',
     'conversation/creator_histories.py',
     'conversation/creator_targets.py',
