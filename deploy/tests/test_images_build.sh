@@ -58,8 +58,8 @@ grep -q 'libreoffice-impress' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandb
 ! grep -q 'playwright install' "$FULL_SANDBOX_DOCKERFILE" || fail "the focused full sandbox should exclude Playwright Chromium"
 grep -q 'io.nexent.sandbox.skills="docx,pdf,pptx,xlsx,canvas-design,frontend-design,slack-gif-creator,mcp-builder,web-artifacts-builder,skill-creator"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should declare its supported skills"
 grep -q 'io.nexent.sandbox.variant="full"' "$FULL_SANDBOX_DOCKERFILE" || fail "the full sandbox should identify its variant"
-grep -q 'image: \[main, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$MAINLAND_WORKFLOW" || fail "mainland publishing should include sandbox-full"
-grep -q 'image: \[main, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$OVERSEAS_WORKFLOW" || fail "overseas publishing should include sandbox-full"
+grep -q 'image: \[main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$MAINLAND_WORKFLOW" || fail "mainland publishing should include sandbox-full"
+grep -q 'image: \[main, gateway, web, data-process, mcp, terminal, sandbox, sandbox-full\]' "$OVERSEAS_WORKFLOW" || fail "overseas publishing should include sandbox-full"
 
 output="$(bash "$BUILD_SCRIPT" --images main,web,mcp,data-process --version latest --registry general --dry-run)"
 assert_contains "$output" "nexent/nexent:latest" "image list should build main image with latest tag"
