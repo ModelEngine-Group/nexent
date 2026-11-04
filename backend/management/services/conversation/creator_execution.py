@@ -29,6 +29,15 @@ async def start_creation_turn(request, *, kind, user_id, tenant_id, stream_facto
     effective = request.model_copy(update={"target": ConversationTarget.model_validate(target) if target else None})
     if kind == "agent":
         effective.agent_id = target["id"]
+    if request.conversation_id is not None:
+        from nexent.core.concurrency import run_blocking
+        from management.services.conversation.model_preferences import read_model_preferences
+
+        saved = await run_blocking("creator-model-preferences", read_model_preferences,
+            request.conversation_id, user_id)
+        effective.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+        if effective.model_id is None:
+            effective.model_id = saved.get("selected_model_id")
     # Validate and build the runtime before inserting the user turn.
     stream = await stream_factory(effective, ref)
     try:
@@ -36,6 +45,8 @@ async def start_creation_turn(request, *, kind, user_id, tenant_id, stream_facto
             conversation_id=request.conversation_id, mode=f"{kind}_create", query=request.query,
             minio_files=request.minio_files, workbench_config=request.workbench_config,
             agent_id=ref.agent_id, target=target, user_id=user_id, tenant_id=tenant_id,
+            **({"selected_model_id": effective.model_id} if effective.model_id is not None else {}),
+            **({"model_parameter_preferences": request.model_parameter_preferences} if request.model_parameter_preferences else {}),
             retry_user_message_id=request.retry_user_message_id,
             retry_message_index=request.retry_message_index,
         )

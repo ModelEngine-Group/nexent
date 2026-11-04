@@ -223,7 +223,7 @@ it("UT-FE-WB-003 returning to a running conversation uses resume instead of star
   expect(service.stop).not.toHaveBeenCalled();
 });
 
-it("passes Start Chat thinking settings to the normal agent run", async () => {
+it("SU-AC-07 does not revive removed controls from a stale ModelContext", async () => {
   service.runAgent.mockResolvedValue({
     type: "json",
     data: { status: "completed" },
@@ -243,8 +243,10 @@ it("passes Start Chat thinking settings to the normal agent run", async () => {
 
   expect(service.runAgent.mock.calls[0][0]).toMatchObject({
     model_id: 12,
-    generation_config: { deep_thinking: true, thinking_effort: "medium" },
   });
+  expect(service.runAgent.mock.calls[0][0]).not.toHaveProperty(
+    "generation_config"
+  );
 });
 
 const sourceHits = [

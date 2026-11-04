@@ -627,6 +627,9 @@ export interface UpdateAgentInfoPayload {
   model_params_override?: Record<
     string,
     {
+      parameter_values?: Record<string, unknown>;
+      context_window_tokens?: number;
+      custom_overrides?: Record<string, unknown>;
       temperature?: number | null;
       top_p?: number | null;
       extra_params?: Record<string, unknown> | null;

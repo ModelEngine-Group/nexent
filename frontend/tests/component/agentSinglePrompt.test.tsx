@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { Form } from "antd";
+import { App, Form } from "antd";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   fireEvent,
   render,
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     constraint_prompt: "LEGACY_RULE_POISON",
     few_shots_prompt: "LEGACY_EXAMPLE_POISON",
     model_ids: [] as number[],
+    model_params_override: null as Record<string, Record<string, unknown>> | null,
   },
 }));
 vi.mock("react-i18next", () => ({
@@ -46,6 +48,7 @@ vi.mock("@/stores/agentStore", () => ({
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({
+    llmModels: mocks.models,
     availableLlmModels: mocks.models,
     isSuccess: mocks.modelListLoaded,
   }),
@@ -55,6 +58,7 @@ vi.mock("@/hooks/useConfig", () => ({
     defaultLlmModelConfig: { id: mocks.defaultModelId },
     isSuccess: mocks.configLoaded,
   }),
+
 }));
 vi.mock("@/hooks/model/useInferenceFieldSpecs", () => ({
   useInferenceFieldSpecs: () => ({ specs: mocks.specs }),
@@ -71,6 +75,13 @@ vi.mock("@/contexts/nl2AgentFlow", () => ({
 vi.mock("@/hooks/agent/useAgentReadOnly", () => ({
   useAgentReadOnly: () => mocks.readOnly,
 }));
+vi.mock("@/services/modelProfileService", () => ({
+  getModelOutlet: vi.fn(async () => ({ config_revision: 7, profile: {
+    parameter_values: { temperature: 0.8 }, capabilities: { reasoning: { status: "unknown" } },
+    parameter_rules: [{ key: "temperature", visible: true, editable: true, required: false,
+      allowed_scopes: ["outlet", "conversation"], schema: { type: "number", minimum: 0, maximum: 2 } }],
+  }})),
+}));
 vi.mock("@/components/resource-picker/ModelDrawer", () => ({
   ModelDrawer: () => null,
 }));
@@ -82,6 +93,7 @@ vi.mock("@/components/common/ExpandEditModal", () => ({ default: () => null }));
 beforeEach(() => {
   mocks.focus = null;
   mocks.agent.model_ids = [];
+  mocks.agent.model_params_override = null;
   mocks.models = [];
   mocks.modelListLoaded = false;
   mocks.configLoaded = true;
@@ -103,10 +115,12 @@ function renderEditor() {
       </Form>
     );
   }
-  const view = render(<Editor />);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const tree = () => <QueryClientProvider client={client}><App><Editor /></App></QueryClientProvider>;
+  const view = render(tree());
   return {
     ...view,
-    refresh: () => view.rerender(<Editor />),
+    refresh: () => view.rerender(tree()),
     getForm: () => editorForm,
   };
 }
@@ -316,4 +330,26 @@ test("disables prompt expansion for read-only Agents", () => {
   fireEvent.click(expand);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(mocks.updateDraft).not.toHaveBeenCalled();
+});
+
+
+test("the actual Agent page reopens saved canonical parameters and confirms without losing custom overrides", async () => {
+  loadModels();
+  mocks.models = [{ id: 2, name: "Profile model", displayName: "Profile model", type: "llm",
+    connect_status: "available", profileSchemaVersion: 1 }];
+  mocks.agent.model_ids = [2];
+  const saved = { parameter_values: { temperature: 0.2 }, custom_overrides: { nullable: null, flag: false } };
+  mocks.agent.model_params_override = { "2": saved };
+  const view = renderEditor();
+  fireEvent.click(await screen.findByRole("button", { name: "agent.modelParamsOverride.button" }));
+  let dialog = await screen.findByRole("dialog");
+  await waitFor(() => expect(within(dialog).getByRole("spinbutton")).toHaveValue("0.2"));
+  fireEvent.click(within(dialog).getByRole("button", { name: "common.confirm" }));
+  await waitFor(() => expect(mocks.updateAgent).toHaveBeenCalledWith({ model_params_override: { "2": saved } }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  view.refresh();
+  fireEvent.click(screen.getByRole("button", { name: "agent.modelParamsOverride.button" }));
+  dialog = await screen.findByRole("dialog");
+  await waitFor(() => expect(within(dialog).getByRole("spinbutton")).toHaveValue("0.2"));
+  expect(mocks.agent.model_params_override).toEqual({ "2": saved });
 });

@@ -22,7 +22,7 @@ async def test_both_entrypoints_save_each_turn_once_with_executor_and_target(moc
     save = mocker.patch.object(creation_history, "save_message", side_effect=[10, 11])
     unit = mocker.patch.object(creation_history, "save_message_unit")
     target = {"type": kind, "id": 201}
-    config = {"schema_version": 3, "mode": f"{kind}_create", "agent_mounts": [], "skill_mounts": []} if workbench else None
+    config = {"schema_version": 4, "mode": f"{kind}_create", "agent_mounts": [], "skill_mounts": []} if workbench else None
     request = (NL2AgentRunRequest if kind == "agent" else NL2SkillRunRequest)(
         query="build", target=target, workbench_config=config, persist_history=False,
     )
@@ -112,6 +112,8 @@ def test_target_authorization_uses_current_tenant_and_edit_permission(mocker, ki
 
 @pytest.mark.asyncio
 async def test_resume_derives_target_from_owned_history(mocker):
+    mocker.patch("management.services.conversation.model_preferences.read_model_preferences",
+        return_value={"model_parameter_preferences": {}, "selected_model_id": None})
     ref = SystemAgentRef("shared", "nl2agent_main", 77, 0)
     mocker.patch.object(execution.system_agent_provider, "get_creator_ref", return_value=ref)
     mocker.patch.object(execution, "get_conversation_history", return_value={"agent_id": 77, "target": {"type": "agent", "id": 201}})

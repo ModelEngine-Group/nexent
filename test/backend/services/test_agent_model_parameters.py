@@ -184,3 +184,37 @@ def test_scb03_historical_agent_length_values_inherit_outlet(profile, window):
     assert result.parameter_values["temperature"] == 0
     assert result.parameter_values["reasoning_budget_tokens"] == 64
     assert profile.parameter_values["max_output_tokens"] == 2048
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_session_off_drops_only_inherited_agent_budget(profile, canonical):
+    from management.services.agent.model_parameters import merge_runtime_model_parameters
+    agent_values = {"enable_thinking": True, "reasoning_budget_tokens": 64}
+    entry = {"parameter_values": agent_values} if canonical else agent_values
+    before, agent_before = deepcopy(profile.model_dump()), deepcopy(entry)
+    resolved = merge_runtime_model_parameters(profile, entry, {"enable_thinking": False})
+    assert resolved.parameter_values["enable_thinking"] is False
+    assert "reasoning_budget_tokens" not in resolved.parameter_values
+    assert profile.model_dump() == before and entry == agent_before
+    with pytest.raises(ModelOutletValidationError) as error:
+        merge_runtime_model_parameters(profile, entry,
+            {"enable_thinking": False, "reasoning_budget_tokens": 64})
+    assert error.value.category == "PARAMETER_DEPENDENCY"
+
+
+def test_preflight_applies_agent_thinking_before_session_budget(profile, monkeypatch):
+    from types import SimpleNamespace
+    from management.db.model import outlets, repository
+    from management.services.model import run_controls
+    disabled = merge_model_preferences(profile, {"enable_thinking": False})
+    monkeypatch.setattr(outlets, "get_resolved_model_record", lambda *args, **kwargs: disabled)
+    monkeypatch.setattr(repository, "get_model_by_model_id", lambda *args, **kwargs:
+                        {"model_id": 42, "model_type": "llm", "connect_status": "available"})
+    monkeypatch.setattr(run_controls, "get_model_by_model_id", repository.get_model_by_model_id)
+    request = SimpleNamespace(model_id=42, model_parameter_preferences={"42": {"reasoning_budget_tokens": 64}},
+                              is_debug=False)
+    agent = {"model_ids": [42], "model_params_override": {"42": {"enable_thinking": True}}}
+    run_controls.preflight_turn_controls(request, "tenant", agent)
+    from contracts.errors.exceptions import RunModelControlsError
+    with pytest.raises(RunModelControlsError, match="model_controls_invalid"):
+        run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [42]})

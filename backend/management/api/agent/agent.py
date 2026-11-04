@@ -9,19 +9,19 @@ from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
-from typing import Literal, Optional
+from typing import Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from starlette.responses import JSONResponse, Response
+
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
 from contracts.conversation import ConversationResponse
 from contracts.tag import TagAssignmentFilter
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
-from permissions.depends import require
-from permissions.models import CurrentUser
 from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
@@ -50,13 +50,6 @@ from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from contracts.errors.exceptions import RunModelControlsError
-from management.services.conversation.creation_history import (
-    prepare_creation_history,
-    persist_creation_stream,
-)
 from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
@@ -70,7 +63,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from gateway.authentication.auth import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from gateway.authentication.auth import get_current_user_info, get_current_user_id
 
 agent_config_router = APIRouter(prefix="/agent")
 
@@ -250,6 +243,9 @@ async def update_agent_info_api(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
         return result or {}
+    except ParameterValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail={"code": exc.category, "field": exc.path}) from None
     except AgentRelationValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except AgentNotFoundError as exc:

@@ -3179,3 +3179,21 @@ def test_backfill_swap_pool_never_resurrects_old_models():
     # does not beat the fresh occupant (256K): nothing changes.
     assert result == []
     assert updated == []
+
+
+def test_saved_outlet_enrichment_uses_projection_without_legacy_normalization(monkeypatch):
+    svc = import_svc("reasoning")
+    projection_module = types.ModuleType("management.services.model.outlet_projection")
+    projection_module.project_saved_outlet = mock.Mock(return_value={
+        "extra_params": {"enable_thinking": False}, "migration_status": "migrated",
+        "migration_review_required": True})
+    monkeypatch.setitem(sys.modules, "management.services.model.outlet_projection", projection_module)
+    model = {"model_type": "llm", "profile_schema_version": 1,
+             "extra_params": {"parameter_values": {}, "api_parameters": []}}
+    with mock.patch.object(svc, "resolve_reasoning_capability") as old_lookup, \
+            mock.patch.object(svc, "normalize_reasoning_params") as old_normalize:
+        svc._enrich_model_reasoning_capability(model)
+    old_lookup.assert_not_called()
+    old_normalize.assert_not_called()
+    assert model["extra_params"] == {"enable_thinking": False}
+    assert model["migration_review_required"] is True

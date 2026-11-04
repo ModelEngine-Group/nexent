@@ -40,6 +40,8 @@ def prepare_creation_history(
     user_id: str,
     tenant_id: str,
     target: dict[str, Any] | None = None,
+    model_parameter_preferences: dict[str, dict[str, Any]] | None = None,
+    selected_model_id: int | None = None,
     retry_user_message_id: int | None = None,
     retry_message_index: int | None = None,
 ) -> tuple[int, int]:
@@ -60,6 +62,8 @@ def prepare_creation_history(
             agent_id=agent_id,
             target=target,
             workbench_config=normalized_config,
+            **({"selected_model_id": selected_model_id} if selected_model_id is not None else {}),
+            **({"model_parameter_preferences": model_parameter_preferences} if model_parameter_preferences else {}),
         )
         resolved_id = int(created["conversation_id"])
         next_index = 0
