@@ -874,7 +874,10 @@ function BatchAddForm({
   });
   const [issues, setIssues] = useState<Record<string, ModelCheckIssue>>({});
   const generations = useRef<Record<string, number>>({});
-  const checkStatuses = useRef<Record<string, "available" | "unavailable">>({});
+  const checkStatuses = useRef<
+    Record<string, { status: "available" | "unavailable"; draft: string }>
+  >({});
+  const previousDrafts = useRef<Record<string, string>>({});
   const discoveryGeneration = useRef(0);
   const [profileMatches, setProfileMatches] = useState<Record<string, boolean>>(
     {}
@@ -1134,6 +1137,24 @@ function BatchAddForm({
     };
   }
 
+  // Catalog loading can change automatic matching without a form edit.
+  // Invalidate both completed checks and responses still in flight.
+  const currentDrafts = JSON.stringify(
+    Object.fromEntries(
+      fetched
+        .filter((row) => !tenantId && row.model_type === MODEL_TYPES.LLM)
+        .map((row) => [row.id, JSON.stringify(outletDraft(row))])
+    )
+  );
+  useEffect(() => {
+    const next: Record<string, string> = JSON.parse(currentDrafts);
+    Object.entries(next).forEach(([id, draft]) => {
+      if (previousDrafts.current[id] && previousDrafts.current[id] !== draft)
+        invalidateChecks(id);
+    });
+    previousDrafts.current = next;
+  }, [currentDrafts]);
+
   async function resolveOutletDraft(row: FetchedRow) {
     const draft = outletDraft(row);
     const preview = await previewModelProfile(draft);
@@ -1188,9 +1209,10 @@ function BatchAddForm({
           },
         });
         if (generations.current[row.id] === generation)
-          checkStatuses.current[row.id] = result.ok
-            ? "available"
-            : "unavailable";
+          checkStatuses.current[row.id] = {
+            status: result.ok ? "available" : "unavailable",
+            draft: JSON.stringify(draft),
+          };
         apply(result.ok, result.error);
         return;
       }
@@ -1257,9 +1279,13 @@ function BatchAddForm({
       try {
         if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
           const draft = await resolveOutletDraft(row);
+          const checked = checkStatuses.current[row.id];
           await createModelOutlet({
             ...draft,
-            connect_status: checkStatuses.current[row.id],
+            connect_status:
+              checked?.draft === JSON.stringify(draft)
+                ? checked.status
+                : undefined,
             api_key:
               draft.authentication_scheme === "no_auth_v1"
                 ? null

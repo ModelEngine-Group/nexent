@@ -29,6 +29,8 @@ change:
     - Default settings and clearing extended settings preserve legacy checks and creates.
     - Mixed selection can proceed with supported LLM rows after deselecting legacy rows; checked and saved drafts retain the same extended settings.
     - Managed-tenant legacy LLM rows cannot silently accept extended settings.
+    - Late profile matching invalidates completed checks and ignores stale in-flight results.
+    - Save reuses connectivity status only for the same resolved draft; unchanged catalog matching preserves a valid result.
     reason: Real React component events and service boundary assertions prove the missing UI decision. No backend or SDK behavior changes, so no duplicate D1 or new D2/D3 is needed. Existing successful-LLM D4 assets do not prove this rejection; actual container browser verification is recorded separately.
     test_selectors:
     - frontend/tests/component/modelOutletBatch.test.tsx

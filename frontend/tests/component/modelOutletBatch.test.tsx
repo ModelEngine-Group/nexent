@@ -3,7 +3,13 @@
 import { App } from "antd";
 import { ApiError } from "../../services/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ModelAddDialog } from "../../app/[locale]/models/components/model/ModelAddDialog";
 
@@ -700,3 +706,133 @@ it("AC-BC4 prevents extended settings from silently entering the managed-tenant 
   ).toBeDisabled();
   expect(legacy.createManageTenantModel).not.toHaveBeenCalled();
 });
+
+it.each([
+  "available",
+  "unavailable",
+  "inflight",
+  "unchanged",
+  "resolved-change",
+])(
+  "AC-PC1 binds batch checks to resolved drafts across catalog loading (%s)",
+  async (mode) => {
+    let finishCatalog!: (value: { items: object[] }) => void;
+    let finishCheck!: (value: { ok: boolean }) => void;
+    api.listModelProfiles.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishCatalog = resolve;
+        })
+    );
+    legacy.addProviderModel.mockResolvedValue([
+      { id: "route-kimi-k3", model_type: "llm" },
+    ]);
+    let resolvedTopP = 1;
+    api.previewModelProfile.mockImplementation(async (draft) => ({
+      catalog_revision: "r1",
+      selected: { model: draft.model_profile, provider: null },
+      field_specs: [],
+      parameter_values: {
+        temperature: 0.7,
+        top_p: draft.model_profile ? 0.95 : resolvedTopP,
+      },
+      capabilities: {
+        context: {
+          combined_window: null,
+          input_limit: null,
+          output_limit: null,
+        },
+      },
+    }));
+    if (mode === "inflight") {
+      api.validateModelOutlet.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishCheck = resolve;
+          })
+      );
+    } else {
+      api.validateModelOutlet.mockResolvedValue({ ok: mode !== "unavailable" });
+    }
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <App>
+          <ModelAddDialog
+            isOpen
+            initialTab="batch"
+            onClose={vi.fn()}
+            onSuccess={vi.fn()}
+          />
+        </App>
+      </QueryClientProvider>
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("https://api.example.com/v1"),
+      { target: { value: "https://models.invalid/v1" } }
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" })
+    );
+    await screen.findByText("route-kimi-k3");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProfile.checkModel route-kimi-k3",
+      })
+    );
+    await waitFor(() => expect(api.validateModelOutlet).toHaveBeenCalledOnce());
+    expect(
+      api.validateModelOutlet.mock.calls[0][0].draft.parameter_values.top_p
+    ).toBe(1);
+    if (mode !== "inflight") {
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name: "modelProfile.checkModel route-kimi-k3",
+          })
+        ).toBeEnabled()
+      );
+    }
+    const changesMatch = ["available", "unavailable", "inflight"].includes(
+      mode
+    );
+    await act(async () =>
+      finishCatalog({
+        items: changesMatch
+          ? [{ key: "moonshot/kimi-k3", revision: 1, name: "Kimi K3" }]
+          : [],
+      })
+    );
+    if (changesMatch) {
+      await screen.findByText("modelProfile.profileMatched");
+      expect(
+        screen.queryByText("modelProfile.checkFailed")
+      ).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name: "modelProfile.checkModel route-kimi-k3",
+          })
+        ).toBeEnabled()
+      );
+    }
+    if (mode === "inflight") await act(async () => finishCheck({ ok: true }));
+    if (mode === "resolved-change") resolvedTopP = 0.8;
+    fireEvent.click(screen.getByText("modelConfig.addDialog.toggleAll"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" })
+    );
+    await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledOnce());
+    expect(api.createModelOutlet.mock.calls[0][0]).toMatchObject({
+      parameter_values: { top_p: changesMatch ? 0.95 : resolvedTopP },
+    });
+    expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBe(
+      mode === "unchanged" ? "available" : undefined
+    );
+    expect(api.validateModelOutlet).toHaveBeenCalledOnce();
+  },
+  20000
+);
