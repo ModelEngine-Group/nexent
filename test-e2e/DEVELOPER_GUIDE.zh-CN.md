@@ -87,6 +87,8 @@ Linux 的 Chromium 系统库需要另外由主机环境提供。依赖安装和�
 
 使用 GitHub Daily 时，若本机 `daily.env` 显式设置了 `NEXENT_REPO`，它必须与 `.github/workflows/nexent-daily-full-test.yml` 中的 `REPO_ROOT` 指向同一个产品 Git 仓库。迁移仓库路径时不能只改其中一个，还需核对启动入口和 SDK 引用，避免从一个仓库启动、却加载另一个仓库的代码。工作流修改只有提交并在实际运行的分支生效后才算完成入口切换；此前不要恢复可能混用新旧入口的 Runner。普通本地命令仍应从实际产品仓库根目录执行，不能仅靠修改该环境变量替代切换工作目录。
 
+普通部署失败留下恢复标记后，下一次 GitHub Daily 可以在持有 Daily 和仓库部署锁、确认旧进程已退出及旧批次终态、核验原始备份和 Local 配置后，保存旧证据并恢复配置，再同步最新 develop、构建部署。标记不会因允许同步而直接清除：服务预检、实际部署模式和 Local 恢复用例必须通过，才能开始普通用例；最终恢复验证完成后才解除本次标记。损坏备份、非预期配置改动、活跃锁、D5 故障恢复标记或未确认的 D5 超时/清理失败仍会阻断。普通定向执行和 resume 不具备这个自动恢复权限。详见[Daily 恢复流程](infra/tools/docs/daily-validation.md#retrying-a-failed-deployment)。
+
 专用 Ubuntu 测试机迁移后的目录分工：产品 Git 仓库是 `/home/jason/projects/nexent`，test-home 仍为 `/home/jason/nexent-test-suite`。旧 `/root/project/nexent` 保留用于回退，不再作为新入口；`/home/jason/nexent` 是容器工作目录，不是新的产品 Git 仓库，不能覆盖或删除。配置、历史结果、浏览器缓存及持久化数据均保留在原 test-home。专用机的本地命令应先执行 `cd /home/jason/projects/nexent`；其他开发者使用自己的仓库位置，不把上述机器路径写进通用 Case。
 
 Windows Docker Desktop 的容器访问宿主机通常使用 `host.docker.internal`。容器内的 `127.0.0.1` 指向容器自身。按实际网络设置 `NEXENT_TEST_ASSETS_CONTAINER_HOST` 和 `NEXENT_TEST_MCP_CONTAINER_HOST`。
