@@ -654,6 +654,75 @@ def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
     return result
 
 
+def container_main(argv=None):
+    """Database-only worker; platform lifecycle belongs to the host Shell."""
+    import psycopg2
+
+    parser = argparse.ArgumentParser(description="Run account migration inside an isolated container")
+    parser.add_argument("--container", action="store_true", required=True)
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--wait-timeout", type=int, default=300)
+    args = parser.parse_args(argv)
+    if not 1 <= args.wait_timeout <= 300:
+        parser.error("--wait-timeout must be between 1 and 300")
+
+    def parameters(prefix, password_key):
+        values = os.environ
+        required = [prefix + "POSTGRES_HOST", password_key]
+        if any(not values.get(key) for key in required):
+            raise MigrationSetupError("Database host/password is missing from the migration environment")
+        return {
+            "host": values[prefix + "POSTGRES_HOST"],
+            "port": _port(values.get(prefix + "POSTGRES_PORT") or 5432),
+            "dbname": values.get(prefix + "POSTGRES_DB") or ("supabase" if prefix else "nexent"),
+            "user": values.get(prefix + "POSTGRES_USER") or "postgres",
+            "password": values[password_key], "connect_timeout": 5,
+        }
+
+    try:
+        with psycopg2.connect(**parameters("", "NEXENT_POSTGRES_PASSWORD")) as target:
+            try:
+                with target.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
+                    cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL, "
+                                   "to_regclass('nexent.user_tenant_t') IS NOT NULL")
+                    complete, legacy = cursor.fetchone()
+                if complete or not legacy:
+                    print(json.dumps({"skipped": True, "complete": complete, "new": not legacy}))
+                    return 0
+                source_params = parameters("SUPABASE_", "SUPABASE_POSTGRES_PASSWORD")
+                deadline = time.monotonic() + args.wait_timeout
+                while True:
+                    try:
+                        source = psycopg2.connect(**source_params)
+                        break
+                    except psycopg2.OperationalError:
+                        if time.monotonic() >= deadline:
+                            raise MigrationSetupError("Original Supabase is unavailable; check source readiness and credentials") from None
+                        time.sleep(1)
+                try:
+                    with source:
+                        source.set_session(readonly=True, isolation_level="REPEATABLE READ")
+                        rows = read_source_users(source)
+                finally:
+                    source.close()
+                result = import_users(target, rows, dry_run=not args.apply)
+            except Exception:
+                target.rollback()
+                raise
+        result["committed"] = args.apply and not result.get("complete", False)
+        print(json.dumps(result))
+        return 0
+    except (MigrationConflict, MigrationSetupError) as error:
+        print("Account upgrade rejected: " + str(error), file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 -- Never log driver text or credentials.
+        print("Account upgrade failed (" + type(error).__name__ + "); target transaction rolled back", file=sys.stderr)
+    finally:
+        if "target" in locals():
+            target.close()
+    return 1
+
+
 def main(*, upgrade=automatic_upgrade):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", nargs="?", choices=["up", "down"], help="Manual legacy stack recovery/removal")
@@ -748,4 +817,4 @@ def main(*, upgrade=automatic_upgrade):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(container_main() if "--container" in sys.argv else main())

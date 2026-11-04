@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real deployment coordinator, SQL runner, import failure and recovery proof."""
 
+import io
 import json
+import tarfile
 import os
 import subprocess
 import time
@@ -22,6 +24,8 @@ def assert_automatic_upgrade(root, temporary):
     target = "auth-auto-target-" + run_id
     worker = "auth-auto-config-" + run_id
     network = "auth-auto-network-" + run_id
+    image = "nexent-account-worker-test:" + run_id
+    source_network = network + "-source"
     label = "codex.test=" + run_id
     password = "IsolatedAutoTest123"
     user_id = str(uuid4())
@@ -30,16 +34,23 @@ def assert_automatic_upgrade(root, temporary):
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",
-           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0"}
+           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0", "NEXENT_IMAGE": image, "DEPLOYMENT_IMAGE_SOURCE": "local-latest"}
     # Automatic mode must recover the source password from the original container.
     env.pop("SUPABASE_POSTGRES_PASSWORD", None)
     env_file = temporary / ".env"
     env_file.write_text("")
+    no_python = temporary / "no-host-python"
+    no_python.mkdir()
+    for executable in ("python", "python3"):
+        path = no_python / executable
+        path.write_text('#!/usr/bin/env bash\nprintf "host Python was invoked" >&2\nexit 97\n', encoding="utf-8")
+        path.chmod(0o755)
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "bash"
 
     def phase(name, success=True):
         shell = 'source "$1/deploy/common/common.sh"; export DEPLOYMENT_ROOT_ENV="$2"; deployment_upgrade_local_accounts docker nexent "$4" "$5"'
-        result = subprocess.run([bash, "-c", shell, "case", root.as_posix(), env_file.as_posix(), name, target, worker],
+        shell = 'export PATH="$(cygpath -u "$6" 2>/dev/null || printf "%s" "$6"):$PATH"; ' + shell
+        result = subprocess.run([bash, "-c", shell, "case", root.as_posix(), env_file.as_posix(), name, target, worker, no_python.as_posix()],
                                 env=env, capture_output=True, text=True, check=False)
         assert result.returncode == (0 if success else 1), result.stdout + result.stderr
         assert encoded not in result.stdout + result.stderr
@@ -51,10 +62,22 @@ def assert_automatic_upgrade(root, temporary):
     def query(sql):
         return docker("exec", "-i", target, "psql", "-U", "postgres", "-qAt", "-v", "ON_ERROR_STOP=1", data=sql)
 
+    context = io.BytesIO()
+    with tarfile.open(fileobj=context, mode="w") as archive:
+        content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
+                   "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
+                   "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
+                   'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
+        info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
+        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql")]:
+            archive.add(source, arcname=destination)
+    built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
+    assert built.returncode == 0, built.stderr
     docker("network", "create", "--label", label, network)
+    docker("network", "create", "--label", label, source_network)
     try:
         for name in [target, names["db"]]:
-            docker("run", "-d", "--name", name, "--label", label, "--network", network,
+            docker("run", "-d", "--name", name, "--label", label, "--network", source_network if name == names["db"] else network,
                    "-e", "POSTGRES_PASSWORD=" + password, "postgres:15-alpine")
         for name in [names["auth"], names["kong"]]:
             docker("run", "-d", "--name", name, "--label", label,
@@ -146,5 +169,8 @@ def assert_automatic_upgrade(root, temporary):
         for name in [*names.values(), target, worker]:
             if name in existing and docker("inspect", "--format", '{{index .Config.Labels "codex.test"}}', name) == run_id:
                 docker("rm", "-f", name)
-        if docker("network", "inspect", "--format", '{{index .Labels "codex.test"}}', network) == run_id:
-            docker("network", "rm", network)
+        if docker("image", "inspect", "--format", '{{index .Config.Labels "codex.test"}}', image) == run_id:
+            docker("image", "rm", image)
+        for owned_network in (network, source_network):
+            if docker("network", "inspect", "--format", '{{index .Labels "codex.test"}}', owned_network) == run_id:
+                docker("network", "rm", owned_network)
