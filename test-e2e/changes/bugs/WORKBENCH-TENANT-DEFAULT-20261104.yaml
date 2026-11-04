@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: WORKBENCH-TENANT-DEFAULT-20261104
+  change_type: bugfix
+  bug_id: WORKBENCH-TENANT-DEFAULT-20261104
+  title: Restore the tenant default model on new Workbench threads
+  description: Restore the existing default-model fallback input without changing explicit selection priority.
+  observed_behavior: WorkbenchPage no longer forwards the tenant default and a new thread chooses the first connected model.
+  expected_behavior: New threads use the configured tenant default when present; saved and manually selected models retain priority.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Hook tests exercise a supplied default but the actual Workbench page test never asserts that tenant configuration reaches Chat.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-036]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Actual Workbench page forwards the tenant default without making selection controlled.
+    - Shared selection uses delayed defaults, keeps manual and persisted choices, and handles missing defaults.
+    reason: Page composition and the existing shared selection hook directly prove the missing boundary. Backend selection-to-provider behavior is unchanged; no duplicate formal D1 is needed. Browser acceptance remains separate.
+    test_selectors:
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+  notes: User authorized comment 4463229343 correction and push before local VM verification. Design and acceptance AC-D1/AC-D2 are in nexent-doc/docs/Developing/model-access-native-agent/PR4121-REVIEW-FIXES-20261103.md. Existing D4 creator fixture uses an obsolete protocol and is not claimed as this fix's proof; its broader migration is outside this bounded correction.

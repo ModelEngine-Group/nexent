@@ -41,6 +41,7 @@ import { WorkbenchConversationLayout } from "./components/WorkbenchConversationL
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useConfig } from "@/hooks/useConfig";
 import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
@@ -131,6 +132,7 @@ const HomeContent: FC = () => {
     conversationDetails,
   } = useWorkbenchSession();
   const { llmModels, isLoading: isLoadingModels } = useModelList();
+  const { defaultLlmModelConfig } = useConfig();
   const effectiveWorkbenchConfig = workbenchState.config;
   const { t, i18n } = useTranslation();
 
@@ -1431,6 +1433,7 @@ const HomeContent: FC = () => {
               }
               selectedAgent={null}
               modelSelectionScope="tenant"
+              selectedModelId={defaultLlmModelConfig?.id?.toString()}
               fallbackAgentName={t(
                 "workbench.genericAgentName",
                 "智能体工作台"

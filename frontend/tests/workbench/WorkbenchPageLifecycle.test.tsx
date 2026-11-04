@@ -44,6 +44,7 @@ const view = vi.hoisted(() => ({
   threadLoading: false,
   running: false,
   initialConfigVersion: 7,
+  defaultModelId: undefined as number | undefined,
 }));
 const runtime = {
   thread: {
@@ -151,7 +152,12 @@ vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({ llmModels: [], availableLlmModels: [], isLoading: false }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
-  useConfig: () => ({ modelConfig: undefined }),
+  useConfig: () => ({
+    modelConfig: undefined,
+    defaultLlmModelConfig: view.defaultModelId === undefined
+      ? undefined
+      : { id: view.defaultModelId },
+  }),
 }));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
@@ -271,6 +277,7 @@ beforeEach(() => {
   view.threadLoading = false;
   view.running = false;
   view.initialConfigVersion = 7;
+  view.defaultModelId = undefined;
   view.nextThread = 0;
   vi.mocked(conversationService.getById).mockImplementation(async (id) =>
     detail(Number(id))
@@ -779,4 +786,18 @@ it("restores standalone Skill history and keeps changed controls out of workbenc
   expect(conversationService.updateWorkbenchConfig).not.toHaveBeenCalled();
   expect(runConfig().creationWorkbenchConfig).not.toHaveProperty("generation_config");
   expect(runConfig().creationWorkbenchConfig).not.toHaveProperty("model_id");
+});
+
+
+it("AC-D1 forwards the tenant default as an uncontrolled Chat fallback, including delayed loading", async () => {
+  view.threadId = "new-default";
+  view.items = [];
+  view.bootstrap = { generic_agent: { agent_id: 100, version_no: 1 } };
+  const page = render(<WorkbenchPage />);
+  await screen.findByRole("textbox", { name: "workbench draft" });
+  expect(view.props?.selectedModelId).toBeUndefined();
+  view.defaultModelId = 2;
+  page.rerender(<WorkbenchPage />);
+  expect(view.props?.selectedModelId).toBe("2");
+  expect(view.props?.onModelChange).toBeUndefined();
 });

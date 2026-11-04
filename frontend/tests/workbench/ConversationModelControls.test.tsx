@@ -263,3 +263,27 @@ it.each(["agent", "workbench"])(
     expect(options[0].connectStatus).toBe("unavailable");
   }
 );
+
+
+it("AC-D1/AC-D2 prefers the tenant default over list order and keeps a later manual choice", () => {
+  const options = models.map((model) => ({ ...model, connectStatus: "available" }));
+  const { result, rerender } = renderHook(
+    ({ defaultId }: { defaultId?: string }) =>
+      useConversationModelControls(options, "tenant-default-regression", defaultId),
+    { initialProps: { defaultId: undefined as string | undefined }, wrapper: Wrapper }
+  );
+  expect(result.current.snapshot).toEqual({ model_id: 1 });
+  rerender({ defaultId: "2" });
+  expect(result.current.snapshot).toEqual({ model_id: 2 });
+  act(() => result.current.onModelChange("1"));
+  rerender({ defaultId: "2" });
+  expect(result.current.snapshot).toEqual({ model_id: 1 });
+});
+
+it("AC-D2 falls back to the existing automatic policy when the tenant default is absent", () => {
+  const { result } = renderHook(
+    () => useConversationModelControls(models, "missing-tenant-default", "999"),
+    { wrapper: Wrapper }
+  );
+  expect(result.current.snapshot).toEqual({ model_id: 1 });
+});
