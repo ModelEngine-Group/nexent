@@ -96,3 +96,18 @@ class TestModelNameUtils:
         sorted_mixed = sort_models_by_id(mixed_list)
         # Should handle non-dict items gracefully
         assert len(sorted_mixed) == 4
+
+        # Test case 7: Same first letter must still sort by the full id
+        same_prefix = [
+            {"id": "qwen-7b"},
+            {"id": "qwen-72b"},
+            {"id": "qwen-1.5"},
+            {"id": "deepseek-r1"},
+        ]
+        sorted_same = sort_models_by_id(same_prefix)
+        assert [m["id"] for m in sorted_same] == [
+            "deepseek-r1",
+            "qwen-1.5",
+            "qwen-7b",
+            "qwen-72b",
+        ]

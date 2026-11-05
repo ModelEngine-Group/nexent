@@ -322,7 +322,7 @@ def _split_repo_name(model_name: str):
 def _sort_models_by_id(model_list):
     if isinstance(model_list, list):
         model_list.sort(key=lambda m: str(
-            (m.get("id") if isinstance(m, dict) else m) or "")[:1].lower())
+            (m.get("id") if isinstance(m, dict) else m) or "").lower())
     return model_list
 
 
