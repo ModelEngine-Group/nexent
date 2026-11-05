@@ -395,6 +395,8 @@ class DockerContainerClient(ContainerClient):
         if not DockerContainerClient._is_running_in_docker():
             container_config["ports"] = {f"{container_port}/tcp": host_port}
 
+        # Tracked so a later failure can still remove it (_cleanup_failed_container).
+        container = None
         try:
             if full_command_to_run:
                 logger.info(
@@ -444,10 +446,36 @@ class DockerContainerClient(ContainerClient):
             }
         except APIError as e:
             logger.error(f"Docker API error starting container: {e}")
+            self._cleanup_failed_container(container, container_name)
             raise ContainerError(f"Container startup failed: {e}")
         except Exception as e:
             logger.error(f"Failed to start container: {e}")
+            self._cleanup_failed_container(container, container_name)
             raise ContainerError(f"Container startup failed: {e}")
+
+    def _cleanup_failed_container(self, container, container_name: str) -> None:
+        """
+        Best-effort removal of a container created by a start_container
+        attempt that failed after creation. Without this, a container that
+        was created and started (restart_policy unless-stopped) but then
+        failed its readiness check is never removed on any of the raise
+        paths above, so it keeps occupying the name and auto-restarting.
+
+        Args:
+            container: The docker SDK container handle, or None if
+                containers.run() itself never succeeded (nothing to clean up).
+            container_name: Used for logging only.
+        """
+        if container is None:
+            return
+        try:
+            container.remove(force=True)
+        except NotFound:
+            pass
+        except Exception as cleanup_error:
+            logger.warning(
+                f"Failed to clean up container {container_name} after a failed start: {cleanup_error}"
+            )
 
     async def _wait_for_service_ready(
         self, url: str, max_retries: int = 30, retry_delay: int = 5, authorization_token: Optional[str] = None
