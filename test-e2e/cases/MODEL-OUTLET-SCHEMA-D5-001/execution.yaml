@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_upgrade_preserves_values_and_repeats]
   AC-03: [test_failed_upgrade_rolls_back_and_recovers]
   AC-04: [test_first_pr_schema_covers_orm_columns_without_later_migrations]
+  AC-05: [test_first_pr_schema_covers_orm_columns_without_later_migrations]
 preparation:
   families: []
   anchors: false

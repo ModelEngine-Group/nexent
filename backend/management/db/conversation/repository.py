@@ -1,12 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
-from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
+from contracts.conversation import ConversationHistory
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
 from copy import deepcopy
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
@@ -191,6 +190,8 @@ def create_conversation(
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
     target: Optional[Dict[str, Any]] = None,
+    model_parameter_preferences: Optional[Dict[str, Any]] = None,
+    selected_model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation record
@@ -224,6 +225,10 @@ def create_conversation(
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
             data["workbench_config_version"] = 1
+        if selected_model_id is not None:
+            data["selected_model_id"] = selected_model_id
+        if model_parameter_preferences:
+            data["model_parameter_preferences"] = deepcopy(model_parameter_preferences)
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -945,7 +950,7 @@ def resolve_conversation_runtime_metadata(
 def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
     """Keep entrypoint and creation workflows stable while allowing chat mounts to change."""
     current = record.workbench_config
-    if not isinstance(current, dict) or current.get("schema_version") != 3:
+    if not isinstance(current, dict) or current.get("schema_version") != 4:
         raise WorkbenchError("WORKBENCH_CONVERSATION_REQUIRED", status_code=409)
     creation_modes = {"skill_create", "agent_create"}
     if current.get("mode") in creation_modes or config.get("mode") in creation_modes:

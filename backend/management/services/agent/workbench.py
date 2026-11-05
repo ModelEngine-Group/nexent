@@ -19,11 +19,9 @@ from contracts.agent import WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
-from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
     system_agent_provider,
 )
-from management.services.model.resolver import is_model_available
 from management.services.skill.service import SkillService
 from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
 from management.db.identity.group import query_group_ids_by_user
@@ -445,25 +443,17 @@ def resolve_workbench_config(
         origin="SYSTEM",
     )
     child_mounts = tuple(child_identities)
-    if canonical.model_id is not None:
-        model_info = get_model_by_model_id(
-            canonical.model_id, tenant_id=tenant_id
-        )
-        if not is_model_available(model_info):
-            raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
-
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
         agent_id=int(root_identity.agent_id), tenant_id=system_ref.tenant_id,
         version_no=int(root_identity.version_no),
     )
-    generation = canonical.generation_config
     root = PublishedRootDescriptor(
         identity=root_identity,
         published_snapshot=deepcopy(snapshot),
     )
     overlay = RootRuntimeOverlay(
-        model_id=canonical.model_id,
-        requested_output_tokens=generation.requested_output_tokens,
+        model_id=None,
+        requested_output_tokens=canonical.requested_output_tokens,
         skill_mounts=tuple(
             value.model_dump(mode="json") for value in canonical.skill_mounts
         ),

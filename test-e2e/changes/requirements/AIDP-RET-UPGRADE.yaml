@@ -22,12 +22,12 @@ change:
       - AGT-AUTO-7A2120E630C381C7
       - API-AUTO-19E0779FED1B649A
     added:
-      - AIDP-RET-CONFIG-API
-      - AIDP-RET-PROTOCOL
-      - AIDP-RET-REAL
-      - AIDP-RET-RUNTIME
-      - AIDP-RET-JOURNEY
-      - AIDP-RET-MIGRATION
+      - AIDP-RET-CONFIG-API-D2-001
+      - AIDP-RET-PROTOCOL-D2-001
+      - AIDP-RET-REAL-D3-001
+      - AIDP-RET-RUNTIME-D3-001
+      - AIDP-RET-JOURNEY-D4-001
+      - AIDP-RET-MIGRATION-D5-001
     modified: [AGENT-CALLABLE-D3-001]
     retired: []
   traditional_ut:
@@ -100,14 +100,14 @@ change:
     hid its input; English channel summaries exposed untranslated keys. The final
     behavior keeps numeric drafts repairable, preserves independently configured
     candidates, blocks invalid confirmation and discards cancellation. These
-    missing interaction assertions belong to AIDP-RET-JOURNEY, not new frontend UT.
+    missing interaction assertions belong to AIDP-RET-JOURNEY-D4-001, not new frontend UT.
 
     Migration regression: accepted legacy top_k=7.0 previously failed text-to-int
     conversion; top_k="7" incorrectly produced candidates 10. Preserve their
     integer meaning, normalize the stored total, and keep absent totals sparse.
     Preserve explicit policy, connection and scope values across all versions and
     tenants. Use the existing versioned primary key and skip unchanged row writes.
-    AIDP-RET-MIGRATION executes the actual SQL in disposable PostgreSQL because
+    AIDP-RET-MIGRATION-D5-001 executes the actual SQL in disposable PostgreSQL because
     backend/SDK UT and the other Cases do not prove casts or physical row replay.
     Its synthetic fixtures do not establish old-UI upgrade or production-runner
     integration acceptance. The existing SQL runner has separate regression

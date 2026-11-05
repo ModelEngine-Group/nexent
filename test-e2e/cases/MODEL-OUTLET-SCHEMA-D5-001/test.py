@@ -159,6 +159,32 @@ def test_first_pr_schema_covers_orm_columns_without_later_migrations(table_name)
         """))
         assert columns["selected_model_id"] == {"type": "integer", "nullable": "YES", "default": None}
         assert columns["model_parameter_preferences"]["default"] == "'{}'::jsonb"
-        assert columns["model_parameter_preferences_version"]["default"] == "0"
+        assert "model_parameter_preferences_version" not in columns
         postgres_sql(sql)
         assert json.loads(postgres_scalar("SELECT row_to_json(t) FROM nexent.model_record_t t;")) == row
+
+        # Exercise an earlier PR deployment with saved preferences and revisions.
+        postgres_sql("""
+            ALTER TABLE nexent.conversation_record_t
+              ADD COLUMN model_parameter_preferences_version INTEGER NOT NULL DEFAULT 0;
+            INSERT INTO nexent.conversation_record_t
+              (conversation_title, selected_model_id, model_parameter_preferences,
+               model_parameter_preferences_version, runtime_metadata_version,
+               workbench_config_version, title_version)
+            VALUES ('preference-upgrade-fixture', 17,
+              '{"17":{"temperature":0,"enable_thinking":false}}'::jsonb, 11, 5, 7, 9);
+        """)
+        query = "SELECT row_to_json(t) FROM nexent.conversation_record_t t WHERE conversation_title='preference-upgrade-fixture';"
+        before = json.loads(postgres_scalar(query))
+        expected = {key: value for key, value in before.items() if key != "model_parameter_preferences_version"}
+        for _ in range(2):
+            postgres_sql(sql)
+            assert json.loads(postgres_scalar(query)) == expected
+            assert postgres_scalar("""
+                SELECT count(*) FROM information_schema.columns
+                WHERE table_schema='nexent' AND table_name='conversation_record_t'
+                  AND column_name='model_parameter_preferences_version';
+            """) == "0"
+            with closing(psycopg2.connect(**postgres_connect_kwargs())) as connection:
+                with connection, connection.cursor() as cursor:
+                    cursor.execute(str(statement))

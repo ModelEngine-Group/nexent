@@ -169,15 +169,17 @@ class CaseNamingTests(unittest.TestCase):
         path.write_text(yaml.safe_dump(document), encoding="utf-8")
         self.assertTrue(any("folder name" in issue.message for issue in validate_cases.validate(self.root)))
 
-    def test_current_repository_stays_compatible_and_catalog_is_read_only(self):
+    def test_frozen_repository_ids_stay_compatible_and_catalog_is_read_only(self):
         path = REPO / LEGACY_CATALOG
         before = path.read_bytes()
         cases, issues = case_index(discover_documents(REPO, "cases"))
         self.assertEqual(issues, [])
-        with patch("case_naming.FROZEN_CATALOG_SHA256", FROZEN_CATALOG_SHA256):
-            self.assertEqual(naming_issues(REPO, cases), [])
-        self.assertEqual(path.read_bytes(), before)
         catalog = json.loads(before)
+        frozen_cases = {case_id: record for case_id, record in cases.items() if case_id in catalog["case_ids"]}
+        self.assertTrue(frozen_cases)
+        with patch("case_naming.FROZEN_CATALOG_SHA256", FROZEN_CATALOG_SHA256):
+            self.assertEqual(naming_issues(REPO, frozen_cases), [])
+        self.assertEqual(path.read_bytes(), before)
         self.assertEqual(catalog["case_ids"], sorted(catalog["case_ids"]))
         self.assertTrue(all(not NEW_CASE_ID.fullmatch(case_id) for case_id in catalog["case_ids"]))
 

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-OPTIMIZE-COMPOSER-20261102
+  change_type: requirement
+  requirement_id: NL2AGENT-OPTIMIZE-COMPOSER-20261102
+  title: Fill the NL2Agent composer on one-click prompt optimization
+  description: Open the assistant and prefill the optimization prompt for manual submission.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    behaviors:
+      - Fill localized optimization prompts without appending messages or invoking the model.
+      - Preserve disabled, running, restoring, invalid-model, missing-target and blank-input guards.
+    reason: Isolated frontend composer mutation; Python, API, persistence and runtime contracts are unaffected. No additional D1-D5 proof boundary.
+  notes: Direct update to ../nexent-doc/docs/Developing/chat-agent-suggestion AC-027. Existing formal Cases remain unchanged. Regression before the fix fails for both locales; after the fix 32 focused frontend tests and type-check pass. Targeted ESLint has zero errors and two existing warnings. No deployed browser journey is claimed.

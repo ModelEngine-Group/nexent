@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-PARAM-LAYERS-20261103
+  change_type: bugfix
+  bug_id: AGENT-PARAM-LAYERS-20261103
+  title: Keep Agent parameter layers and first-consumer frontend contracts consistent
+  description: Preserve inherited dependency semantics, validate Agent overrides during preflight, and move existing canonical frontend consumers into their backend-owning PR.
+  observed_behavior: Session thinking-off treats inherited Agent budget as explicit; preflight ignores Agent thinking-on; same-PR frontend sends rejected schema3 requests. Removed service read exports break CI imports.
+  expected_behavior: Runtime and preflight share outlet-Agent-session semantics; first consumers send schema4 and canonical preferences; Agent subscription read facade stays importable.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing tests do not combine Agent-level budget with session thinking-off or outlet-off Agent-on session-budget, and final-stack tests hide the standalone frontend mismatch.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-036]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-MODEL-CONTROLS-D2-001, CHAT-MODEL-CONTROLS-D2-002, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
+    added: []
+    modified: [CHAT-MODEL-CONTROLS-D2-001, CHAT-MODEL-CONTROLS-D2-002, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Session-off removes only inherited Agent budgets and retains explicit-conflict rejection and outlet restoration.
+    - Preflight validates the same three layers as runtime without changing access or selection checks.
+    - Actual frontend callers serialize canonical schema4 and preference payloads; public read exports remain importable.
+    reason: Reuse the existing Python and frontend contract suites, adding the missing layer combinations and moving existing caller tests with their implementation. Actual model/VM evidence remains separate; no duplicate formal D1 is created.
+    test_selectors:
+    - test/backend/services/test_conversation_model_preference_layers.py
+    - test/backend/services/test_agent_model_parameters.py
+    - test/backend/services/test_conversation_service_exports.py
+    - test/backend/services/test_run_model_control_boundaries.py
+    - test/sdk/core/model_service/test_backend_turn_overlays.py
+  notes: Second review additionally fixes list metadata mapping, actual Agent editor integration, existing-conversation GET/PATCH layering and stale D2 fixtures. Necessary frontend and D2 changes move from later PRs; no new D1. User authorized PR4121 CI/review correction; PR4120 is merged and untouched. Design and evidence in nexent-doc/docs/Developing/model-access-native-agent/PR4121-REVIEW-FIXES-20261103.md. Frontend code is moved from4122 instead of introducing temporary server compatibility. Existing canonical runtime fixtures are moved from4097; D3-001 strengthens AC-02 with ordinary/Workbench Agent-session dependency regressions; selected runtime regressions and actual model evidence are recorded separately.

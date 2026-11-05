@@ -9,6 +9,38 @@ import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import zh from "@/public/locales/zh/common.json";
 import en from "@/public/locales/en/common.json";
+import { useSourcesPanelState } from "@/app/newchat/ui/sources-panel-context";
+
+function SourcesProbe({
+  name,
+  epoch,
+  onOpen,
+}: {
+  name: string;
+  epoch?: number;
+  onOpen?: () => void;
+}) {
+  const panel = useSourcesPanelState(onOpen, epoch);
+  return (
+    <>
+      <button
+        onClick={() =>
+          panel.open({
+            messageId: name,
+            groupId: "retrieval",
+            sources: [],
+            images: [],
+          })
+        }
+      >
+        Show {name} references
+      </button>
+      {panel.isOpen && (
+        <div data-testid={`${name}-references`}>Reference details</div>
+      )}
+    </>
+  );
+}
 
 const fixture = vi.hoisted(() => ({
   locale: "zh" as "zh" | "en",
@@ -64,12 +96,22 @@ vi.mock("@/app/newchat/assistant-ui/thread", () => ({
   Thread: ({
     chatMode,
     onChatModeChange,
+    onSourcesPanelOpen,
+    sourcesPanelCloseEpoch,
   }: {
     chatMode: ChatMode;
     onChatModeChange?: (mode: ChatMode) => void;
+    onSourcesPanelOpen?: () => void;
+    sourcesPanelCloseEpoch?: number;
   }) => (
     <>
       <input aria-label="Single draft" defaultValue="unsent draft" />
+      <SourcesProbe
+        name="single"
+        epoch={sourcesPanelCloseEpoch}
+        onOpen={onSourcesPanelOpen}
+      />
+      <button onClick={onSourcesPanelOpen}>Open single sources</button>
       <output data-testid="single-chat-mode">{chatMode}</output>
       <button
         onClick={() =>
@@ -88,13 +130,23 @@ vi.mock("@/app/agents/[agentId]/components/debug/compare-panel", () => ({
     clearEpoch,
     chatMode,
     onChatModeChange,
+    onSourcesPanelOpen,
+    sourcesPanelCloseEpoch,
   }: {
     clearEpoch: number;
     chatMode: ChatMode;
     onChatModeChange: (mode: ChatMode) => void;
+    onSourcesPanelOpen?: () => void;
+    sourcesPanelCloseEpoch?: number;
   }) => (
     <>
       <output data-testid="compare-clear-epoch">{clearEpoch}</output>
+      <SourcesProbe
+        name="compare"
+        epoch={sourcesPanelCloseEpoch}
+        onOpen={onSourcesPanelOpen}
+      />
+      <button onClick={onSourcesPanelOpen}>Open compare sources</button>
       <output data-testid="compare-chat-mode">{chatMode}</output>
       <button
         onClick={() =>
@@ -119,18 +171,36 @@ beforeEach(() => {
 });
 
 function ControlledPanel() {
+  const [fullscreen, setFullscreen] = useState(false);
   const [compare, setCompare] = useState(false);
   const [open, setOpen] = useState(true);
   return (
     <>
       <style>{".hidden { display: none; }"}</style>
-      {open && (
+      <button onClick={() => setOpen(true)}>Reopen debug</button>
+      {["Configure", "Publish"].map((label) => (
+        <button
+          key={label}
+          onClick={() => {
+            setFullscreen(false);
+            setOpen(false);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+      <div className={open ? "" : "hidden"}>
         <AgentDebugPanel
           isCompareMode={compare}
+          isFullscreen={fullscreen}
+          onToggleFullscreen={() => setFullscreen((value) => !value)}
           onCompareModeChange={setCompare}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            setFullscreen(false);
+            setOpen(false);
+          }}
         />
-      )}
+      </div>
     </>
   );
 }
@@ -181,9 +251,9 @@ it("shares the mode across ordinary and compare views without clearing unsent te
   expect(remoteChatModelAdapter.run).not.toHaveBeenCalled();
 });
 
-it("shows a static name and toggles comparison both ways without replacing the single draft", async () => {
+it("shows a static title and toggles comparison both ways without replacing the single draft", async () => {
   render(<ControlledPanel />);
-  const name = screen.getByText("Draft name");
+  const name = screen.getByText(zh["agent.debug.title"]);
   expect(name.closest("button")).toBeNull();
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   const toggle = screen.getByRole("button", { name: "切换对比模式" });
@@ -228,8 +298,67 @@ it("closes debug from the rightmost X with its localized tooltip", async () => {
   fireEvent.mouseOver(close);
   expect(await screen.findByRole("tooltip")).toHaveTextContent("关闭调试");
   fireEvent.click(close);
-  expect(screen.queryByTestId("agent-debug-panel")).not.toBeInTheDocument();
+  expect(screen.getByTestId("agent-debug-panel")).not.toBeVisible();
 });
+
+it.each([false, true])(
+  "closes references on a parent fullscreen transition without a toggle callback (compare=%s)",
+  (compare) => {
+    const view = render(
+      <AgentDebugPanel isCompareMode={compare} isFullscreen />
+    );
+    const name = compare ? "compare" : "single";
+    fireEvent.click(
+      screen.getByRole("button", { name: `Show ${name} references` })
+    );
+    view.rerender(<AgentDebugPanel isCompareMode={compare} isFullscreen />);
+    expect(screen.getByTestId(`${name}-references`)).toBeVisible();
+    view.rerender(<AgentDebugPanel isCompareMode={compare} />);
+    expect(screen.queryByTestId(`${name}-references`)).not.toBeInTheDocument();
+    view.rerender(<AgentDebugPanel isCompareMode={compare} isFullscreen />);
+    expect(screen.queryByTestId(`${name}-references`)).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: `Show ${name} references` })
+    );
+    expect(screen.getByTestId(`${name}-references`)).toBeVisible();
+    expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+  }
+);
+
+it.each(["关闭调试", "Configure", "Publish"])(
+  "closes mounted references after %s and reopening without resetting the draft",
+  (exit) => {
+    render(<ControlledPanel />);
+    const draft = screen.getByRole("textbox", { name: "Single draft" });
+    fireEvent.change(draft, { target: { value: "Keep this draft" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show single references" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show compare references" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: exit }));
+    expect(screen.getByTestId("agent-debug-panel")).not.toBeVisible();
+    expect(screen.queryByTestId("single-references")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("compare-references")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen debug" }));
+    expect(
+      screen.getByRole("button", { name: zh["agent.debug.maximize"] })
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue("Keep this draft");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show single references" })
+    );
+    expect(screen.getByTestId("single-references")).toBeVisible();
+    expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+    expect(remoteChatModelAdapter.run).not.toHaveBeenCalled();
+  }
+);
 
 it("keeps fullscreen controls and English labels", () => {
   fixture.locale = "en";
@@ -256,10 +385,86 @@ it("keeps fullscreen controls and English labels", () => {
   expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
 });
 
-it("uses the internal name fallback and tolerates omitted optional callbacks", () => {
+it.each([false, true])(
+  "expands retrieval details without resetting state (compare=%s)",
+  (compare) => {
+    const onToggleFullscreen = vi.fn();
+    const view = render(
+      <AgentDebugPanel
+        isCompareMode={compare}
+        onToggleFullscreen={onToggleFullscreen}
+      />
+    );
+    const open = screen.getByRole("button", {
+      name: compare ? "Open compare sources" : "Open single sources",
+    });
+    fireEvent.click(open);
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <AgentDebugPanel
+        isCompareMode={compare}
+        isFullscreen
+        onToggleFullscreen={onToggleFullscreen}
+      />
+    );
+    fireEvent.click(open);
+    fireEvent.click(open);
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("textbox", { name: "Single draft" })).toHaveValue(
+      "unsent draft"
+    );
+    expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+    expect(remoteChatModelAdapter.run).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: zh["agent.debug.restore"] })
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+  }
+);
+
+it("allows retrieval opens when the fullscreen callback is omitted", () => {
+  render(<AgentDebugPanel />);
+  fireEvent.click(screen.getByRole("button", { name: "Open single sources" }));
+  expect(screen.getByTestId("agent-debug-panel")).toBeInTheDocument();
+});
+
+it("closes visible and hidden reference drawers when restoring without losing the draft", () => {
+  render(<ControlledPanel />);
+  const draft = screen.getByRole("textbox", { name: "Single draft" });
+  fireEvent.change(draft, { target: { value: "Keep this draft" } });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show single references" })
+  );
+  expect(screen.getByTestId("single-references")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show compare references" })
+  );
+  expect(screen.getByTestId("compare-references")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: zh["agent.debug.restore"] })
+  );
+  expect(screen.queryByTestId("single-references")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("compare-references")).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: zh["agent.debug.maximize"] })
+  );
+  expect(screen.queryByTestId("compare-references")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+  expect(draft).toHaveValue("Keep this draft");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show single references" })
+  );
+  expect(screen.getByTestId("single-references")).toBeVisible();
+  expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+  expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+});
+
+it("keeps the debug title and tolerates omitted optional callbacks", () => {
   fixture.editedAgent!.display_name = "";
   render(<AgentDebugPanel />);
-  expect(screen.getByText("Internal name")).toBeInTheDocument();
+  expect(screen.getByText(zh["agent.debug.title"])).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
   fireEvent.click(screen.getByRole("button", { name: "关闭调试" }));
   expect(screen.getByTestId("agent-debug-panel")).toBeInTheDocument();

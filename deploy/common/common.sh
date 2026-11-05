@@ -542,12 +542,11 @@ deployment_source_root_env() {
 }
 
 deployment_upgrade_local_accounts() {
-  local phase="$1"
-  local mode="$2"
-  local namespace="${3:-nexent}"
-  local interpreter=""
-  local common_dir script candidate
+  local mode="$1" namespace="${2:-nexent}"
+  local database="${3:-nexent-postgresql}" config="${4:-nexent-config}"
+  local common_dir script candidate interpreter="" env_file
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
   if [ "$mode" = kubernetes ]; then
     script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
@@ -559,15 +558,11 @@ deployment_upgrade_local_accounts() {
     fi
   done
   if [ -z "$interpreter" ]; then
-    echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
+    echo "ERROR: Python 3.8+ is required on the deployment host for account upgrade." >&2
     return 1
   fi
-  local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
-  if [ "$phase" = apply ]; then
-    arguments+=(--apply)
-  fi
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$interpreter" "$script" "${arguments[@]}"
+  "$interpreter" "$script" --deploy --apply --deployment "$mode" --namespace "$namespace" \
+    --database-target "$database" --config-target "$config" --env-file "$env_file" --wait-timeout 300
 }
 
 deployment_env_dir() {

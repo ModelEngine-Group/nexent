@@ -59,7 +59,6 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
 - **application (selected by default, optional)**: config, runtime, mcp, northbound, web
 - **data-process (selected by default, optional)**: data processing service
-- **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
@@ -84,25 +83,7 @@ After a successful deployment, non-sensitive choices are saved to `deploy/k8s/de
 
 1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. An offline package launched with `--config` instead prompts for and confirms the password, and that input takes precedence without being displayed.
 
-2️⃣ To recreate the `suadmin` account, follow these steps:
-
-```bash
-# Step 1: Delete su account record in Supabase database
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "SELECT id, email FROM auth.users WHERE email='suadmin@nexent.com';"
-# Get the user_id and delete
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "DELETE FROM auth.identities WHERE user_id='your_user_id';"
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "DELETE FROM auth.users WHERE id='your_user_id';"
-
-# Step 2: Delete su account record in nexent database
-kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
-  "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
-
-# Step 3: Redeploy; non-interactive mode uses the configured or default password
-bash deploy.sh k8s
-```
+2️⃣ For historical account upgrades, administrator failures and data recovery, use the [consolidated migration runbook](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md). Preserve the original account ID and tenant ownership; recover consistent data as described there.
 
 ### Offline Deployment
 
@@ -187,13 +168,6 @@ Nexent uses a microservices architecture deployed via Helm charts:
 | nexent-redis | Cache, distributed locks, and task message broker |
 | nexent-minio | S3-compatible object storage |
 
-**Supabase Services (when `supabase` is selected):**
-| Service | Description |
-|---------|-------------|
-| nexent-supabase-kong | API Gateway |
-| nexent-supabase-auth | Authentication service |
-| nexent-supabase-db | Database service |
-
 **Optional Services:**
 | Service | Description |
 |---------|-------------|
@@ -222,7 +196,6 @@ Nexent uses PersistentVolumes for data persistence:
 | PostgreSQL | nexent-postgresql-pv | `/var/lib/nexent-data/nexent-postgresql` |
 | Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
-| Supabase DB (when `supabase` is selected) | nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 | Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
 | Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
@@ -270,10 +243,10 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process --port-policy development --image-source general
 
 # Add the terminal tool to the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh k8s --components infrastructure,application,data-process,terminal
 
 # Deploy with mainland China image sources
 bash deploy.sh k8s --image-source mainland
@@ -359,21 +332,18 @@ kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
 
 ### OAuth Login Configuration
 
-OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `config.oauth.callbackBaseUrl` to the browser-accessible Nexent Web URL.
+OAuth login uses local accounts in the application component. When enabling third-party login, set `nexent-common.config.oauth.callbackBaseUrl` to the browser-accessible Nexent Web URL.
 
 ```bash
-bash deploy.sh k8s --components infrastructure,application,supabase
+bash deploy.sh k8s --components infrastructure,application
 ```
 
 Kubernetes writes OAuth settings into backend environment variables through `nexent-common` `config.oauth.*` values:
 
 ```bash
-helm upgrade --install nexent nexent \
+helm upgrade --install nexent deploy/k8s/helm/nexent \
   --namespace nexent --create-namespace \
-  --set global.deploymentComponents.supabase=true \
-  --set nexent-supabase-kong.enabled=true \
-  --set nexent-supabase-auth.enabled=true \
-  --set nexent-supabase-db.enabled=true \
+  -f /path/to/private-application-values.yaml \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
   --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
@@ -411,7 +381,7 @@ For local NodePort, a GitHub callback example is `http://localhost:30000/api/use
 
 ### CAS Login Configuration
 
-CAS SSO does not require the `supabase` component. Set `nexent-common.config.cas.callbackBaseUrl` to the browser-accessible Nexent Web URL without a trailing `/`. `nexent-common.config.cas.serverUrl` is the CAS Server root URL and should also not include a trailing `/`.
+CAS SSO uses local application accounts. Set `nexent-common.config.cas.callbackBaseUrl` to the browser-accessible Nexent Web URL without a trailing `/`. `nexent-common.config.cas.serverUrl` is the CAS Server root URL and should also not include a trailing `/`.
 
 Kubernetes writes CAS settings into backend environment variables through `nexent-common` `config.cas.*` values:
 

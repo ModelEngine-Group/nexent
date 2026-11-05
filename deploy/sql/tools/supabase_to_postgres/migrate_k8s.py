@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Kubernetes deployment entry point; account import is shared with migrate_docker.py."""
 
-import hashlib
 import json
 import sys
 
@@ -51,18 +50,12 @@ def preserve_storage(args, source, path):
 
 
 def upgrade(args):
-    # Bind retries to the selected API server; contexts can change between runs.
-    cluster = migrate._command(["kubectl", "config", "view", "--minify", "-o", "json"])
-    servers = [item["cluster"]["server"] for item in json.loads(cluster).get("clusters", [])]
-    if len(servers) != 1:
-        raise migrate.MigrationSetupError("Select exactly one Kubernetes cluster context before migration")
-    args.cluster_identity = hashlib.sha256(servers[0].encode()).hexdigest()
     return migrate.automatic_upgrade(args, source_resolver=source_target, storage_preserver=preserve_storage)
 
 
 def main():
-    if not any(arg == "--deploy-phase" or arg.startswith("--deploy-phase=") for arg in sys.argv):
-        raise SystemExit("Use --deploy-phase prepare or --deploy-phase apply --apply; legacy up/down is Docker-only")
+    if "--deploy" not in sys.argv:
+        raise SystemExit("Use --deploy --apply; legacy up/down is Docker-only")
     sys.argv.extend(["--deployment", "kubernetes"])
     return migrate.main(upgrade=upgrade)
 

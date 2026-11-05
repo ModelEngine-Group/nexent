@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from management.utils.app_factory import create_app
 from contracts.constants.constants import CONFIG_SERVICE_NAME
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -57,6 +56,7 @@ from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
     clear_default_thread_manager,
+    run_blocking,
     set_default_thread_manager,
 )
 from contracts.constants.constants import CONFIG_SERVICE_NAME
@@ -108,10 +108,14 @@ async def config_lifespan(_app):
     if config_thread_manager.state is ManagerState.CREATED:
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
-    await recover_config_tasks_on_startup()
-    await validate_external_service_configuration()
-    await start_dreaming_scheduler()
     try:
+        from management.services.model.outlet_migration import migrate_legacy_outlets
+
+        migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
+        logger.info("LLM outlet upgrade: migrated=%s failed=%s", migration["migrated"], migration["failed"])
+        await recover_config_tasks_on_startup()
+        await validate_external_service_configuration()
+        await start_dreaming_scheduler()
         yield
     finally:
         # Preserve the scheduler's existing graceful shutdown behavior. Task

@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for config_app module.
 
@@ -222,6 +223,14 @@ class TestConfigAppRouterConfiguration:
         concurrency_module = types.ModuleType("nexent.core.concurrency")
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
+
+        async def invoke_blocking(_name, operation, *args, **kwargs):
+            return operation(*args, **kwargs)
+
+        concurrency_module.run_blocking = AsyncMock(side_effect=invoke_blocking)
+        migration = types.ModuleType("management.services.model.outlet_migration")
+        migration.migrate_legacy_outlets = MagicMock(return_value={"migrated": 2, "failed": 1})
+        monkeypatch.setitem(sys.modules, migration.__name__, migration)
         concurrency_module.set_default_thread_manager = MagicMock()
         concurrency_module.clear_default_thread_manager = MagicMock()
         monkeypatch.setitem(
@@ -319,6 +328,10 @@ class TestConfigAppRouterConfiguration:
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
+        migration.migrate_legacy_outlets.assert_called_once_with()
+        concurrency_module.run_blocking.assert_awaited_once_with(
+            "model-outlet-upgrade", migration.migrate_legacy_outlets
+        )
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with(
             config_app.config_thread_manager
