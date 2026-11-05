@@ -389,6 +389,9 @@ def reselect_outlet_profile(profile, request):
     data["connection"]["credential_ref"] = profile.connection.credential_ref.model_dump(mode="json")
     data["capabilities"]["context"] = profile.capabilities.context.model_dump(mode="json")
     data["context_configuration"] = profile.context_configuration.model_dump(mode="json")
+    migration = profile.provenance.provider_metadata.get("migration")
+    if isinstance(migration, dict):
+        data["provenance"]["provider_metadata"]["migration"] = _json_copy(migration)
     return ResolvedModelProfile.model_validate(data)
 
 

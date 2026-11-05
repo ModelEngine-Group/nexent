@@ -696,7 +696,11 @@ it("AC-RF1 invalidates a successful check when reselecting the same upgraded pro
     api.validateModelOutlet.mock.calls[0][0].patch.profile_selection
   ).toBeUndefined();
   fireEvent.mouseDown(screen.getByLabelText("modelProfile.modelProfile"));
-  fireEvent.click(await screen.findByText("Exact Model", { selector: ".ant-select-item-option-content" }));
+  fireEvent.click(
+    await screen.findByText("Exact Model", {
+      selector: ".ant-select-item-option-content",
+    })
+  );
   await waitFor(() =>
     expect(screen.queryByText("model.status.available")).not.toBeInTheDocument()
   );
@@ -711,3 +715,53 @@ it("AC-RF1 invalidates a successful check when reselecting the same upgraded pro
   });
   expect(api.updateModelOutlet.mock.calls[0][1].connect_status).toBeUndefined();
 });
+
+it.each([100000, 250000])(
+  "AC-ME1 edits the window to %s without submitting the hidden input limit",
+  async (window) => {
+    const saved = await api.getModelOutlet();
+    saved.profile.capabilities.context.input_limit = 180000;
+    api.getModelOutlet.mockResolvedValue(saved);
+    const originalPreview =
+      api.previewModelOutletPatch.getMockImplementation()!;
+    api.previewModelOutletPatch.mockImplementation(async (id, patch) => {
+      if (
+        patch.context_limits?.input_limit >
+        patch.context_limits?.combined_window
+      )
+        throw new Error("invalid context limits");
+      return originalPreview(id, patch);
+    });
+    setup(
+      <ModelOutletEditDialog
+        modelId={42}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+    await screen.findByRole("button", { name: "common.save" });
+    await waitForEditSaveReady();
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: "modelProfile.combined_window" }),
+      { target: { value: String(window) } }
+    );
+    await waitForEditSaveReady();
+    await waitFor(() =>
+      expect(api.previewModelOutletPatch).toHaveBeenLastCalledWith(
+        42,
+        expect.objectContaining({
+          context_limits: expect.objectContaining({ combined_window: window }),
+        }),
+        expect.any(AbortSignal)
+      )
+    );
+    const preview = api.previewModelOutletPatch.mock.calls.at(-1)![1];
+    expect(preview.context_limits).not.toHaveProperty("input_limit");
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(api.updateModelOutlet).toHaveBeenCalledOnce());
+    expect(api.updateModelOutlet.mock.calls[0][1].context_limits).toEqual(
+      preview.context_limits
+    );
+    expect(saved.profile.capabilities.context.input_limit).toBe(180000);
+  }
+);

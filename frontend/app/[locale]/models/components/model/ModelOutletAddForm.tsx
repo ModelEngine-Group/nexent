@@ -301,7 +301,14 @@ export function ModelOutletAddForm({
             !Object.hasOwn(request.parameter_values ?? {}, key) &&
             !["temperature", "top_p"].includes(key)
         ),
-    context_limits: request.context_limits,
+    // The hidden input limit is inherited; let the backend bound it to the window.
+    context_limits: request.context_limits
+      ? Object.fromEntries(
+          Object.entries(request.context_limits).filter(
+            ([key]) => key !== "input_limit"
+          )
+        )
+      : undefined,
     context_configuration: request.context_configuration,
     thinking_control: request.thinking_control,
     thinking_mode: request.thinking_mode,

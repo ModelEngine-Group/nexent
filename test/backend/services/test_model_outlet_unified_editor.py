@@ -158,3 +158,33 @@ def test_aeu_restore_frozen_defaults_preserves_fixed_values_and_explicit_zero(mo
     with pytest.raises(ModelOutletValidationError):
         service.apply_outlet_patch(original, ModelOutletPatchRequest(expected_revision=1,
             reset_parameters=True, delete_parameters=["temperature"]))
+
+
+@pytest.mark.parametrize("window,expected", [(100000, 100000), (250000, 180000)])
+def test_hidden_input_limit_follows_window_edits_without_changing_original(window, expected):
+    data = saved().model_dump(mode="json")
+    data["capabilities"]["context"].update(combined_window=200000, input_limit=180000, output_limit=16000)
+    original = ResolvedModelProfile.model_validate(data)
+    changed = service.apply_outlet_patch(original, ModelOutletPatchRequest(expected_revision=1,
+        context_limits={"combined_window": window, "output_limit": 16000}))
+    assert changed.capabilities.context.input_limit == expected
+    assert original.capabilities.context.input_limit == 180000
+
+
+@pytest.mark.parametrize("renamed", [False, True])
+@pytest.mark.parametrize("reviewed_revision", [None, 1])
+def test_reselection_preserves_only_migration_history_from_old_metadata(renamed, reviewed_revision):
+    request = draft(provider=None)
+    data = saved(draft(provider=None)).model_dump(mode="json")
+    migration = {"version": "legacy", "from_version": "2.5.0", "reviewed_revision": reviewed_revision,
+                 "defaulted_fields": ["context"], "unbound_legacy_parameters": ["old_parameter"]}
+    data["provenance"]["provider_metadata"].update(migration=deepcopy(migration), old_catalog_only="discard")
+    original = ResolvedModelProfile.model_validate(data)
+    changed = service.apply_outlet_patch(original, ModelOutletPatchRequest(expected_revision=1,
+        profile_selection=selection(request), request_model_id="renamed-deployment" if renamed else None,
+        parameter_values=request.parameter_values))
+    assert changed.provenance.provider_metadata["migration"] == migration
+    assert "old_catalog_only" not in changed.provenance.provider_metadata
+    assert changed.provenance.atomic_refs.model == service.build_outlet_draft(request, "tenant")[0].provenance.atomic_refs.model
+    changed.provenance.provider_metadata["migration"]["defaulted_fields"].append("new")
+    assert original.provenance.provider_metadata["migration"] == migration
