@@ -36,7 +36,7 @@ change:
     - List diagnostics are cleared after edit, revision or status changes while unchanged failures remain visible.
     - Context-window edits omit the hidden input limit and reuse existing server bounding.
     - Profile reselection preserves migration history without copying unrelated old metadata.
-    reason: Real React component events and service boundary assertions prove the missing UI decision. No backend or SDK behavior changes, so no duplicate D1 or new D2/D3 is needed. Existing successful-LLM D4 assets do not prove this rejection; actual container browser verification is recorded separately.
+    reason: Real React events and backend profile-recomposition tests cover the changed UI and metadata decisions. Existing migration DB tests and owned-model container API checks cover confirmation. No SDK inference behavior changes; no duplicate formal D1 or new Case is needed. Existing successful-LLM D4 assets do not prove this rejection; actual container browser verification is recorded separately.
     test_selectors:
     - frontend/tests/component/modelOutletBatch.test.tsx
     - frontend/tests/component/modelAddDialogBatchDuplicate.test.tsx
