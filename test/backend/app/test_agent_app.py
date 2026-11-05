@@ -464,6 +464,7 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
     assert call_kwargs["tenant_id"] == "tenant-a"
     assert call_kwargs["skip_user_save"] is True
     assert call_kwargs["http_request"] is None
+    assert call_kwargs["northbound_run"] is True
 
 
 @pytest.mark.asyncio

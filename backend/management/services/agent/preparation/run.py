@@ -113,6 +113,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    northbound_run: bool = False,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -221,6 +222,7 @@ async def create_agent_run_info(
                 captured_records[captured["model_id"]] = captured
     if captured_records:
         create_config_kwargs["runtime_model_records"] = captured_records
+    create_config_kwargs["northbound_run"] = northbound_run
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # v2.6.0: Apply per-agent model params override to model_config_list.

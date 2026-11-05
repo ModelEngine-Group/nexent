@@ -12,6 +12,7 @@ from contracts.constants.environment import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
+    NORTHBOUND_EXTERNAL_URL,
 )
 from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.errors.exceptions import ValidationError
@@ -365,6 +366,7 @@ async def create_tool_config_list(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     language: str = "zh",
+    northbound_run: bool = False,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -538,6 +540,15 @@ async def create_tool_config_list(
                 "allowed_kds_set": sorted(_allowed_kds_set),
                 "kds_name_to_id_map": _kds_name_to_id_map,
             }
+            if northbound_run:
+                # Request-scoped, backend-computed values. They are not part
+                # of tool params, so request overrides cannot forge them.
+                tool_config.metadata.update(
+                    {
+                        "northbound_run": True,
+                        "northbound_external_url": NORTHBOUND_EXTERNAL_URL,
+                    }
+                )
             tool_class_name = tool.get("class_name")
             for langchain_tool in langchain_tools:
                 if langchain_tool.name == tool_class_name:

@@ -1,0 +1,24 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+schema_version: '1.0'
+case_id: AIDP-FILE-IDENTITY-D1-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: test_
+acceptance_bindings:
+  AC-01:
+    - test_page_tool_keeps_identity_without_northbound_field
+  AC-02:
+    - test_northbound_tool_adds_only_a_model_side_locator_url
+    - test_invalid_northbound_base_degrades_without_a_link
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained component proof. Backend data access, AIDP permission snapshot,
+  AIDP transport and model access are controlled; the real tool-config assembly,
+  SDK ToolConfig-to-instance path and hit conversion execute in-process. No
+  deployed service, database or persistent business asset is required.

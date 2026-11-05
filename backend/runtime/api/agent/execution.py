@@ -115,6 +115,9 @@ async def northbound_agent_run_api(
             tenant_id=tenant_id,
             skip_user_save=True,
             final_answer_mode=final_answer_mode,
+            # Internal, request-scoped provenance. It is never accepted from
+            # the serialized AgentRequest or generic tool_params.
+            northbound_run=True,
         )
     except UnauthorizedError as exc:
         raise HTTPException(

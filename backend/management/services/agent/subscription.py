@@ -196,6 +196,7 @@ async def run_agent_stream(
     skip_user_save: bool = False,
     resume: bool = False,
     final_answer_mode: str = "delta",
+    northbound_run: bool = False,
 ):
     """
     Start an agent run and stream responses.
@@ -203,6 +204,9 @@ async def run_agent_stream(
 
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
+        northbound_run: Request-scoped marker installed by the internal
+            northbound entrypoint. It never comes from a serialized client
+            payload and enables API-key download links for AIDP tool results.
     """
     if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
@@ -943,6 +947,8 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
     }
+    if northbound_run:
+        stream_kwargs["northbound_run"] = True
     if final_answer_mode != "delta":
         stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:

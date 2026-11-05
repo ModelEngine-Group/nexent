@@ -124,6 +124,7 @@ async def prepare_agent_run(
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
     reservation_token: Optional[str] = None,
+    northbound_run: bool = False,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -150,6 +151,7 @@ async def prepare_agent_run(
         "conversation_id": agent_request.conversation_id,
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
+        "northbound_run": northbound_run,
     }
     runtime_knowledge_context = getattr(
         agent_request, "_runtime_knowledge_context", None
@@ -283,6 +285,7 @@ async def generate_stream(
     deferred_run: Optional[DeferredAgentRun] = None,
     final_answer_mode: str = "delta",
     execution_state: Optional[BackgroundExecutionState] = None,
+    northbound_run: bool = False,
 ):
     """Unified streaming entry point.
 
@@ -337,6 +340,8 @@ async def generate_stream(
             prepare_kwargs = {}
             if reservation_token is not None:
                 prepare_kwargs["reservation_token"] = reservation_token
+            if northbound_run:
+                prepare_kwargs["northbound_run"] = True
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
