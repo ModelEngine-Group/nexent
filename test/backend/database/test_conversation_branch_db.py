@@ -295,6 +295,92 @@ def test_branch_copies_turn_range_and_remaps_children(session):
     assert inserted["conversation_source_image_t"][0]["message_id"] == 1004
 
 
+def _conversation_insert(recorder):
+    """Return the single conversation INSERT statement executed by a branch."""
+    statements = [
+        statement
+        for statement in recorder.statements
+        if str(statement.compile(dialect=postgresql.dialect())).startswith(
+            "INSERT INTO nexent.conversation_record_t"
+        )
+    ]
+    assert len(statements) == 1
+    return statements[0]
+
+
+def test_branch_of_agent_chat_leaves_workbench_columns_unbound(session):
+    """An agent-chat branch must not bind JSONB columns with Python None.
+
+    SQLAlchemy serializes a None bound to a JSONB column as the JSON value
+    null instead of SQL NULL, and agent-chat history filters on
+    "workbench_config IS NULL": binding the absent declaration would hide
+    the branched conversation from every agent-chat list as soon as it stops
+    being the active thread.
+    """
+    _wire(
+        session,
+        _three_turn_rows(),
+        conversation=_conversation_row(
+            workbench_config=None, knowledge_scope=None
+        ),
+    )
+    recorder = _ExecuteRecorder()
+    session.execute.side_effect = recorder
+
+    result = db.branch_conversation(7, 1, user_id="owner")
+
+    assert result["workbench_config"] is None
+    # The RETURNING clause references workbench_config regardless, so assert
+    # on the VALUES binds: an unbound column falls back to SQL NULL while a
+    # bound None would be serialized by SQLAlchemy as the JSON value null.
+    inserted = params(_conversation_insert(recorder))
+    assert "workbench_config" not in inserted
+    assert "workbench_config_version" not in inserted
+    assert "knowledge_scope" not in inserted
+    assert inserted["runtime_metadata"] == {"model": "gpt"}
+    assert inserted["runtime_metadata_version"] == 1
+
+
+def test_branch_copies_workbench_declaration_when_present(session):
+    """A Workbench branch keeps its declaration and restarts the version."""
+    workbench = {
+        "schema_version": 3,
+        "mode": "single_agent_chat",
+        "agent_mounts": [{"agent_id": 5, "version_no": 3}],
+    }
+    new_row = SimpleNamespace(
+        conversation_id=42,
+        conversation_title="Trip planning（分支）",
+        agent_id=5,
+        chat_mode="execution",
+        knowledge_scope={"kb": True},
+        runtime_metadata={},
+        runtime_metadata_version=1,
+        workbench_config=workbench,
+        workbench_config_version=1,
+        create_time=1700000000000,
+        update_time=1700000000000,
+    )
+    _wire(
+        session,
+        _three_turn_rows(),
+        conversation=_conversation_row(
+            workbench_config=workbench, workbench_config_version=5
+        ),
+    )
+    recorder = _ExecuteRecorder(new_conversation_row=new_row)
+    session.execute.side_effect = recorder
+
+    result = db.branch_conversation(7, 1, user_id="owner")
+
+    assert result["workbench_config"] == workbench
+    inserted = params(_conversation_insert(recorder))
+    assert inserted["workbench_config"] == workbench
+    # The copy is independent of the source row's declaration.
+    assert inserted["workbench_config"] is not workbench
+    assert inserted["workbench_config_version"] == 1
+
+
 def test_branch_last_turn_copies_everything(session):
     _wire(session, _three_turn_rows())
     recorder = _ExecuteRecorder()

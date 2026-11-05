@@ -575,12 +575,24 @@ def branch_conversation(
             "delete_flag": "N",
             "agent_id": conversation.agent_id,
             "chat_mode": conversation.chat_mode,
-            "knowledge_scope": deepcopy(conversation.knowledge_scope),
             "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
             "runtime_metadata_version": 1,
-            "workbench_config": deepcopy(conversation.workbench_config),
-            "workbench_config_version": 1,
         }
+        # SQLAlchemy serializes Python None bound to a JSONB column as the JSON
+        # value null (not SQL NULL), and agent-chat history filters on
+        # "workbench_config IS NULL": binding an absent declaration would hide
+        # the branched conversation from every agent-chat list. Copy nullable
+        # JSONB values only when the source actually declares them, mirroring
+        # create_conversation.
+        if conversation.knowledge_scope is not None:
+            conversation_data["knowledge_scope"] = deepcopy(
+                conversation.knowledge_scope
+            )
+        if conversation.workbench_config is not None:
+            conversation_data["workbench_config"] = deepcopy(
+                conversation.workbench_config
+            )
+            conversation_data["workbench_config_version"] = 1
         if user_id:
             conversation_data = add_creation_tracking(conversation_data, user_id)
 
