@@ -7,7 +7,7 @@ description: Use when implementing, debugging, or reviewing Nexent frontend page
 
 Repository paths below are relative to the root; reference links resolve from this skill.
 
-1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read the authoritative sibling document `../docs/前端ui.md` from the repository root when it is available, then apply the linked English component references.
+1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read the authoritative sibling document `../docs/前端ui.md` from the repository root when it is available, then apply the linked English component references. For colors and interaction states, also read [UI specification](references/components/style.md), which consolidates UI color rules, including functional-color Light state tables, in one document.
 2. Load relevant detailed rules only.
 
 | Work                                                               | Reference                                                                                                                |
@@ -25,6 +25,9 @@ Repository paths below are relative to the root; reference links resolve from th
 ## UI source synchronization
 
 - Treat `../docs/前端ui.md` as the visual source of truth. Do not invent visual values that it does not define; use the existing frontend references only for unspecified defaults.
-- Translate every first-level heading into one English Markdown reference under `references/components/`; keep nested headings in that reference.
+- The single [UI specification](references/components/style.md) contains UI-role, chart-color, gradient, company-palette, software-product, auxiliary-color, and functional-color Light rules. It supplements the existing UI source. If specifications explicitly disagree on the same property, report the discrepancy before applying that conflicting value; do not silently replace either specification.
+- Keep all UI color specification categories in the single [UI specification](references/components/style.md); do not split them into separate documents. For other UI source material, translate every first-level heading into one English Markdown reference under `references/components/` and keep nested headings in that reference.
+- Extract visual rules into text and tables; do not retain uploaded screenshots or reference them in maintained skill documentation.
+- Define all documented color roles as shared CSS variables using [color tokens](references/components/color-tokens.css); add missing variables in the application global stylesheet and consume them in components instead of color literals. Keep the CSS definitions synchronized with the specification.
 - Convert documented visual values to Tailwind CSS in the reference and implement reusable components under `frontend/components/common/` when the source defines a reusable component contract.
 - Keep user-facing default text localized through the existing translation namespace. Create component test pages only as explicitly requested temporary local debug entries; do not add them to Nexent feature routes or navigation, and remove them after debugging is complete.

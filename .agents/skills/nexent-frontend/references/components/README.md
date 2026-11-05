@@ -9,7 +9,7 @@ This directory contains component-level constraints and focused Markdown referen
 3. Read the component-specific document that matches the component being changed:
    - [Font](font.md)
    - [Icon](icon.md)
-   - [Style](style.md)
+   - [UI specification](style.md): all UI colors, chart palettes, gradient rules, company palettes, interaction states, and Tailwind translations in one document.
    - [Button](button.md)
    - [Drawer](drawer.md)
    - [Modal](modal.md)
