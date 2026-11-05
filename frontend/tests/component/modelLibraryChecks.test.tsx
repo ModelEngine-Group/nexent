@@ -355,3 +355,33 @@ it.each(["revision", "success", "edit-saved", "unchanged"])(
     expect(mocks.validate).toHaveBeenCalledOnce();
   }
 );
+
+it.each(["success", "error", "aborted"])(
+  "AC-RG1 prevents overlapping retries and releases the guard after %s",
+  async (outcome) => {
+    mocks.validate.mockResolvedValueOnce(failure);
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /check Kimi:/ }));
+    await screen.findByRole("button", { name: "check Kimi: unavailable" });
+    fireEvent.click(screen.getByRole("button", { name: "modelProfile.checkIssues:1" }));
+    const retry = await screen.findByRole("button", { name: "modelProfile.retryCheck" });
+    let finish!: (value: unknown) => void;
+    let fail!: (error: unknown) => void;
+    mocks.validate.mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole("button", { name: "modelConfig.button.checkConnectivity" }));
+    await screen.findByRole("button", { name: "check Kimi: detecting" });
+    expect(mocks.validate).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      if (outcome === "success") finish({ ok: true, error: null });
+      else fail(outcome === "aborted" ? new DOMException("Cancelled", "AbortError") : { code: 403 });
+    });
+    const status = outcome === "success" ? "available" : "unavailable";
+    await screen.findByRole("button", { name: `check Kimi: ${status}` });
+    mocks.validate.mockResolvedValue({ ok: true, error: null });
+    fireEvent.click(screen.getByRole("button", { name: `check Kimi: ${status}` }));
+    await waitFor(() => expect(mocks.validate).toHaveBeenCalledTimes(3));
+    await screen.findByRole("button", { name: "check Kimi: available" });
+  }
+);

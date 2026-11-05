@@ -101,6 +101,7 @@ export const ModelConfigSection = forwardRef<
   const [models, setModels] = useState<ModelOption[]>([]);
   const modelsRef = useRef(models);
   modelsRef.current = models;
+  const pendingModelChecks = useRef(new Set<string>());
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [checkIssues, setCheckIssues] = useState<Record<string, ModelCheckIssue>>(
@@ -640,10 +641,15 @@ export const ModelConfigSection = forwardRef<
       (item) => item.displayName === modelName && item.type === modelType
     );
     const id = String(model?.id ?? `${modelType}:${modelName}`);
+    if (pendingModelChecks.current.has(id)) return;
+    pendingModelChecks.current.add(id);
     let issue: ModelCheckIssue | null = null;
     let connected = false;
     let completed = false;
-    const previousStatus = model?.connect_status ?? MODEL_STATUS.UNCHECKED;
+    const previousStatus = model?.connect_status === MODEL_STATUS.CHECKING
+      ? MODEL_STATUS.UNCHECKED
+      : model?.connect_status ?? MODEL_STATUS.UNCHECKED;
+    updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
     const isCurrent = () => modelsRef.current.some((current) =>
       current.id === model?.id && current.type === modelType &&
       current.configRevision === model?.configRevision && current.displayName === modelName
@@ -671,6 +677,8 @@ export const ModelConfigSection = forwardRef<
         return;
       }
       issue = modelCheckFailure(error);
+    } finally {
+      pendingModelChecks.current.delete(id);
     }
     if (!isCurrent()) return;
     if (signal?.aborted) {
@@ -793,7 +801,6 @@ export const ModelConfigSection = forwardRef<
             modelName,
             modelType,
           });
-          updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
         }
       }
       if (modelsToVerify.length === 0) {
@@ -836,14 +843,7 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ Verify single ------------------ */
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
-    // Flip the row to CHECKING immediately so the click is always visible,
-    // and debounce per row instead of on one shared timer: with a shared
-    // timer, clicks on different rows cancelled each other, leaving the
-    // earlier row without any feedback. A per-row timer can only be
-    // superseded by clicking that same row again — impossible through the
-    // UI while it is CHECKING (the row action disables itself), so every
-    // lit "detecting" status is guaranteed to reach a terminal one.
-    updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
+    // All entry points share the per-model in-flight guard in checkModel.
     await checkModel(displayName, modelType, models);
   };
 
