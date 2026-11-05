@@ -7117,3 +7117,37 @@ def test_create_local_tool_independent_aidp_search_without_metadata(nexent_agent
         kds_list=["kb-1"],
     )
     assert result.image_url_builder is None
+
+
+@pytest.mark.parametrize("class_name", ["ExaSearchTool", "TavilySearchTool", "LinkupSearchTool"])
+def test_create_local_tool_web_search_tool_data_process_service(nexent_agent_instance, class_name):
+    """Web search tools receive data_process_service from metadata, not the environment."""
+    mock_tool_class = MagicMock()
+    mock_tool_instance = MagicMock()
+    mock_tool_class.return_value = mock_tool_instance
+
+    tool_config = ToolConfig(
+        class_name=class_name,
+        name="web_search",
+        description="desc",
+        inputs="{}",
+        output_type="string",
+        params={"api_key": "key", "max_results": 3},
+        source="local",
+        metadata={"data_process_service_url": "http://data-process"},
+    )
+
+    original_value = nexent_agent.__dict__.get(class_name)
+    nexent_agent.__dict__[class_name] = mock_tool_class
+
+    try:
+        result = nexent_agent_instance.create_local_tool(tool_config)
+    finally:
+        if original_value is not None:
+            nexent_agent.__dict__[class_name] = original_value
+        elif class_name in nexent_agent.__dict__:
+            del nexent_agent.__dict__[class_name]
+
+    mock_tool_class.assert_called_once_with(api_key="key", max_results=3)
+    assert result.observer == nexent_agent_instance.observer
+    assert result.data_process_service == "http://data-process"

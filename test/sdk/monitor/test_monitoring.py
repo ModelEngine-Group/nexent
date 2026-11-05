@@ -1367,8 +1367,7 @@ class TestWriteBatchIsolation:
 
     def _make_buffer(self):
         """Create a MonitoringRecordBuffer with flush thread disabled."""
-        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
-            buf = MonitoringRecordBuffer()
+        buf = MonitoringRecordBuffer(enabled=False)
         buf._enabled = True
         return buf
 
@@ -1808,8 +1807,7 @@ class TestBufferDegradation:
 
     def _make_buffer(self):
         """Create a buffer with flush thread disabled."""
-        with patch.dict("os.environ", {"ENABLE_MODEL_MONITORING": "false"}):
-            buf = MonitoringRecordBuffer()
+        buf = MonitoringRecordBuffer(enabled=False)
         buf._enabled = True
         return buf
 
@@ -2428,3 +2426,51 @@ class TestClientLevelIntegrationPaths:
                 monitored.chat.completions.create(stream=False, messages=[])
 
             buf.add_record.assert_not_called()
+
+
+class TestBufferConfiguration:
+    """MonitoringRecordBuffer takes its settings as parameters, not from the environment."""
+
+    def test_parameters_override_defaults(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_MODEL_MONITORING", "true")
+        monkeypatch.setenv("MODEL_MONITORING_BATCH_SIZE", "7")
+        monkeypatch.setenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "9")
+
+        buf = MonitoringRecordBuffer(
+            enabled=False, batch_size=5, flush_interval=11)
+
+        assert buf.is_enabled is False
+        assert buf._batch_size == 5
+        assert buf._flush_interval == 11
+
+    def test_defaults_ignore_environment(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_MODEL_MONITORING", "false")
+        monkeypatch.setenv("MODEL_MONITORING_BATCH_SIZE", "7")
+        monkeypatch.setenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "9")
+
+        buf = MonitoringRecordBuffer(enabled=False)
+
+        assert buf._batch_size == 100
+        assert buf._flush_interval == 30
+
+    def test_get_monitoring_buffer_uses_configured_settings(self):
+        from sdk.nexent.monitor import monitoring as monitoring_module
+
+        manager = monitoring_module._monitoring_manager
+        original_config = manager._config
+        original_buffer = monitoring_module._monitoring_buffer
+        manager._config = MonitoringConfig(
+            enable_model_monitoring="false",
+            model_monitoring_batch_size="5",
+            model_monitoring_flush_interval_seconds="11",
+        )
+        monitoring_module._monitoring_buffer = None
+        try:
+            buf = get_monitoring_buffer()
+        finally:
+            manager._config = original_config
+            monitoring_module._monitoring_buffer = original_buffer
+
+        assert buf.is_enabled is False
+        assert buf._batch_size == 5
+        assert buf._flush_interval == 11

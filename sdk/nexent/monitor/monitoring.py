@@ -151,6 +151,8 @@ METRIC_PATH = "/v1/metrics"
 DEFAULT_TRACE_CONTENT_MODE = "summary"
 DEFAULT_TRACE_MAX_CHARS = 4000
 DEFAULT_TRACE_MAX_ITEMS = 20
+DEFAULT_MODEL_MONITORING_BATCH_SIZE = 100
+DEFAULT_MODEL_MONITORING_FLUSH_INTERVAL_SECONDS = 30
 
 OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
 OPENINFERENCE_SPAN_KIND_AGENT = "AGENT"
@@ -429,6 +431,9 @@ class MonitoringConfig:
     excluded_span_names: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_SPAN_NAMES)
     )
+    enable_model_monitoring: bool = True
+    model_monitoring_batch_size: int = DEFAULT_MODEL_MONITORING_BATCH_SIZE
+    model_monitoring_flush_interval_seconds: int = DEFAULT_MODEL_MONITORING_FLUSH_INTERVAL_SECONDS
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
@@ -475,6 +480,14 @@ class MonitoringConfig:
         self.trace_max_items = max(
             0,
             _as_int(self.trace_max_items, DEFAULT_TRACE_MAX_ITEMS),
+        )
+        self.enable_model_monitoring = _as_bool(self.enable_model_monitoring, True)
+        self.model_monitoring_batch_size = _as_int(
+            self.model_monitoring_batch_size, DEFAULT_MODEL_MONITORING_BATCH_SIZE
+        )
+        self.model_monitoring_flush_interval_seconds = _as_int(
+            self.model_monitoring_flush_interval_seconds,
+            DEFAULT_MODEL_MONITORING_FLUSH_INTERVAL_SECONDS,
         )
         self.otlp_headers = _parse_headers(self.otlp_headers)
 
@@ -2643,19 +2656,21 @@ class MonitoringRecordBuffer:
     Automatically retries after 30 seconds.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        enabled: bool = True,
+        batch_size: int = DEFAULT_MODEL_MONITORING_BATCH_SIZE,
+        flush_interval: int = DEFAULT_MODEL_MONITORING_FLUSH_INTERVAL_SECONDS,
+    ):
         from ..core.concurrency import (
             get_current_thread_manager,
             get_default_thread_manager,
         )
 
         self._buffer: deque = deque(maxlen=5000)
-        self._enabled: bool = os.getenv(
-            "ENABLE_MODEL_MONITORING", "true").lower() == "true"
-        self._batch_size: int = int(
-            os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
-        self._flush_interval: int = int(
-            os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
+        self._enabled: bool = enabled
+        self._batch_size: int = batch_size
+        self._flush_interval: int = flush_interval
         self._consecutive_failures: int = 0
         self._max_failures: int = 3
         self._degraded_until: float = 0.0
@@ -2830,7 +2845,12 @@ _monitoring_buffer: Optional[MonitoringRecordBuffer] = None
 def get_monitoring_buffer() -> Optional[MonitoringRecordBuffer]:
     global _monitoring_buffer
     if _monitoring_buffer is None:
-        _monitoring_buffer = MonitoringRecordBuffer()
+        config = _monitoring_manager._config or MonitoringConfig()
+        _monitoring_buffer = MonitoringRecordBuffer(
+            enabled=config.enable_model_monitoring,
+            batch_size=config.model_monitoring_batch_size,
+            flush_interval=config.model_monitoring_flush_interval_seconds,
+        )
     return _monitoring_buffer
 
 
