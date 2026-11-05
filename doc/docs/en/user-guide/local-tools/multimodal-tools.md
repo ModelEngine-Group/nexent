@@ -46,7 +46,7 @@ Multimodal tools analyze text files, images, videos, and audio with model suppor
 ## ⚙️ Prerequisites
 
 - Configure storage access (e.g., MinIO/S3) and data processing service to fetch files.
-- Provide an LLM for `analyze_text_file`, a VLM for `analyze_image`, and a video understanding model for `analyze_video` and `analyze_audio` (must support audio/video input, e.g., Qwen3-Omni series).
+- Provide an LLM for `analyze_text_file`, a VLM for `analyze_image`, a video understanding model for `analyze_video`, and an audio understanding model for `analyze_audio` (all must support audio/video input, e.g., Qwen3-Omni series).
 
 ## 🛠️ How to Use
 
