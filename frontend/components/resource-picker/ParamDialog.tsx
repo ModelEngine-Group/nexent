@@ -40,7 +40,9 @@ export function ParamDialog({
   footer,
   children,
   variant,
+  splitLayout = false,
 }: {
+  splitLayout?: boolean;
   variant?: "skill" | "tool" | "model" | "publish";
   open: boolean;
   title: ReactNode;
@@ -68,7 +70,7 @@ export function ParamDialog({
       open={open}
       onCancel={onClose}
       centered
-      width={480}
+      width={splitLayout ? "min(1040px, calc(100vw - 32px))" : 480}
       footer={null}
       closable={false}
       zIndex={zIndex}
@@ -83,7 +85,11 @@ export function ParamDialog({
         body: { padding: 0 },
       }}
     >
-      <div className={styles.dialog} data-config-variant={variant}>
+      <div
+        className={styles.dialog}
+        data-config-variant={variant}
+        data-config-layout={splitLayout ? "split" : undefined}
+      >
         <div
           data-config-part="heading"
           className="flex shrink-0 flex-col gap-2"
@@ -325,7 +331,7 @@ export function ParamLabel({
           *
         </span>
       )}
-      {label}
+      <span data-config-label-text>{label}</span>
       {infoNode &&
         (showInfo && infoText ? (
           <Tooltip title={infoText}>{infoNode}</Tooltip>

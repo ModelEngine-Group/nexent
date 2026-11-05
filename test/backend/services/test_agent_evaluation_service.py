@@ -446,6 +446,7 @@ _utils_pkg.llm_utils = _utils_llm_module
 # Declare fetch_agent_profile so set_import_attribute can patch it later.
 _agent_profile_stub = MagicMock()
 _agent_profile_stub.fetch_agent_profile = MagicMock()
+_agent_profile_stub.format_agent_profile_context = MagicMock()
 sys.modules["management.services.agent.profile"] = _agent_profile_stub
 _utils_pkg.agent_profile_utils = _agent_profile_stub
 

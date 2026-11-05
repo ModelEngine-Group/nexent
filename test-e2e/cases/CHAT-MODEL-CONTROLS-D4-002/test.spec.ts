@@ -41,7 +41,7 @@ journey("CHAT-MODEL-CONTROLS-D4-002", async ({ page, contract }) => {
       await input(page).fill("Preserve this local draft");
       await chooseModel(page, "Effort B"); await thinking(page, true, "极高");
       await chooseModel(page, "Default A"); await chooseModel(page, "Effort B");
-      await expect(trigger(page)).toContainText("极高");
+      await openControls(page); await expect(settings(page).locator(".ant-select")).toContainText("极高"); await page.keyboard.press("Escape");
       expect(await inputText()).toBe("Preserve this local draft");
       if (entry === "workbench") {
         await expect(page.getByText("model-controls-fixture.txt", { exact: true }).first()).toBeVisible();
@@ -58,7 +58,7 @@ journey("CHAT-MODEL-CONTROLS-D4-002", async ({ page, contract }) => {
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
     await enter(page, "workbench"); await page.locator("button[data-radix-collection-item]").filter({ hasText: "Saved skill creation" }).click();
-    await expect(trigger(page)).toContainText("Effort B"); await expect(trigger(page)).toContainText("极高");
+    await expect(trigger(page)).toContainText("Effort B"); await openControls(page); await expect(settings(page).locator(".ant-select")).toContainText("极高"); await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "技能创建", exact: true })).toHaveAttribute("aria-pressed", "true");
     for (const entry of ["nl2agent", "nl2skill"] as Entry[]) {
       await enter(page, entry); await chooseModel(page, "Effort B");
@@ -87,14 +87,12 @@ journey("CHAT-MODEL-CONTROLS-D4-002", async ({ page, contract }) => {
   });
   await contract.step(contract.expectedIds("steps")[3], async () => {
     await enter(page, "workbench"); await page.locator("button[data-radix-collection-item]").filter({ hasText: "Invalid saved model" }).click();
-    await expect(trigger(page)).toContainText("选择模型");
-    await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
+    await expect(page.getByText("所选模型出口已不可用，请检查配置或手动重新选择模型。", { exact: true }).first()).toBeVisible();
     await input(page).fill("Recover invalid saved selection");
     await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     await chooseModel(page, "Effort B"); await send(page, state, "Recovered saved selection");
     state.unavailable = true; await send(page, state, "Controlled unavailable model");
-    await expect(trigger(page)).toContainText("选择模型");
-    await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
+    await expect(page.getByText("所选模型出口已不可用，请检查配置或手动重新选择模型。", { exact: true }).first()).toBeVisible();
     state.unavailable = false; await chooseModel(page, "Default A"); await send(page, state, "Reselected valid model");
     for (const [permission, label] of [["agent:create", "智能体创建"], ["skill:create", "技能创建"]]) {
       state.authorization.permissions = [permission === "agent:create" ? "skill:create" : "agent:create"];

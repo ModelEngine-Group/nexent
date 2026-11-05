@@ -92,3 +92,15 @@ def compile_model_runtime_profile(model_config, agent_config):
     data = resolved.model_dump()
     data["extra_api_parameters"] = extras
     return type(profile).model_validate(data)
+
+
+def compile_bound_model_profile(model_config, agent_config):
+    """Keep canonical Agent/session parameters; apply only the resolved output budget."""
+    from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+
+    profile = model_config.resolved_profile
+    if profile is None:
+        raise ValueError("MODEL_OUTLET_PROVISIONING_REQUIRED")
+    budget = agent_config.context_budget_snapshot
+    output = budget.requested_output_tokens if budget else agent_config.requested_output_tokens
+    return LegacyInvocationOptions(parameters={"max_tokens": output}).resolve(profile) if output is not None else profile

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import getpass
-import hashlib
 import json
 import os
 import re
@@ -18,9 +17,6 @@ from uuid import UUID
 
 HERE = Path(__file__).resolve().parent
 ROOT = next((p for p in HERE.parents if (p / "deploy/sql/migrations").is_dir()), Path.cwd())
-AUTH_SQL = "v2.9.0_001_local_user_accounts.sql"
-DATA_MARKER = "__local_auth_data_2.9.0__"
-CLEANUP_MARKER = "__local_auth_cleanup_2.9.0__"
 
 
 def password_scheme(encoded):
@@ -83,6 +79,11 @@ def connections(values):
         "password": source_password(values),
         "connect_timeout": 3,
     }
+    return source, target_connection(values), service_host or not values.get("SUPABASE_POSTGRES_HOST")
+
+
+def target_connection(values):
+    """Resolve the target without asking for source credentials on completed upgrades."""
     host = values.get("POSTGRES_HOST") or "127.0.0.1"
     internal = host == "nexent-postgresql"
     target = {
@@ -95,9 +96,7 @@ def connections(values):
     }
     if not target["password"]:
         raise MigrationSetupError("Set NEXENT_POSTGRES_PASSWORD")
-    # An explicitly reachable host uses that connection directly; service aliases
-    # and defaults retain automatic local container discovery/startup.
-    return source, target, service_host or not values.get("SUPABASE_POSTGRES_HOST")
+    return target
 
 
 class MigrationConflict(ValueError):
@@ -142,19 +141,17 @@ def map_source_user(row: dict) -> dict:
             or (banned and banned > datetime.now(timezone.utc).replace(tzinfo=None))
             or bool(row.get("is_anonymous"))
         )
-        cas_only = (row.get("raw_user_meta_data") or {}).get("provider") == "cas"
         return {
             "user_id": user_id,
             "email": email,
             "password_hash": encoded,
             "password_hash_scheme": scheme,
-            "password_login_enabled": bool(encoded) and not cas_only,
-            "account_status": "disabled" if disabled else "active",
+            "password_login_enabled": bool(encoded),
             "token_version": 0,
             "email_confirmed_at": utc_time(row.get("email_confirmed_at")),
             "create_time": utc_time(row.get("created_at")) or datetime.now(timezone.utc).replace(tzinfo=None),
             "update_time": utc_time(row.get("updated_at")) or datetime.now(timezone.utc).replace(tzinfo=None),
-            "delete_flag": "Y" if deleted else "N",
+            "delete_flag": "Y" if disabled else "N",
             "source_metadata": metadata,
         }
     except MigrationConflict:
@@ -183,77 +180,115 @@ def read_source_users(source) -> list:
     return users
 
 
-def import_users(target, source_rows: list, *, dry_run: bool = True) -> dict:
-    """Import credentials, hydrating only schema-created pending identities."""
-    from psycopg2.extras import Json, RealDictCursor
-
+def _account_import_sql(source_rows, *, dry_run=False):
+    """Build one credential/schema transaction body, shared by host and psql."""
     rows = [map_source_user(row) for row in source_rows]
-    ids, emails = set(), set()
+    ids = set()
     for row in rows:
-        if row["user_id"] in ids or (row["delete_flag"] == "N" and row["email"] in emails):
-            raise MigrationConflict("Source has conflicting stable IDs or normalized emails")
+        if row["user_id"] in ids:
+            raise MigrationConflict("Account migration conflict IDs: " + json.dumps([row["user_id"]]))
         ids.add(row["user_id"])
-        if row["delete_flag"] == "N":
-            emails.add(row["email"])
-    result = {"source": len(rows), "inserted": 0, "updated": 0, "skipped": 0,
-              "disabled_orphans": 0, "dry_run": dry_run}
-    plans = []
-    with target.cursor(cursor_factory=RealDictCursor) as cursor:
+        row["user_email"] = row.pop("email")
+    encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
+    schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    return "SET LOCAL standard_conforming_strings=on;\nSET LOCAL nexent.account_import='on';\n" + schema + "\n" + r"""
+CREATE TEMP TABLE account_import ON COMMIT DROP AS
+SELECT s.*, coalesce(p.role_value,a.user_role) AS role_value,
+       coalesce(p.email_value,a.user_email) AS profile_email,
+       (p.user_id IS NOT NULL OR a.user_id IS NOT NULL) AS existing,
+       NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u
+                   WHERE u.user_id=s.user_id AND u.delete_flag='N') AS orphan
+FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s
+LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=s.user_id
+LEFT JOIN nexent.user_account_t a ON a.user_id=s.user_id;
+UPDATE account_import SET delete_flag='Y' WHERE orphan OR nullif(trim(role_value),'') IS NULL;
+DO $validate$
+DECLARE conflict_ids json;
+BEGIN
+    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
+        SELECT DISTINCT user_id FROM account_import
+        WHERE delete_flag='N' AND profile_email IS NOT NULL AND profile_email<>user_email
+    ) conflicts;
+    IF conflict_ids IS NOT NULL THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
+    END IF;
+END
+$validate$;
+UPDATE nexent.user_account_t a SET
+    user_email=s.user_email,user_role=s.role_value,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
+    password_login_enabled=s.password_login_enabled,token_version=s.token_version,
+    email_confirmed_at=s.email_confirmed_at,source_metadata=s.source_metadata,
+    create_time=s.create_time,update_time=s.update_time,delete_flag=s.delete_flag,updated_by='auth-migration'
+FROM account_import s WHERE a.user_id=s.user_id;
+INSERT INTO nexent.user_account_t
+    (user_id,user_email,user_role,password_hash,password_hash_scheme,password_login_enabled,token_version,
+     email_confirmed_at,source_metadata,create_time,update_time,delete_flag,created_by,updated_by)
+SELECT user_id,user_email,role_value,password_hash,password_hash_scheme,password_login_enabled,token_version,
+       email_confirmed_at,source_metadata,create_time,update_time,delete_flag,'auth-migration','auth-migration'
+FROM account_import s WHERE delete_flag='N'
+AND NOT EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id);
+DELETE FROM nexent.user_account_t WHERE delete_flag='Y'
+AND coalesce(source_metadata->>'system_identity','')<>'speed';
+DO $email_conflicts$
+DECLARE conflict_ids json;
+BEGIN
+    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids
+    FROM nexent.user_account_t
+    WHERE delete_flag='N' AND lower(trim(user_email)) IN (
+        SELECT lower(trim(user_email)) FROM nexent.user_account_t
+        WHERE delete_flag='N' AND user_email IS NOT NULL
+        GROUP BY lower(trim(user_email)) HAVING count(*)>1
+    );
+    IF conflict_ids IS NOT NULL THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
+    END IF;
+END
+$email_conflicts$;
+SET LOCAL nexent.account_import='off';
+SELECT json_build_object('source',count(*),'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
+                         'updated',count(*) FILTER (WHERE existing AND delete_flag='N'),
+                         'skipped',count(*) FILTER (WHERE delete_flag='Y'),
+                         'excluded_inactive',count(*) FILTER (WHERE delete_flag='Y'),
+                         'disabled_orphans',count(*) FILTER (WHERE orphan),'dry_run',__DRY_RUN__)
+FROM account_import;
+""".replace("__DRY_RUN__", "true" if dry_run else "false").replace("__ROWS__", encoded)
+
+
+def import_users(target, source_rows: list, *, dry_run: bool = True) -> dict:
+    """Create schema and credentials atomically; an existing table is complete."""
+    with target.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
-        for row in rows:
-            cursor.execute(
-                "SELECT user_id,user_email,source_metadata,password_hash,token_version,delete_flag,user_role "
-                "FROM nexent.user_account_t WHERE user_id=%s OR (user_email=%s AND delete_flag='N' AND %s='N') FOR UPDATE",
-                (row["user_id"], row["email"], row["delete_flag"]),
-            )
-            existing = cursor.fetchall()
-            pending = False
-            if existing:
-                account = existing[0]
-                profile_pending = (len(existing) == 1 and (account["source_metadata"] or {}).get("credential_migration_pending") is True
-                           and account["password_hash"] is None and account["token_version"] == 0)
-                pending = profile_pending and account["delete_flag"] == "N"
-                if (len(existing) != 1 or account["user_id"] != row["user_id"]
-                        or (account["user_email"] != row["email"] and not (profile_pending and account["user_email"] is None))):
-                    raise MigrationConflict("Target account conflicts with a source identity")
-                if not pending:
-                    result["skipped"] += 1
-                    continue
-            cursor.execute("SELECT delete_flag FROM nexent.user_tenant_t WHERE user_id=%s", (row["user_id"],))
-            active = [member for member in cursor.fetchall() if member["delete_flag"] == "N"]
-            if active and not existing:
-                raise MigrationConflict("Membership account profile is missing; apply the account SQL migration first")
-            if not active or (pending and not account["user_role"]):
-                row["account_status"] = "disabled"
-                result["disabled_orphans"] += 1
-            values = dict(row)
-            values["user_email"] = values.pop("email")
-            if not pending:
-                values["user_role"] = None
-            plans.append((pending, values))
-            result["updated" if pending else "inserted"] += 1
+        cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL")
+        if cursor.fetchone()[0]:
+            return {"skipped": len(source_rows), "complete": True, "dry_run": dry_run}
+        cursor.execute("SAVEPOINT account_migration")
+        try:
+            cursor.execute(_account_import_sql(source_rows, dry_run=dry_run))
+            result = cursor.fetchone()[0]
+        except Exception as exc:
+            conflict = _migration_conflict(getattr(getattr(exc, "diag", None), "message_primary", ""))
+            cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
+            cursor.execute("RELEASE SAVEPOINT account_migration")
+            if conflict:
+                raise conflict from None
+            raise
         if dry_run:
-            return result
-        for pending, row in plans:
-            values = dict(row, source_metadata=Json(row["source_metadata"]))
-            if pending:
-                user_id = values.pop("user_id")
-                cursor.execute(
-                    "UPDATE nexent.user_account_t SET " + ",".join(name + "=%s" for name in values)
-                    + ",updated_by='auth-migration' WHERE user_id=%s AND password_hash IS NULL AND token_version=0 "
-                    "AND delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'",
-                    [*values.values(), user_id],
-                )
-                if cursor.rowcount != 1:
-                    raise MigrationConflict("Pending account changed concurrently; retry preflight")
-            else:
-                names = list(values)
-                cursor.execute(
-                    "INSERT INTO nexent.user_account_t (" + ",".join(names) + ",created_by,updated_by) VALUES ("
-                    + ",".join(["%s"] * len(names)) + ",%s,%s)",
-                    [*values.values(), "auth-migration", "auth-migration"],
-                )
-    return result
+            cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
+        cursor.execute("RELEASE SAVEPOINT account_migration")
+        return result
+
+
+def _migration_sql(rows, *, dry_run=False):
+    """psql releases the entire failed transaction when its connection exits."""
+    body = _account_import_sql(rows, dry_run=dry_run)
+    return "BEGIN;\n" + r"""
+SET LOCAL standard_conforming_strings=on;
+SELECT pg_advisory_xact_lock(hashtext('account-writers'));
+SELECT to_regclass('nexent.user_account_t') IS NOT NULL AS complete \gset
+\if :complete
+SELECT '{"skipped":true,"complete":true}';
+\else
+""" + body + "\n\\endif\n" + ("ROLLBACK;" if dry_run else "COMMIT;")
 
 
 def _docker(*args):
@@ -409,6 +444,23 @@ def execute(action, values, *, with_auth=False, production=False):
     docker(args, values)
 
 
+def _migration_conflict(message):
+    """Extract only structured account identifiers, never raw database output."""
+    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_CONFLICT=(\[[^\r\n]*\])', message or '', re.M)
+    if not match:
+        return None
+    try:
+        ids = json.loads(match.group(1))
+        if not isinstance(ids, list) or not ids:
+            return None
+        if any(not isinstance(value,str) or not 0<len(value)<=100 or any(ord(c)<32 for c in value) for value in ids):
+            return None
+        ids = sorted(set(ids))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return MigrationConflict("Account migration conflict IDs: " + json.dumps(ids))
+
+
 def _command(command, *, data=None, env=None):
     try:
         result = subprocess.run(command, input=data.encode("utf-8") if data is not None else None,
@@ -416,6 +468,9 @@ def _command(command, *, data=None, env=None):
     except (OSError, subprocess.TimeoutExpired):
         raise MigrationSetupError("Deployment migration command is unavailable or timed out") from None
     if result.returncode:
+        conflict = _migration_conflict(result.stderr.decode("utf-8", errors="replace"))
+        if conflict:
+            raise conflict
         raise MigrationSetupError("Deployment migration command failed; inspect the selected database/workload readiness")
     return result.stdout.decode("utf-8").strip()
 
@@ -450,49 +505,6 @@ def _psql(args, target, sql, values, *, source=False):
     return _exec(args, target, ["sh", "-c", shell, "migration", "psql", "-X", "-qAt",
                  "-h", "127.0.0.1", "-p", port, "-U", user, "-d", database,
                  "-v", "ON_ERROR_STOP=1"], secret_line + "\n" + sql)
-
-
-def _history_table(values):
-    name = values.get("NEXENT_SQL_MIGRATION_TABLE") or "nexent.schema_migrations"
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)?", name):
-        raise MigrationSetupError("Invalid SQL migration table name")
-    return ".".join('"' + part + '"' for part in name.split("."))
-
-
-def deployment_status(args, values):
-    table = _history_table(values)
-    plain = table.replace('"', '')
-    sql = rf"""
-SELECT to_regclass('{plain}') IS NOT NULL AS has_history \gset
-\if :has_history
-SELECT coalesce(json_agg(row_to_json(m)), '[]') FROM {table} m
-WHERE migration_id IN ('{AUTH_SQL}','{DATA_MARKER}','{CLEANUP_MARKER}');
-\else
-SELECT '[]';
-\endif
-SELECT count(*)=2 AS has_accounts FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name IN ('source_metadata','user_role') \gset
-\if :has_accounts
-SELECT json_build_object('pending',count(*)) FROM nexent.user_account_t a
-WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'
-AND NOT (a.user_id='user_id' AND coalesce(upper(a.user_role),'')='SPEED'
-    AND a.account_status='disabled' AND nullif(trim(a.user_email),'') IS NULL
-    AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
-    AND coalesce(a.updated_by,'')='account-schema-migration'
-    AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.tenant_id='tenant_id' AND u.delete_flag='N')
-    AND NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N' AND u.tenant_id IS DISTINCT FROM 'tenant_id'));
-\else
-SELECT '{{"pending":0}}';
-\endif
-SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name='user_email') AS has_legacy \gset
-\if :has_legacy
-SELECT json_build_object('legacy_logins',exists(SELECT 1 FROM nexent.user_tenant_t WHERE delete_flag='N' AND nullif(trim(user_email),'') IS NOT NULL));
-\else
-SELECT '{{"legacy_logins":false}}';
-\endif
-"""
-    rows = _psql(args, args.database_target, sql, values).splitlines()
-    history = {row["migration_id"]: row for row in json.loads(rows[0]) if row["status"] in {"applied", "baselined"}}
-    return {"history": history, **json.loads(rows[1]), **json.loads(rows[2])}
 
 
 def _private_json(path, value):
@@ -575,23 +587,6 @@ COMMIT;
     return users
 
 
-def _preserve_source_storage(args, source, path):
-    if args.deployment != "kubernetes":
-        return
-    prefix = ["kubectl", "--namespace", args.namespace]
-    claim = _command([*prefix, "get", "pvc", source["target"], "--ignore-not-found", "-o", "json"])
-    if not claim:
-        return
-    claim = json.loads(claim)
-    volume_name = claim.get("spec", {}).get("volumeName")
-    if not volume_name:
-        raise MigrationSetupError("Source Supabase PVC is not bound; preserving the old release")
-    volume = json.loads(_command(["kubectl", "get", "pv", volume_name, "-o", "json"]))
-    _private_json(path.with_name(path.stem + "-storage.json"), {"claim": claim, "volume": volume})
-    if volume["spec"].get("persistentVolumeReclaimPolicy") != "Retain":
-        _command(["kubectl", "patch", "pv", volume_name, "--type=merge", "-p", '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'])
-
-
 def _worker(job):
     """Executed in Config's existing Python environment; no host packages needed."""
     import psycopg2
@@ -605,41 +600,7 @@ def _worker(job):
         finally:
             source.close()
         return
-    values = dict(os.environ)
-    params = {"host": values.get("POSTGRES_HOST") or "nexent-postgresql",
-              "port": int(values.get("POSTGRES_PORT") or 5432), "dbname": values.get("POSTGRES_DB") or "nexent",
-              "user": values.get("POSTGRES_USER") or "root", "password": values.get("NEXENT_POSTGRES_PASSWORD"),
-              "connect_timeout": 5}
-    table = _history_table(values)
-    connection = psycopg2.connect(**params)
-    try:
-        with connection:  # noqa: SIM117 -- Close the cursor before committing the transaction.
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT pg_advisory_xact_lock(hashtext('local-auth-upgrade'))")
-                cursor.execute(f"SELECT checksum FROM {table} WHERE migration_id=%s AND status IN ('applied','baselined')", (AUTH_SQL,))
-                sql_record = cursor.fetchone()
-                if not sql_record or sql_record[0] != job["checksum"]:
-                    raise MigrationSetupError("Account SQL has not reached the expected version/checksum")
-                marker = CLEANUP_MARKER if job["action"] == "cleanup" else DATA_MARKER
-                cursor.execute(f"SELECT checksum FROM {table} WHERE migration_id=%s", (marker,))
-                recorded = cursor.fetchone()
-                pending = False
-                if marker == DATA_MARKER:
-                    cursor.execute("SELECT count(*) FROM nexent.user_account_t WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'")
-                    pending = bool(cursor.fetchone()[0])
-                if recorded and recorded[0] == job["checksum"] and not pending:
-                    result = {"automatic": True, "skipped": True}
-                else:
-                    result = import_users(connection, job.get("rows", []), dry_run=False) if marker == DATA_MARKER else {"cleanup": True}
-                    if marker == DATA_MARKER:
-                        cursor.execute("SELECT count(*) FROM nexent.user_account_t WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'")
-                        if cursor.fetchone()[0]:
-                            raise MigrationConflict("Historical account credentials remain pending; source snapshot is incomplete")
-                    cursor.execute(f"INSERT INTO {table} (migration_id,checksum,status,app_version,source_file) VALUES (%s,%s,'applied','2.9.0',%s) ON CONFLICT (migration_id) DO UPDATE SET checksum=excluded.checksum,status='applied',executed_at=now(),app_version=excluded.app_version,source_file=excluded.source_file",
-                                   (marker, job["checksum"], str(HERE / "migrate_docker.py")))
-        print(json.dumps(result))
-    finally:
-        connection.close()
+    raise MigrationSetupError("Unsupported migration worker action")
 
 
 def _run_worker(args, job):
@@ -660,57 +621,36 @@ except (n["MigrationSetupError"], n["MigrationConflict"]) as error:
 
 
 def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
-    # deploy.sh has already exported its complete root environment. This path
-    # deliberately imports no database/dotenv libraries on the deployment host.
-    values = dict(os.environ)
-    sql_file = ROOT / "deploy/sql/migrations" / AUTH_SQL
-    checksum = hashlib.sha256(sql_file.read_bytes()).hexdigest()
-    path = (args.state_dir or args.env_file.parent / ".migration-state") / (args.deployment + "-" + args.namespace + "-" + AUTH_SQL + ".json")
-    status = deployment_status(args, values)
-    complete = not status["pending"] and all(status["history"].get(marker, {}).get("checksum") == checksum for marker in [AUTH_SQL, DATA_MARKER, CLEANUP_MARKER])
-    target = {"deployment": args.deployment, "namespace": args.namespace, "database": args.database_target,
-              "dbname": values.get("POSTGRES_DB") or "nexent"}
-    if getattr(args, "cluster_identity", None):
-        target["cluster"] = args.cluster_identity
-    snapshot = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-    if snapshot and snapshot["target"] != target:
-        raise MigrationSetupError("Retained account snapshot belongs to a different deployment target")
-    if complete:
-        if path.exists():
-            path.unlink()
-        return {"automatic": True, "skipped": True}
-    if args.deploy_phase == "prepare":
-        if snapshot:
-            return {"automatic": True, "prepared": True, "retained": True}
-        source = (source_resolver or _source_target)(args, values)
-        if not source and (status["pending"] or status["legacy_logins"]):
-            raise MigrationSetupError("Historical login accounts need the original Supabase source; old application rollout was preserved")
-        if source and not source.get("remote"):
-            (storage_preserver or _preserve_source_storage)(args, source, path)
-        rows = source_snapshot(args, values, source) if source else []
-        # Validate the complete snapshot before application replacement.
-        for row in rows:
-            map_source_user(row)
-        _private_json(path, {"target": target, "source": source, "rows": rows})
-        return {"automatic": True, "prepared": True, "source": len(rows)}
-    if not snapshot:
-        raise MigrationSetupError("Deployment account snapshot is missing; rerun deploy.sh from the prepare phase")
-    deadline = time.monotonic() + args.wait_timeout
-    while status["history"].get(AUTH_SQL, {}).get("checksum") != checksum:
-        if time.monotonic() >= deadline:
-            raise MigrationSetupError("Waiting for the versioned account SQL timed out; snapshot was retained")
-        time.sleep(1)
-        status = deployment_status(args, values)
-    result = _run_worker(args, {"action": "apply", "checksum": checksum, "rows": snapshot["rows"]})
-    source = snapshot["source"]
-    if source and not source.get("remote"):
-        if args.deployment == "docker":
-            cleanup_source_stack(source["configuration"])
-        else:
-            for name in ["nexent-supabase-kong", "nexent-supabase-auth", source["target"]]:
-                _command(["kubectl", "--namespace", args.namespace, "delete", "deployment,service", name, "--ignore-not-found"])
-    _run_worker(args, {"action": "cleanup", "checksum": checksum})
-    path.unlink(missing_ok=True)
+    values = load_settings(args.env_file)
+    state = json.loads(_psql(args, args.database_target,
+        "SELECT json_build_object('complete',to_regclass('nexent.user_account_t') IS NOT NULL,"
+        "'legacy',to_regclass('nexent.user_tenant_t') IS NOT NULL);", values))
+    if state["complete"]:
+        return {"skipped": True, "complete": True}
+    if not state["legacy"]:
+        return {"skipped": True, "new": True}
+    source = (source_resolver or _source_target)(args, values)
+    if not source:
+        raise MigrationSetupError("The original Supabase database is required; restore its original data before retrying")
+    # Storage backups are recovery artifacts, never migration completion markers.
+    if storage_preserver and not source.get("remote"):
+        backup = args.env_file.parent / "backups" / (args.deployment + "-" + args.namespace + "-supabase.json")
+        storage_preserver(args, source, backup)
+    rows = source_snapshot(args, values, source)
+    sql = _migration_sql(rows, dry_run=not args.apply)
+    output = _psql(args, args.database_target, sql, values)
+    result = json.loads(output.splitlines()[-1])
+    if args.apply and not result.get("skipped") and not source.get("remote"):
+        try:
+            if args.deployment == "docker":
+                cleanup_source_stack(source["configuration"])
+            else:
+                for name in ["nexent-supabase-kong", "nexent-supabase-auth", source["target"]]:
+                    _command(["kubectl", "--namespace", args.namespace, "delete", "deployment,service", name, "--ignore-not-found"])
+        except Exception:  # noqa: BLE001 -- Cleanup is independent of the committed import.
+            # The transaction already committed. Never erase imported credentials
+            # after source cleanup has started; report its independent outcome.
+            print("Account migration committed; source container cleanup incomplete. Remove the remaining legacy resources manually; data volumes are retained.", file=sys.stderr)
     return result
 
 
@@ -719,25 +659,22 @@ def main(*, upgrade=automatic_upgrade):
     parser.add_argument("action", nargs="?", choices=["up", "down"], help="Manual legacy stack recovery/removal")
     parser.add_argument("--with-auth", action="store_true")
     parser.add_argument("--production", action="store_true")
-    parser.add_argument("--deploy-phase", choices=["prepare", "apply"])
+    parser.add_argument("--deploy", action="store_true", help="Upgrade through the deployment database container or pod")
     parser.add_argument("--deployment", choices=["docker", "kubernetes"], default="docker")
     parser.add_argument("--namespace", default="nexent")
     parser.add_argument("--database-target", default="nexent-postgresql")
     parser.add_argument("--config-target", default="nexent-config")
-    parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--apply", action="store_true", help="Write after preflight; default is dry-run")
     parser.add_argument("--env-file", type=Path, default=ROOT / "deploy/env/.env")
     parser.add_argument("--source-container", help="Existing local Supabase database container name")
     parser.add_argument("--no-start-source", action="store_true", help="Fail if the local source container is stopped")
     parser.add_argument("--wait-timeout", type=int, default=30, help="Source readiness timeout in seconds")
     args = parser.parse_args()
-    if args.deploy_phase == "apply" and not args.apply:
-        parser.error("--deploy-phase apply requires --apply")
     if args.wait_timeout < 1 or args.wait_timeout > 300:
         parser.error("--wait-timeout must be between 1 and 300")
-    if args.deploy_phase or args.action:
+    if args.deploy or args.action:
         try:
-            if args.deploy_phase:
+            if args.deploy:
                 print(json.dumps(upgrade(args)))
             else:
                 execute(args.action, load_settings(args.env_file), with_auth=args.with_auth, production=args.production)
@@ -746,15 +683,25 @@ def main(*, upgrade=automatic_upgrade):
         except (MigrationSetupError, MigrationConflict) as exc:
             print("Account upgrade rejected: " + str(exc), file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 -- Never expose raw database/container credentials.
-            print("Account upgrade failed (" + type(exc).__name__ + "); retained migration state is available for retry.", file=sys.stderr)
+            print("Account upgrade failed (" + type(exc).__name__ + "); target changes were rolled back; retry with the original source.", file=sys.stderr)
         return 1
     import psycopg2
 
 
-    cleanup_started = False
     try:
         values = load_settings(args.env_file)
-        source_params, target_params, managed = connections(values)
+        target_params = target_connection(values)
+        target = psycopg2.connect(**target_params)
+        try:
+            with target, target.cursor() as cursor:
+                cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL")
+                complete = cursor.fetchone()[0]
+        finally:
+            target.close()
+        if complete:
+            print(json.dumps({"skipped": True, "complete": True, "dry_run": not args.apply}))
+            return 0
+        source_params, _, managed = connections(values)
         cleanup_values = None
         if managed or args.source_container:
             selected = prepare_source(source_params, args.source_container, allow_start=not args.no_start_source)
@@ -783,18 +730,19 @@ def main(*, upgrade=automatic_upgrade):
                 result = import_users(target, rows, dry_run=not args.apply)
         finally:
             target.close()
-        if cleanup_values is not None:
-            cleanup_started = True
-            cleanup_source_stack(cleanup_values)
-            print("Removed source Supabase DB/Auth/Kong containers; data volumes and backups were retained.", file=sys.stderr)
+        if cleanup_values is not None and not result.get("complete"):
+            try:
+                cleanup_source_stack(cleanup_values)
+                print("Removed source Supabase DB/Auth/Kong containers; data volumes and backups were retained.", file=sys.stderr)
+            except Exception:  # noqa: BLE001 -- Never discard committed accounts after cleanup starts.
+                print("Account migration committed; source cleanup failed. Remove remaining legacy resources manually; data volumes are retained.", file=sys.stderr)
         print(json.dumps(result))
         return 0
     except (MigrationConflict, MigrationSetupError) as exc:
-        prefix = "Account migration committed; source cleanup failed: " if cleanup_started else "Account migration preflight rejected: "
-        print(prefix + str(exc), file=sys.stderr)
+        print("Account migration preflight rejected: " + str(exc), file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 -- Never expose raw database/container credentials.
-        print(("Account migration committed; source cleanup failed (" if cleanup_started else "Account migration failed (") + type(exc).__name__
+        print("Account migration failed (" + type(exc).__name__
               + "); inspect prerequisites and run preflight again.", file=sys.stderr)
         return 1
 

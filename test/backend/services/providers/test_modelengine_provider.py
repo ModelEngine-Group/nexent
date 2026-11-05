@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ModelEngineProvider module.
 
 Tests cover model fetching, type mapping, and error handling.
@@ -18,6 +20,30 @@ from management.services.model.providers.modelengine_provider import (
 
 class TestModelEngineProvider:
     """Tests for ModelEngineProvider class."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("verify", [True, False])
+    async def test_shared_http_settings_with_header_auth(self, mocker, verify):
+        """AC-FIX-04/05: dedicated discovery honors shared HTTP controls too."""
+        response = AsyncMock(status=200)
+        response.json.return_value = {"data": []}
+        get_context = MagicMock()
+        get_context.__aenter__.return_value = response
+        session = MagicMock()
+        session.get.return_value = get_context
+        context = MagicMock()
+        context.__aenter__.return_value = session
+        client = mocker.patch("management.services.model.providers.modelengine_provider.aiohttp.ClientSession", return_value=context)
+        connector = mocker.patch("management.services.model.providers.modelengine_provider.aiohttp.TCPConnector")
+        await ModelEngineProvider().get_models({
+            "base_url": "https://test.example.com",
+            "http_headers": {"x-gateway-auth": "test-header"},
+            "ssl_verify": verify,
+            "timeout_seconds": 7,
+        })
+        connector.assert_called_once_with(ssl=verify)
+        assert client.call_args.kwargs["timeout"].total == 7
+        assert session.get.call_args.kwargs["headers"] == {"x-gateway-auth": "test-header"}
 
     @pytest.mark.asyncio
     async def test_get_models_success_with_all_types(self, mocker: MockFixture):

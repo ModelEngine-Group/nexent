@@ -7,8 +7,6 @@ import { useMessageSources } from "../ui/message-sources";
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { SourceAttributes } from "@/types/source";
 
@@ -66,6 +64,7 @@ import { SourcesPanel } from "../ui/sources-panel";
 import {
   SourcesPanelProvider,
   useSourcesPanel,
+  useSourcesPanelState,
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
@@ -203,16 +202,9 @@ export interface ThreadProps {
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   showAgentCreationResult?: boolean;
@@ -234,6 +226,8 @@ export interface ThreadProps {
   showComposer?: boolean;
   configurationLayout?: boolean;
   debugLayout?: boolean;
+  onSourcesPanelOpen?: () => void;
+  sourcesPanelCloseEpoch?: number;
   emptyFooterContent?: ReactNode;
   footerContent?: ReactNode;
   interactionContent?: ReactNode;
@@ -270,16 +264,9 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
   showAgentCreationResult = true,
@@ -298,6 +285,8 @@ export const Thread: FC<ThreadProps> = ({
   showComposer = true,
   configurationLayout = false,
   debugLayout = false,
+  onSourcesPanelOpen,
+  sourcesPanelCloseEpoch,
   emptyFooterContent,
   footerContent,
   interactionContent,
@@ -324,7 +313,8 @@ export const Thread: FC<ThreadProps> = ({
     models,
     `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${modelThreadKey}`,
     selectedModelId,
-    onModelChange ? (selectedModelId ?? "") : undefined
+    onModelChange ? (selectedModelId ?? "") : undefined,
+    conversationId
   );
   const effectiveSelectedModelId = onModelChange
     ? (selectedModelId ?? "")
@@ -379,35 +369,11 @@ export const Thread: FC<ThreadProps> = ({
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
-    null
+  const panelContextValue = useSourcesPanelState(
+    onSourcesPanelOpen,
+    sourcesPanelCloseEpoch
   );
-
-  const open = useCallback((payload: SourcesPanelSelection) => {
-    setSelection(payload);
-  }, []);
-
-  const toggle = useCallback((payload: SourcesPanelSelection) => {
-    setSelection((current) => {
-      if (
-        current &&
-        current.messageId === payload.messageId &&
-        current.groupId === payload.groupId
-      ) {
-        return null;
-      }
-      return payload;
-    });
-  }, []);
-
-  const close = useCallback(() => {
-    setSelection(null);
-  }, []);
-
-  const panelContextValue = useMemo(
-    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close]
-  );
+  const { selection, close } = panelContextValue;
 
   return (
     <ConversationShareContext.Provider
@@ -423,27 +389,9 @@ export const Thread: FC<ThreadProps> = ({
           models={models}
           selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
           onModelChange={handleModelChange}
-          deepThinking={deepThinking ?? controls.deepThinking}
-          onDeepThinkingChange={
-            onDeepThinkingChange ?? controls.onDeepThinkingChange
-          }
-          thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
-          onThinkingEffortChange={
-            onThinkingEffortChange ?? controls.onThinkingEffortChange
-          }
-          reasoningBudgetTokens={
-            reasoningBudgetTokens ?? controls.reasoningBudgetTokens
-          }
-          onReasoningBudgetTokensChange={
-            onReasoningBudgetTokensChange ??
-            controls.onReasoningBudgetTokensChange
-          }
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
           showModelSelector={showModelSelector}
-          modelParameterSettings={
-            modelParameterSettings ?? controls.modelParameterSettings
-          }
           showConversationTitle={showConversationTitle}
           showAgentCreationResult={showAgentCreationResult}
           composerTools={composerTools}
@@ -458,7 +406,9 @@ export const Thread: FC<ThreadProps> = ({
           onRuntimeMetadataChange={onRuntimeMetadataChange}
           readOnly={readOnly || (showModelSelector && !modelIsValid)}
           modelSelectionDisabled={readOnly}
-          readOnlyReason={readOnlyReason}
+          readOnlyReason={
+            readOnlyReason ?? (showModelSelector ? controls.error : undefined)
+          }
           showComposer={showComposer}
           configurationLayout={configurationLayout}
           debugLayout={debugLayout}
@@ -556,16 +506,9 @@ interface ThreadViewProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
   showAgentCreationResult: boolean;
   composerTools?: ReactNode;
@@ -622,16 +565,9 @@ const ThreadView: FC<ThreadViewProps> = ({
   models,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
-  modelParameterSettings,
   showConversationTitle,
   showAgentCreationResult,
   composerTools,
@@ -692,6 +628,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
+        debugLayout && selection !== null && "gap-6",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
@@ -774,6 +711,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
             !hasMessages &&
+              variant !== "embedded" &&
               !workbenchLanding &&
               !debugLayout &&
               "!overflow-y-hidden",
@@ -869,20 +807,14 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
+              conversationId={conversationId}
               hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
-              deepThinking={deepThinking}
-              onDeepThinkingChange={onDeepThinkingChange}
-              thinkingEffort={thinkingEffort}
-              onThinkingEffortChange={onThinkingEffortChange}
-              reasoningBudgetTokens={reasoningBudgetTokens}
-              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
-              modelParameterSettings={modelParameterSettings}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}

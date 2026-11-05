@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Existing smolagents model interface over the one model service."""
 
+import json
 from copy import deepcopy
 from inspect import iscoroutinefunction
 from uuid import uuid4
@@ -7,6 +10,7 @@ from uuid import uuid4
 from smolagents.models import (
     ChatMessage,
     ChatMessageStreamDelta,
+    ChatMessageToolCall,
     ChatMessageToolCallFunction,
     ChatMessageToolCallStreamDelta,
     Model,
@@ -19,10 +23,11 @@ from smolagents.monitoring import TokenUsage
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
-from nexent.core.model_service.contracts import ModelMessage, ModelRequest, ToolDefinition
+from nexent.core.model_service.contracts import ModelMessage, ModelRequest, ToolCall, ToolDefinition
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import AuthenticationRegistry
 from nexent.core.model_service.service import ModelService, ModelServiceError
+from nexent.core.model_service.errors import model_error_message
 from nexent.core.models.capacity_budget import parse_context_budget_snapshot
 from nexent.core.models.message_utils import merge_system_messages
 from nexent.core.models.prompt_cache import PromptCacheUsage
@@ -41,6 +46,56 @@ _ERROR_CODES = {
     "MODEL_CONTEXT_EXCEEDED": ModelErrorCode.CONTEXT_OVERFLOW,
     "MODEL_REQUEST_INVALID": ModelErrorCode.INVALID_REQUEST,
 }
+
+
+def _legacy_tool_call(call, index):
+    """Translate a legacy function call without changing its provider identity."""
+    if isinstance(call, ChatMessageToolCall):
+        call = {"id": call.id, "type": call.type,
+                "function": {"name": call.function.name, "arguments": call.function.arguments}}
+    if not isinstance(call, dict) or call.get("type") != "function" or not isinstance(call.get("function"), dict):
+        raise ValueError("Legacy tool calls require a function declaration")
+    arguments = call["function"].get("arguments")
+    if not isinstance(arguments, (str, dict)):
+        raise ValueError("Legacy tool arguments require text or an object")
+    try:
+        return ToolCall(
+            provider_call_id=call.get("id"), index=index, name=call["function"].get("name"),
+            raw_arguments=arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False, allow_nan=False),
+            parsed_arguments=arguments if isinstance(arguments, dict) else None,
+        )
+    except (TypeError, ValueError):
+        raise ValueError("Invalid legacy tool call") from None
+
+
+def _clean_legacy_messages(messages, *, flatten_messages_as_text):
+    """Keep native tool boundaries while retaining ordinary legacy coalescing."""
+    groups = []
+    for message in messages:
+        native = bool(message.get("tool_calls")) or message.get("tool_call_id") is not None or message["role"] == "tool"
+        if not native and groups and not groups[-1][0]:
+            groups[-1][1].append(message)
+        else:
+            groups.append((native, [message]))
+    result = []
+    for native, group in groups:
+        source = group[0]
+        tool_result = native and source["role"] in {"tool", "tool-response"}
+        payload = [{"role": "tool-response" if tool_result else message["role"],
+                    "content": message["content"]} for message in group]
+        if native and not source["content"]:
+            cleaned = [{"role": tool_role_conversions.get(source["role"], source["role"]), "content": []}]
+        else:
+            cleaned = get_clean_message_list(
+                payload, role_conversions=tool_role_conversions, convert_images_to_image_urls=True,
+                flatten_messages_as_text=flatten_messages_as_text,
+            )
+        if native:
+            cleaned[0].update(tool_calls=source.get("tool_calls") or [], tool_call_id=source.get("tool_call_id"))
+            if tool_result:
+                cleaned[0]["role"] = "tool"
+        result.extend(cleaned)
+    return result
 
 
 class LegacyChatModel(Model):
@@ -81,11 +136,11 @@ class LegacyChatModel(Model):
         self.last_context_evidence = None
 
     @classmethod
-    def from_profile(cls, profile, api_key, *, observer=None, cancellation_scope=None):
+    def from_profile(cls, profile, api_key, *, http_headers=None, observer=None, cancellation_scope=None):
         """Construct the compatibility model with the shared transport and retry policy."""
         auth = AuthenticationRegistry()
         service = ModelService(
-            lambda snapshot: auth.sender_for(snapshot, lambda _tenant, _reference: api_key),
+            lambda snapshot: auth.sender_for(snapshot, lambda _tenant, _reference: api_key, http_headers=http_headers),
             retry_policy=DEFAULT_MODEL_RETRY,
         )
         return cls(profile, service, observer=observer, cancellation_scope=cancellation_scope)
@@ -116,7 +171,8 @@ class LegacyChatModel(Model):
         normalized = []
         for message in merge_system_messages(deepcopy(messages)):
             if isinstance(message, ChatMessage):
-                message = {"role": message.role, "content": message.content}
+                message = {"role": message.role, "content": message.content,
+                           "tool_calls": message.tool_calls, "tool_call_id": getattr(message, "tool_call_id", None)}
             if not isinstance(message, dict) or not {"role", "content"} <= message.keys():
                 raise ValueError("Legacy messages require role and content")
             message = deepcopy(message)
@@ -125,11 +181,8 @@ class LegacyChatModel(Model):
             elif message["content"] is None:
                 message["content"] = []
             normalized.append(message)
-        cleaned = get_clean_message_list(
-            normalized,
-            role_conversions=tool_role_conversions,
-            convert_images_to_image_urls=True,
-            flatten_messages_as_text=self.flatten_messages_as_text,
+        cleaned = _clean_legacy_messages(
+            normalized, flatten_messages_as_text=self.flatten_messages_as_text,
         )
         request = ModelRequest(
             request_id=uuid4().hex,
@@ -144,6 +197,8 @@ class LegacyChatModel(Model):
                         if isinstance(message["content"], str)
                         else message["content"]
                     ),
+                    tool_calls=[_legacy_tool_call(call, index) for index, call in enumerate(message.get("tool_calls") or [])],
+                    tool_call_id=message.get("tool_call_id"),
                 )
                 for message in cleaned
             ],
@@ -164,6 +219,7 @@ class LegacyChatModel(Model):
             _ERROR_CODES.get(error.category, ModelErrorCode.UNKNOWN_ERROR),
             error.attempt,
             cause=ModelServiceError(error),
+            public_messages={lang: model_error_message(error, lang) for lang in ("en", "zh")},
         )
 
     def _reset_response(self, profile):
@@ -300,7 +356,7 @@ class LegacyChatModel(Model):
         )
         events = self._events(
             messages, options, tools_to_call_from, suppress_stream=_suppress_attempt_stream,
-            empty_response_policy="retry" if _retry_empty_response else "fail",
+            empty_response_policy="retry_uncommitted" if _retry_empty_response else "fail",
             context_rebuild=context_rebuild,
         )
         try:

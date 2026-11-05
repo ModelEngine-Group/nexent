@@ -68,3 +68,17 @@ def test_existing_value_columns_remain_single_storage_locations(table):
         assert str(table.c[name].type.compile(dialect=postgresql.dialect())) == sql_type
     assert not table.c.reasoning_controls.index
     assert not table.c.native_tool_call_supported.index
+
+
+def test_conversation_preferences_do_not_declare_or_select_a_revision():
+    from sqlalchemy import select
+    from management.db.models import ConversationRecord
+
+    columns = ConversationRecord.__table__.c
+    assert "model_parameter_preferences_version" not in columns
+    assert not hasattr(ConversationRecord, "model_parameter_preferences_version")
+    assert "model_parameter_preferences_version" not in str(select(ConversationRecord))
+    assert str(columns.model_parameter_preferences.type) == "JSONB"
+    assert columns.model_parameter_preferences.nullable is False
+    assert str(columns.model_parameter_preferences.server_default.arg) == "'{}'::jsonb"
+    assert {"selected_model_id", "runtime_metadata_version", "workbench_config_version", "title_version"} <= set(columns.keys())

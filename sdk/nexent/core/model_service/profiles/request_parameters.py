@@ -104,7 +104,8 @@ def apply_extra_api_parameters(
             raise ParameterValidationError("RESERVED_API_PATH", path)
         if any(_overlap(tokens, existing) for existing, _ in accepted):
             raise ParameterValidationError("API_PATH_CONFLICT", path)
-        leaf_count += _leaves(entry["value"])
+        # Preserve sixteen levels under a top-level parameter, counting nested pointer segments too.
+        leaf_count += _leaves(entry["value"], depth=len(tokens) - 1)
         if leaf_count > _MAX_LEAVES:
             raise ParameterValidationError("EXTRA_API_PARAMETERS_LIMIT", keyword="leaves")
         accepted.append((tokens, entry))

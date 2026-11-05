@@ -212,12 +212,6 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if not resume:
-        from management.services.model import run_controls
-
-        run_controls.validate_agent_model_selection(
-            agent_request, resolved_tenant_id, search_agent_info_by_agent_id
-        )
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -254,6 +248,16 @@ async def run_agent_stream(
                 raise ForbiddenError(
                     "Conversation belongs to a different chat entrypoint"
                 )
+
+    if not resume:
+        from management.services.model import run_controls
+        if conversation is not None:
+            from management.services.conversation.model_preferences import read_model_preferences
+            saved = await run_blocking("conversation-model-settings", read_model_preferences, agent_request.conversation_id, resolved_user_id)
+            if agent_request.model_id is None:
+                agent_request.model_id = saved.get("selected_model_id")
+            agent_request.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+        run_controls.validate_agent_model_selection(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
 
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
@@ -323,6 +327,8 @@ async def run_agent_stream(
             agent_id=agent_request.agent_id, version_no=agent_request.version_no,
             is_debug=bool(agent_request.is_debug),
         )
+    if not resume and conversation is not None and agent_request.model_parameter_preferences:
+        raise ValidationError("Save existing conversation parameters through the preference endpoint")
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -441,6 +447,10 @@ async def run_agent_stream(
             "agent_id": agent_request.agent_id,
             "chat_mode": "planning" if agent_request.enable_plan else "execution",
         }
+        if agent_request.model_id is not None:
+            conversation_kwargs["selected_model_id"] = agent_request.model_id
+        if agent_request.model_parameter_preferences:
+            conversation_kwargs["model_parameter_preferences"] = agent_request.model_parameter_preferences
         if canonical_workbench is not None:
             conversation_kwargs["workbench_config"] = canonical_workbench.model_dump(
                 mode="json"
@@ -452,6 +462,7 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
+        agent_request.__dict__["_runtime_model_parameter_preferences"] = agent_request.model_parameter_preferences
         logger.info(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
@@ -969,7 +980,7 @@ async def run_agent_stream(
                                 "config_version": getattr(
                                     agent_request, "_workbench_config_version", 0
                                 ),
-                                "schema_version": 3,
+                                "schema_version": canonical_workbench.schema_version,
                                 "mode": canonical_workbench.mode,
                                 "agent_mounts": [
                                     mount.model_dump(mode="json")

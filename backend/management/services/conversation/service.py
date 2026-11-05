@@ -21,7 +21,12 @@ from contracts.agent import AgentRequest
 from contracts.conversation import MessageRequest, MessageUnit
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
-from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+# Public read facade consumed by Agent subscriptions; these are intentional re-exports.
+from management.db.conversation.repository import (  # noqa: F401
+    get_last_unit_for_message,
+    get_latest_assistant_message,
+)
 from management.db.model.repository import get_model_by_model_id
 from management.db.conversation.repository import append_conversation_user_message, resolve_conversation_retry_user
 from management.services.model.adapter import get_llm_adapter_from_config
@@ -387,6 +392,8 @@ def create_new_conversation(
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
     target: Optional[Dict[str, Any]] = None,
+    model_parameter_preferences: Optional[Dict[str, Any]] = None,
+    selected_model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -413,6 +420,10 @@ def create_new_conversation(
             create_kwargs["runtime_metadata"] = runtime_metadata
         if workbench_config is not None:
             create_kwargs["workbench_config"] = workbench_config
+        if selected_model_id is not None:
+            create_kwargs["selected_model_id"] = selected_model_id
+        if model_parameter_preferences:
+            create_kwargs["model_parameter_preferences"] = model_parameter_preferences
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except AppException:

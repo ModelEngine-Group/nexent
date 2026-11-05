@@ -62,7 +62,7 @@ content_sha256 = "fc0ab4a85f709e3d823c7ba166c5136ed3470dd2369faa032c3e578500429c
 
 [[rules]]
 path = "rules/providers/alibaba-cn/models/qwen3.8-max.toml"
-content_sha256 = "cdb054ab498b5a30bc4b4ab210700526f8bb07b0d54f87242c1b202dadcba22b"
+content_sha256 = "af3e629013a1f10870b72ee1a50ddb9b32a277dd2f7113326342b87917e6e9b1"
 
 [[rules]]
 path = "rules/providers/deepseek/models/deepseek-flash.toml"

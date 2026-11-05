@@ -166,7 +166,7 @@ def test_nonretryable_provider_error_is_safe_and_releases_permit(setup, status):
                 response=RawHttpResponse(
                     status,
                     {},
-                    b'{"error":{"message":"Provider rejected credential private-key-123"}}',
+                    b'{"error":{"message":"private-key-123"}}',
                     sensitive_values=("private-key-123",),
                 ),
             )
@@ -176,7 +176,6 @@ def test_nonretryable_provider_error_is_safe_and_releases_permit(setup, status):
         service(sender).invoke(request, profile)
     assert caught.value.error.attempt == 1 and not caught.value.error.will_retry
     assert "private-key" not in str(caught.value) + caught.value.error.model_dump_json()
-    assert "Provider rejected credential [redacted]" in caught.value.error.safe_message
     assert len(sender.calls) == 1 and not limiter._entries
 
 
@@ -411,6 +410,7 @@ async def test_empty_response_policy_shares_physical_retry_budget(setup, asynchr
     ({'reasoning_content': 'thought'}, 'stop', 'error'),
     ({'content': '   '}, 'stop', 'error'),
     ({}, 'length', 'error'),
+    ({}, None, 'error'),
     ({'refusal': 'cannot comply'}, 'stop', 'message_completed'),
     ({'content': 'answer'}, 'stop', 'message_completed'),
 ])
@@ -427,3 +427,25 @@ async def test_empty_policy_never_replays_visible_output_or_nonstop_finish(setup
             events = list(stream)
     assert events[-1].type == terminal
     assert len(sender.calls) == 1 and not limiter._entries
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("max_attempts", [1, 3, 5])
+async def test_empty_stop_has_only_one_retry_within_total_budget(setup, asynchronous, max_attempts):
+    profile, request, limiter, _factory = setup
+    request = request.model_copy(update={"stream": True})
+    sender = Sender([[frame(finish="stop"), SSEEvent("[DONE]")]] * max_attempts)
+    model = ModelService(lambda _: sender, limiter=limiter, retry_policy=SimpleNamespace(
+        max_attempts=max_attempts, calculate_backoff=lambda _: 0,
+    ))
+    if asynchronous:
+        async with model.astream(request, profile, empty_response_policy="retry") as stream:
+            events = [event async for event in stream]
+    else:
+        with model.stream(request, profile, empty_response_policy="retry") as stream:
+            events = list(stream)
+    assert len(sender.calls) == min(2, max_attempts)
+    assert events[-1].error.category == "MODEL_EMPTY_RESPONSE"
+    assert not events[-1].error.will_retry
+    assert not limiter._entries

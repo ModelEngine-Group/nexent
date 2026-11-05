@@ -17,6 +17,10 @@ from .test_agent_subscription_lifecycle import lifecycle as lifecycle
 @pytest_asyncio.fixture
 async def workbench(lifecycle, monkeypatch):
     env = lifecycle
+    from management.services.conversation import model_preferences
+    monkeypatch.setattr(model_preferences, "read_model_preferences", MagicMock(return_value={
+        "selected_model_id": None, "model_parameter_preferences": {},
+    }))
     canonical = WorkbenchSessionConfig(mode="generic_chat")
     env.tenant = "tenant-a"
     env.user = "user-a"

@@ -3,7 +3,6 @@
 import ast
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -28,6 +27,7 @@ from smolagents.utils import (
     extract_code_from_text,
     truncate_content,
 )
+
 
 from nexent.consts.mcp_errors import (
     classify_mcp_failure,
@@ -1490,12 +1490,6 @@ Additional Args:
             ):
                 raise RuntimeFinalAnswer(
                     self._empty_model_response_hint(), "empty_model_output"
-                ) from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
-                raise ModelOutputProtocolError(
-                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                    protocol=getattr(self, "output_protocol", "code_action"),
-                    logger=self.logger,
                 ) from terminal_error
             raise
         except Exception as e:

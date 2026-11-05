@@ -5,20 +5,14 @@
 from copy import deepcopy
 
 from contracts.errors.exceptions import ModelOutletValidationError
-from contracts.model_profile import ModelProfilePreviewRequest
+from contracts.model import ModelProfilePreviewRequest
 from nexent.core.agents.contracts.config import ModelConfig
-from nexent.core.model_service.compatibility.legacy_config import (
-    legacy_agent_request_parameters,
-    legacy_thinking_enabled,
-)
-from nexent.core.model_service.profiles.outlet_storage import (
-    decode_resolved_model_profile,
-    encode_resolved_model_profile,
-)
+from nexent.core.model_service.compatibility.legacy_config import legacy_agent_request_parameters, legacy_thinking_enabled
+from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile, encode_resolved_model_profile
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.registry import model_service_references
 from pydantic import ValidationError
-from management.services.model.profile import build_outlet_draft
+from management.services.model.profiles import build_outlet_draft
 from management.services.model.names import add_repo_to_name
 
 MIGRATION_VERSION = "legacy_llm_outlet_v2"
@@ -142,9 +136,9 @@ def build_legacy_outlet_snapshot(row, *, legacy_capability, migrated_at, from_ve
             context["combined_window"] = 200000
             defaults.append("capabilities.context.combined_window")
         for field in ("input_limit", "output_limit"):
-            if (row.get({"input_limit": "max_input_tokens", "output_limit": "max_output_tokens"}[field]) is None
-                    and context[field] is not None and context[field] > context["combined_window"]):
-                context[field] = None
+            if row.get({"input_limit": "max_input_tokens", "output_limit": "max_output_tokens"}[field]) is None:
+                if context[field] is not None and context[field] > context["combined_window"]:
+                    context[field] = None
         for field, column in (("output_reserve_tokens", "default_output_reserve_tokens"),
             ("tokenizer_family", "tokenizer_family"), ("capacity_source", "capacity_source"),
             ("capability_profile_version", "capability_profile_version")):
@@ -194,3 +188,33 @@ def build_legacy_outlet_snapshot(row, *, legacy_capability, migrated_at, from_ve
         raise
     except (KeyError, TypeError, ValueError, ValidationError):
         raise ModelOutletValidationError(category="LEGACY_OUTLET_INVALID") from None
+
+
+def migrate_legacy_outlets(*, dry_run=False, batch_size=100):
+    """Process each legacy LLM once per invocation, retaining sanitized failure diagnostics."""
+    from datetime import datetime, timezone
+
+    from configs.model_catalog_loader import resolve_reasoning_capability
+    from management.db.model.outlets import migrate_legacy_model_records
+
+    migrated_at = datetime.now(timezone.utc).isoformat()
+
+    def construct(record):
+        name = add_repo_to_name(record.get("model_repo") or "", record["model_name"])
+        capability = resolve_reasoning_capability(name, record.get("base_url"), record.get("model_factory"),
+                                                  allow_gateway_fallback=False)
+        return build_legacy_outlet_snapshot(record, legacy_capability=capability, migrated_at=migrated_at)
+
+    results = []
+    cursor = 0
+    while True:
+        batch = migrate_legacy_model_records(construct, registered_references=model_service_references(),
+            batch_size=batch_size, after_model_id=cursor, dry_run=dry_run)
+        if not batch:
+            break
+        results.extend(batch)
+        cursor = max(item["model_id"] for item in batch)
+    return {"migration_version": MIGRATION_VERSION, "dry_run": dry_run,
+            "migrated": sum(item["status"] == "migrated" for item in results),
+            "ready": sum(item["status"] == "ready" for item in results),
+            "failed": sum(item["status"] == "failed" for item in results), "items": results}

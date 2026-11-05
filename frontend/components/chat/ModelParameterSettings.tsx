@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button, Popover, Slider } from "antd";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,11 +14,12 @@ function configuredValue(value: number | undefined, max: number) {
     : undefined;
 }
 
-function ParameterLevel({
+export function ParameterLevel({
   label,
   value,
   inheritedValue,
   max,
+  min = 0,
   disabled,
   onChange,
 }: {
@@ -26,6 +27,7 @@ function ParameterLevel({
   value?: number;
   inheritedValue?: number;
   max: number;
+  min?: number;
   disabled?: boolean;
   onChange: (value: number) => void;
 }) {
@@ -46,7 +48,7 @@ function ParameterLevel({
   const commit = () => {
     if (!dirty) return;
     const next = Number(text);
-    if (!text.trim() || !Number.isFinite(next) || next < 0 || next > max) {
+    if (!text.trim() || !Number.isFinite(next) || next < min || next > max) {
       setError(true);
       return;
     }
@@ -64,7 +66,7 @@ function ParameterLevel({
       <div className="flex items-center gap-3">
         {sliderValue != null ? (
           <Slider
-            min={0}
+            min={min}
             max={max}
             step={0.1}
             value={sliderValue}
@@ -89,7 +91,7 @@ function ParameterLevel({
         )}
         <input
           type="number"
-          min={0}
+          min={min}
           max={max}
           step={0.1}
           placeholder="—"
@@ -116,7 +118,7 @@ function ParameterLevel({
         <p role="alert" className="text-xs text-destructive">
           {t("workbench.controls.numberRange", {
             defaultValue: "请输入 {{min}}–{{max}} 的数字",
-            min: 0,
+            min,
             max,
           })}
         </p>
@@ -125,34 +127,51 @@ function ParameterLevel({
   );
 }
 
-export function ModelParameterSettings(control: ModelParameterSettingsControl) {
+/** Shared selector entry and nested panel for legacy and profile parameters. */
+export function ModelParameterPopover({
+  children,
+  disabled,
+  onOpenChange,
+}: {
+  children: ReactNode | ((close: () => void) => ReactNode);
+  disabled?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [resetVersion, setResetVersion] = useState(0);
+  const changeOpen = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange]
+  );
   useEffect(() => {
     if (!open) return;
     const closeOutside = (event: PointerEvent) => {
       if (
         event.target instanceof Element &&
         !event.target.closest(
-          "[data-model-parameter-panel], [data-model-parameter-trigger]"
+          "[data-model-parameter-panel], [data-model-parameter-trigger], [data-model-effort-popup]"
         )
       )
-        setOpen(false);
+        changeOpen(false);
     };
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [open]);
+  }, [open, changeOpen]);
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         if (
           !next &&
-          document.activeElement?.closest("[data-model-parameter-panel]")
+          document.activeElement?.closest(
+            "[data-model-parameter-panel], [data-model-parameter-trigger]"
+          )
         )
           return;
-        setOpen(next);
+        changeOpen(next);
       }}
       trigger={["hover", "click"]}
       placement="rightTop"
@@ -167,73 +186,28 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
           className="w-64 space-y-3"
           onKeyDown={(event) => {
             event.stopPropagation();
-            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Escape") changeOpen(false);
           }}
         >
-          <ParameterLevel
-            key={`temperature-${resetVersion}`}
-            label={t("workbench.controls.temperature", "温度")}
-            value={control.value.temperature}
-            inheritedValue={control.inheritedValue?.temperature}
-            max={2}
-            disabled={control.disabled}
-            onChange={(temperature) =>
-              control.onChange({ ...control.value, temperature })
-            }
-          />
-          <ParameterLevel
-            key={`top-p-${resetVersion}`}
-            label="Top P"
-            value={control.value.top_p}
-            inheritedValue={control.inheritedValue?.top_p}
-            max={1}
-            disabled={control.disabled}
-            onChange={(top_p) => control.onChange({ ...control.value, top_p })}
-          />
-          {(configuredValue(
-            control.value.temperature ?? control.inheritedValue?.temperature,
-            2
-          ) == null ||
-            configuredValue(
-              control.value.top_p ?? control.inheritedValue?.top_p,
-              1
-            ) == null) && (
-            <p className="text-xs text-muted-foreground">
-              {t(
-                "workbench.controls.configureDefaults",
-                "请先在模型配置中设置默认值，或输入本次使用的数值。"
-              )}
-            </p>
-          )}
-          <Button
-            size="small"
-            htmlType="button"
-            disabled={control.disabled}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              control.onChange({ ...control.defaultValue });
-              setResetVersion((value) => value + 1);
-            }}
-          >
-            {t("workbench.controls.restore", "恢复默认")}
-          </Button>
+          {typeof children === "function"
+            ? children(() => changeOpen(false))
+            : children}
         </div>
       }
     >
       <button
         data-model-parameter-trigger
         type="button"
-        disabled={control.disabled}
+        disabled={disabled}
         aria-expanded={open}
+
         onKeyDown={(event) => {
           if (["Enter", "ArrowRight", " "].includes(event.key)) {
             event.preventDefault();
             event.stopPropagation();
-            setOpen(true);
+            changeOpen(true);
           }
-          if (event.key === "Escape") setOpen(false);
+          if (event.key === "Escape") changeOpen(false);
         }}
         className="flex w-full items-center justify-between gap-3 border-b px-3 py-2 text-sm font-normal hover:bg-accent"
       >
@@ -241,5 +215,80 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
         <ChevronRight className="ml-auto size-4" />
       </button>
     </Popover>
+  );
+}
+
+export function ModelSamplingFields(
+  control: ModelParameterSettingsControl & {
+    disabledFields?: string[];
+    bounds?: Record<string, { min?: number; max?: number }>;
+  }
+) {
+  const { t } = useTranslation();
+  const [resetVersion, setResetVersion] = useState(0);
+  return (
+    <>
+      <ParameterLevel
+        key={`temperature-${resetVersion}`}
+        label={t("workbench.controls.temperature", "温度")}
+        value={control.value.temperature}
+        inheritedValue={control.inheritedValue?.temperature}
+        min={control.bounds?.temperature?.min}
+        max={control.bounds?.temperature?.max ?? 2}
+        disabled={
+          control.disabled || control.disabledFields?.includes("temperature")
+        }
+        onChange={(temperature) =>
+          control.onChange({ ...control.value, temperature })
+        }
+      />
+      <ParameterLevel
+        key={`top-p-${resetVersion}`}
+        label="Top P"
+        value={control.value.top_p}
+        inheritedValue={control.inheritedValue?.top_p}
+        min={control.bounds?.top_p?.min}
+        max={control.bounds?.top_p?.max ?? 1}
+        disabled={control.disabled || control.disabledFields?.includes("top_p")}
+        onChange={(top_p) => control.onChange({ ...control.value, top_p })}
+      />
+      {(configuredValue(
+        control.value.temperature ?? control.inheritedValue?.temperature,
+        2
+      ) == null ||
+        configuredValue(
+          control.value.top_p ?? control.inheritedValue?.top_p,
+          1
+        ) == null) && (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "workbench.controls.configureDefaults",
+            "请先在模型配置中设置默认值，或输入本次使用的数值。"
+          )}
+        </p>
+      )}
+      <Button
+        size="small"
+        htmlType="button"
+        disabled={control.disabled}
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          control.onChange({ ...control.defaultValue });
+          setResetVersion((value) => value + 1);
+        }}
+      >
+        {t("workbench.controls.restore", "恢复默认")}
+      </Button>
+    </>
+  );
+}
+
+export function ModelParameterSettings(control: ModelParameterSettingsControl) {
+  return (
+    <ModelParameterPopover disabled={control.disabled}>
+      <ModelSamplingFields {...control} />
+    </ModelParameterPopover>
   );
 }
