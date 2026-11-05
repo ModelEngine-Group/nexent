@@ -88,21 +88,24 @@ it("missing or foreign pins cannot fail ordinary history or hide later rows", as
   expect(localStorage.getItem(pinKey)).toBe('["42","43"]');
 });
 
-it("Agent chat retains its original list behavior even when a pin scope is supplied", async () => {
+it("leaves Agent-chat history to grouped loading even when a legacy pin scope is supplied", async () => {
   localStorage.setItem(pinKey, '["42"]');
-  vi.spyOn(conversationService, "getList").mockResolvedValue({
-    items: [listed],
-    metadata,
-  });
+  const list = vi.spyOn(conversationService, "getList");
   const pins = vi.spyOn(conversationService, "getWorkbenchPins");
   const detail = vi.spyOn(conversationService, "getById");
-  const response = await createConversationThreadListAdapter(
+  const loadPins = vi.fn();
+  const adapter = createConversationThreadListAdapter(
     "agent_chat",
-    pinKey
-  ).list({});
-  expect(response.threads.map((item) => item.remoteId)).toEqual(["1"]);
+    pinKey,
+    loadPins
+  );
+  expect(await adapter.list({})).toEqual({ threads: [] });
+  expect(await adapter.list({ after: "20" })).toEqual({ threads: [] });
+  expect(list).not.toHaveBeenCalled();
   expect(detail).not.toHaveBeenCalled();
   expect(pins).not.toHaveBeenCalled();
+  expect(loadPins).not.toHaveBeenCalled();
+  expect(localStorage.getItem(pinKey)).toBe('["42"]');
 });
 
 it("unsent Workbench drafts have distinct local identities without backend creation", async () => {
@@ -134,13 +137,11 @@ it("uses an injected refreshed pin snapshot when reloading history and deduplica
       metadata,
     });
   const network = vi.spyOn(conversationService, "getWorkbenchPins");
-  const load = vi
-    .fn()
-    .mockResolvedValue({
-      items: [
-        { ...listed, conversation_id: 42, pinned_at: new Date().toISOString() },
-      ],
-    });
+  const load = vi.fn().mockResolvedValue({
+    items: [
+      { ...listed, conversation_id: 42, pinned_at: new Date().toISOString() },
+    ],
+  });
   const adapter = createConversationThreadListAdapter(
     "workbench",
     pinKey,

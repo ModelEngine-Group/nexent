@@ -112,6 +112,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { findRequirementSubmission } from "../ui/requirement-clarification-history";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
 import {
@@ -1198,6 +1199,23 @@ const AssistantMessage: FC<{
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const requirementMessages = useAuiState((s) =>
+    nl2a?.content.subtype === "requirement_clarification"
+      ? s.thread.messages
+      : undefined
+  );
+  const requirementSubmission = useMemo(
+    () =>
+      requirementMessages &&
+      nl2a?.content.subtype === "requirement_clarification"
+        ? findRequirementSubmission(
+            requirementMessages,
+            messageId,
+            nl2a.content
+          )
+        : undefined,
+    [requirementMessages, messageId, nl2a]
+  );
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
     name?: string;
@@ -1528,6 +1546,8 @@ const AssistantMessage: FC<{
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
+            sourceMessageId={messageId}
+            submission={requirementSubmission}
             disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
