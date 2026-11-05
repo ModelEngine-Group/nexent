@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-UI-20261015
+  change_type: test-fix
+  title: Follow resolved LLM onboarding and editing in the existing browser journey
+  description: >-
+    Reuse PW-MODEL-01 rather than adding another case. The LLM form now saves an
+    outlet and checks its connection in one action; canonical edits use PATCH.
+    Compare actual saved capacity and request parameters before and after refresh
+    and blank-key editing. Preserve real provider and Agent assertions, use exact
+    configured identity, retain immutable provider identity when aligning an old
+    fixture, and clean a newly created outlet even when later validation fails.
+    Non-LLM onboarding and checks retain their existing paths. Product behavior
+    and dependencies are unchanged by this test maintenance. Browser and HTTP
+    observations are recorded separately from execution of the fixed runner.
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-MODEL-01]
+    retired: []

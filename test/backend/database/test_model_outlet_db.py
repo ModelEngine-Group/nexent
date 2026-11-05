@@ -333,3 +333,17 @@ def test_registered_sampling_upgrade_passes_guard_without_accepting_wire_edits(d
     next(item for item in forged if item["key"] == "temperature")["api_binding"]["path"] = "/unregistered"
     with pytest.raises(errors.ModelOutletValidationError):
         db._validate_update(old, normalized.model_copy(update={"parameter_rules": forged}))
+
+
+@pytest.mark.parametrize("field,value,changed", [
+    ("request_model_id", "another-model", True),
+    ("display_name", "renamed", False),
+])
+def test_connectivity_identity_changes_invalidate_previous_probe(database, profile, monkeypatch, field, value, changed):
+    db, _, _ = database
+    data = profile.model_dump(mode="json")
+    data["identity"][field] = value
+    proposed = ResolvedModelProfile.model_validate(data)
+    monkeypatch.setattr(db, "_connectivity_request", lambda p: {"model": p.identity.request_model_id})
+    assert db._connectivity_changed(profile, proposed, row(profile), api_key=db._UNSET,
+                                    http_headers=db._UNSET) is changed
