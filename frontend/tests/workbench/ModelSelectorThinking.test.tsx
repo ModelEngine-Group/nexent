@@ -20,7 +20,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@assistant-ui/react", () => ({
   useAui: () => modelApi,
 }));
-vi.mock("@/components/ui/popover", () => ({
+vi.mock("@/components/common/Popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,
   PopoverTrigger: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>

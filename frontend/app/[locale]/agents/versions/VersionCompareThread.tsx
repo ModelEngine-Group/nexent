@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -6,7 +8,7 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { ThreadMessages } from "@/app/newchat/assistant-ui/thread";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { Agent } from "@/types/agentConfig";
 
 function Messages({

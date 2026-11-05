@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 
 import { SliderStepper } from "@/components/common/SliderStepper";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {

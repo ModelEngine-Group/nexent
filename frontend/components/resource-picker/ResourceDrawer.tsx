@@ -7,7 +7,8 @@ import { Drawer, Input, Select } from "antd";
 import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
+import { Button as ProjectButton } from "@/components/common/Button";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   ResourcePickerTab,
@@ -623,10 +624,15 @@ export function ResourceDrawer({
         >
           {title}
         </span>
-        <StandardCloseButton
-          ariaLabel={t("resourcePicker.close", "关闭")}
+        <ProjectButton
+          variant="ghost"
+          size="icon"
+          className="size-[14px] p-0"
+          aria-label={t("resourcePicker.close", "关闭")}
           onClick={handleClose}
-        />
+        >
+          <X className="size-[14px]" />
+        </ProjectButton>
       </div>
 
       <fieldset

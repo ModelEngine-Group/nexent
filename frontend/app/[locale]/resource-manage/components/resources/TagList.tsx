@@ -7,7 +7,7 @@ import { Alert, Empty, Select, Spin } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 import TagDefinitionManagementPanel from "@/components/tag/TagDefinitionManagementPanel";
 import { USER_ROLES } from "@/const/auth";
 import { tagManagementApi } from "@/services/tagManagementService";
@@ -79,9 +79,9 @@ function TenantTagList({
         showIcon
         title={error.message}
         action={
-          <StandardButton onClick={() => void refetch()}>
+          <Button onClick={() => void refetch()} variant="outline" size="sm">
             {t("common.retry")}
-          </StandardButton>
+          </Button>
         }
       />
     );

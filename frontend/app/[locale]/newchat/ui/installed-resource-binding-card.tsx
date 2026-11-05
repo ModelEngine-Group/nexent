@@ -15,7 +15,7 @@ import {
   mergeCanonicalTool,
   mergeToolParamValues,
 } from "../../agents/components/capability/tool/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   useNl2AgentFlow,
   type Nl2AgentConfigFocusTarget,

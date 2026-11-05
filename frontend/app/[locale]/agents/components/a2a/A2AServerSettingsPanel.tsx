@@ -1,46 +1,35 @@
-"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"use client";
+import { Button } from "@/components/common/Button";
+import { Badge } from "@/components/common/Badge";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  Tag,
-  message,
-} from "antd";
+import { message } from "antd";
 import { Copy, CheckCircle, Info } from "lucide-react";
 import { buildCopyAriaLabel } from "@/lib/agentUsageGuide";
-
 interface A2ASupportedInterface {
   protocolBinding?: string;
   url?: string;
   protocolVersion?: string;
 }
-
 interface A2AServerSettingsPanelProps {
   endpointId?: string;
   supportedInterfaces?: A2ASupportedInterface[];
 }
-
 export default function A2AServerSettingsPanel({
   endpointId,
   supportedInterfaces,
 }: A2AServerSettingsPanelProps) {
   const { t } = useTranslation("common");
-
-
-
   const [messageApi, contextHolder] = message.useMessage();
-
   const [copiedField, setCopiedField] = useState<string | null>(null);
-
   const previewData = (() => {
     if (!endpointId || !supportedInterfaces) return null;
-
     const restInterface = supportedInterfaces.find((iface) => {
       const binding = iface.protocolBinding?.toLowerCase();
       return binding === "http+json" || binding === "httprest";
     });
-
     const restUrl = restInterface?.url || "";
     return {
       endpointId,
@@ -52,14 +41,12 @@ export default function A2AServerSettingsPanel({
       },
     };
   })();
-
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
     messageApi.success(t("common.copied"));
     setTimeout(() => setCopiedField(null), 2000);
   };
-
   const CopyButton = ({
     text,
     field,
@@ -70,8 +57,6 @@ export default function A2AServerSettingsPanel({
     label: string;
   }) => (
     <Button
-      type="text"
-      size="small"
       aria-label={buildCopyAriaLabel(t("common.copy"), label)}
       icon={
         copiedField === field ? (
@@ -81,14 +66,14 @@ export default function A2AServerSettingsPanel({
         )
       }
       onClick={() => handleCopy(text, field)}
+      variant="ghost"
+      size="xs"
     />
   );
-
   return (
     <>
       {contextHolder}
       <div className="space-y-4">
-
         <p className="text-sm text-gray-500">
           {t("a2a.server.previewDescription")}
         </p>
@@ -99,20 +84,26 @@ export default function A2AServerSettingsPanel({
             {/* Endpoint ID */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-2">
               <div className="sm:w-[150px] sm:flex-shrink-0 flex items-center justify-between">
-                <span className="text-sm text-gray-600">{t("a2a.server.endpointId")}</span>
+                <span className="text-sm text-gray-600">
+                  {t("a2a.server.endpointId")}
+                </span>
                 <CopyButton
                   text={previewData.endpointId}
                   field="endpointId"
                   label={t("a2a.server.endpointId")}
                 />
               </div>
-              <code className="text-xs bg-gray-100 px-2 py-1 rounded break-all">{previewData.endpointId}</code>
+              <code className="text-xs bg-gray-100 px-2 py-1 rounded break-all">
+                {previewData.endpointId}
+              </code>
             </div>
 
             {/* Agent Card URL */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-2">
               <div className="sm:w-[150px] sm:flex-shrink-0 flex items-center justify-between">
-                <span className="text-sm text-gray-600">{t("a2a.server.agentCardUrl")}</span>
+                <span className="text-sm text-gray-600">
+                  {t("a2a.server.agentCardUrl")}
+                </span>
                 <CopyButton
                   text={previewData.agentCardUrl}
                   field="agentCardUrl"
@@ -120,41 +111,83 @@ export default function A2AServerSettingsPanel({
                 />
               </div>
               <div className="flex flex-col gap-1 min-w-0 w-full">
-                <code className="text-xs bg-gray-100 px-2 py-1 rounded break-all">{previewData.agentCardUrl}</code>
+                <code className="text-xs bg-gray-100 px-2 py-1 rounded break-all">
+                  {previewData.agentCardUrl}
+                </code>
                 <span className="text-xs text-gray-500">
-                  {t("a2a.server.urlHint", { defaultValue: "Append base URL to access. For local dev: localhost:5013" })}
+                  {t("a2a.server.urlHint", {
+                    defaultValue:
+                      "Append base URL to access. For local dev: localhost:5013",
+                  })}
                 </span>
               </div>
             </div>
 
             {/* Protocol Version */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-2">
-              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">{t("a2a.server.protocolVersion")}</div>
-              <Tag color="green">1.0</Tag>
+              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">
+                {t("a2a.server.protocolVersion")}
+              </div>
+              <Badge variant={"success"} size="sm">
+                1.0
+              </Badge>
             </div>
 
             {/* REST Endpoints */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-2">
-              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">{t("a2a.server.restEndpoints")}</div>
+              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">
+                {t("a2a.server.restEndpoints")}
+              </div>
               <div className="flex flex-col gap-1 text-xs min-w-0">
-                <div><Tag color="blue">POST</Tag> <code className="break-all">{previewData.restEndpoints.message_send}</code></div>
-                <div><Tag color="blue">POST</Tag> <code className="break-all">{previewData.restEndpoints.message_stream}</code></div>
-                <div><Tag color="green">GET</Tag> <code className="break-all">{previewData.restEndpoints.tasks_get}</code></div>
+                <div>
+                  <Badge variant={"info"} size="sm">
+                    POST
+                  </Badge>{" "}
+                  <code className="break-all">
+                    {previewData.restEndpoints.message_send}
+                  </code>
+                </div>
+                <div>
+                  <Badge variant={"info"} size="sm">
+                    POST
+                  </Badge>{" "}
+                  <code className="break-all">
+                    {previewData.restEndpoints.message_stream}
+                  </code>
+                </div>
+                <div>
+                  <Badge variant={"success"} size="sm">
+                    GET
+                  </Badge>{" "}
+                  <code className="break-all">
+                    {previewData.restEndpoints.tasks_get}
+                  </code>
+                </div>
               </div>
             </div>
 
             {/* JSON-RPC Methods */}
             <div className="flex flex-col sm:flex-row sm:items-start gap-2">
-              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">JSON-RPC</div>
+              <div className="sm:w-[150px] sm:flex-shrink-0 text-sm text-gray-600">
+                JSON-RPC
+              </div>
               <div className="flex flex-col gap-1 text-xs min-w-0">
                 <div>
-                  <Tag color="purple">POST</Tag>
-                  <span className="text-gray-500 ml-1">{t("a2a.server.sameUrl")}:</span>
-                  <code className="break-all ml-1">/nb/a2a/{previewData.endpointId}/v1</code>
+                  <Badge variant={"info"} size="sm">
+                    POST
+                  </Badge>
+                  <span className="text-gray-500 ml-1">
+                    {t("a2a.server.sameUrl")}:
+                  </span>
+                  <code className="break-all ml-1">
+                    /nb/a2a/{previewData.endpointId}/v1
+                  </code>
                 </div>
                 <div className="ml-6 text-gray-600">
                   <div>• SendMessage: method="SendMessage"</div>
-                  <div>• SendStreamingMessage: method="SendStreamingMessage"</div>
+                  <div>
+                    • SendStreamingMessage: method="SendStreamingMessage"
+                  </div>
                   <div>• GetTask: method="GetTask"</div>
                 </div>
               </div>
@@ -176,13 +209,21 @@ export default function A2AServerSettingsPanel({
             />
             <div>
               <p className="font-medium text-blue-700 mb-1">
-                {t("a2a.server.usageTitle", { defaultValue: "How to use these endpoints" })}
+                {t("a2a.server.usageTitle", {
+                  defaultValue: "How to use these endpoints",
+                })}
               </p>
               <p className="mb-1">
-                {t("a2a.server.localDevHint", { defaultValue: "For local development: prepend localhost:5013 to the paths above." })}
+                {t("a2a.server.localDevHint", {
+                  defaultValue:
+                    "For local development: prepend localhost:5013 to the paths above.",
+                })}
               </p>
               <p>
-                {t("a2a.server.productionHint", { defaultValue: "For production: replace localhost:5013 with your server domain or public IP and port 5013." })}
+                {t("a2a.server.productionHint", {
+                  defaultValue:
+                    "For production: replace localhost:5013 with your server domain or public IP and port 5013.",
+                })}
               </p>
             </div>
           </div>

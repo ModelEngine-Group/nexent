@@ -124,7 +124,7 @@ vi.mock("@assistant-ui/react", () => ({
     return fixture.runtime;
   },
 }));
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@/components/common/Tooltip", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/hooks/useConfig", () => ({

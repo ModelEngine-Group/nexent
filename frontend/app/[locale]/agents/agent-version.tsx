@@ -1,22 +1,27 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
 import { useState } from "react";
 import { GitBranch, GitCompare, Rocket, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
+import { Card, Flex, Empty, Spin, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { useAgentStore } from "@/stores/agentStore"
+import { useAgentStore } from "@/stores/agentStore";
 import { VersionCardItem } from "./versions/agent-version-card";
 import log from "@/lib/logger";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
-import { compareVersions, type VersionCompareResponse } from "@/services/agentVersionService";
+import {
+  compareVersions,
+  type VersionCompareResponse,
+} from "@/services/agentVersionService";
 import type { Agent } from "@/types/agentConfig";
-
 interface AgentVersionManageProps {
   onClose?: () => void;
   currentVersionNo?: number;
   onRefreshAgentInfo: () => Promise<Agent | null>;
 }
-
 export default function AgentVersionManage({
   onClose,
   currentVersionNo,
@@ -24,17 +29,24 @@ export default function AgentVersionManage({
 }: AgentVersionManageProps) {
   const { t } = useTranslation("common");
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-
-  const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
-  
+  const {
+    agentVersionList,
+    total,
+    isLoading,
+    invalidate: invalidateAgentVersionList,
+  } = useAgentVersionList(currentAgentId);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
-  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(null);
+  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(
+    null
+  );
   const [selectedVersionA, setSelectedVersionA] = useState<number | null>(null);
   const [selectedVersionB, setSelectedVersionB] = useState<number | null>(null);
-
-
-  const loadComparison = async (agentId: number, versionNoA: number, versionNoB: number) => {
+  const loadComparison = async (
+    agentId: number,
+    versionNoA: number,
+    versionNoB: number
+  ) => {
     try {
       setCompareLoading(true);
       const result = await compareVersions(agentId, versionNoA, versionNoB);
@@ -46,7 +58,6 @@ export default function AgentVersionManage({
       setCompareLoading(false);
     }
   };
-
   const handleOpenCompareModal = async () => {
     if (!currentAgentId) {
       message.error(t("agent.error.agentNotFound"));
@@ -56,23 +67,21 @@ export default function AgentVersionManage({
       message.warning(t("agent.version.needTwoVersions"));
       return;
     }
-
     // Use the last two versions by version_no as default comparison
-    const sorted = [...agentVersionList].sort((a, b) => a.version_no - b.version_no);
+    const sorted = [...agentVersionList].sort(
+      (a, b) => a.version_no - b.version_no
+    );
     const defaultVersionA = sorted[sorted.length - 2]?.version_no;
     const defaultVersionB = sorted[sorted.length - 1]?.version_no;
-
     if (!defaultVersionA || !defaultVersionB) {
       message.warning(t("agent.version.needTwoVersions"));
       return;
     }
-
     setSelectedVersionA(defaultVersionA);
     setSelectedVersionB(defaultVersionB);
     setCompareModalOpen(true);
     await loadComparison(currentAgentId, defaultVersionA, defaultVersionB);
   };
-
   const handleChangeVersionA = async (value: number) => {
     setSelectedVersionA(value);
     if (!currentAgentId || !selectedVersionB) {
@@ -84,7 +93,6 @@ export default function AgentVersionManage({
     }
     await loadComparison(currentAgentId, value, selectedVersionB);
   };
-
   const handleChangeVersionB = async (value: number) => {
     setSelectedVersionB(value);
     if (!currentAgentId || !selectedVersionA) {
@@ -96,7 +104,6 @@ export default function AgentVersionManage({
     }
     await loadComparison(currentAgentId, selectedVersionA, value);
   };
-
   const footer = [
     <Flex
       align="center"
@@ -105,19 +112,19 @@ export default function AgentVersionManage({
       className="pl-4"
       key="actions"
     >
-      <Tag color="blue">
+      <Badge variant={"info"} size="sm">
         {t("agent.version.totalVersions", { count: total })}
-      </Tag>
+      </Badge>
       <Button
-        type="text"
         icon={<GitCompare size={16} />}
         onClick={handleOpenCompareModal}
+        variant="ghost"
+        size="sm"
       >
         {t("agent.version.compare")}
       </Button>
     </Flex>,
   ];
-
   return (
     <>
       <div className="flex h-full min-h-0 w-full flex-col py-2">
@@ -147,6 +154,8 @@ export default function AgentVersionManage({
             <Button
               icon={<Rocket size={16} />}
               onClick={handleOpenCompareModal}
+              variant="outline"
+              size="sm"
             >
               {t("agent.version.compare")}
             </Button>

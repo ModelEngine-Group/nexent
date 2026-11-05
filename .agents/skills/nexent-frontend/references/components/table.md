@@ -1,31 +1,22 @@
 # Table
 
-## Implementation
+Use ui Table primitives for semantic presentation and common Table for the shared project contract. Generic sizing, selection and interaction presentation can belong in common; domain columns, query/data transformations and operation implementations remain business-owned. Introduce TanStack Table only for actual required table behavior; the basic table does not implement Ant Design TableProps.
 
-- Render data tables with Ant Design `Table`.
-- Use the reusable `StandardTable` wrapper for shared table styling. It forwards Ant Design `Table` props to preserve compatibility with existing table features.
-- Leave unspecified behavior to Ant Design defaults; do not invent extra visual states or interactions.
+Use `components/common/Table.tsx` for project data tables. It composes pinned ui Table primitives and owns the 4px rounded border, muted 44px header, 52px rows, body-only scrolling, a separate fixed header with synchronized horizontal position and brand-soft row hover. Domain callers provide typed columns, data and stable row keys; they do not repeat table-wide styling.
 
-## Styling
+Columns expose `header`, `cell`, optional `minWidth`/`maxWidth`, optional fixed `width`, and `grow` weights. The component measures currently rendered content, bounds preferred widths, and distributes extra container space to growing columns without exceeding explicit caps. Fixed widths do not grow. Omit `grow` for equal sharing or set it to zero for content-sized columns. When preferred widths exceed the viewport, automatic columns shrink to their minimums first, followed by constrained manual widths after a container resize. Fixed non-resizable columns retain their width. Horizontal scrolling is reserved for viewports narrower than the combined minimum widths. Manual resizing is capped by the viewport budget after reserving other manual/fixed widths and the minimums of automatic columns; dragging must not introduce horizontal overflow. Header and body use the same column grid; the vertical scrollbar starts below the header, and the body scrollbar gutter is excluded from available column space. Keep explicit table/rowgroup/row/cell roles when changing native table display for the scroll layout. Container resizing, data/text changes and font loading trigger recalculation; pagination remains caller-owned. Width allocation measures loaded content, not every record on the server.
 
-| Property                                 | Value               | Tailwind CSS                             |
-| ---------------------------------------- | ------------------- | ---------------------------------------- |
-| Text color                               | `#191919`           | `text-[#191919]`                         |
-| Font size                                | `14px`              | `text-[14px]`                            |
-| Letter spacing                           | `0px`               | `![letter-spacing:0px]`                  |
-| Table background                         | `#fff`              | `bg-white`                               |
-| Header background                        | `#f3f3f3`           | `bg-[#f3f3f3]`                           |
-| Row height                               | `40px`              | `h-10`                                   |
-| Row divider                              | `1px solid #f0f0f0` | `border-b border-solid border-[#f0f0f0]` |
-| Header column divider (except last)      | `1px solid #c9c9c9`, `14px` high, centered | `before:h-[14px] before:bg-[#c9c9c9] before:top-1/2 before:[transform:translateY(-50%)]` |
-| Compact filter-header horizontal padding | `8px`               | `px-2`                                   |
+## Reusable capability evolution
 
-Render the header separator with Ant Design's header-cell `::before` pseudo-element, centered vertically and limited to text height. Set its `transform` explicitly; do not combine Ant Design's default transform with Tailwind `-translate-y-1/2`, which adds a second independent translation. Apply it only between header columns, not between body cells; do not add an outer table border. Do not set a `font-family`.
+Manual column dragging, row checkboxes, select-all/indeterminate states, disabled rows and a configurable bulk-action area are valid common Table capabilities when needed. Automatic sizing and manual dragging may coexist; do not treat them as mutually exclusive. Selection and bulk-action presentation belong here, while callers provide row eligibility, selected keys/change callbacks, labels, pending/disabled conditions and action callbacks. Passing a Delete callback into common is allowed; implementing agent deletion or embedding its API/permission rules in common is not.
 
-## Reusable component
+The current Table implements automatic width allocation, body-only scrolling, manual column resizing and optional current-page row selection with bulk actions. Keep these capabilities in common rather than reconstructing them in individual business tables.
 
-```tsx
-import { StandardTable } from "@/components/common/StandardTable";
-```
+- Manual resizing is enabled by default; set `resizable={false}` globally or `column.resizable = false` per column to disable it. Drag the separator or use Left/Right arrows to adjust within min/max bounds. Double-click or press Enter on a separator to restore automatic sizing. A manual width is retained while other eligible columns continue to auto-fit. `columnWidths`/`onColumnWidthsChange` provide controlled overrides when widths must survive page unmounts; otherwise common owns them locally.
+- Enable selection through `selection`. Supply `selectedKeys`/`onChange` for controlled use or omit selectedKeys for local state. `isRowSelectable` controls eligibility; disabled rows are excluded from select-all. Selection is limited to the current data page; missing/ineligible keys are pruned. The header checkbox exposes all/mixed/empty states, and selected rows use the project selection background at 50% opacity, with hover at 25%. The bottom bulk-action area uses the same muted background as the header; checkbox accents retain the solid brand primary.
+- `selection.actions` contains generic labels, icons, variants, disabled/loading state and callbacks. A callback receives the selected rows and a clear-selection function. Common renders the toolbar, count and clear action below the table so selecting rows does not shift the header or existing rows; it does not execute domain-specific API calls. `selection.disabled` or a loading action locks selection during pending work.
+- The agent table supplies bulk deletion through its own confirmation and `useAgentBulkDelete` hook, reusing the single-delete service and checking each result. Read-only agents cannot be selected. Partial failures are reported, successful rows are removed from selection and agent queries are invalidated. No destructive operation should run merely because a checkbox is selected.
 
-`StandardTable<RecordType>` forwards the Ant Design `TableProps<RecordType>` API. Keep its generic props and forwarding behavior backward-compatible when updating shared table styles.
+The agents list consumes this component, gives the description the elastic space and reserves room for action buttons. Category/status presentation and action callbacks remain in AgentListTable. There is no agent-list.css or Ant Design Table provider for this list.
+
+The unused Ant Design StandardTable wrapper was removed after checking source imports. CSV file previews use common/file-preview/CsvPreviewTable: it windows fixed-height rows, preserves column order, logical row indices and streaming scroll callbacks. Do not replace large streaming previews with an unbounded DOM table.

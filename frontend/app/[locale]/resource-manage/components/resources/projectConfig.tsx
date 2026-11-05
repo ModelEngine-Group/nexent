@@ -25,8 +25,8 @@ import { API_ENDPOINTS, ApiError } from "@/services/api";
 import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo } from "@/lib/projectBranding";
 import logger from "@/lib/logger";
-import { StandardInput as Input } from "@/components/common/StandardInput";
-import { StandardButton as Button } from "@/components/common/StandardButton";
+import { InputField as Input } from "@/components/common/InputField";
+import { Button } from "@/components/common/Button";
 import { PlatformQuotaPanel } from "./PlatformQuotaPanel";
 
 interface ProjectConfigTabProps {
@@ -353,7 +353,9 @@ export default function ProjectConfigTab({
             showUploadList={false}
             accept="image/png,image/jpeg"
           >
-            <Button size="small">{t("project.config.logo.upload.new")}</Button>
+            <Button size="sm" variant="outline">
+              {t("project.config.logo.upload.new")}
+            </Button>
           </Upload>
         </Form.Item>
         <Form.Item
@@ -383,12 +385,12 @@ export default function ProjectConfigTab({
               showUploadList={false}
               accept="image/png,image/jpeg"
             >
-              <Button size="small">
+              <Button size="sm" variant="outline">
                 {t("project.config.home.logo.upload")}
               </Button>
             </Upload>
             <Button
-              size="small"
+              size="sm"
               disabled={
                 removeHomeLogo || (!homeLogoFile && !configuredHomeLogo)
               }
@@ -397,13 +399,14 @@ export default function ProjectConfigTab({
                 setHomeLogoPreview("");
                 setRemoveHomeLogo(true);
               }}
+              variant="outline"
             >
               {t("project.config.home.logo.reset")}
             </Button>
           </div>
         </Form.Item>
         <Form.Item>
-          <Button variant="primary" htmlType="submit" loading={loading}>
+          <Button variant="default" type="submit" loading={loading} size="sm">
             {t("common.save")}
           </Button>
         </Form.Item>

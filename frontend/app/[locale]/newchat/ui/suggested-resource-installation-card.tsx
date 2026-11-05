@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";

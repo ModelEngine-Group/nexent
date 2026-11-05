@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@/types/agentConfig";
@@ -122,10 +124,10 @@ describe("CreateAgentModal", () => {
     expect(screen.getByText("报告")).toHaveClass("text-[#393939]");
     expect(screen.queryByText("心肌病筛查助手")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { pressed: false })).toHaveLength(1);
-    expect(document.querySelector(".ant-modal")).toHaveStyle({
+    expect(screen.getByRole("dialog")).toHaveStyle({
       width: "560px",
     });
-    expect(document.querySelector(".ant-modal-container")).toHaveStyle({
+    expect(screen.getByRole("dialog")).toHaveStyle({
       maxHeight: "572px",
     });
     expect(document.querySelector("[data-template-list]")).toHaveClass(

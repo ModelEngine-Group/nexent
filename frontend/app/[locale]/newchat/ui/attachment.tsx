@@ -24,9 +24,13 @@ import {
   type CompleteAttachment,
 } from "@assistant-ui/react";
 import { TooltipIconButton } from "./tooltip-icon-button";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+import { Button } from "@/components/common/Button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+} from "@/components/common/Dialog";
+import { FilePreviewDrawer } from "@/components/preview/filePreviewDrawer";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { type AttachmentType } from "../utils/attachment-type";
@@ -280,8 +284,10 @@ const AttachmentPreview: FC<{
 
         <Dialog open={isLocalPreviewOpen} onOpenChange={setIsLocalPreviewOpen}>
           <DialogContent
-            className="flex max-h-[80vh] max-w-3xl flex-col p-0"
             onOpenAutoFocus={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+            className="flex max-h-[80vh] max-w-3xl flex-col p-0"
           >
             <DialogHeader className="border-b px-4 py-3">
               <h2 className="truncate text-base font-medium">{name}</h2>
@@ -372,8 +378,10 @@ const AttachmentPreview: FC<{
 
       <Dialog open={isLocalPreviewOpen} onOpenChange={setIsLocalPreviewOpen}>
         <DialogContent
-          className="flex max-h-[80vh] max-w-3xl flex-col p-0"
           onOpenAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+          className="flex max-h-[80vh] max-w-3xl flex-col p-0"
         >
           <DialogHeader className="border-b px-4 py-3">
             <h2 className="truncate text-base font-medium">{name}</h2>

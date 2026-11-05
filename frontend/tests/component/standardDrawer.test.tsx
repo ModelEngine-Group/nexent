@@ -1,10 +1,11 @@
-import { App } from "antd";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardDrawer } from "@/components/common/StandardDrawer";
+import { Button } from "@/components/common/Button";
+import { PreviewDrawerShell } from "@/components/preview/PreviewDrawerShell";
 
 describe("StandardDrawer", () => {
   it("renders the documented content and closes through the footer actions", async () => {
@@ -13,29 +14,29 @@ describe("StandardDrawer", () => {
     const onConfirm = vi.fn();
 
     render(
-      <App>
-        <StandardDrawer
-          open
-          title="test"
-          closeLabel="Close"
-          closeText="Close"
-          confirmText="Confirm"
-          onClose={onClose}
-          onConfirm={onConfirm}
-        >
-          12434
-        </StandardDrawer>
-      </App>
+      <PreviewDrawerShell
+        open
+        title="test"
+        closeLabel="Close"
+        onClose={onClose}
+        footer={
+          <>
+            <Button variant="outline" onClick={onClose}>
+              {"Close"}
+            </Button>
+            <Button onClick={onConfirm}>{"Confirm"}</Button>
+          </>
+        }
+      >
+        12434
+      </PreviewDrawerShell>
     );
 
     expect(screen.getByText("test")).toBeInTheDocument();
     expect(screen.getByText("12434")).toBeInTheDocument();
-    expect(document.querySelector(".ant-drawer-content-wrapper")).toHaveStyle({
+    expect(screen.getByRole("dialog")).toHaveStyle({
       width: "560px",
     });
-    expect(screen.getByRole("dialog")).toHaveClass(
-      "!shadow-[-2px_0_12px_0_rgba(0,0,0,0.08)]"
-    );
     const closeButtons = screen.getAllByRole("button", { name: "Close" });
     expect(closeButtons).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
@@ -50,36 +51,47 @@ describe("StandardDrawer", () => {
 
   it("allows the drawer width to be adjusted", () => {
     render(
-      <App>
-        <StandardDrawer
-          open
-          title="test"
-          closeLabel="Close"
-          closeText="Close"
-          onClose={vi.fn()}
-          width={640}
-        >
-          12434
-        </StandardDrawer>
-      </App>
+      <PreviewDrawerShell
+        open
+        title="test"
+        closeLabel="Close"
+        onClose={vi.fn()}
+        width={640}
+        footer={
+          <>
+            <Button variant="outline" onClick={vi.fn()}>
+              {"Close"}
+            </Button>
+          </>
+        }
+      >
+        12434
+      </PreviewDrawerShell>
     );
 
-    expect(document.querySelector(".ant-drawer-content-wrapper")).toHaveStyle({
+    expect(screen.getByRole("dialog")).toHaveStyle({
       width: "640px",
     });
   });
 
   it("sets button text letter spacing to zero", () => {
-    render(<StandardButton>Close</StandardButton>);
+    render(
+      <Button variant="outline" size="sm">
+        Close
+      </Button>
+    );
 
     expect(screen.getByRole("button", { name: "Close" })).toHaveClass(
-      "![letter-spacing:0px]",
-      "[&>span]:![letter-spacing:0px]"
+      "tracking-normal"
     );
   });
 
   it("does not insert spaces into localized CJK button labels", () => {
-    render(<StandardButton>关闭</StandardButton>);
+    render(
+      <Button variant="outline" size="sm">
+        关闭
+      </Button>
+    );
 
     const button = screen.getByRole("button", { name: "关闭" });
     expect(button.textContent).toBe("关闭");

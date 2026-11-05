@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
+import { ConversationSidebarProvider } from "@/components/chat/ConversationSidebarProvider";
 import { useSidebar } from "@/components/ui/sidebar";
 
 function StateButton() {

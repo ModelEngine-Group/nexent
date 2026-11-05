@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
 import {
   useCallback,
   useEffect,
@@ -11,13 +10,13 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "next/navigation";
-import { App, Alert, Button, ConfigProvider, Form } from "antd";
+import { App, Alert, ConfigProvider, Form } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { StandardCard } from "@/components/common/StandardCard";
+import { ConfigCard } from "@/components/agent/ConfigCard";
 import { useAgentStore } from "@/stores/agentStore";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
@@ -26,7 +25,6 @@ import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { buildDefaultAgentVersionName } from "@/lib/agentUsageGuide";
-
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
 import {
@@ -45,7 +43,6 @@ import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
 import { AgentPublication } from "./components/agent-publication";
 import { AgentPublicationEmpty } from "./components/agent-publication-empty";
 import { AgentConfigHeader } from "./components/agent-config-header";
-
 import {
   ChevronDown,
   Info,
@@ -61,7 +58,6 @@ import {
   Settings2,
   ShieldCheck,
 } from "lucide-react";
-
 type ConfigSectionKey =
   | "display_info"
   | "role_model"
@@ -73,7 +69,6 @@ type ConfigSectionKey =
   | "knowledge_base"
   | "conversation_guide"
   | "guardrail";
-
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
   role_model: true,
@@ -86,10 +81,8 @@ const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   conversation_guide: false,
   guardrail: false,
 };
-
 const CONFIG_CARD_SURFACE =
   "relative overflow-hidden !shadow-none ring-1 ring-inset ring-transparent transition-[box-shadow] duration-200 ease-out hover:ring-gray-200 focus-within:ring-gray-300 motion-reduce:transition-none";
-
 interface ConfigSectionProps {
   title: string;
   description: string;
@@ -105,7 +98,6 @@ interface ConfigSectionProps {
   referenceMinHeight?: number;
   contentGap?: 4 | 8;
 }
-
 function ConfigSection({
   title,
   description,
@@ -137,9 +129,9 @@ function ConfigSection({
         className="w-full min-w-0"
       >
         <div className="flex min-h-6 items-center justify-between gap-4">
-          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none items-center gap-4 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-[#2673e5]/40 focus-visible:ring-offset-4">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none items-center gap-4 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-4">
             <span className="flex shrink-0 items-center gap-2 text-sm font-medium leading-[22px] tracking-[0px] text-gray-600 transition-colors duration-200 group-hover/section:text-gray-800 group-focus-within/section:text-gray-800 motion-reduce:transition-none [font-family:'HarmonyOS_Sans_SC','Huawei_Sans',sans-serif]">
-              <span className="flex h-[22px] w-[18px] shrink-0 items-center justify-center leading-none text-gray-400 transition-colors duration-200 group-hover/section:text-[#2673e5] group-focus-within/section:text-[#2673e5] motion-reduce:transition-none">
+              <span className="flex h-[22px] w-[18px] shrink-0 items-center justify-center leading-none text-gray-400 transition-colors duration-200 group-hover/section:text-primary group-focus-within/section:text-primary motion-reduce:transition-none">
                 {icon}
               </span>
               <span>{title}</span>
@@ -170,10 +162,10 @@ function ConfigSection({
     </div>
   );
   return card ? (
-    <StandardCard
+    <ConfigCard
       data-testid={testId}
       className={`${CONFIG_CARD_SURFACE} group/section shrink-0 !rounded-lg !bg-white !px-6 !py-5`}
-      styles={{ body: { padding: 0 } }}
+      bodyStyle={{ padding: 0 }}
       style={
         open && referenceMinHeight
           ? { minHeight: referenceMinHeight }
@@ -181,12 +173,11 @@ function ConfigSection({
       }
     >
       {section}
-    </StandardCard>
+    </ConfigCard>
   ) : (
     section
   );
 }
-
 interface AgentConfigProps {
   publicationVisible?: boolean;
   onPublication?: () => void;
@@ -202,7 +193,6 @@ interface AgentConfigProps {
   debugPanel?: ReactNode;
   debugExpanded?: boolean;
 }
-
 export default function AgentConfig({
   publicationVisible = false,
   onPublication,
@@ -225,10 +215,8 @@ export default function AgentConfig({
   const [configScrollRegion, setConfigScrollRegion] =
     useState<HTMLDivElement | null>(null);
   const [configScrollbarWidth, setConfigScrollbarWidth] = useState(0);
-
   useEffect(() => {
     if (!configScrollRegion) return;
-
     const updateScrollbarWidth = () => {
       setConfigScrollbarWidth(
         Math.max(
@@ -269,7 +257,6 @@ export default function AgentConfig({
   const guardrailSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
   const { configFocusRequest, clearConfigFocusRequest } = useNl2AgentFlow();
-
   const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const configuredModelIds = editedAgent?.model_ids ?? [];
@@ -294,7 +281,6 @@ export default function AgentConfig({
   const replaceServerSnapshot = useAgentStore(
     (state) => state.replaceServerSnapshot
   );
-
   const handleRefreshAvailability = useCallback(async () => {
     if (!agentId || isRefreshingAvailability) return;
     setIsRefreshingAvailability(true);
@@ -313,11 +299,9 @@ export default function AgentConfig({
       setIsRefreshingAvailability(false);
     }
   }, [agentId, isRefreshingAvailability, message, replaceServerSnapshot, t]);
-
   useEffect(() => {
     lastScrolledRequestRef.current = null;
   }, [agentId]);
-
   useEffect(() => {
     form.resetFields();
     const serverSnapshot = useAgentStore.getState().editedAgent;
@@ -325,10 +309,8 @@ export default function AgentConfig({
       form.setFieldsValue(serverSnapshot);
     }
   }, [agentId, form, serverSnapshotRevision]);
-
   useEffect(() => {
     if (!configFocusRequest || configFocusRequest.agentId !== agentId) return;
-
     const { requestId, target } = configFocusRequest;
     const requestKey = `${configFocusRequest.agentId}:${requestId}`;
     if (lastScrolledRequestRef.current === requestKey) {
@@ -348,7 +330,6 @@ export default function AgentConfig({
             openSections: { ...sections, [targetSection]: true },
           };
     });
-
     lastScrolledRequestRef.current = requestKey;
     const frameId = window.requestAnimationFrame(() => {
       const sectionRefs: Record<
@@ -371,7 +352,6 @@ export default function AgentConfig({
         clearConfigFocusRequest();
         return;
       }
-
       const prefersReducedMotion = window.matchMedia(
         "(prefers-reduced-motion: reduce)"
       ).matches;
@@ -381,10 +361,8 @@ export default function AgentConfig({
       });
       clearConfigFocusRequest();
     });
-
     return () => window.cancelAnimationFrame(frameId);
   }, [agentId, configFocusRequest, clearConfigFocusRequest]);
-
   const handleSectionOpenChange = useCallback(
     (section: ConfigSectionKey, open: boolean) => {
       setSectionState((current) => {
@@ -402,7 +380,6 @@ export default function AgentConfig({
     },
     [agentId]
   );
-
   const handleDebug = async () => {
     try {
       await form.validateFields();
@@ -414,7 +391,6 @@ export default function AgentConfig({
       // Field validation errors are rendered by Ant Design.
     }
   };
-
   const handlePublish = async () => {
     try {
       await form.validateFields();
@@ -426,7 +402,6 @@ export default function AgentConfig({
       // Field validation errors are rendered by Ant Design.
     }
   };
-
   useEffect(() => {
     if (
       searchParams.get("publish") !== "1" ||
@@ -437,7 +412,6 @@ export default function AgentConfig({
     ) {
       return;
     }
-
     publishIntentHandledForAgentRef.current = agentId;
     void form
       .validateFields()
@@ -458,19 +432,16 @@ export default function AgentConfig({
     save,
     searchParams,
   ]);
-
   useEffect(() => {
     if (!saveError) {
       return;
     }
-
     message.error(
       getTenantResourceLimitMessage(saveError, t) ||
         (saveError instanceof Error ? saveError.message : saveError)
     );
     clearSaveError();
   }, [clearSaveError, message, saveError, t]);
-
   if (!editedAgent) {
     return (
       <div className="relative flex h-full min-h-0 items-center justify-center">
@@ -491,7 +462,6 @@ export default function AgentConfig({
       </div>
     );
   }
-
   return (
     <ConfigProvider
       button={{ autoInsertSpace: false }}
@@ -589,8 +559,6 @@ export default function AgentConfig({
                   <span className="flex items-center justify-between gap-2">
                     <span>{`${t("agent.unavailable")}${unavailableReasonLabels.join("、")}`}</span>
                     <Button
-                      type="link"
-                      size="small"
                       icon={
                         <RefreshCw
                           size={12}
@@ -602,6 +570,8 @@ export default function AgentConfig({
                       onClick={handleRefreshAvailability}
                       disabled={isRefreshingAvailability}
                       loading={isRefreshingAvailability}
+                      variant="link"
+                      size="xs"
                     >
                       {t("agent.config.refreshAvailability")}
                     </Button>
@@ -642,16 +612,14 @@ export default function AgentConfig({
                 <AgentPrmopt highFidelity onOptimizePrompt={onOptimizePrompt} />
               </ConfigSection>
             </div>
-            <StandardCard
+            <ConfigCard
               data-agent-guide="resources"
               data-testid="agent-config-card-resources"
               className={`${CONFIG_CARD_SURFACE} shrink-0 !rounded-lg !bg-white !p-0`}
-              styles={{
-                body: {
-                  padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                },
+              bodyStyle={{
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               <KnowledgeBaseConfig
@@ -738,7 +706,7 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-            </StandardCard>
+            </ConfigCard>
             <ConfigSection
               testId="agent-config-card-welcome"
               title={t("agent.highFidelity.guideTitle")}

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { render, screen, within, waitFor, act, fireEvent, cleanup } from '@testing-library/react';
@@ -95,7 +97,7 @@ vi.mock('@/app/[locale]/knowledges/components/upload/UploadArea', () => ({
   default: () => <div data-testid='upload-area' />,
 }));
 
-vi.mock('@/components/common/markdownRenderer', () => ({
+vi.mock('@/components/common/markdown/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ content }: any) => <div>{content}</div>,
 }));
 

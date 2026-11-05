@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useRouter } from "next/navigation";
-import { App, Button, Col, Flex, Row } from "antd";
+import { App, Col, Flex, Row } from "antd";
 import {
   BlocksIcon,
   ExternalLink,
@@ -13,7 +12,6 @@ import {
   RefreshCw,
   Wrench,
 } from "lucide-react";
-
 import { updateToolList } from "@/services/mcpService";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
@@ -22,7 +20,7 @@ import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
-import { ResourceAddButton } from "@/components/common/ResourceAddButton";
+import { ResourceAddButton } from "@/components/resources/ResourceAddButton";
 import type { ResourceSectionProps } from "./resource-section.types";
 import ToolManagement from "./capability/ToolManagement";
 import SkillBuildModal from "../../components/capability/SkillBuildModal";
@@ -30,16 +28,16 @@ import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
 import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
-
 const EMPTY_SELECTED_SKILLS: import("@/types/agentConfig").Skill[] = [];
-
 export function AgentToolCapability({
   highFidelity = false,
   renderSection,
 }: ResourceSectionProps = {}) {
   const { t } = useTranslation("common");
   const router = useRouter();
-  const { locale } = useParams<{ locale: string }>();
+  const { locale } = useParams<{
+    locale: string;
+  }>();
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
@@ -47,36 +45,30 @@ export function AgentToolCapability({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
   const { invalidate } = useToolList();
-
   const prepareAgentForMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
     const agentId = initialState.agentId;
     if (agentId === null) return;
-
     const autosaveSucceeded = await initialState.waitForIdle();
     if (!autosaveSucceeded) {
       throw new Error("Pending Agent edits could not be saved");
     }
     if (useAgentStore.getState().agentId !== agentId) return;
   }, []);
-
   const refreshAgentAfterMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
     const agentId = initialState.agentId;
     if (agentId === null) return;
-
     const result = await searchAgentInfo(agentId, undefined, 0);
     if (!result.success || !result.data) {
       throw new Error(result.message || "Failed to refresh Agent draft");
     }
-
     const currentState = useAgentStore.getState();
     if (currentState.agentId !== agentId) return;
     if (!currentState.replaceServerSnapshot(agentId, result.data)) {
       throw new Error("Agent context changed during synchronization");
     }
   }, []);
-
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -92,14 +84,14 @@ export function AgentToolCapability({
       setIsRefreshing(false);
     }
   }, [invalidate, message, t]);
-
   const resourceActions = (
     <div className="flex h-6 items-center gap-2">
       <Button
-        type="link"
         disabled={isReadOnly}
         onClick={() => router.push(`/${locale}/mcp-space`)}
-        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-primary"
+        variant="link"
+        size="sm"
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newTool")}
@@ -124,7 +116,6 @@ export function AgentToolCapability({
       }
     />
   );
-
   return (
     <>
       {highFidelity ? (
@@ -143,31 +134,34 @@ export function AgentToolCapability({
               <Flex justify="space-between" align="center">
                 <div className="flex items-center gap-4 text-sm">
                   <Button
-                    type="text"
-                    size="small"
                     icon={<RefreshCw size={16} />}
                     onClick={handleRefreshTools}
                     loading={isRefreshing}
-                    className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
+                    className="!text-primary hover:!text-primary-hover hover:!bg-brand-soft"
+                    variant="ghost"
+                    size="xs"
+                    disabled={isReadOnly}
                   >
                     {t("toolManagement.refresh.button.refresh")}
                   </Button>
                   <Button
-                    type="text"
-                    size="small"
                     icon={<Plug size={16} />}
                     onClick={() => setIsMcpModalOpen(true)}
-                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+                    className="!text-primary hover:!text-primary-hover hover:!bg-brand-soft"
+                    variant="ghost"
+                    size="xs"
+                    disabled={isReadOnly}
                   >
                     {t("toolManagement.mcp.button")}
                   </Button>
                 </div>
                 <Button
-                  size="small"
                   icon={<Wrench size={14} />}
                   onClick={() => setIsToolSelectOpen(true)}
                   disabled={currentAgentId === null || isReadOnly}
                   className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
+                  variant="outline"
+                  size="xs"
                 >
                   <span className="inline-flex items-center self-center leading-none">
                     {t("toolPool.selectTools")}
@@ -193,7 +187,6 @@ export function AgentToolCapability({
     </>
   );
 }
-
 export function AgentSkillCapability({
   highFidelity = false,
   renderSection,
@@ -212,7 +205,6 @@ export function AgentSkillCapability({
     null
   );
   const { invalidate: invalidateSkills } = useSkillList();
-
   const handleRefreshSkills = useCallback(async () => {
     setIsRefreshingSkill(true);
     try {
@@ -224,7 +216,6 @@ export function AgentSkillCapability({
       setIsRefreshingSkill(false);
     }
   }, [invalidateSkills, message, t]);
-
   const handleSkillBuildSuccess = useCallback(
     () => invalidateSkills(),
     [invalidateSkills]
@@ -251,17 +242,17 @@ export function AgentSkillCapability({
     setIsSkillModalOpen(false);
     setEditingSkill(null);
   }, []);
-
   const resourceActions = (
     <div className="flex h-6 items-center gap-2">
       <Button
-        type="link"
         disabled={isReadOnly}
         onClick={() => {
           setEditingSkill(null);
           setIsSkillModalOpen(true);
         }}
-        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-primary"
+        variant="link"
+        size="sm"
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newSkill")}
@@ -300,7 +291,6 @@ export function AgentSkillCapability({
       />
     </div>
   );
-
   return (
     <>
       {highFidelity ? (
@@ -319,35 +309,38 @@ export function AgentSkillCapability({
               <Flex justify="space-between" align="center">
                 <div className="flex items-center gap-4 text-sm">
                   <Button
-                    type="text"
-                    size="small"
                     icon={<RefreshCw size={16} />}
                     onClick={handleRefreshSkills}
                     loading={isRefreshingSkill}
-                    className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
+                    className="!text-primary hover:!text-primary-hover hover:!bg-brand-soft"
+                    variant="ghost"
+                    size="xs"
+                    disabled={isReadOnly}
                   >
                     {t("skillManagement.refresh.button")}
                   </Button>
                   <Button
-                    type="text"
-                    size="small"
                     icon={<BlocksIcon size={16} />}
                     onClick={() => {
                       setEditingSkill(null);
                       setIsSkillModalOpen(true);
                     }}
-                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+                    className="!text-primary hover:!text-primary-hover hover:!bg-brand-soft"
                     title={t("skillManagement.build.title")}
+                    variant="ghost"
+                    size="xs"
+                    disabled={isReadOnly}
                   >
                     {t("skillManagement.build.button")}
                   </Button>
                 </div>
                 <Button
-                  size="small"
                   icon={<Wrench size={14} />}
                   onClick={() => setIsSkillSelectOpen(true)}
                   disabled={currentAgentId === null || isReadOnly}
                   className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
+                  variant="outline"
+                  size="xs"
                 >
                   <span className="inline-flex items-center self-center leading-none">
                     {t("skillPool.selectSkills")}

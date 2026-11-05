@@ -55,7 +55,7 @@ vi.mock("@/hooks/tenant/useTenantList", () => ({
 vi.mock("@/hooks/useConfirmModal", () => ({
   useConfirmModal: () => ({ confirm: vi.fn() }),
 }));
-vi.mock("@/components/common/markdownRenderer", () => ({
+vi.mock("@/components/common/markdown/MarkdownRenderer", () => ({
   MarkdownRenderer: () => null,
 }));
 vi.mock(

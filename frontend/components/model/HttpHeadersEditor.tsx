@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Input } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 
 const snapshotHeaders = (value: Record<string, string | null>) =>
   JSON.stringify(
@@ -106,22 +106,24 @@ export function HttpHeadersEditor({
               )
             }
           />
-          <StandardButton
+          <Button
+            variant="outline"
             disabled={disabled}
             onClick={() => update(rows.filter((item) => item.id !== row.id))}
           >
             {t("common.delete")}
-          </StandardButton>
+          </Button>
         </div>
       ))}
-      <StandardButton
+      <Button
+        variant="outline"
         disabled={disabled}
         onClick={() =>
           update([...rows, { id: ++sequence.current, name: "", value: "" }])
         }
       >
         {t("modelProfile.addHeader")}
-      </StandardButton>
+      </Button>
     </div>
   );
 }

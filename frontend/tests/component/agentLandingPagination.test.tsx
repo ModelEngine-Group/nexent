@@ -31,7 +31,8 @@ vi.mock("@/hooks/chat/useConversationAgentHistory", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, values?: { count?: number }) =>
+      key === "pagination.perPage" ? `${values?.count} / page` : key,
     i18n: { language: "en" },
   }),
 }));
@@ -51,7 +52,7 @@ describe("Agent discovery pagination", () => {
     expect(cards()).toHaveLength(12);
     expect(screen.queryByText("Agent 13")).not.toBeInTheDocument();
     expect(screen.getByText("12 / page")).toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.focus(screen.getByRole("combobox"));
     await waitFor(() =>
       expect(
         screen.getAllByRole("option").map((item) => item.textContent)
@@ -65,8 +66,7 @@ describe("Agent discovery pagination", () => {
     fireEvent.click(screen.getByTitle("2"));
     expect(cards()).toHaveLength(1);
     expect(screen.getByText("Agent 13")).toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByRole("combobox"));
-    fireEvent.click(await screen.findByText("10 / page"));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "10" } });
     await waitFor(() => expect(cards()).toHaveLength(10));
     expect(screen.getByText("Agent 01")).toBeInTheDocument();
     expect(screen.queryByText("Agent 11")).not.toBeInTheDocument();

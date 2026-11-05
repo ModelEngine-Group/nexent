@@ -6719,5 +6719,35 @@
     "reviewedHint": "An administrator has reviewed this configuration version. The migration source is retained.",
     "failedHint": "This outlet could not be migrated. An administrator must review and resolve its configuration."
   },
-  "modelProfile.selectionCheckFailed": "Check failed"
+  "modelProfile.selectionCheckFailed": "Check failed",
+  "pagination": {
+    "total": "{{count}} items",
+    "jump": "Go",
+    "navigation": "Pagination",
+    "pageSize": "Items per page",
+    "perPage": "{{count}} / page",
+    "previous": "Previous page",
+    "next": "Next page",
+    "page": "Page {{page}}",
+    "jumpTo": "Go to page"
+  },
+  "common": {
+    "clear": "Clear",
+    "togglePasswordVisibility": "Toggle password visibility"
+  },
+  "tour": {
+    "previous": "Previous",
+    "next": "Next",
+    "finish": "Finish"
+  },
+  "table.resizeColumn": "Resize {{column}} (arrow keys to adjust; double-click or Enter to reset)",
+  "table.selectAll": "Select all eligible rows on this page",
+  "table.selectRow": "Select {{row}}",
+  "table.selectionCount": "{{count}} selected (current page)",
+  "table.clearSelection": "Clear selection",
+  "agentConfig.list.bulkDelete": "Delete selected",
+  "agentConfig.list.bulkDeleteConfirm": "Delete the {{count}} selected agents? This cannot be undone.",
+  "agentConfig.list.bulkDeleteResult": "Bulk deletion result",
+  "agentConfig.list.bulkDeleteSummary": "Deleted {{succeeded}}; failed {{failed}}.",
+  "agentConfig.list.bulkDeleteFailedNames": "Not deleted: {{names}}"
 }

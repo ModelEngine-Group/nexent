@@ -56,9 +56,9 @@ import { formatDateOrFallback } from "@/lib/date";
 import { formatFileSize } from "@/lib/utils";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import { USER_ROLES } from "@/const/auth";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Button as ProjectButton } from "@/components/common/Button";
+import { InputField } from "@/components/common/InputField";
+import { Pagination } from "@/components/common/Pagination";
 import log from "@/lib/logger";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
@@ -662,7 +662,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         className="mb-3 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-3"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
-          <StandardInput
+          <InputField
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<Search className="size-4 text-[#777777]" />}
             value={effectiveSearchKeyword}
@@ -769,7 +769,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               </div>
             }
           >
-            <StandardButton
+            <ProjectButton
               className="!h-8"
               aria-label={t("knowledgeBase.filter.button")}
               aria-pressed={
@@ -782,9 +782,10 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 effectiveSelectedSources.length > 0 ||
                 effectiveSelectedModels.length > 0 ||
                 tagPredicates.length > 0
-                  ? "primary"
-                  : "default"
+                  ? "default"
+                  : "outline"
               }
+              size="sm"
             >
               {t("knowledgeBase.filter.button")}
               {(effectiveSelectedSources.length > 0 ||
@@ -796,28 +797,32 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                     tagPredicates.length}
                 </span>
               )}
-            </StandardButton>
+            </ProjectButton>
           </Popover>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StandardButton
+          <ProjectButton
             onClick={onSync}
             loading={syncLoading}
             icon={<SyncOutlined />}
+            variant="outline"
+            size="sm"
           >
             {t("knowledgeBase.button.sync")}
-          </StandardButton>
+          </ProjectButton>
           {showDataMateConfig && (
-            <StandardButton
+            <ProjectButton
               onClick={onDataMateConfig}
               icon={<SettingOutlined />}
+              variant="outline"
+              size="sm"
             >
               {t("knowledgeBase.button.dataMateConfig")}
-            </StandardButton>
+            </ProjectButton>
           )}
-          <StandardButton variant="primary" onClick={onCreateNew}>
+          <ProjectButton variant="default" onClick={onCreateNew} size="sm">
             {t("knowledgeBase.card.create")}
-          </StandardButton>
+          </ProjectButton>
         </div>
       </div>
       <div className="min-h-0 max-h-[calc(100%-160px)] flex-none overflow-y-auto overflow-x-hidden px-px pb-3 pt-px">
@@ -829,14 +834,16 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             <p className="text-sm text-gray-500">
               {error || t("knowledgeBase.error.fetchListRetry")}
             </p>
-            <StandardButton
+            <ProjectButton
               onClick={() => {
                 onRetry?.();
                 setTagRetry((value) => value + 1);
               }}
+              variant="outline"
+              size="sm"
             >
               {t("repository.common.retry")}
-            </StandardButton>
+            </ProjectButton>
           </div>
         ) : loading ? (
           <div className="flex min-h-40 items-center justify-center">
@@ -1132,12 +1139,12 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             className="!h-8 !w-[116px]"
             disabled={loading}
           />
-          <StandardPaginator
+          <Pagination
             current={currentPage}
             pageSize={pageSize}
             total={filteredTotal}
             showSizeChanger={false}
-            onChange={(nextPage) => {
+            onPageChange={(nextPage) => {
               onPageChange?.(nextPage);
               setJumpPage(null);
             }}
@@ -1153,7 +1160,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             className="!h-8 !w-12"
             disabled={loading}
           />
-          <StandardButton
+          <ProjectButton
             disabled={loading || jumpPage === null}
             className="!px-2"
             onClick={() => {
@@ -1162,9 +1169,11 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                   Math.max(1, Math.min(pageCount, Math.trunc(jumpPage)))
                 );
             }}
+            variant="outline"
+            size="sm"
           >
             {t("agentConfig.list.jump")}
-          </StandardButton>
+          </ProjectButton>
         </div>
       </div>
 

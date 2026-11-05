@@ -1,19 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
-import {
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  LoaderIcon,
-} from "lucide-react";
+import { BotIcon, CheckIcon, ChevronDownIcon, LoaderIcon } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/common/Badge";
 
 const subAgentAccentByDepth: Array<{
   border: string;
@@ -73,20 +70,18 @@ export const SubAgentContainer = ({
       onOpenChange={setOpen}
       className={cn(
         "my-3 ml-3 overflow-hidden rounded-lg border bg-card/80 shadow-sm",
-        accent.border,
+        accent.border
       )}
       data-subagent-depth={depth}
       data-subagent-run-id={runId}
       data-subagent-id={subagentId}
     >
-      <CollapsibleTrigger
-        className="group flex w-full cursor-pointer flex-col gap-1.5 px-3.5 py-3 text-left transition-colors hover:bg-muted/40 data-[state=open]:bg-muted/25"
-      >
+      <CollapsibleTrigger className="group flex w-full cursor-pointer flex-col gap-1.5 px-3.5 py-3 text-left transition-colors hover:bg-muted/40 data-[state=open]:bg-muted/25">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
             className={cn(
               "flex shrink-0 items-center justify-center rounded-md bg-muted/80",
-              accent.icon,
+              accent.icon
             )}
           >
             <BotIcon className="size-4" aria-hidden />

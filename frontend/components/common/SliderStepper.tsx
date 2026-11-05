@@ -87,7 +87,7 @@ export function SliderStepper({
             {TICK_POSITIONS.map((pos) => (
               <span
                 key={pos}
-                className={`absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full opacity-60 ${hasDisplayValue ? "bg-[#0067D1]" : "bg-[#E0E0E0]"}`}
+                className={`absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full opacity-60 ${hasDisplayValue ? "bg-primary" : "bg-[#E0E0E0]"}`}
                 style={{ left: `${pos}%` }}
               />
             ))}
@@ -126,7 +126,7 @@ export function SliderStepper({
             {hasDisplayValue && (
               <>
                 <div
-                  className="absolute left-0 top-0 h-full rounded-full bg-[#0067D1]"
+                  className="absolute left-0 top-0 h-full rounded-full bg-primary"
                   style={{ width: `${pct}%` }}
                 />
                 <div

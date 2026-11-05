@@ -6717,5 +6717,35 @@
     "reviewedHint": "管理员已检查当前配置版本，保留旧版本迁移来源标识。",
     "failedHint": "此模型出口未能完成迁移，请管理员检查并处理配置异常。"
   },
-  "modelProfile.selectionCheckFailed": "检测失败"
+  "modelProfile.selectionCheckFailed": "检测失败",
+  "pagination": {
+    "total": "共 {{count}} 条",
+    "jump": "跳转",
+    "navigation": "分页",
+    "pageSize": "每页条数",
+    "perPage": "{{count}} 条/页",
+    "previous": "上一页",
+    "next": "下一页",
+    "page": "第 {{page}} 页",
+    "jumpTo": "跳至"
+  },
+  "common": {
+    "clear": "清空",
+    "togglePasswordVisibility": "显示或隐藏密码"
+  },
+  "tour": {
+    "previous": "上一步",
+    "next": "下一步",
+    "finish": "完成"
+  },
+  "table.resizeColumn": "拖动调整“{{column}}”列宽（方向键微调，双击或回车恢复自动宽度）",
+  "table.selectAll": "选择当前页所有可选项",
+  "table.selectRow": "选择 {{row}}",
+  "table.selectionCount": "已选择 {{count}} 项（当前页）",
+  "table.clearSelection": "清空选择",
+  "agentConfig.list.bulkDelete": "批量删除",
+  "agentConfig.list.bulkDeleteConfirm": "确认删除选中的 {{count}} 个智能体？删除后不可恢复。",
+  "agentConfig.list.bulkDeleteResult": "批量删除结果",
+  "agentConfig.list.bulkDeleteSummary": "成功删除 {{succeeded}} 个，失败 {{failed}} 个。",
+  "agentConfig.list.bulkDeleteFailedNames": "未删除：{{names}}"
 }

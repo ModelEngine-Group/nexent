@@ -240,14 +240,14 @@ vi.mock("@/app/newchat/ui/skill-file-mention", () => ({
 vi.mock("@/app/newchat/ui/directive-text", () => ({
   DirectiveChip: () => null,
 }));
-vi.mock("@/app/newchat/ui/skill-directives", () => ({
+vi.mock("@/lib/skillDirectives", () => ({
   combinedSkillDirectiveFormatter: {},
   skillDirectiveIconMap: {},
 }));
 vi.mock("@/components/chat/RuntimeMetadataEditor", () => ({
   RuntimeMetadataEditor: () => null,
 }));
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@/components/common/Tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipContent: () => null,

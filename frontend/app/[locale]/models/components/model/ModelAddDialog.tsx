@@ -19,14 +19,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/common/Dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -110,6 +110,9 @@ export const ModelAddDialog = ({
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
         className={cn(
           "flex max-h-[90vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0",
           wide || tab === "batch" ? "sm:max-w-5xl" : "sm:max-w-xl"
@@ -1956,7 +1959,12 @@ function RowSettingsDialog({
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[80vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        className="flex max-h-[80vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+      >
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle className="text-sm font-mono">
             {row.model_name}

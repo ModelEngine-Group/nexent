@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -38,7 +40,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 
 interface Chunk {
   id: string;

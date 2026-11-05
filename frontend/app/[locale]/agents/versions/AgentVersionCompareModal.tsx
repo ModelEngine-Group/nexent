@@ -1,19 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
-
+import { Button } from "@/components/common/Button";
+import { Badge } from "@/components/common/Badge";
+import { Textarea } from "@/components/common/Textarea";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Flex,
-  Spin,
-  Empty,
-  Table,
-  Tag,
-  Typography,
-  Button,
-  Select,
-  Input,
-} from "antd";
+import { Modal, Flex, Spin, Empty, Table, Typography, Select } from "antd";
 import {
   AlertTriangle,
   RotateCcw,
@@ -22,14 +14,11 @@ import {
   Bot,
   PencilLine,
 } from "lucide-react";
-
 import type { VersionCompareResponse } from "@/services/agentVersionService";
 import { VersionCompareThread } from "./VersionCompareThread";
 import { useVersionCompareRuntime } from "./useVersionCompareRuntime";
 import type { Agent } from "@/types/agentConfig";
-
 const { Text } = Typography;
-
 export interface AgentVersionCompareModalProps {
   open: boolean;
   loading: boolean;
@@ -47,14 +36,16 @@ export interface AgentVersionCompareModalProps {
    * Version select data and handlers.
    * When provided, version columns will render Select components for switching versions.
    */
-  versionList?: { version_no: number; version_name?: string | null }[];
+  versionList?: {
+    version_no: number;
+    version_name?: string | null;
+  }[];
   currentVersionNo?: number;
   selectedVersionNoA?: number | null;
   selectedVersionNoB?: number | null;
   onChangeVersionA?: (versionNo: number) => void;
   onChangeVersionB?: (versionNo: number) => void;
 }
-
 export default function AgentVersionCompareModal({
   open,
   loading,
@@ -73,7 +64,6 @@ export default function AgentVersionCompareModal({
 }: AgentVersionCompareModalProps) {
   const { t } = useTranslation("common");
   const [compareQuestion, setCompareQuestion] = useState("");
-
   const resolveVersionNo = useCallback(
     (side: "left" | "right") => {
       const selected =
@@ -102,10 +92,8 @@ export default function AgentVersionCompareModal({
     open,
   });
   const compareAgent = { id: String(agentId), name: "Nexent" } as Agent;
-
   const versionA = compareData?.data?.version_a;
   const versionB = compareData?.data?.version_b;
-
   const versionOptions =
     versionList?.map((version) => {
       const baseLabel = version.version_name || `V${version.version_no}`;
@@ -119,29 +107,27 @@ export default function AgentVersionCompareModal({
           : baseLabel,
       };
     }) ?? [];
-
   const footer = showRollback
     ? [
-        <Button key="cancel" onClick={onCancel}>
+        <Button key="cancel" onClick={onCancel} variant="outline" size="sm">
           {t("common.cancel")}
         </Button>,
         <Button
           key="confirm"
-          type="primary"
-          danger
           icon={<RotateCcw size={14} />}
           loading={rollbackLoading}
           onClick={onRollbackConfirm}
+          variant="destructive"
+          size="sm"
         >
           {t("agent.version.confirmRollback")}
         </Button>,
       ]
     : [
-        <Button key="close" type="primary" onClick={onCancel}>
+        <Button key="close" onClick={onCancel} variant="default" size="sm">
           {t("common.button.close")}
         </Button>,
       ];
-
   useEffect(() => {
     if (!open) {
       stopCompare();
@@ -150,20 +136,17 @@ export default function AgentVersionCompareModal({
     }
     setCompareQuestion("");
   }, [open, resetCompareState, stopCompare]);
-
   useEffect(() => {
     if (isCompareStreaming) {
       stopCompare();
     }
     setCompareQuestion("");
   }, [selectedVersionNoA, selectedVersionNoB, resetCompareState, stopCompare]);
-
   const handleClose = () => {
     stopCompare();
     setCompareQuestion("");
     onCancel();
   };
-
   const handleClearCompareHistory = async () => {
     if (isCompareStreaming) {
       await stopCompare();
@@ -171,13 +154,11 @@ export default function AgentVersionCompareModal({
     resetCompareState();
     setCompareQuestion("");
   };
-
   const resolveVersionLabel = (versionNo: number | null | undefined) => {
     if (versionNo === null || versionNo === undefined) return "-";
     const matched = versionList?.find((v) => v.version_no === versionNo);
     return matched?.version_name || `V${versionNo}`;
   };
-
   const resolveVersionModel = (versionNo: number | null | undefined) => {
     if (versionNo === null || versionNo === undefined || !compareData?.data)
       return "-";
@@ -195,12 +176,10 @@ export default function AgentVersionCompareModal({
     }
     return "-";
   };
-
   const handleCompareAsk = async () => {
     if (!agentId) return;
     const question = compareQuestion.trim();
     if (!question) return;
-
     const versionNoA = resolveVersionNo("left");
     const versionNoB = resolveVersionNo("right");
     if (versionNoA === null || versionNoA === undefined) return;
@@ -209,7 +188,6 @@ export default function AgentVersionCompareModal({
     setCompareQuestion("");
     await runCompare(question);
   };
-
   return (
     <Modal
       title={
@@ -233,7 +211,6 @@ export default function AgentVersionCompareModal({
           <Flex vertical gap={16}>
             {(() => {
               const { version_a, version_b } = compareData.data;
-
               const columns = [
                 {
                   title: t("agent.version.versionName"),
@@ -281,7 +258,6 @@ export default function AgentVersionCompareModal({
                   width: "38%",
                 },
               ];
-
               const data = [
                 {
                   key: "name_model",
@@ -371,26 +347,28 @@ export default function AgentVersionCompareModal({
                     </Flex>
                   ),
                   current: (
-                    <Tag
-                      color={
+                    <Badge
+                      variant={
                         version_a.tools?.length !== version_b.tools?.length
-                          ? "orange"
-                          : "default"
+                          ? "warning"
+                          : "outline"
                       }
+                      size="sm"
                     >
                       {version_a.tools?.length || 0}
-                    </Tag>
+                    </Badge>
                   ),
                   version: (
-                    <Tag
-                      color={
+                    <Badge
+                      variant={
                         version_a.tools?.length !== version_b.tools?.length
-                          ? "green"
-                          : "default"
+                          ? "success"
+                          : "outline"
                       }
+                      size="sm"
                     >
                       {version_b.tools?.length || 0}
-                    </Tag>
+                    </Badge>
                   ),
                 },
                 {
@@ -402,32 +380,33 @@ export default function AgentVersionCompareModal({
                     </Flex>
                   ),
                   current: (
-                    <Tag
-                      color={
+                    <Badge
+                      variant={
                         version_a.sub_agent_id_list?.length !==
                         version_b.sub_agent_id_list?.length
-                          ? "orange"
-                          : "default"
+                          ? "warning"
+                          : "outline"
                       }
+                      size="sm"
                     >
                       {version_a.sub_agent_id_list?.length || 0}
-                    </Tag>
+                    </Badge>
                   ),
                   version: (
-                    <Tag
-                      color={
+                    <Badge
+                      variant={
                         version_a.sub_agent_id_list?.length !==
                         version_b.sub_agent_id_list?.length
-                          ? "green"
-                          : "default"
+                          ? "success"
+                          : "outline"
                       }
+                      size="sm"
                     >
                       {version_b.sub_agent_id_list?.length || 0}
-                    </Tag>
+                    </Badge>
                   ),
                 },
               ];
-
               return (
                 <Table
                   dataSource={data}
@@ -442,17 +421,21 @@ export default function AgentVersionCompareModal({
               <div className="text-sm font-medium">
                 {t("agent.version.compareQaTitle")}
               </div>
-              <Input.TextArea
+              <Textarea
                 value={compareQuestion}
                 onChange={(e) => setCompareQuestion(e.target.value)}
                 placeholder={t("agent.version.compareQaPlaceholder")}
-                autoSize={{ minRows: 2, maxRows: 4 }}
                 disabled={isCompareStreaming}
-                onPressEnter={(e) => {
-                  if (!e.shiftKey) {
-                    e.preventDefault();
-                    handleCompareAsk();
-                  }
+                minRows={2}
+                maxRows={4}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing)
+                    ((e) => {
+                      if (!e.shiftKey) {
+                        e.preventDefault();
+                        handleCompareAsk();
+                      }
+                    })(event);
                 }}
               />
               <Flex align="center" justify="space-between">
@@ -463,18 +446,26 @@ export default function AgentVersionCompareModal({
                   <Button
                     onClick={handleClearCompareHistory}
                     disabled={isCompareStreaming}
+                    variant="outline"
+                    size="sm"
                   >
                     {t("agent.debug.clear")}
                   </Button>
                   {isCompareStreaming && (
-                    <Button danger onClick={stopCompare}>
+                    <Button
+                      onClick={stopCompare}
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
                       {t("agent.debug.stop")}
                     </Button>
                   )}
                   <Button
-                    type="primary"
                     onClick={handleCompareAsk}
                     disabled={isCompareStreaming}
+                    variant="default"
+                    size="sm"
                   >
                     {t("agent.version.compareQaRun")}
                   </Button>

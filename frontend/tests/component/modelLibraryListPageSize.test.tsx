@@ -8,7 +8,7 @@ import {
   ModelLibraryList,
   computePageSize,
 } from "../../app/[locale]/models/components/model/ModelLibraryList";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { ModelOption } from "@/types/modelConfig";
 
 vi.mock("react-i18next", () => ({

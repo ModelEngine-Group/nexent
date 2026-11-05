@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import {
   baseUrl,
@@ -59,7 +61,7 @@ journey("AGENT-EDITOR-D4-001", async ({ page, contract, expect }) => {
     );
   });
   await contract.step(steps[2], async () => {
-    const tour = page.locator(".agent-creation-guide.ant-tour");
+    const tour = page.locator(".agent-creation-guide[data-ui-tour]");
     await expect(tour).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(tour).toHaveCount(0);

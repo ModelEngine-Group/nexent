@@ -1,16 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Input } from "@/components/ui/input";
 import { useEffect, useState } from "react";
-import { App, Empty, Form, Input, Spin } from "antd";
+import { App, Empty, Form, Spin } from "antd";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
-
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardModal } from "@/components/common/StandardModal";
+import { Button } from "@/components/common/Button";
+import { Modal } from "@/components/common/Modal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import {
@@ -19,26 +17,20 @@ import {
   isValidAgentDisplayName,
 } from "@/hooks/agent/useSaveGuard";
 import { updateAgentInfo } from "@/services/agentConfigService";
-
 import { useAgentCreationTemplates } from "@/hooks/agent/useAgentCreationTemplates";
-
 export interface CreatedAgentResult {
   agentId: number;
   displayName: string;
 }
-
 interface CreateAgentModalProps {
   open: boolean;
   onCancel: () => void;
   onCreated: (agent: CreatedAgentResult) => void | Promise<void>;
 }
-
 interface CreateAgentFormValues {
   displayName: string;
 }
-
 const CREATE_AGENT_MODAL_MAX_HEIGHT = 572;
-
 export default function CreateAgentModal({
   open,
   onCancel,
@@ -47,7 +39,9 @@ export default function CreateAgentModal({
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { message } = App.useApp();
-  const params = useParams<{ locale?: string }>();
+  const params = useParams<{
+    locale?: string;
+  }>();
   const [form] = Form.useForm<CreateAgentFormValues>();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     null
@@ -55,26 +49,20 @@ export default function CreateAgentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const templatesQuery = useAgentCreationTemplates(open);
   const templates = templatesQuery.isError ? [] : (templatesQuery.data ?? []);
-
   useEffect(() => {
     if (open) {
       form.resetFields();
     }
   }, [form, open]);
-
   if (!open && selectedTemplateId !== null) setSelectedTemplateId(null);
-
   const selectedTemplate = templates.find(
     (template) => template.id === selectedTemplateId
   );
-
   const handleSubmit = async () => {
     if (isSubmitting) return;
-
     try {
       const values = await form.validateFields();
       setIsSubmitting(true);
-
       const result = await updateAgentInfo({
         display_name: values.displayName.trim(),
         description: selectedTemplate?.description ?? "",
@@ -84,7 +72,6 @@ export default function CreateAgentModal({
         provide_run_summary: false,
         enabled: true,
       });
-
       if (!result.success || !result.data?.agent_id) {
         message.error(
           getTenantResourceLimitMessage(result.error, t) ||
@@ -93,7 +80,6 @@ export default function CreateAgentModal({
         );
         return;
       }
-
       await onCreated({
         agentId: Number(result.data.agent_id),
         displayName: values.displayName.trim(),
@@ -103,39 +89,29 @@ export default function CreateAgentModal({
       setIsSubmitting(false);
     }
   };
-
   const resetModalState = () => {
     setSelectedTemplateId(null);
     setIsSubmitting(false);
   };
-
   const handleCancel = () => {
     resetModalState();
     onCancel();
   };
-
   const handleTemplateClick = (templateId: string) => {
     setSelectedTemplateId((currentId) =>
       currentId === templateId ? null : templateId
     );
   };
-
   const locale = params.locale || "zh";
-
   return (
-    <StandardModal
+    <Modal
       open={open}
       width={560}
       maxHeight={CREATE_AGENT_MODAL_MAX_HEIGHT}
       title={t("chat.agentLanding.createAgent")}
       closeLabel={t("agentConfig.createModal.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
       footer={null}
       bodyClassName="!overflow-hidden !pb-0"
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) resetModalState();
-      }}
       onClose={handleCancel}
     >
       <Form
@@ -182,14 +158,13 @@ export default function CreateAgentModal({
               className="!h-8 !rounded-[4px] !border-[#c9c9c9] !px-3 !py-[5px] !text-[14px] !leading-[22px] ![letter-spacing:0px]"
             />
           </Form.Item>
-          <StandardButton
-            variant="primary"
-            htmlType="submit"
+          <Button
+            type="submit"
             loading={isSubmitting}
             className="!mt-[30px] !mb-0"
           >
             {t("agentConfig.createModal.submit")}
-          </StandardButton>
+          </Button>
         </div>
       </Form>
 
@@ -199,7 +174,7 @@ export default function CreateAgentModal({
         </span>
         <Link
           href={`/${locale}/agent-space`}
-          className="inline-flex items-center gap-1 ![letter-spacing:0px] text-[#2673e5]"
+          className="inline-flex items-center gap-1 ![letter-spacing:0px] text-primary"
         >
           {t("agentConfig.createModal.template.repository")}
           <ExternalLink aria-hidden="true" size={14} strokeWidth={1.75} />
@@ -217,12 +192,13 @@ export default function CreateAgentModal({
         ) : templatesQuery.isError ? (
           <div role="alert" className="flex flex-col items-center gap-3 py-6">
             <span>{t("agentConfig.createModal.templates.loadFailed")}</span>
-            <StandardButton
+            <Button
+              variant="outline"
               disabled={templatesQuery.isFetching}
               onClick={() => void templatesQuery.refetch()}
             >
               {t("common.retry")}
-            </StandardButton>
+            </Button>
           </div>
         ) : templates.length === 0 ? (
           <Empty
@@ -233,7 +209,6 @@ export default function CreateAgentModal({
           <div className="grid grid-cols-2 gap-4">
             {templates.map((template) => {
               const isSelected = selectedTemplateId === template.id;
-
               return (
                 <button
                   key={template.id}
@@ -242,15 +217,15 @@ export default function CreateAgentModal({
                   onClick={() => handleTemplateClick(template.id)}
                   className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
                     isSelected
-                      ? "!border-[#2673e5]"
-                      : "!border-[#c9c9c9] hover:!border-[#2673e5]"
+                      ? "!border-primary"
+                      : "!border-[#c9c9c9] hover:!border-primary"
                   }`}
                 >
                   <div className="flex w-full items-center gap-2">
                     <span
                       aria-hidden="true"
                       data-template-icon
-                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-white bg-[#2673e5]`}
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-white bg-primary`}
                     >
                       ✦
                     </span>
@@ -278,6 +253,6 @@ export default function CreateAgentModal({
           </div>
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }

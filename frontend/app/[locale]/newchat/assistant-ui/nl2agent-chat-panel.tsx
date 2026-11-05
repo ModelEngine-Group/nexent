@@ -18,7 +18,7 @@ import {
 } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
 import { useConfig } from "@/hooks/useConfig";

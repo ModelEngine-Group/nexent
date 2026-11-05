@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SkillFileCard } from "@/app/newchat/ui/skill-file-card";
 
-vi.mock("@/components/common/markdownRenderer", () => ({
+vi.mock("@/components/common/markdown/MarkdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 vi.mock("@/app/agents/components/capability/SkillCodePreview", () => ({

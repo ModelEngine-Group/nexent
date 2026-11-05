@@ -55,7 +55,7 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpUpdateKbModal from "@/ext_components/aidp/pages/knowledge-files/AidpUpdateKbModal";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+import { FilePreviewDrawer } from "@/components/preview/filePreviewDrawer";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";

@@ -1,10 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Button } from "@/components/common/Button";
+import { Textarea } from "@/components/common/Textarea";
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
+import { Col, Form, Popover, Row, Select } from "antd";
 import {
   GripVertical,
   ListOrdered,
@@ -31,10 +32,12 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Image from "next/image";
-
 import { useAgentStore } from "@/stores/agentStore";
 import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
-import { MODEL_TOKEN_LIMIT_KEYS, withoutModelTokenLimits } from "@/lib/modelParameterLayers";
+import {
+  MODEL_TOKEN_LIMIT_KEYS,
+  withoutModelTokenLimits,
+} from "@/lib/modelParameterLayers";
 import { AgentModelParameters } from "@/components/model/AgentModelParameters";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -42,7 +45,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import type { ModelOption } from "@/types/modelConfig";
 import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
-import { ResourceAddButton } from "@/components/common/ResourceAddButton";
+import { ResourceAddButton } from "@/components/resources/ResourceAddButton";
 import {
   ModelAdvancedSettingsValue,
   advancedSettingsValueFromRecord,
@@ -65,11 +68,7 @@ import {
 } from "@/lib/agent/modelPriority";
 import HighFidelityTextArea from "./HighFidelityTextArea";
 import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
-
-const { TextArea } = Input;
-
 type PromptField = "prompt";
-
 type SortableModelItemProps = {
   disabled: boolean;
   displayName: string;
@@ -78,7 +77,6 @@ type SortableModelItemProps = {
   primaryLabel: string;
   reorderLabel: string;
 };
-
 function SortableModelItem({
   disabled,
   displayName,
@@ -98,7 +96,6 @@ function SortableModelItem({
     id: modelId,
     disabled,
   });
-
   return (
     <li
       ref={setNodeRef}
@@ -126,7 +123,6 @@ function SortableModelItem({
     </li>
   );
 }
-
 interface SelectedModelCardProps {
   model: ModelOption;
   disabled: boolean;
@@ -140,7 +136,6 @@ interface SelectedModelCardProps {
   toolCallsLabel: string;
   contextLabel?: string;
 }
-
 function SelectedModelCard({
   model,
   disabled,
@@ -175,14 +170,11 @@ function SelectedModelCard({
       : null,
     model.supportToolCalls === true ? toolCallsLabel : null,
   ].filter((value): value is string => Boolean(value));
-
   return (
     <div
       ref={setNodeRef}
       data-testid={`agent-selected-model-${model.id}`}
-      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 ${SELECTED_RESOURCE_HOVER} ${
-        isDragging ? "z-10 opacity-60 shadow-md" : ""
-      }`}
+      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 ${SELECTED_RESOURCE_HOVER} ${isDragging ? "z-10 opacity-60 shadow-md" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -209,15 +201,15 @@ function SelectedModelCard({
             className="size-5 object-contain"
           />
         ) : (
-          <Sparkles size={17} className="text-[#2673e5]" aria-hidden="true" />
+          <Sparkles size={17} className="text-primary" aria-hidden="true" />
         )}
       </span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-        <Tooltip title={model.displayName || model.name}>
+        <Hint content={model.displayName || model.name}>
           <span className="min-w-0 shrink truncate text-sm leading-[22px] text-[#191919]">
             {model.displayName || model.name}
           </span>
-        </Tooltip>
+        </Hint>
         {contextSize ? (
           <span className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
             {contextLabel?.replace("{{count}}", contextSize) ?? contextSize}
@@ -232,32 +224,31 @@ function SelectedModelCard({
           </span>
         ))}
       </div>
-      <Tooltip title={settingsLabel}>
+      <Hint content={settingsLabel}>
         <Button
-          type="text"
-          size="small"
           icon={<Settings2 size={14} />}
           aria-label={settingsLabel}
           disabled={disabled}
           onClick={onConfigure}
           className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+          variant="ghost"
+          size="xs"
         />
-      </Tooltip>
-      <Tooltip title={removeLabel}>
+      </Hint>
+      <Hint content={removeLabel}>
         <Button
-          type="text"
-          size="small"
           icon={<Trash2 size={14} />}
           aria-label={removeLabel}
           disabled={disabled}
           onClick={onRemove}
           className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+          variant="ghost"
+          size="xs"
         />
-      </Tooltip>
+      </Hint>
     </div>
   );
 }
-
 interface HighFidelityModelGridProps {
   value?: number[];
   onChange?: (modelIds: number[]) => void;
@@ -277,7 +268,6 @@ interface HighFidelityModelGridProps {
   contextLabel?: string;
   sensors: ReturnType<typeof useSensors>;
 }
-
 function HighFidelityModelGrid({
   value,
   onChange,
@@ -301,12 +291,10 @@ function HighFidelityModelGrid({
   const selectedModels = modelIds
     .map((id) => models.find((model) => model.id === Number(id)))
     .filter((model): model is ModelOption => Boolean(model));
-
   const updateSelection = (nextIds: number[]) => {
     onSelectionChange(nextIds);
     onChange?.(nextIds);
   };
-
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     const oldIndex = modelIds.indexOf(Number(active.id));
@@ -317,7 +305,6 @@ function HighFidelityModelGrid({
     nextIds.splice(newIndex, 0, movedId);
     updateSelection(nextIds);
   };
-
   return (
     <DndContext
       sensors={sensors}
@@ -359,12 +346,10 @@ function HighFidelityModelGrid({
     </DndContext>
   );
 }
-
 interface AgentPromptProps {
   highFidelity?: boolean;
   onOptimizePrompt?: () => void;
 }
-
 export default function AgentPrompt({
   highFidelity = false,
   onOptimizePrompt,
@@ -387,7 +372,6 @@ export default function AgentPrompt({
   const defaultModelId = defaultLlmModelConfig?.id;
   const modelInitialization = useRef({ agentId, complete: false });
   const { configFocusRequest } = useNl2AgentFlow();
-
   const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(
     null
   );
@@ -396,7 +380,6 @@ export default function AgentPrompt({
   useEffect(() => {
     setIsModelSelectionOpen(false);
   }, [agentId]);
-
   useEffect(() => {
     if (
       configFocusRequest?.agentId === agentId &&
@@ -405,7 +388,6 @@ export default function AgentPrompt({
       document.getElementById("agent-primary-prompt")?.focus();
     }
   }, [agentId, configFocusRequest]);
-
   const modelOptions = useMemo(() => {
     return (selectableLlmModels ?? []).map((m) => ({
       value: m.id,
@@ -418,7 +400,6 @@ export default function AgentPrompt({
     () => new Set(modelOptions.map((option) => option.value)),
     [modelOptions]
   );
-
   const selectedModelIds = useMemo(() => {
     const configuredModelIds = (editedAgent.model_ids ?? []).map(Number);
     if (configuredModelIds.length > 0) {
@@ -426,7 +407,6 @@ export default function AgentPrompt({
     }
     return [];
   }, [availableModelIds, editedAgent.model_ids]);
-
   useEffect(() => {
     if (modelInitialization.current.agentId !== agentId) {
       modelInitialization.current = { agentId, complete: false };
@@ -438,7 +418,6 @@ export default function AgentPrompt({
       (!canManageModels(user?.role ?? "") && !isSpeedMode)
     )
       return;
-
     // An existing selection completes initialization even while queries load.
     if (editedAgent.model_ids?.length) {
       modelInitialization.current.complete = true;
@@ -447,7 +426,6 @@ export default function AgentPrompt({
     if (!modelListLoaded || !configLoaded) return;
     modelInitialization.current.complete = true;
     if (!defaultModelId || !availableModelIds.has(defaultModelId)) return;
-
     const modelIds = [defaultModelId];
     form.setFieldValue("model_ids", modelIds);
     updateAgent(resolveModelSelection(modelIds, modelOptions));
@@ -465,20 +443,16 @@ export default function AgentPrompt({
     updateAgent,
     user?.role,
   ]);
-
   useEffect(() => {
     if (!modelListLoaded || !editedAgent.model_ids?.length) return;
-
     const currentModelIds = editedAgent.model_ids.map(Number);
     const nextModelIds = currentModelIds.filter((id) =>
       availableModelIds.has(id)
     );
     if (nextModelIds.length === currentModelIds.length) return;
-
     // Keep the Ant Design Form value in sync with the cleaned agent draft.
     // Otherwise Form.Item can re-inject an unavailable raw model ID into Select.
     form.setFieldValue("model_ids", nextModelIds);
-
     const modelNames = nextModelIds.map((id) => {
       const option = modelOptions.find((model) => model.value === id);
       return option?.displayName ?? "";
@@ -499,7 +473,6 @@ export default function AgentPrompt({
     form,
     reconcileUnavailableModels,
   ]);
-
   const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
   const [configuringModelId, setConfiguringModelId] = useState<number | null>(
     null
@@ -535,7 +508,6 @@ export default function AgentPrompt({
       modelType,
       configuringModel.reasoningCapability
     );
-
     // Reasoning is an agent-owned snapshot. For an existing partial override,
     // fill only missing reasoning fields from the model so older agents and
     // newly selected models start with the same value as the model page.
@@ -565,7 +537,6 @@ export default function AgentPrompt({
         base.reasoning_budget_tokens = modelReasoning.reasoning_budget_tokens;
       }
     }
-
     // Custom params are the exception: model-level customs render as plain
     // editable rows (merged display). Deletion persists as a null marker in
     // the override entry, so deleted rows do NOT reappear on reopen.
@@ -578,7 +549,6 @@ export default function AgentPrompt({
     // and field-spec changes are the transitions that require rehydration.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configuringModel, configuringModelId, inferenceSpecs]);
-
   const handleModelParamsOverrideChange = (
     modelId: number,
     next: ModelAdvancedSettingsValue
@@ -598,7 +568,6 @@ export default function AgentPrompt({
       model_params_override: Object.keys(updated).length > 0 ? updated : null,
     });
   };
-
   const handleClearModelParamsOverride = (modelId: number) => {
     const updated: ModelOverrideMap = { ...modelParamsOverride };
     delete updated[String(modelId)];
@@ -606,7 +575,6 @@ export default function AgentPrompt({
       model_params_override: Object.keys(updated).length > 0 ? updated : null,
     });
   };
-
   const handleConfirmOverride = () => {
     if (!editingOverrideValue || !configuringModel) {
       setConfiguringModelId(null);
@@ -627,7 +595,8 @@ export default function AgentPrompt({
     for (const [key, val] of Object.entries(editingOverrideValue)) {
       // Custom params are diffed per-key below (deleting an inherited row
       // must persist a removal, not drop the key).
-      if (key === "__custom__" || MODEL_TOKEN_LIMIT_KEYS.includes(key)) continue;
+      if (key === "__custom__" || MODEL_TOKEN_LIMIT_KEYS.includes(key))
+        continue;
       // Reasoning is an agent-owned snapshot; do not compare with the model
       // level setting.
       if (
@@ -653,7 +622,6 @@ export default function AgentPrompt({
     handleModelParamsOverrideChange(configuringModel.id, diffValue);
     setConfiguringModelId(null);
   };
-
   const canManage = canManageModels(user?.role ?? "");
   const isModelSelectionDisabled = isReadOnly || (!canManage && !isSpeedMode);
   const sensors = useSensors(
@@ -663,11 +631,9 @@ export default function AgentPrompt({
   const selectedModels = selectedModelIds.map((id) =>
     modelOptions.find((option) => option.value === id)
   );
-
   useEffect(() => {
     if (selectedModels.length < 2) setIsModelPriorityOpen(false);
   }, [selectedModels.length]);
-
   const updateModelSelection = useCallback(
     (modelIds: number[]) => {
       form.setFieldValue("model_ids", modelIds);
@@ -675,11 +641,9 @@ export default function AgentPrompt({
     },
     [form, modelOptions, updateAgent]
   );
-
   const handleModelPriorityChange = useCallback(
     ({ active, over }: DragEndEvent) => {
       if (!over) return;
-
       const modelIds = reorderModelIds(
         selectedModelIds,
         Number(active.id),
@@ -689,7 +653,6 @@ export default function AgentPrompt({
     },
     [selectedModelIds, updateModelSelection]
   );
-
   const expandedPromptConfig = {
     prompt: {
       title: t("agent.field.prompt"),
@@ -697,20 +660,18 @@ export default function AgentPrompt({
       save: (content: string) => updateDraft({ prompt: content }),
     },
   };
-
   const renderExpandButton = (prompt: PromptField) => (
-    <Tooltip title={t("systemPrompt.button.expand")}>
+    <Hint content={t("systemPrompt.button.expand")}>
       <Button
-        type="text"
-        size="small"
         icon={<Maximize2 size={15} />}
         aria-label={t("systemPrompt.button.expand")}
         disabled={isReadOnly}
         onClick={() => setExpandedPrompt(prompt)}
+        variant="ghost"
+        size="xs"
       />
-    </Tooltip>
+    </Hint>
   );
-
   const modelPriorityContent = (
     <div className="w-72 space-y-2">
       <div>
@@ -747,20 +708,19 @@ export default function AgentPrompt({
       </DndContext>
     </div>
   );
-
   const modelPriorityTrigger = (
-    <Tooltip title={t("agent.field.adjustModelPriority")}>
+    <Hint content={t("agent.field.adjustModelPriority")}>
       <span className="inline-flex">
         <Button
-          type="default"
           icon={<ListOrdered size={16} />}
           aria-label={t("agent.field.adjustModelPriority")}
           disabled={selectedModels.length < 2 || isModelSelectionDisabled}
+          variant="outline"
+          size="sm"
         />
       </span>
-    </Tooltip>
+    </Hint>
   );
-
   const modelSelectionActions = (
     <div className="flex shrink-0 items-center gap-2">
       {selectedModels.length > 1 && !isModelSelectionDisabled ? (
@@ -776,14 +736,13 @@ export default function AgentPrompt({
       ) : (
         modelPriorityTrigger
       )}
-      <Tooltip
-        title={t("agent.modelParamsOverride.button", {
+      <Hint
+        content={t("agent.modelParamsOverride.button", {
           defaultValue: "模型参数覆盖",
         })}
       >
         <span className="inline-flex">
           <Button
-            type="default"
             icon={<Settings2 size={16} />}
             aria-label={t("agent.modelParamsOverride.button", {
               defaultValue: "模型参数覆盖",
@@ -794,12 +753,13 @@ export default function AgentPrompt({
             onClick={() =>
               setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)
             }
+            variant="outline"
+            size="sm"
           />
         </span>
-      </Tooltip>
+      </Hint>
     </div>
   );
-
   const modelSelection = (
     <Row gutter={[12, 0]}>
       <Col xs={24} sm={24}>
@@ -846,7 +806,6 @@ export default function AgentPrompt({
       </Col>
     </Row>
   );
-
   const promptEditor = (
     <div>
       <Form.Item className="mb-0">
@@ -858,15 +817,12 @@ export default function AgentPrompt({
               rows={6}
               value={editedAgent.prompt ?? ""}
               disabled={isReadOnly}
-              classNames={{
-                textarea: "!py-2 !pl-3 !pr-5",
-                count:
-                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-              }}
+              className="!py-2 !pl-3 !pr-5"
+              countClassName="absolute bottom-2 right-3 !text-xs !leading-[22px] !text-[#808080]"
               onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
           ) : (
-            <TextArea
+            <Textarea
               placeholder={t("agent.field.promptPlaceholder")}
               disabled={isReadOnly}
               rows={6}
@@ -887,7 +843,6 @@ export default function AgentPrompt({
       </Form.Item>
     </div>
   );
-
   return (
     <div className="w-full">
       {highFidelity ? (
@@ -930,12 +885,12 @@ export default function AgentPrompt({
               {t("agent.highFidelity.prompt")}
             </label>
             <Button
-              type="link"
-              autoInsertSpace={false}
-              className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+              className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-primary disabled:!text-[#dfdfdf]"
               icon={<Sparkles size={14} />}
               disabled={isReadOnly || !onOptimizePrompt}
               onClick={onOptimizePrompt}
+              variant="link"
+              size="sm"
             >
               {t("agent.highFidelity.optimizePrompt")}
             </Button>
@@ -947,12 +902,8 @@ export default function AgentPrompt({
               value={editedAgent.prompt ?? ""}
               placeholder={t("agent.highFidelity.promptPlaceholder")}
               disabled={isReadOnly}
-              classNames={{
-                textarea:
-                  "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
-                count:
-                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-              }}
+              className="!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+              countClassName="absolute bottom-2 right-3 !text-xs !leading-[22px] !text-[#808080]"
               onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
             <div className="absolute right-1 top-2 z-10">
@@ -1016,40 +967,48 @@ export default function AgentPrompt({
           onClose={() => setConfiguringModelId(null)}
           onApply={(entry) => {
             const updated = { ...modelParamsOverride };
-            if (Object.keys(entry).length) updated[String(configuringModel.id)] = entry;
+            if (Object.keys(entry).length)
+              updated[String(configuringModel.id)] = entry;
             else delete updated[String(configuringModel.id)];
-            updateAgent({ model_params_override: Object.keys(updated).length ? updated : null });
+            updateAgent({
+              model_params_override: Object.keys(updated).length
+                ? updated
+                : null,
+            });
           }}
         />
-      ) : <ModelParamsModal
-        open={configuringModelId !== null}
-        title={
-          configuringModel
-            ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
-            : t("model.advanced.overrideTitle", {
-                defaultValue: "模型参数覆盖",
-              })
-        }
-        onClose={() => setConfiguringModelId(null)}
-        onConfirm={handleConfirmOverride}
-        modelOptions={modelOptions}
-        selectedModelId={configuringModelId}
-        onSelectModel={(id) => setConfiguringModelId(id)}
-        value={editingOverrideValue ?? {}}
-        onChange={(next) => setEditingOverrideValue(next)}
-        modelType={(configuringModel as any)?.type ?? "llm"}
-        reasoningCapability={(configuringModel as any)?.reasoningCapability}
-        inheritedDefaults={{
-          context_window_tokens: (configuringModel as any)?.contextWindowTokens,
-          max_input_tokens: (configuringModel as any)?.maxInputTokens,
-          max_output_tokens: (configuringModel as any)?.maxOutputTokens,
-          default_output_reserve_tokens: (configuringModel as any)
-            ?.defaultOutputReserveTokens,
-          temperature: (configuringModel as any)?.temperature,
-          top_p: (configuringModel as any)?.topP,
-        }}
-        disabled={isModelSelectionDisabled}
-      />}
+      ) : (
+        <ModelParamsModal
+          open={configuringModelId !== null}
+          title={
+            configuringModel
+              ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
+              : t("model.advanced.overrideTitle", {
+                  defaultValue: "模型参数覆盖",
+                })
+          }
+          onClose={() => setConfiguringModelId(null)}
+          onConfirm={handleConfirmOverride}
+          modelOptions={modelOptions}
+          selectedModelId={configuringModelId}
+          onSelectModel={(id) => setConfiguringModelId(id)}
+          value={editingOverrideValue ?? {}}
+          onChange={(next) => setEditingOverrideValue(next)}
+          modelType={(configuringModel as any)?.type ?? "llm"}
+          reasoningCapability={(configuringModel as any)?.reasoningCapability}
+          inheritedDefaults={{
+            context_window_tokens: (configuringModel as any)
+              ?.contextWindowTokens,
+            max_input_tokens: (configuringModel as any)?.maxInputTokens,
+            max_output_tokens: (configuringModel as any)?.maxOutputTokens,
+            default_output_reserve_tokens: (configuringModel as any)
+              ?.defaultOutputReserveTokens,
+            temperature: (configuringModel as any)?.temperature,
+            top_p: (configuringModel as any)?.topP,
+          }}
+          disabled={isModelSelectionDisabled}
+        />
+      )}
     </div>
   );
 }

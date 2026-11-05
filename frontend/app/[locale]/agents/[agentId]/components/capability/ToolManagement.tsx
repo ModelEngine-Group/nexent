@@ -1,10 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Button } from "@/components/common/Button";
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Tooltip } from "antd";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
@@ -24,7 +23,7 @@ import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import {
   SelectedResourceRow,
   SelectedResourceTag,
-} from "@/components/common/SelectedResourceRow";
+} from "@/components/resources/SelectedResourceRow";
 import ToolConfigModal from "../../../components/capability/tool/ToolConfigModal";
 import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
@@ -36,9 +35,7 @@ import {
   getToolLabels,
   mergeCanonicalTool,
 } from "../../../components/capability/tool/utils";
-
 // --- Local tool helpers (not in utils) ---
-
 function isToolDisabledDueToVlm(
   name: string,
   img: boolean,
@@ -50,16 +47,19 @@ function isToolDisabledDueToVlm(
   if (TOOLS_REQUIRING_VIDEO_UNDERSTANDING.includes(name)) return !vid;
   return false;
 }
-
 function isToolDisabledDueToEmbedding(name: string, emb: boolean): boolean {
   if (!TOOLS_REQUIRING_EMBEDDING.includes(name)) return false;
   return !emb;
 }
-
 type SourceKey = "local" | "mcp" | "langchain";
 const SOURCE_META: Record<
   SourceKey,
-  { sourceValue: string; label: string; dot: string; accentClass: string }
+  {
+    sourceValue: string;
+    label: string;
+    dot: string;
+    accentClass: string;
+  }
 > = {
   local: {
     sourceValue: TOOL_SOURCE_TYPES.LOCAL,
@@ -80,14 +80,12 @@ const SOURCE_META: Record<
     accentClass: "bg-violet-500/10 text-violet-600",
   },
 };
-
 interface ToolManagementProps {
   currentAgentId?: number;
   hideEmpty?: boolean;
   highFidelity?: boolean;
   addEntry?: ReactNode;
 }
-
 /** Display selected tools while retaining their existing configuration controller. */
 export default function ToolManagement({
   currentAgentId,
@@ -104,30 +102,25 @@ export default function ToolManagement({
     isAudioUnderstandingAvailable,
     isEmbeddingAvailable,
   } = useConfig();
-
   const selectedTools = useAgentStore(
     (state) => state.editedAgent?.tools ?? []
   );
   const updateTools = useAgentStore((state) => state.updateTools);
-
   const [modalOpen, setModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
   const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>(
     {}
   );
-
   // Canonical tool list (with `inputs`) — used to backfill any missing
   // fields on the stored tool object so the tool test panel always
   // operates in parsed mode and shows the manual-input toggle.
   const { availableTools } = useToolList({
     enabled: true,
   });
-
   // Tool availability is refreshed independently from the agent draft. Do not
   // persist a cleanup during initialization because it is indistinguishable
   // from a user tool edit and can race with agent switching.
-
   // Keep system-managed tools in the draft for persistence, but omit them from
   // the user-facing selected-tools list.
   const visibleSelectedTools = useMemo(() => {
@@ -139,12 +132,9 @@ export default function ToolManagement({
       return (canonicalTool ?? tool).is_user_selectable !== false;
     });
   }, [availableTools, selectedTools]);
-
   // --- Group by source → category ---
   const grouped = groupToolsBySource(visibleSelectedTools);
-
   const mergeParams = useMergedToolParams(currentAgentId);
-
   const openConfig = useCallback(
     async (tool: Tool) => {
       const kbType = getToolKbType(tool.name);
@@ -165,7 +155,6 @@ export default function ToolManagement({
     },
     [mergeParams, prefetchKnowledgeBases, availableTools]
   );
-
   const removeTool = useCallback(
     (toolId: string) => {
       const current = useAgentStore.getState().editedAgent?.tools ?? [];
@@ -173,10 +162,8 @@ export default function ToolManagement({
     },
     [updateTools]
   );
-
   const toggleCat = (cat: string) =>
     setCollapsedCats((p) => ({ ...p, [cat]: !p[cat] }));
-
   const configModal = modalOpen ? (
     <ToolConfigModal
       isOpen={modalOpen}
@@ -191,7 +178,6 @@ export default function ToolManagement({
       currentAgentId={currentAgentId}
     />
   ) : null;
-
   if (highFidelity) {
     return (
       <>
@@ -213,7 +199,6 @@ export default function ToolManagement({
                 isAudioUnderstandingAvailable
               ) ||
               isToolDisabledDueToEmbedding(tool.name, isEmbeddingAvailable);
-
             return (
               <SelectedResourceRow
                 key={tool.id}
@@ -245,41 +230,41 @@ export default function ToolManagement({
                 actions={
                   <>
                     {isModelUnavailable ? (
-                      <Tooltip title={t("toolPool.mcpModelUnavailableTooltip")}>
+                      <Hint content={t("toolPool.mcpModelUnavailableTooltip")}>
                         <AlertTriangle
                           size={14}
                           aria-label={t("toolPool.mcpModelUnavailableTooltip")}
                           className="mr-2 shrink-0 text-orange-400"
                         />
-                      </Tooltip>
+                      </Hint>
                     ) : isCapabilityUnavailable ? (
                       <AlertTriangle
                         size={14}
                         className="mr-2 shrink-0 text-orange-400"
                       />
                     ) : null}
-                    <Tooltip title={t("toolPool.configure")}>
+                    <Hint content={t("toolPool.configure")}>
                       <Button
-                        type="text"
-                        size="small"
                         icon={<Settings size={14} />}
                         aria-label={`${t("toolPool.configure")} ${tool.name}`}
                         disabled={isReadOnly}
                         onClick={() => openConfig(tool)}
                         className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                        variant="ghost"
+                        size="xs"
                       />
-                    </Tooltip>
-                    <Tooltip title={t("toolPool.remove")}>
+                    </Hint>
+                    <Hint content={t("toolPool.remove")}>
                       <Button
-                        type="text"
-                        size="small"
                         icon={<Trash2 size={14} />}
                         aria-label={`${t("toolPool.remove")} ${tool.name}`}
                         disabled={isReadOnly}
                         onClick={() => removeTool(tool.id)}
                         className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+                        variant="ghost"
+                        size="xs"
                       />
-                    </Tooltip>
+                    </Hint>
                   </>
                 }
               />
@@ -291,7 +276,6 @@ export default function ToolManagement({
       </>
     );
   }
-
   if (grouped.length === 0) {
     if (hideEmpty) return null;
     return (
@@ -300,7 +284,6 @@ export default function ToolManagement({
       </div>
     );
   }
-
   return (
     <div className="h-full overflow-y-auto pr-1">
       <div className="mb-3 flex items-center gap-1.5">
@@ -327,7 +310,6 @@ export default function ToolManagement({
                 const catKey = `${src.key}-${cat.category}`;
                 const isCollapsed = collapsedCats[catKey] ?? false;
                 const accent = SOURCE_META[src.key].accentClass;
-
                 return (
                   <div
                     key={catKey}
@@ -335,9 +317,7 @@ export default function ToolManagement({
                   >
                     <button
                       onClick={() => toggleCat(catKey)}
-                      className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-gray-50 ${
-                        !isCollapsed ? "border-b border-gray-100" : ""
-                      }`}
+                      className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-gray-50 ${!isCollapsed ? "border-b border-gray-100" : ""}`}
                     >
                       <ChevronRight
                         className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`}
@@ -374,7 +354,6 @@ export default function ToolManagement({
                               isEmbeddingAvailable
                             ) ||
                             isModelUnavailable;
-
                           return (
                             <div
                               key={tool.id}
@@ -396,15 +375,15 @@ export default function ToolManagement({
                                     </span>
                                   ))}
                                   {labels.length > 2 && (
-                                    <Tooltip title={labels.slice(2).join(", ")}>
+                                    <Hint content={labels.slice(2).join(", ")}>
                                       <span className="shrink-0 cursor-help rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
                                         +{labels.length - 2}
                                       </span>
-                                    </Tooltip>
+                                    </Hint>
                                   )}
                                   {isModelUnavailable && (
-                                    <Tooltip
-                                      title={t(
+                                    <Hint
+                                      content={t(
                                         "toolPool.mcpModelUnavailableTooltip"
                                       )}
                                     >
@@ -412,7 +391,7 @@ export default function ToolManagement({
                                         size={14}
                                         className="shrink-0 text-orange-400"
                                       />
-                                    </Tooltip>
+                                    </Hint>
                                   )}
                                   {disabled && !isModelUnavailable && (
                                     <AlertTriangle
@@ -459,9 +438,7 @@ export default function ToolManagement({
     </div>
   );
 }
-
 // ─── Pure helper ─────────────────────────────────────────────────────────────
-
 interface CatGroup {
   category: string;
   tools: Tool[];
@@ -471,7 +448,6 @@ interface SourceGroup {
   categories: CatGroup[];
   totalCount: number;
 }
-
 function groupToolsBySource(tools: Tool[]): SourceGroup[] {
   const result: SourceGroup[] = [];
   for (const [key, meta] of Object.entries(SOURCE_META) as [

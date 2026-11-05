@@ -24,10 +24,10 @@ import {
 } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
 import { Card } from "@/components/ui/card";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";

@@ -4,14 +4,16 @@ Use these constraints as the default contract for new or substantially changed f
 
 ## Ownership and placement
 
+Apply the [component decision workflow](../architecture.md#component-decision-before-implementation) before choosing where to implement a UI requirement; shared styling and capability gaps should be resolved in the appropriate existing or new common component before the business caller repeats them.
+
 - Place feature-only components under `frontend/app/[locale]/{feature}/components/`.
-- Place components reused by multiple features under `frontend/components/`.
+- Follow the [three-layer architecture](../architecture.md#component-layers): reusable brand presentation and generic interactions belong in common; business conditions and operation implementations remain domain-owned. Prefer an existing applicable common component before using a primitive directly or repeating project styles.
 - Keep feature-private components private to their feature. Do not import another feature's internal component; promote shared behavior instead.
 - Keep route entries thin. A page should compose components and coordinate routing, authentication, and feature-level data rather than contain a large reusable UI implementation.
 
 ## Public API
 
-- Define a named TypeScript props interface for every reusable component.
+- Define a named TypeScript props contract for project-owned reusable components. Preserve upstream-native prop types for managed basic controls.
 - Keep the public API minimal and coherent. Prefer semantic props and callbacks over exposing internal state, DOM details, or implementation-specific wrappers.
 - Use controlled behavior when the parent needs to own the value or lifecycle; otherwise keep transient state inside the component.
 - Review an interface when it accumulates roughly 7 to 10 props, repeated pass-through props, or several unrelated concerns. Extract a focused component or group only a coherent concern.
@@ -27,10 +29,10 @@ Use these constraints as the default contract for new or substantially changed f
 
 ## Visual and interaction behavior
 
-- Prefer Ant Design primitives for forms, data display, buttons, modals, and complex interactions. Avoid wrappers that do not add behavior, layout, or accessibility value.
+- Prefer shadcn/ui Radix basic controls. Common components must not import Ant Design; domain components migrate incrementally without expanding the legacy budget. Shared brand presentation, interaction defaults, layout and accessibility are valid common-component responsibilities; avoid wrappers that only rename or forward unchanged props.
 - Use theme tokens or CSS variables and responsive layout primitives. Keep necessary component CSS colocated with the component.
-- Use `lucide-react` icons by default and `@ant-design/icons` only when an equivalent Lucide icon is unavailable.
-- Use the centered AntD `Modal` pattern for custom content and `frontend/hooks/useConfirmModal.ts` for simple confirmations. Destructive actions must retain the established danger-button and warning-title treatment.
+- Use `lucide-react` for new icons; preserve legacy icon imports only in unmigrated consumers.
+- Use common Modal and domain drawer shells over the basic Dialog/Sheet for shared content contracts. Legacy useConfirmModal consumers migrate with their domain. Destructive actions retain danger-button and warning-title treatment.
 - Ensure keyboard focus, narrow-screen layout, disabled states, and error recovery remain usable when extracting or reusing a component.
 
 ## Copy, localization, and accessibility

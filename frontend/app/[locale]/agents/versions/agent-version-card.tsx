@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
+import { Hint } from "@/components/common/Hint";
 import { useMemo, useState } from "react";
 import {
   CheckCircle,
@@ -15,43 +20,47 @@ import {
   EllipsisVertical,
   Trash2,
   ArchiveRestore,
-  Edit
+  Edit,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   Flex,
-  Button,
-  Tag,
   Typography,
   Card,
   Descriptions,
   DescriptionsProps,
   Modal,
   Dropdown,
-  Tooltip,
-  theme
+  theme,
 } from "antd";
-import { ExclamationCircleFilled } from '@ant-design/icons';
-
+import { ExclamationCircleFilled } from "@ant-design/icons";
 const { useToken } = theme;
-import type { AgentVersion, Agent as AgentVersionAgent, ToolInstance, AgentVersionDetail, VersionCompareResponse } from "@/services/agentVersionService";
+import type {
+  AgentVersion,
+  Agent as AgentVersionAgent,
+  ToolInstance,
+  AgentVersionDetail,
+  VersionCompareResponse,
+} from "@/services/agentVersionService";
 import type { Agent, Tool } from "@/types/agentConfig";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { rollbackVersion, compareVersions, deleteVersion } from "@/services/agentVersionService";
+import {
+  rollbackVersion,
+  compareVersions,
+  deleteVersion,
+} from "@/services/agentVersionService";
 import { searchAgentInfo } from "@/services/agentConfigService";
-import { useAgentStore } from "@/stores/agentStore"
+import { useAgentStore } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentVersionCompareModal from "./AgentVersionCompareModal";
 import AgentVersionPubulishModal from "./AgentVersionPubulishModal";
-
 const { Text } = Typography;
-
 const formatter = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
   month: "2-digit",
@@ -61,7 +70,6 @@ const formatter = new Intl.DateTimeFormat("zh-CN", {
   second: "2-digit",
   hour12: false,
 });
-
 /**
  * Format UTC time string from backend to local time string based on user timezone
  */
@@ -69,10 +77,8 @@ function formatUtcToLocal(dateTimeStr?: string | null) {
   if (!dateTimeStr) {
     return "";
   }
-
   // Detect whether the string already contains timezone information
   const hasTimezone = /[zZ]|[+\-]\d{2}:?\d{2}$/.test(dateTimeStr);
-
   let date: Date;
   if (hasTimezone) {
     // If timezone exists, use as is
@@ -83,17 +89,15 @@ function formatUtcToLocal(dateTimeStr?: string | null) {
     const normalized = dateTimeStr.replace(" ", "T");
     date = new Date(`${normalized}Z`);
   }
-
   return formatter.format(date);
 }
-
 /**
  * Get status configuration based on isCurrentVersion flag
  */
 function getStatusConfig(isCurrentVersion: boolean) {
   if (isCurrentVersion) {
     return {
-      color: "green",
+      variant: "success" as const,
       icon: (
         <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center">
           <CheckCircle className="text-green-500" size={16} />
@@ -102,9 +106,8 @@ function getStatusConfig(isCurrentVersion: boolean) {
       labelKey: "agent.version.currentVersion",
     };
   }
-
   return {
-    color: "default",
+    variant: "outline" as const,
     icon: (
       <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
         <Archive className="text-gray-400" size={16} />
@@ -113,7 +116,6 @@ function getStatusConfig(isCurrentVersion: boolean) {
     labelKey: "",
   };
 }
-
 /**
  * Version card item component
  */
@@ -132,33 +134,26 @@ export function VersionCardItem({
   const isCurrentVersion = currentVersionNo === version.version_no;
   const statusConfig = getStatusConfig(isCurrentVersion);
   const { t } = useTranslation("common");
-
   // Local expanded state for this version card
   const [isExpanded, setIsExpanded] = useState(false);
-
   // Get user context for tenantId
   const { user } = useAuthorizationContext();
   const queryClient = useQueryClient();
-
   // Get invalidate functions for refreshing data
-  const { agentVersionList, invalidate: invalidateAgentVersionList } = useAgentVersionList(agentId);
-
+  const { agentVersionList, invalidate: invalidateAgentVersionList } =
+    useAgentVersionList(agentId);
   // Fetch version detail when expanded
   const { agentVersionDetail } = useAgentVersionDetail(
     agentId,
     isExpanded ? version.version_no : null
   );
-
   const { tools: toolList } = useToolList();
   const { agents: agentList } = useAgentList("");
-
   // Get current agent's permission from agent list
   const currentAgent = useMemo(() => {
     return agentList.find((a: Agent) => a.id === String(agentId));
   }, [agentList, agentId]);
-
   const isReadOnly = currentAgent?.permission === "READ_ONLY";
-
   // Modal state
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -166,18 +161,21 @@ export function VersionCardItem({
   const [loading, setLoading] = useState(false);
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(null);
-  const [selectedVersionNoA, setSelectedVersionNoA] = useState<number | null>(null);
-  const [selectedVersionNoB, setSelectedVersionNoB] = useState<number | null>(null);
-
+  const [compareData, setCompareData] = useState<VersionCompareResponse | null>(
+    null
+  );
+  const [selectedVersionNoA, setSelectedVersionNoA] = useState<number | null>(
+    null
+  );
+  const [selectedVersionNoB, setSelectedVersionNoB] = useState<number | null>(
+    null
+  );
   // Get theme token for styling
   const { token } = theme.useToken();
-
   // Generate display date from version data (convert from UTC to local time)
   const displayDate = useMemo(() => {
     return formatUtcToLocal(version.create_time);
   }, [version.create_time]);
-
   /**
    * Handle rollback button click - show comparison modal
    */
@@ -193,7 +191,6 @@ export function VersionCardItem({
     setCompareModalOpen(true);
     await loadComparison(versionNoA, versionNoB);
   };
-
   /**
    * Load version comparison data between current version and selected version
    */
@@ -209,7 +206,6 @@ export function VersionCardItem({
       setLoading(false);
     }
   };
-
   const handleChangeVersionA = async (value: number) => {
     setSelectedVersionNoA(value);
     if (!selectedVersionNoB) {
@@ -221,7 +217,6 @@ export function VersionCardItem({
     }
     await loadComparison(value, selectedVersionNoB);
   };
-
   const handleChangeVersionB = async (value: number) => {
     setSelectedVersionNoB(value);
     if (!selectedVersionNoA) {
@@ -233,7 +228,6 @@ export function VersionCardItem({
     }
     await loadComparison(selectedVersionNoA, value);
   };
-
   /**
    * Handle rollback confirmation
    * Rollback updates current_version_no to point to the target version
@@ -243,13 +237,11 @@ export function VersionCardItem({
     setRollbackLoading(true);
     try {
       const result = await rollbackVersion(agentId, version.version_no);
-
       if (result.success) {
         message.success(t("agent.version.rollbackSuccess"));
         setCompareModalOpen(false);
         invalidateAgentVersionList?.();
         queryClient.invalidateQueries({ queryKey: ["agents"] });
-
         const store = useAgentStore.getState();
         if (store.currentAgentId === agentId) {
           const agentResult = await searchAgentInfo(agentId);
@@ -268,7 +260,6 @@ export function VersionCardItem({
       setRollbackLoading(false);
     }
   };
-
   /**
    * Handle delete version button click - show confirmation modal
    */
@@ -279,7 +270,6 @@ export function VersionCardItem({
     }
     setDeleteModalOpen(true);
   };
-
   /**
    * Handle delete confirmation - actually delete the version
    */
@@ -287,7 +277,6 @@ export function VersionCardItem({
     setDeleteLoading(true);
     try {
       const result = await deleteVersion(agentId, version.version_no);
-
       if (result.success) {
         message.success(t("agent.version.deleteSuccess"));
         setDeleteModalOpen(false);
@@ -303,15 +292,14 @@ export function VersionCardItem({
       setDeleteLoading(false);
     }
   };
-
-  const agentConfigurationItems: DescriptionsProps['items'] = [
+  const agentConfigurationItems: DescriptionsProps["items"] = [
     {
-      key: '1',
+      key: "1",
       label: t("agent.version.field.name"),
       children: <span>{agentVersionDetail?.name}</span>,
     },
     {
-      key: '2',
+      key: "2",
       label: t("agent.version.field.modelName"),
       children: (
         <span>
@@ -323,7 +311,6 @@ export function VersionCardItem({
       ),
     },
   ];
-
   return (
     <div className="">
       <Card
@@ -333,7 +320,12 @@ export function VersionCardItem({
       >
         <Flex className="h-full" gap={12}>
           {/* Left: Status icon with timeline */}
-          <Flex align="center" justify="center" vertical className="flex-shrink-0">
+          <Flex
+            align="center"
+            justify="center"
+            vertical
+            className="flex-shrink-0"
+          >
             <Flex align="center" justify="center" className="flex-shrink-0">
               {statusConfig.icon}
             </Flex>
@@ -341,18 +333,14 @@ export function VersionCardItem({
           </Flex>
 
           {/* Middle: Version info */}
-          <Flex
-            vertical
-            gap={4}
-            className="flex-1 min-w-0"
-          >
+          <Flex vertical gap={4} className="flex-1 min-w-0">
             <Flex align="center" gap={8}>
               <Text strong className="text-base">
                 {version.version_name || `V${version.version_no}`}
               </Text>
-              <Tag color={statusConfig.color} className="m-0">
+              <Badge className="m-0" variant={statusConfig.variant} size="sm">
                 {t(statusConfig.labelKey)}
-              </Tag>
+              </Badge>
             </Flex>
 
             <Flex align="center" gap={12} className="text-gray-500 text-xs">
@@ -362,7 +350,6 @@ export function VersionCardItem({
                   {displayDate}
                 </Text>
               </Flex>
-
             </Flex>
 
             {version.release_note && (
@@ -377,52 +364,66 @@ export function VersionCardItem({
           </Flex>
 
           {/* Right: Actions */}
-          <Flex align="start" justify="center" gap={8} className="flex-shrink-0">
+          <Flex
+            align="start"
+            justify="center"
+            gap={8}
+            className="flex-shrink-0"
+          >
             <Button
-              type="text"
-              size="small"
-              icon={isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+              icon={
+                isExpanded ? (
+                  <ChevronDown size={18} />
+                ) : (
+                  <ChevronRight size={18} />
+                )
+              }
               onClick={() => setIsExpanded(!isExpanded)}
               className="text-gray-400 hover:text-gray-600"
+              variant="ghost"
+              size="xs"
             />
             <Dropdown
               menu={{
                 items: [
                   {
-                    key: 'edit',
+                    key: "edit",
                     label: isReadOnly ? (
-                      <Tooltip title={t("agent.noEditPermission")}>
+                      <Hint content={t("agent.noEditPermission")}>
                         <span>{t("common.edit")}</span>
-                      </Tooltip>
+                      </Hint>
                     ) : (
                       t("common.edit")
                     ),
                     icon: <Edit size={14} />,
                     disabled: isReadOnly,
-                    onClick: () => setEditModalOpen(true)
+                    onClick: () => setEditModalOpen(true),
                   },
                   {
-                    key: 'rollback',
+                    key: "rollback",
                     label: isReadOnly ? (
-                      <Tooltip title={t("agent.noEditPermission")}>
+                      <Hint content={t("agent.noEditPermission")}>
                         <span>{t("agent.version.rollback")}</span>
-                      </Tooltip>
+                      </Hint>
                     ) : (
                       t("agent.version.rollback")
                     ),
                     icon: <RotateCcw size={14} />,
-                    disabled: isReadOnly || isCurrentVersion || version.status.toLowerCase() === "disabled",
-                    onClick: handleRollbackClick
+                    disabled:
+                      isReadOnly ||
+                      isCurrentVersion ||
+                      version.status.toLowerCase() === "disabled",
+                    onClick: handleRollbackClick,
                   },
                   {
-                    type: 'divider',
+                    type: "divider",
                   },
                   {
-                    key: 'delete',
+                    key: "delete",
                     label: isReadOnly ? (
-                      <Tooltip title={t("agent.noEditPermission")}>
+                      <Hint content={t("agent.noEditPermission")}>
                         <span>{t("common.delete")}</span>
-                      </Tooltip>
+                      </Hint>
                     ) : (
                       t("common.delete")
                     ),
@@ -433,29 +434,29 @@ export function VersionCardItem({
                   },
                 ],
               }}
-              trigger={['click']}
+              trigger={["click"]}
             >
               <Button
-                type="text"
-                size="small"
                 icon={<EllipsisVertical size={18} />}
                 className="text-gray-400 hover:text-gray-600"
+                variant="ghost"
+                size="xs"
               />
             </Dropdown>
           </Flex>
-
         </Flex>
 
         {/* Expanded content */}
         {isExpanded && (
           <div className="mt-4 pt-4 border-t border-gray-100">
             <Flex vertical gap={16}>
-
               <Descriptions
                 title={
                   <Flex align="center" gap={8}>
                     <Eye size={14} className="text-blue-500" />
-                    <span className="text-sm">{t("agent.version.configuration")}</span>
+                    <span className="text-sm">
+                      {t("agent.version.configuration")}
+                    </span>
                   </Flex>
                 }
                 items={agentConfigurationItems}
@@ -465,67 +466,88 @@ export function VersionCardItem({
               />
 
               {/* Tools detail */}
-              {agentVersionDetail?.tools && agentVersionDetail.tools.length > 0 && (
-                <Descriptions
-                  title={
-                    <Flex align="center" gap={8}>
-                      <Wrench size={14} className="text-blue-500" />
-                      <span className="text-sm">{t("agent.version.tools")}</span>
-                    </Flex>
-                  }
-                  items={[
-                    {
-                      key: '1',
-                      children: (
-                        <Flex wrap gap={6}>
-                          {agentVersionDetail.tools.map((tool) => {
-                            const fullTool = toolList.find((t: Tool) => t.id === String(tool.tool_id));
-                            return (
-                              <Tag key={tool.tool_id} color="blue">
-                                {fullTool?.name}
-                              </Tag>
-                            );
-                          })}
-                        </Flex>
-                      ),
-                    },
-                  ]}
-                  classNames={{ header: "!mb-2" }}
-                  className="[&_.ant-descriptions-item]:!pb-0"
-                />
-              )}
-
+              {agentVersionDetail?.tools &&
+                agentVersionDetail.tools.length > 0 && (
+                  <Descriptions
+                    title={
+                      <Flex align="center" gap={8}>
+                        <Wrench size={14} className="text-blue-500" />
+                        <span className="text-sm">
+                          {t("agent.version.tools")}
+                        </span>
+                      </Flex>
+                    }
+                    items={[
+                      {
+                        key: "1",
+                        children: (
+                          <Flex wrap gap={6}>
+                            {agentVersionDetail.tools.map((tool) => {
+                              const fullTool = toolList.find(
+                                (t: Tool) => t.id === String(tool.tool_id)
+                              );
+                              return (
+                                <Badge
+                                  key={tool.tool_id}
+                                  variant={"info"}
+                                  size="sm"
+                                >
+                                  {fullTool?.name}
+                                </Badge>
+                              );
+                            })}
+                          </Flex>
+                        ),
+                      },
+                    ]}
+                    classNames={{ header: "!mb-2" }}
+                    className="[&_.ant-descriptions-item]:!pb-0"
+                  />
+                )}
 
               {/* Related agents detail */}
-              {agentVersionDetail?.sub_agent_id_list && agentVersionDetail.sub_agent_id_list.length > 0 && (
-                <Descriptions
-                  title={
-                    <Flex align="center" gap={8}>
-                      <Network size={14} className="text-blue-500" />
-                      <span className="text-sm">{t("agent.version.relatedAgents")}</span>
-                    </Flex>
-                  }
-                  items={[
-                    {
-                      key: '1',
-                      children: (
-                        <Flex wrap gap={6}>
-                          {agentVersionDetail.sub_agent_id_list.map((subAgentId) => {
-                            const subAgent = agentList.find((a: Agent) => a.id === String(subAgentId));
-                            return (
-                              <Tag key={subAgentId} color="purple">
-                                {subAgent?.display_name || subAgent?.name || `Agent ${subAgentId}`}
-                              </Tag>
-                            );
-                          })}
-                        </Flex>
-                      ),
-                    },
-                  ]}
-                  classNames={{ header: "!mb-2" }}
-                  className="[&_.ant-descriptions-item]:!pb-0"
-                />
-              )}
+              {agentVersionDetail?.sub_agent_id_list &&
+                agentVersionDetail.sub_agent_id_list.length > 0 && (
+                  <Descriptions
+                    title={
+                      <Flex align="center" gap={8}>
+                        <Network size={14} className="text-blue-500" />
+                        <span className="text-sm">
+                          {t("agent.version.relatedAgents")}
+                        </span>
+                      </Flex>
+                    }
+                    items={[
+                      {
+                        key: "1",
+                        children: (
+                          <Flex wrap gap={6}>
+                            {agentVersionDetail.sub_agent_id_list.map(
+                              (subAgentId) => {
+                                const subAgent = agentList.find(
+                                  (a: Agent) => a.id === String(subAgentId)
+                                );
+                                return (
+                                  <Badge
+                                    key={subAgentId}
+                                    variant={"info"}
+                                    size="sm"
+                                  >
+                                    {subAgent?.display_name ||
+                                      subAgent?.name ||
+                                      `Agent ${subAgentId}`}
+                                  </Badge>
+                                );
+                              }
+                            )}
+                          </Flex>
+                        ),
+                      },
+                    ]}
+                    classNames={{ header: "!mb-2" }}
+                    className="[&_.ant-descriptions-item]:!pb-0"
+                  />
+                )}
             </Flex>
           </div>
         )}
@@ -554,16 +576,21 @@ export function VersionCardItem({
         open={deleteModalOpen}
         onCancel={() => setDeleteModalOpen(false)}
         footer={[
-          <Button key="cancel" onClick={() => setDeleteModalOpen(false)}>
+          <Button
+            key="cancel"
+            onClick={() => setDeleteModalOpen(false)}
+            variant="outline"
+            size="sm"
+          >
             {t("common.cancel")}
           </Button>,
           <Button
             key="confirm"
-            type="primary"
-            danger
             icon={<Trash2 size={14} />}
             loading={deleteLoading}
             onClick={handleDeleteConfirm}
+            variant="destructive"
+            size="sm"
           >
             {t("common.delete")}
           </Button>,
@@ -572,11 +599,15 @@ export function VersionCardItem({
       >
         <Flex align="start" gap={12}>
           <div className="mt-1">
-            <ExclamationCircleFilled style={{ color: token.colorWarning, fontSize: '22px' }} />
+            <ExclamationCircleFilled
+              style={{ color: token.colorWarning, fontSize: "22px" }}
+            />
           </div>
           <div>
             <div className="font-medium mb-2">
-              {t("agent.version.deleteConfirmContent", { versionName: version.version_name || `V${version.version_no}` })}
+              {t("agent.version.deleteConfirmContent", {
+                versionName: version.version_name || `V${version.version_no}`,
+              })}
             </div>
             <div className="text-sm text-gray-500">
               {t("agent.version.deleteWarning")}

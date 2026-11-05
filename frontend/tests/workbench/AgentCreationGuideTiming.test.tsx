@@ -6,8 +6,8 @@ import { render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { AgentCreationGuide } from "@/app/agents/[agentId]/components/agent-creation-guide";
 
-vi.mock("@/components/common/StandardTour", () => ({
-  StandardTour: ({ open }: { open: boolean }) =>
+vi.mock("@/components/agent/CreationGuideTour", () => ({
+  CreationGuideTour: ({ open }: { open: boolean }) =>
     open ? <div role="dialog">Creation guide</div> : null,
 }));
 

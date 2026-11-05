@@ -1,41 +1,26 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
+import { Hint } from "@/components/common/Hint";
+import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/common/PasswordInput";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { Form, Table, Space, Typography, Card, message, Select } from "antd";
+import { RefreshCw, Trash2, Plus, Search, Wifi, Edit } from "lucide-react";
 import {
-  Button,
-  Input,
-  Form,
-  Table,
-  Tag,
-  Space,
-  Typography,
-  Card,
-  Tooltip,
-  message,
-  Select,
-} from "antd";
-import {
-  RefreshCw,
-  Trash2,
-  Plus,
-  Search,
-  Wifi,
-  Edit,
-} from "lucide-react";
-import { a2aClientService, A2AExternalAgent, NacosConfig } from "@/services/a2aService";
+  a2aClientService,
+  A2AExternalAgent,
+  NacosConfig,
+} from "@/services/a2aService";
 import log from "@/lib/logger";
-
 const { Text, Title } = Typography;
-
 interface NacosDiscoveryPanelProps {
   onAgentDiscovered?: (agent: A2AExternalAgent) => void;
   onDiscoverSuccess?: () => void;
   localAgentId?: number;
 }
-
 interface NewNacosConfigForm {
   name: string;
   nacos_addr: string;
@@ -43,7 +28,6 @@ interface NewNacosConfigForm {
   password: string;
   namespace_id: string;
 }
-
 export default function NacosDiscoveryPanel({
   onAgentDiscovered,
   onDiscoverSuccess,
@@ -51,7 +35,6 @@ export default function NacosDiscoveryPanel({
 }: NacosDiscoveryPanelProps) {
   const { t } = useTranslation("common");
   const [messageApi, contextHolder] = message.useMessage();
-
   // Add/Edit config form state
   const [showAddNacosForm, setShowAddNacosForm] = useState(false);
   const [editingConfigId, setEditingConfigId] = useState<string | null>(null);
@@ -64,23 +47,23 @@ export default function NacosDiscoveryPanel({
   });
   const [savingNacosConfig, setSavingNacosConfig] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
-
   // Existing configs list state
   const [nacosConfigs, setNacosConfigs] = useState<NacosConfig[]>([]);
   const [loadingNacosConfigs, setLoadingNacosConfigs] = useState(false);
-  const [selectedNacosConfigId, setSelectedNacosConfigId] = useState<string | null>(null);
+  const [selectedNacosConfigId, setSelectedNacosConfigId] = useState<
+    string | null
+  >(null);
   const [testingConfigId, setTestingConfigId] = useState<string | null>(null);
-
   // Scan state
   const [agentNames, setAgentNames] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [discoveredAgents, setDiscoveredAgents] = useState<A2AExternalAgent[]>([]);
-
+  const [discoveredAgents, setDiscoveredAgents] = useState<A2AExternalAgent[]>(
+    []
+  );
   // Load configs on mount
   useEffect(() => {
     loadNacosConfigs();
   }, []);
-
   const loadNacosConfigs = async () => {
     setLoadingNacosConfigs(true);
     const result = await a2aClientService.listNacosConfigs();
@@ -89,14 +72,12 @@ export default function NacosDiscoveryPanel({
     }
     setLoadingNacosConfigs(false);
   };
-
   const handleTestNacosConnection = async (configToTest?: NacosConfig) => {
     const addr = configToTest?.nacos_addr ?? nacosConfig.nacos_addr;
     if (!addr.trim()) {
       messageApi.error(t("a2a.discovery.nacosAddrRequired"));
       return;
     }
-
     const isTestingExisting = !!configToTest;
     if (isTestingExisting) {
       setTestingConfigId(configToTest!.config_id);
@@ -106,15 +87,23 @@ export default function NacosDiscoveryPanel({
     try {
       const result = await a2aClientService.testNacosConnection({
         nacos_addr: addr.trim(),
-        namespace_id: configToTest?.namespace_id || nacosConfig.namespace_id || "public",
-        nacos_username: configToTest?.nacos_username ?? (nacosConfig.username.trim() || undefined),
-        nacos_password: configToTest?.nacos_password ?? (nacosConfig.password.trim() || undefined),
+        namespace_id:
+          configToTest?.namespace_id || nacosConfig.namespace_id || "public",
+        nacos_username:
+          configToTest?.nacos_username ??
+          (nacosConfig.username.trim() || undefined),
+        nacos_password:
+          configToTest?.nacos_password ??
+          (nacosConfig.password.trim() || undefined),
       });
-
       if (result.success) {
-        messageApi.success(result.message || t("a2a.discovery.testConnectionSuccess"));
+        messageApi.success(
+          result.message || t("a2a.discovery.testConnectionSuccess")
+        );
       } else {
-        messageApi.error(result.message || t("a2a.discovery.testConnectionFailed"));
+        messageApi.error(
+          result.message || t("a2a.discovery.testConnectionFailed")
+        );
       }
     } catch (error) {
       log.error("Failed to test Nacos connection:", error);
@@ -126,7 +115,6 @@ export default function NacosDiscoveryPanel({
       setTestingConnection(false);
     }
   };
-
   const handleAddNacosConfig = async () => {
     if (!nacosConfig.name.trim()) {
       messageApi.error(t("a2a.discovery.nacosNameRequired"));
@@ -136,7 +124,6 @@ export default function NacosDiscoveryPanel({
       messageApi.error(t("a2a.discovery.nacosAddrRequired"));
       return;
     }
-
     setSavingNacosConfig(true);
     try {
       const result = await a2aClientService.createNacosConfig({
@@ -146,15 +133,22 @@ export default function NacosDiscoveryPanel({
         nacos_username: nacosConfig.username.trim() || undefined,
         nacos_password: nacosConfig.password.trim() || undefined,
       });
-
       if (result.success && result.data) {
         messageApi.success(t("a2a.discovery.addNacosConfigSuccess"));
         await loadNacosConfigs();
         setSelectedNacosConfigId(result.data.config_id);
-        setNacosConfig({ name: "", nacos_addr: "", username: "", password: "", namespace_id: "public" });
+        setNacosConfig({
+          name: "",
+          nacos_addr: "",
+          username: "",
+          password: "",
+          namespace_id: "public",
+        });
         setShowAddNacosForm(false);
       } else {
-        messageApi.error(result.message || t("a2a.discovery.addNacosConfigFailed"));
+        messageApi.error(
+          result.message || t("a2a.discovery.addNacosConfigFailed")
+        );
       }
     } catch (error) {
       log.error("Failed to add Nacos config:", error);
@@ -162,7 +156,6 @@ export default function NacosDiscoveryPanel({
     }
     setSavingNacosConfig(false);
   };
-
   const handleDeleteNacosConfig = async (configId: string) => {
     const result = await a2aClientService.deleteNacosConfig(configId);
     if (result.success) {
@@ -172,10 +165,11 @@ export default function NacosDiscoveryPanel({
       }
       await loadNacosConfigs();
     } else {
-      messageApi.error(result.message || t("a2a.discovery.deleteNacosConfigFailed"));
+      messageApi.error(
+        result.message || t("a2a.discovery.deleteNacosConfigFailed")
+      );
     }
   };
-
   const handleEditNacosConfig = (config: NacosConfig) => {
     setEditingConfigId(config.config_id);
     setNacosConfig({
@@ -187,10 +181,8 @@ export default function NacosDiscoveryPanel({
     });
     setShowAddNacosForm(true);
   };
-
   const handleUpdateNacosConfig = async () => {
     if (!editingConfigId) return;
-
     if (!nacosConfig.name.trim()) {
       messageApi.error(t("a2a.discovery.nacosNameRequired"));
       return;
@@ -199,7 +191,6 @@ export default function NacosDiscoveryPanel({
       messageApi.error(t("a2a.discovery.nacosAddrRequired"));
       return;
     }
-
     setSavingNacosConfig(true);
     try {
       const result = await a2aClientService.updateNacosConfig(editingConfigId, {
@@ -209,14 +200,15 @@ export default function NacosDiscoveryPanel({
         nacos_username: nacosConfig.username.trim() || undefined,
         nacos_password: nacosConfig.password.trim() || undefined,
       });
-
       if (result.success) {
         messageApi.success(t("a2a.discovery.updateNacosConfigSuccess"));
         setShowAddNacosForm(false);
         handleCancelEdit();
         await loadNacosConfigs();
       } else {
-        messageApi.error(result.message || t("a2a.discovery.updateNacosConfigFailed"));
+        messageApi.error(
+          result.message || t("a2a.discovery.updateNacosConfigFailed")
+        );
       }
     } catch (error) {
       log.error("Failed to update Nacos config:", error);
@@ -224,7 +216,6 @@ export default function NacosDiscoveryPanel({
     }
     setSavingNacosConfig(false);
   };
-
   const handleCancelEdit = () => {
     setEditingConfigId(null);
     setNacosConfig({
@@ -235,28 +226,28 @@ export default function NacosDiscoveryPanel({
       namespace_id: "public",
     });
   };
-
   const handleDiscoverFromNacos = async () => {
     if (scanning) return;
     if (!selectedNacosConfigId) {
       messageApi.error(t("a2a.discovery.selectNacosConfig"));
       return;
     }
-
     if (agentNames.length === 0) {
       messageApi.error(t("a2a.discovery.enterAgentNames"));
       return;
     }
-
-    const selectedConfig = nacosConfigs.find(c => c.config_id === selectedNacosConfigId);
+    const selectedConfig = nacosConfigs.find(
+      (c) => c.config_id === selectedNacosConfigId
+    );
     setScanning(true);
     try {
       const result = await a2aClientService.discoverFromNacos({
         nacos_config_id: selectedNacosConfigId,
-        agent_names: agentNames.map(name => name.trim()).filter(name => name.length > 0),
+        agent_names: agentNames
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0),
         namespace: selectedConfig?.namespace_id || "public",
       });
-
       if (result.success && result.data) {
         setDiscoveredAgents(result.data);
         if (result.data.length === 0) {
@@ -284,18 +275,17 @@ export default function NacosDiscoveryPanel({
       setScanning(false);
     }
   };
-
   const handleAddToLocalAgent = async (agent: A2AExternalAgent) => {
     if (!localAgentId) return;
-
     const result = await a2aClientService.addRelation(localAgentId, agent.id);
     if (result.success) {
       messageApi.success(t("a2a.discovery.addToLocalAgentSuccess"));
     } else {
-      messageApi.error(result.message || t("a2a.discovery.addToLocalAgentFailed"));
+      messageApi.error(
+        result.message || t("a2a.discovery.addToLocalAgentFailed")
+      );
     }
   };
-
   // Nacos config table columns
   const nacosConfigColumns = [
     {
@@ -319,7 +309,11 @@ export default function NacosDiscoveryPanel({
       dataIndex: "namespace_id",
       key: "namespace_id",
       width: "20%",
-      render: (text: string) => <Tag>{text}</Tag>,
+      render: (text: string) => (
+        <Badge variant="outline" size="sm">
+          {text}
+        </Badge>
+      ),
     },
     {
       title: t("common.actions"),
@@ -327,45 +321,44 @@ export default function NacosDiscoveryPanel({
       width: "15%",
       render: (_: any, record: NacosConfig) => (
         <Space size="small">
-          <Tooltip title={t("a2a.discovery.editNacosConfig")}>
+          <Hint content={t("a2a.discovery.editNacosConfig")}>
             <Button
-              type="link"
-              size="small"
               icon={<Edit size={14} />}
               onClick={() => handleEditNacosConfig(record)}
+              variant="link"
+              size="xs"
             />
-          </Tooltip>
-          <Tooltip title={t("a2a.discovery.testConnection")}>
+          </Hint>
+          <Hint content={t("a2a.discovery.testConnection")}>
             <Button
-              type="link"
-              size="small"
               icon={<Wifi size={14} />}
               loading={testingConfigId === record.config_id}
               onClick={() => handleTestNacosConnection(record)}
+              variant="link"
+              size="xs"
             />
-          </Tooltip>
-          <Tooltip title={t("a2a.discovery.scan")}>
+          </Hint>
+          <Hint content={t("a2a.discovery.scan")}>
             <Button
-              type="link"
-              size="small"
               icon={<Search size={14} />}
               onClick={() => setSelectedNacosConfigId(record.config_id)}
+              variant="link"
+              size="xs"
             />
-          </Tooltip>
-          <Tooltip title={t("common.delete")}>
+          </Hint>
+          <Hint content={t("common.delete")}>
             <Button
-              type="link"
-              size="small"
-              danger
               icon={<Trash2 size={14} />}
               onClick={() => handleDeleteNacosConfig(record.config_id)}
+              variant="link"
+              size="xs"
+              className="text-destructive hover:text-destructive"
             />
-          </Tooltip>
+          </Hint>
         </Space>
       ),
     },
   ];
-
   return (
     <>
       {contextHolder}
@@ -378,7 +371,6 @@ export default function NacosDiscoveryPanel({
             </Title>
             <Space>
               <Button
-                type="primary"
                 icon={<Plus size={14} />}
                 onClick={() => {
                   setEditingConfigId(null);
@@ -391,14 +383,17 @@ export default function NacosDiscoveryPanel({
                   });
                   setShowAddNacosForm(true);
                 }}
+                variant="default"
+                size="sm"
               >
                 {t("a2a.discovery.addNacosConfig")}
               </Button>
               <Button
-                size="small"
                 icon={<RefreshCw size={14} />}
                 onClick={loadNacosConfigs}
                 loading={loadingNacosConfigs}
+                variant="outline"
+                size="xs"
               >
                 {t("common.refresh")}
               </Button>
@@ -414,10 +409,7 @@ export default function NacosDiscoveryPanel({
                 labelCol={{ span: 5 }}
                 wrapperCol={{ span: 19 }}
               >
-                <Form.Item
-                  label={t("a2a.discovery.nacosName")}
-                  required
-                >
+                <Form.Item label={t("a2a.discovery.nacosName")} required>
                   <Input
                     placeholder={t("a2a.discovery.nacosNamePlaceholder")}
                     value={nacosConfig.name}
@@ -437,7 +429,10 @@ export default function NacosDiscoveryPanel({
                     placeholder="http://nacos-server:8848"
                     value={nacosConfig.nacos_addr}
                     onChange={(e) =>
-                      setNacosConfig({ ...nacosConfig, nacos_addr: e.target.value })
+                      setNacosConfig({
+                        ...nacosConfig,
+                        nacos_addr: e.target.value,
+                      })
                     }
                     disabled={savingNacosConfig}
                   />
@@ -451,7 +446,10 @@ export default function NacosDiscoveryPanel({
                     placeholder="public"
                     value={nacosConfig.namespace_id}
                     onChange={(e) =>
-                      setNacosConfig({ ...nacosConfig, namespace_id: e.target.value })
+                      setNacosConfig({
+                        ...nacosConfig,
+                        namespace_id: e.target.value,
+                      })
                     }
                     disabled={savingNacosConfig}
                   />
@@ -465,7 +463,10 @@ export default function NacosDiscoveryPanel({
                     placeholder={t("a2a.discovery.nacosUsernamePlaceholder")}
                     value={nacosConfig.username}
                     onChange={(e) =>
-                      setNacosConfig({ ...nacosConfig, username: e.target.value })
+                      setNacosConfig({
+                        ...nacosConfig,
+                        username: e.target.value,
+                      })
                     }
                     disabled={savingNacosConfig}
                   />
@@ -475,11 +476,14 @@ export default function NacosDiscoveryPanel({
                   label={t("a2a.discovery.nacosPassword")}
                   tooltip={t("a2a.discovery.nacosPasswordTooltip")}
                 >
-                  <Input.Password
+                  <PasswordInput
                     placeholder={t("a2a.discovery.nacosPasswordPlaceholder")}
                     value={nacosConfig.password}
                     onChange={(e) =>
-                      setNacosConfig({ ...nacosConfig, password: e.target.value })
+                      setNacosConfig({
+                        ...nacosConfig,
+                        password: e.target.value,
+                      })
                     }
                     disabled={savingNacosConfig}
                   />
@@ -492,6 +496,8 @@ export default function NacosDiscoveryPanel({
                       handleCancelEdit();
                     }}
                     disabled={savingNacosConfig}
+                    variant="outline"
+                    size="sm"
                   >
                     {t("common.cancel")}
                   </Button>
@@ -499,16 +505,27 @@ export default function NacosDiscoveryPanel({
                     onClick={() => handleTestNacosConnection()}
                     loading={testingConnection}
                     icon={<Wifi size={14} />}
+                    variant="outline"
+                    size="sm"
                   >
                     {t("a2a.discovery.testConnection")}
                   </Button>
                   <Button
-                    type="primary"
-                    onClick={editingConfigId ? handleUpdateNacosConfig : handleAddNacosConfig}
+                    onClick={
+                      editingConfigId
+                        ? handleUpdateNacosConfig
+                        : handleAddNacosConfig
+                    }
                     loading={savingNacosConfig}
-                    icon={editingConfigId ? <Edit size={14} /> : <Plus size={14} />}
+                    icon={
+                      editingConfigId ? <Edit size={14} /> : <Plus size={14} />
+                    }
+                    variant="default"
+                    size="sm"
                   >
-                    {editingConfigId ? t("common.save") : t("a2a.discovery.saveAndSelect")}
+                    {editingConfigId
+                      ? t("common.save")
+                      : t("a2a.discovery.saveAndSelect")}
                   </Button>
                 </div>
               </Form>
@@ -553,10 +570,11 @@ export default function NacosDiscoveryPanel({
                 />
               </Form.Item>
               <Button
-                type="primary"
                 onClick={handleDiscoverFromNacos}
                 loading={scanning}
                 icon={<Search size={14} />}
+                variant="default"
+                size="sm"
               >
                 {t("a2a.discovery.scan")}
               </Button>
@@ -577,9 +595,7 @@ export default function NacosDiscoveryPanel({
                 key={String(agent.id)}
                 agent={agent}
                 onAddToLocalAgent={
-                  localAgentId
-                    ? () => handleAddToLocalAgent(agent)
-                    : undefined
+                  localAgentId ? () => handleAddToLocalAgent(agent) : undefined
                 }
               />
             ))}
@@ -589,25 +605,25 @@ export default function NacosDiscoveryPanel({
     </>
   );
 }
-
 // Agent Detail Card Component
 interface AgentDetailCardProps {
   agent: A2AExternalAgent;
   onAddToLocalAgent?: () => void;
 }
-
 function AgentDetailCard({ agent, onAddToLocalAgent }: AgentDetailCardProps) {
   const { t } = useTranslation("common");
-
   return (
     <Card size="small">
       <div className="flex justify-between items-start">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <Text strong>{agent.name}</Text>
-            <Tag color={agent.source_type === "url" ? "blue" : "green"}>
+            <Badge
+              variant={agent.source_type === "url" ? "info" : "success"}
+              size="sm"
+            >
               {agent.source_type === "url" ? "URL" : "Nacos"}
-            </Tag>
+            </Badge>
           </div>
           <Text type="secondary" className="block text-sm">
             {agent.description || t("a2a.discovery.noDescription")}
@@ -618,10 +634,10 @@ function AgentDetailCard({ agent, onAddToLocalAgent }: AgentDetailCardProps) {
         </div>
         {onAddToLocalAgent && (
           <Button
-            type="primary"
-            size="small"
             icon={<Plus size={14} />}
             onClick={onAddToLocalAgent}
+            variant="default"
+            size="xs"
           >
             {t("a2a.discovery.addToLocalAgent")}
           </Button>

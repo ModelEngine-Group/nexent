@@ -18,7 +18,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
 
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { Agent } from "@/types/agentConfig";
 import type { SkillFileContent } from "@/types/skill";
 import { useCreatorModelControls } from "@/features/model-controls/useCreatorModelControls";

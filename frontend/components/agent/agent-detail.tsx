@@ -1,8 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import { Button, Spin } from "antd";
+import { Button } from "@/components/common/Button";
+import { Spin } from "antd";
 import {
   BookOpen,
   Bot,
@@ -21,7 +20,6 @@ import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
 import type { AgentRepositoryListingStatus } from "@/types/agentRepository";
-
 interface AgentDetailProps {
   open: boolean;
   onClose: () => void;
@@ -36,12 +34,10 @@ interface AgentDetailProps {
   isFetching?: boolean;
   onRetry?: () => void;
 }
-
 function formatCreatedAt(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 }
-
 function DetailSection({
   icon,
   title,
@@ -54,7 +50,6 @@ function DetailSection({
   tone?: "neutral" | "blue";
 }) {
   if (items.length === 0) return null;
-
   return (
     <section className="space-y-2">
       <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -81,7 +76,6 @@ function DetailSection({
     </section>
   );
 }
-
 export function AgentDetail({
   open,
   onClose,
@@ -98,7 +92,6 @@ export function AgentDetail({
 }: AgentDetailProps) {
   const { t } = useTranslation("common");
   const displayName = useUserDisplayName();
-
   return (
     <ResourceDetail
       open={open}
@@ -119,7 +112,12 @@ export function AgentDetail({
                 {t("agentRepository.detail.loadError")}
               </p>
               {onRetry ? (
-                <Button type="primary" onClick={onRetry} loading={isFetching}>
+                <Button
+                  onClick={onRetry}
+                  loading={isFetching}
+                  variant="default"
+                  size="sm"
+                >
                   {t("repository.common.retry")}
                 </Button>
               ) : null}
@@ -261,12 +259,15 @@ export function AgentDetail({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/60 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/60 sm:px-4">
-          <Button onClick={onClose}>{t("common.close")}</Button>
+          <Button onClick={onClose} variant="outline" size="sm">
+            {t("common.close")}
+          </Button>
           {onEdit && detail && !isError ? (
             <Button
-              type="primary"
               icon={<Pencil className="size-4" />}
               onClick={onEdit}
+              variant="default"
+              size="sm"
             >
               {t("agentRepository.mine.edit")}
             </Button>

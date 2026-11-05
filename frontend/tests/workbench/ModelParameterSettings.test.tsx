@@ -15,7 +15,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@/components/common/Popover";
 import type { ModelParameterValue } from "@/types/modelParameterSettings";
 
 vi.mock("react-i18next", async (importOriginal) => ({

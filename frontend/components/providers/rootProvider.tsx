@@ -4,6 +4,9 @@
 
 import { ReactNode } from "react";
 import { ConfigProvider, App } from "antd";
+import { useTheme } from "next-themes";
+import { BRAND_COLORS } from "@/const/brand";
+import { NoticeHost } from "./NoticeHost";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 
@@ -18,7 +21,7 @@ import {
 
 import { LoginModal } from "@/components/auth/loginModal";
 import { RegisterModal } from "@/components/auth/registerModal";
-import { FullScreenLoading } from "@/components/ui/loading";
+import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { useDeployment } from "./deploymentProvider";
 import { useSessionManager } from "@/hooks/auth/useSessionManager";
 import { AutoHideScrollbars } from "./AutoHideScrollbars";
@@ -47,12 +50,16 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
   // don't show full screen loading (they can already see the page)
   const isUserOperating = auth.isLoginModalOpen || auth.isRegisterModalOpen;
 
-  // Only show FullScreenLoading during initial load, not during user operations
+  // Only show the fullscreen loading indicator during initial load, not during user operations
   if (isAppReady || isUserOperating) {
     return <>{children}</>;
   }
 
-  return <FullScreenLoading />;
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <LoadingIndicator className="size-12" />
+    </div>
+  );
 }
 
 /**
@@ -60,14 +67,26 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  * Integrates all necessary providers for the application
  */
 export function RootProvider({ children }: { children: ReactNode }) {
+  const { resolvedTheme } = useTheme();
+  const brand = BRAND_COLORS[resolvedTheme === "dark" ? "dark" : "light"];
   return (
     <ConfigProvider
-      getPopupContainer={() => document.body}
+      theme={{
+        token: {
+          colorPrimary: brand.primary,
+          colorPrimaryHover: brand.hover,
+          colorPrimaryActive: brand.active,
+        },
+      }}
+      getPopupContainer={(trigger) =>
+        trigger?.closest<HTMLElement>("[data-ui-layer]") ?? document.body
+      }
       modal={{ mask: { closable: false } }}
       drawer={{ mask: { closable: false } }}
     >
       <QueryClientProvider client={queryClient}>
         <App>
+          <NoticeHost />
           <AutoHideScrollbars />
           <AuthenticationProvider>
             <AuthorizationProvider>

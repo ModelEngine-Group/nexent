@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Badge } from "@/components/common/Badge";
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Collapse, Spin, Table, Tag, Tooltip } from "antd";
+import { Alert, App, Collapse, Spin, Table } from "antd";
 import {
   Copy,
   ExternalLink,
@@ -17,9 +17,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
+import { Button as ProjectButton } from "@/components/common/Button";
+import { InputField } from "@/components/common/InputField";
 import {
   buildAgentShareUrl,
   buildCopyAriaLabel,
@@ -32,19 +31,19 @@ import {
 import { a2aClientService } from "@/services/a2aService";
 import { configService } from "@/services/configService";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-
 interface AgentPublicationProps {
   agentId: number;
   agentName: string;
 }
-
 export function AgentPublication({
   agentId,
   agentName,
 }: AgentPublicationProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { locale } = useParams<{ locale: string }>();
+  const { locale } = useParams<{
+    locale: string;
+  }>();
   const [showA2AHelp, setShowA2AHelp] = useState(false);
   const frontendConfig = useQuery({
     queryKey: ["frontend-config"],
@@ -136,7 +135,6 @@ export function AgentPublication({
         ]
       : []),
   ];
-
   const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -148,14 +146,18 @@ export function AgentPublication({
   const copyField = (
     label: string,
     value: string,
-    options: { hint?: string; prefix?: string; hideLabel?: boolean } = {}
+    options: {
+      hint?: string;
+      prefix?: string;
+      hideLabel?: boolean;
+    } = {}
   ) => (
     <div className="flex w-[564px] max-w-full flex-col gap-2">
       {!options.hideLabel && (
         <span className="inline-flex items-center gap-1 text-sm text-[#191919]">
           {label}
           {options.hint && (
-            <Tooltip title={options.hint}>
+            <Hint content={options.hint}>
               <button
                 type="button"
                 aria-label={options.hint}
@@ -163,37 +165,36 @@ export function AgentPublication({
               >
                 <Info size={14} aria-hidden />
               </button>
-            </Tooltip>
+            </Hint>
           )}
         </span>
       )}
-      <StandardInput
+      <InputField
         readOnly
         aria-label={label}
         value={value}
         prefix={
           options.prefix ? (
-            <Tag color="blue" className="!m-0">
+            <Badge className="!m-0" variant={"info"} size="sm">
               {options.prefix}
-            </Tag>
+            </Badge>
           ) : undefined
         }
         className="!bg-[#f5f5f5] !border-transparent"
         suffix={
-          <Tooltip title={t("common.copy")}>
-            <Button
-              type="text"
-              size="small"
+          <Hint content={t("common.copy")}>
+            <ProjectButton
               aria-label={buildCopyAriaLabel(t("common.copy"), label)}
               icon={<Copy size={14} />}
               onClick={() => copy(value)}
+              variant="ghost"
+              size="xs"
             />
-          </Tooltip>
+          </Hint>
         }
       />
     </div>
   );
-
   return (
     <div
       data-testid="agent-publication-content"
@@ -227,15 +228,22 @@ export function AgentPublication({
                 />
                 <div className="flex flex-wrap items-end gap-3">
                   {copyField(t("agent.publication.agentLink"), shareUrl)}
-                  <StandardButton icon={<Send size={14} />} href={shareUrl}>
+                  <ProjectButton
+                    icon={<Send size={14} />}
+                    href={shareUrl}
+                    variant="outline"
+                    size="sm"
+                  >
                     {t("agent.publication.preview")}
-                  </StandardButton>
-                  <StandardButton
+                  </ProjectButton>
+                  <ProjectButton
                     icon={<Share2 size={14} />}
                     onClick={() => copy(shareUrl)}
+                    variant="outline"
+                    size="sm"
                   >
                     {t("agent.publication.share")}
-                  </StandardButton>
+                  </ProjectButton>
                 </div>
               </div>
             ),
@@ -300,15 +308,16 @@ export function AgentPublication({
                     showIcon
                     title={t("agent.publication.loadFailed")}
                     action={
-                      <Button
-                        size="small"
+                      <ProjectButton
                         onClick={() => {
                           void frontendConfig.refetch();
                           void publishedAgents.refetch();
                         }}
+                        variant="outline"
+                        size="xs"
                       >
                         {t("common.retry")}
-                      </Button>
+                      </ProjectButton>
                     }
                   />
                 ) : (
@@ -317,8 +326,7 @@ export function AgentPublication({
                       {t("agent.publication.example")}
                     </summary>
                     <div className="relative mt-4 rounded-lg bg-[#f5f5f5] p-4">
-                      <Button
-                        type="text"
+                      <ProjectButton
                         icon={<Copy size={14} />}
                         aria-label={buildCopyAriaLabel(
                           t("common.copy"),
@@ -326,6 +334,8 @@ export function AgentPublication({
                         )}
                         className="!absolute right-3 top-3"
                         onClick={() => copy(curl)}
+                        variant="ghost"
+                        size="sm"
                       />
                       <pre className="overflow-x-auto whitespace-pre-wrap break-all pr-10 leading-6">
                         <code>{curl}</code>
@@ -357,18 +367,18 @@ export function AgentPublication({
                   title={
                     <span className="inline-flex flex-wrap items-center gap-2">
                       {t("a2a.server.usageTitle")}
-                      <Button
-                        type="link"
-                        size="small"
+                      <ProjectButton
                         aria-expanded={showA2AHelp}
                         onClick={() => setShowA2AHelp((shown) => !shown)}
+                        variant="link"
+                        size="xs"
                       >
                         {t(
                           showA2AHelp
                             ? "agent.publication.hideHelp"
                             : "agent.publication.showHelp"
                         )}
-                      </Button>
+                      </ProjectButton>
                     </span>
                   }
                   description={
@@ -389,9 +399,13 @@ export function AgentPublication({
                     showIcon
                     title={t("agent.publication.loadFailed")}
                     action={
-                      <Button size="small" onClick={() => void a2a.refetch()}>
+                      <ProjectButton
+                        onClick={() => void a2a.refetch()}
+                        variant="outline"
+                        size="xs"
+                      >
                         {t("common.retry")}
-                      </Button>
+                      </ProjectButton>
                     }
                   />
                 ) : a2aGuideState === "disabled" || !settings ? (
@@ -448,9 +462,9 @@ export function AgentPublication({
                     <div className="flex flex-col gap-3 text-sm">
                       <span className="inline-flex items-center gap-1">
                         {t("agent.publication.interfaces")}
-                        <Tooltip title={t("agent.publication.a2aHelp")}>
+                        <Hint content={t("agent.publication.a2aHelp")}>
                           <Info size={14} />
-                        </Tooltip>
+                        </Hint>
                       </span>
                       <Table
                         size="small"
@@ -470,13 +484,14 @@ export function AgentPublication({
                             width: 380,
                             render: (endpoint: string, row) => (
                               <span className="break-all font-mono text-xs">
-                                <Tag
-                                  color={
-                                    row.method === "GET" ? "purple" : "cyan"
+                                <Badge
+                                  variant={
+                                    row.method === "GET" ? "info" : "info"
                                   }
+                                  size="sm"
                                 >
                                   {row.method}
-                                </Tag>
+                                </Badge>
                                 {endpoint}
                               </span>
                             ),

@@ -7,7 +7,7 @@ description: Use when implementing, debugging, or reviewing Nexent frontend page
 
 Repository paths below are relative to the root; reference links resolve from this skill.
 
-1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read the authoritative sibling document `../docs/前端ui.md` from the repository root when it is available, then apply the linked English component references. For colors and interaction states, also read [UI specification](references/components/style.md), which consolidates UI color rules, including functional-color Light state tables, in one document.
+1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read [the theme contract](references/components/theme.md) and the relevant English component references. The approved shadcn/Radix migration and Nexent brand-color supersede legacy Ant Design implementation and fixed primary colors; preserve unaffected business layouts and behavior. For the complete color categories and interaction states, also consult the single [UI specification](references/components/style.md) and its [color tokens](references/components/color-tokens.css).
 2. Load relevant detailed rules only.
 
 | Work                                                               | Reference                                                                                                                |
@@ -18,16 +18,35 @@ Repository paths below are relative to the root; reference links resolve from th
 | Requests, responses, endpoint configuration                        | [API services](references/api-services.md)                                                                               |
 | Shared types, constants, runtime guards                            | [Types](references/types.md)                                                                                             |
 
-3. Keep route entries thin, reuse existing shared UI, and extract abstractions when reuse or complexity warrants it.
+3. Before writing frontend UI, follow the [component decision workflow](references/architecture.md#component-decision-before-implementation): inspect existing common/ui components, assess requirement coverage and brand adaptation, then choose reuse, extension or a new shared component. Make this decision before implementing the business page, not as cleanup afterward. Keep route entries thin.
 4. Verify affected behavior, including loading/error states and localization for UI changes. Select checks from `frontend/package.json`; use `npm run check-all` for broad verification when warranted. Do not install dependencies solely because obsolete examples name them.
 5. Report references consulted, checks run, and blocked checks. Do not enforce these conventions by changing unrelated legacy code.
 
 ## UI source synchronization
 
-- Treat `../docs/前端ui.md` as the visual source of truth. Do not invent visual values that it does not define; use the existing frontend references only for unspecified defaults.
-- The single [UI specification](references/components/style.md) contains UI-role, chart-color, gradient, company-palette, software-product, auxiliary-color, and functional-color Light rules. It supplements the existing UI source. If specifications explicitly disagree on the same property, report the discrepancy before applying that conflicting value; do not silently replace either specification.
-- Keep all UI color specification categories in the single [UI specification](references/components/style.md); do not split them into separate documents. For other UI source material, translate every first-level heading into one English Markdown reference under `references/components/` and keep nested headings in that reference.
-- Extract visual rules into text and tables; do not retain uploaded screenshots or reference them in maintained skill documentation.
-- Define all documented color roles as shared CSS variables using [color tokens](references/components/color-tokens.css); add missing variables in the application global stylesheet and consume them in components instead of color literals. Keep the CSS definitions synchronized with the specification.
-- Convert documented visual values to Tailwind CSS in the reference and implement reusable components under `frontend/components/common/` when the source defines a reusable component contract.
+- Use shadcn/ui's Radix implementation for new basic UI. Nexent brand-color supplies the brand palette through semantic theme variables; do not introduce Radix Themes or Base UI.
+- Translate every first-level heading into one English Markdown reference under `references/components/`; keep nested headings in that reference.
+- Follow the [three component layers](references/architecture.md#component-layers): preserve upstream ui sources, centralize shared brand presentation and generic interactions in common, and compose business behavior in its domain. Prefer an existing common component over repeating its adaptations in pages.
+- Follow `frontend/vendor/shadcn/README.md` for upstream snapshots, isolated previews and reviewed synchronization. Run `npm run check:ui` and the relevant component/tool tests when changing these boundaries.
+- Keep all color specification categories in the single [UI specification](references/components/style.md), with shared values in [color tokens](references/components/color-tokens.css). The [theme contract](references/components/theme.md) defines the approved migration overrides; preserve documented roles outside that scope.
+- Extract visual rules into text and tables; do not retain uploaded screenshots in maintained skill documentation.
 - Keep user-facing default text localized through the existing translation namespace. Create component test pages only as explicitly requested temporary local debug entries; do not add them to Nexent feature routes or navigation, and remove them after debugging is complete.
+
+## Component decision before implementation
+
+For every frontend UI change, first inspect the actual components and contracts in `components/common` and `components/ui`. Decide:
+
+1. Can an existing common component cover the required appearance and behavior as-is?
+2. If only an upstream shadcn/ui primitive covers it, does the requirement need Nexent brand styling, defaults or shared interactions?
+3. If common falls short, can its existing contract be extended cleanly instead of adding page-local overrides or a parallel component?
+4. If there is no suitable common component but project adaptation is needed, should a new common component compose/adapt the ui primitives?
+
+Prefer the existing common component when it fits. Direct ui use is appropriate when no project adaptation is needed. Create or extend common for meaningful project-wide presentation/interaction needs, then let business components consume it; keep genuinely domain-specific composition local. Record the choice briefly in the normal implementation reasoning, without adding a separate approval gate. See [the workflow and decision criteria](references/architecture.md#component-decision-before-implementation).
+
+## Component layers
+
+- `components/ui`: add shadcn/ui Radix primitives on demand, pin their provenance and periodically review upstream updates. Keep source adaptations limited to import paths, copyright headers and formatting.
+- `components/common`: own reusable Nexent brand styling, defaults and generic interactions. Evolve the shared contract to meet real requirements rather than repeatedly adapting primitives inside business pages.
+- Business components: compose the chosen components and supply domain data, conditions and operation callbacks.
+
+See [architecture](references/architecture.md#component-layers) for ownership boundaries and the relevant component reference for its actual implemented capabilities.

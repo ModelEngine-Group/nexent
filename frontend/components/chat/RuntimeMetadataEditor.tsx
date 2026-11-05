@@ -1,10 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
 import { Braces } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +14,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/common/Dialog";
 import { Textarea } from "@/components/ui/textarea";
 
 const MAX_METADATA_BYTES = 64 * 1024;
@@ -85,6 +87,9 @@ export function RuntimeMetadataEditor({
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+          onOpenAutoFocus={(event) => event.preventDefault()}
           className={elevated ? "z-[1100] sm:max-w-xl" : "sm:max-w-xl"}
         >
           <DialogHeader>

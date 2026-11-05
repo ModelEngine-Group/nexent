@@ -29,7 +29,7 @@ import {
   getTagDefinitionDisplayName,
   getTagValueDisplayName,
 } from "@/lib/systemTagLabels";
-import HighlightedText from "@/components/common/HighlightedText";
+import HighlightedText from "@/components/tag/HighlightedText";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
   TagDefinition,

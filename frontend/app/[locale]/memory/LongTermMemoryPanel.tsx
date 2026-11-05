@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -15,7 +17,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdown/MarkdownRenderer";
 import { Can } from "@/components/permission/Can";
 import {
   activateLongTermVersion,

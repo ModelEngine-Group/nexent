@@ -3,7 +3,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { RouteLoadingSkeleton } from "@/components/common/RouteLoadingSkeleton";
+import { RouteLoadingSkeleton } from "@/components/navigation/RouteLoadingSkeleton";
 
 interface RouteTransitionContentProps {
   pendingPath: string | null;

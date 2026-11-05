@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ThreadMessages } from "@/app/newchat/assistant-ui/thread";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { Agent } from "@/types/agentConfig";
 
 vi.mock("react-i18next", async (importOriginal) => ({

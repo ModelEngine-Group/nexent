@@ -1,10 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { memo, useState, type ComponentProps } from "react";
 import { FileTextIcon } from "lucide-react";
 import type { SourceMessagePartComponent } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
-import { Badge, badgeVariants, type BadgeProps } from "@/components/ui/badge";
+import {
+  Badge,
+  badgeVariants,
+  type BadgeProps,
+} from "@/components/common/Badge";
 
 const extractDomain = (url: string): string => {
   try {

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
 
 const activitySync = vi.hoisted(() => vi.fn());

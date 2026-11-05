@@ -21,7 +21,7 @@ import type {
   ModelOutletResponse,
   ThinkingDegreeMode,
 } from "@/types/modelProfile";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 import { ModelParameterField } from "./ModelParameterField";
 
 interface Props {
@@ -177,18 +177,19 @@ function Editor({
       )}
       {!disabled &&
         thinkingKeys.some((key) => Object.hasOwn(parameters, key)) && (
-          <StandardButton
+          <Button
+            variant="outline"
             onClick={() => {
               setThinkingMode(undefined);
               change({}, thinkingKeys);
             }}
           >
             {t("modelProfile.useOutletDefault")}
-          </StandardButton>
+          </Button>
         )}
-      <StandardButton variant="primary" htmlType="submit" disabled={disabled}>
+      <Button variant="default" type="submit" disabled={disabled}>
         {t("common.confirm")}
-      </StandardButton>
+      </Button>
     </Form>
   );
 }

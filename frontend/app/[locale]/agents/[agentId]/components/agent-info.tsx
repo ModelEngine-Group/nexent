@@ -1,26 +1,24 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { InputField } from "@/components/common/InputField";
+import { Textarea } from "@/components/common/Textarea";
+import { Button } from "@/components/common/Button";
+import { Hint } from "@/components/common/Hint";
 import { createElement, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Form,
   App,
-  Button,
-  Input,
   Row,
   Col,
   Flex,
   Avatar,
   Upload as AntdUpload,
   Spin,
-  Tooltip,
 } from "antd";
 import type { UploadProps } from "antd";
 import { Upload } from "lucide-react";
-
 import { useAgentStore, type AgentDraftPatch } from "@/stores/agentStore";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
@@ -45,13 +43,10 @@ import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import HighFidelityTextArea from "./HighFidelityTextArea";
 import AgentAvatarOptions from "./agent-avatar-options";
 import { createAgentIconFile } from "@/lib/chat/agentIconImage";
-
 const HIGH_FIDELITY_DESCRIPTION_LIMIT = 200;
-
 interface AgentInfoProps {
   highFidelity?: boolean;
 }
-
 export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -59,7 +54,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
   const form = Form.useFormInstance();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
-
   const updateDraftValue = (
     field: "display_name" | "name" | "description",
     value: string
@@ -67,7 +61,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
     form.setFieldValue(field, value);
     updateDraft({ [field]: value } as AgentDraftPatch);
   };
-
   const agentId = useAgentStore((state) => state.agentId);
   const [descriptionBaseline, setDescriptionBaseline] = useState({
     agentId,
@@ -120,7 +113,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           getAgentUploadedIconRevision(editedAgent.icon_url)
         )
       : undefined;
-
   const selectedIconKey = editedAgent.icon_url
     ? avatarSelection?.agentId === agentId &&
       avatarSelection.iconUrl === editedAgent.icon_url
@@ -129,7 +121,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
     : DEFAULT_AGENT_ICONS.find(
         (option) => option.icon === getAgentIcon({ agent_id: agentId ?? 0 })
       )?.key;
-
   const uploadIcon = async (
     source: File | (() => Promise<File>),
     presetKey?: DefaultAgentIconKey
@@ -194,7 +185,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
       return false;
     },
   };
-
   const identityFields = (
     <>
       <Row gutter={[12, 0]}>
@@ -233,7 +223,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
               },
             ]}
           >
-            <Input
+            <InputField
               disabled={isReadOnly}
               placeholder={t("agent.displayNamePlaceholder")}
               maxLength={AGENT_DISPLAY_NAME_MAX_LENGTH}
@@ -281,23 +271,20 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
               },
             ]}
           >
-            <Input
+            <InputField
               data-testid="agent-variable-name-input"
               disabled={isReadOnly}
               placeholder={t("agent.namePlaceholder")}
-              count={{
-                max: AGENT_NAME_MAX_LENGTH,
-                strategy: (value) => Array.from(value).length,
-              }}
               showCount
               onChange={(event) => updateDraftValue("name", event.target.value)}
+              countLimit={AGENT_NAME_MAX_LENGTH}
+              countStrategy={(value) => Array.from(value).length}
             />
           </Form.Item>
         </Col>
       </Row>
     </>
   );
-
   const descriptionTextAreaProps = {
     placeholder: t(
       highFidelity
@@ -349,16 +336,11 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
         <HighFidelityTextArea
           {...descriptionTextAreaProps}
           limit={HIGH_FIDELITY_DESCRIPTION_LIMIT}
-          classNames={{
-            root: "!h-[100px] !rounded-[4px] !border-[#c9c9c9]",
-            textarea:
-              "!h-[98px] !min-h-[98px] !resize-none !rounded-[4px] !px-3 !py-[5px] !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
-            count:
-              "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-          }}
+          className="!h-[98px] !min-h-[98px] !resize-none !rounded-[4px] !px-3 !py-[5px] !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+          countClassName="absolute bottom-2 right-3 !text-xs !leading-[22px] !text-[#808080]"
         />
       ) : (
-        <Input.TextArea
+        <Textarea
           {...descriptionTextAreaProps}
           showCount
           maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
@@ -366,14 +348,13 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
       )}
     </Form.Item>
   );
-
   const tagFields = (
     <Form.Item
       label={t("tagManagement.title.assignTags")}
       className="mb-0 mt-3"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap [&>span]:gap-2 [&_.ant-tag]:!m-0 [&_.ant-tag]:!h-[26px] [&_.ant-tag]:!rounded-full [&_.ant-tag]:!border-0 [&_.ant-tag]:!bg-[#E6F2FD] [&_.ant-tag]:!px-2.5 [&_.ant-tag]:!text-[12px] [&_.ant-tag]:!leading-[26px] [&_.ant-tag]:!text-[#0067D1]">
+        <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap [&>span]:gap-2 [&_.ant-tag]:!m-0 [&_.ant-tag]:!h-[26px] [&_.ant-tag]:!rounded-full [&_.ant-tag]:!border-0 [&_.ant-tag]:!bg-brand-soft [&_.ant-tag]:!px-2.5 [&_.ant-tag]:!text-[12px] [&_.ant-tag]:!leading-[26px] [&_.ant-tag]:!text-primary">
           {agentId !== null ? (
             <ResourceTagChips
               resourceType="agent"
@@ -388,24 +369,23 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           )}
         </div>
         <Button
-          type="link"
-          size="small"
           disabled={agentId === null || isReadOnly}
           onClick={() => setAssignTagsOpen(true)}
+          variant="link"
+          size="xs"
         >
           {t("tagManagement.action.editTags")}
         </Button>
       </div>
     </Form.Item>
   );
-
   const avatarField = (
     <Flex
       vertical
       align={highFidelity ? "flex-start" : "center"}
       className={highFidelity ? "min-h-[130px] items-start gap-2" : "h-full"}
     >
-      <Tooltip title={highFidelity ? t("agent.iconHint") : undefined}>
+      <Hint content={highFidelity ? t("agent.iconHint") : undefined}>
         <div
           className={
             highFidelity
@@ -415,7 +395,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
         >
           {t(highFidelity ? "agent.highFidelity.avatar" : "agent.icon")}
         </div>
-      </Tooltip>
+      </Hint>
       <div className="flex min-w-0 items-start gap-3">
         <AntdUpload {...uploadProps}>
           <div
@@ -470,7 +450,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
       )}
     </Flex>
   );
-
   return (
     <div className="w-full">
       {highFidelity ? (

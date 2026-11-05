@@ -16,7 +16,8 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
+import { Button as ProjectButton } from "@/components/common/Button";
+import { X } from "lucide-react";
 import styles from "./ParamDialog.module.css";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
@@ -101,10 +102,15 @@ export function ParamDialog({
             <span className="min-w-0 text-[16px] font-bold leading-6 text-[#1A1A1A]">
               {title}
             </span>
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <ProjectButton
+              variant="ghost"
+              size="icon"
+              className="size-[14px] p-0"
+              aria-label={t("common.close")}
               onClick={onClose}
-            />
+            >
+              <X className="size-[14px]" />
+            </ProjectButton>
           </div>
           {description ? (
             <div

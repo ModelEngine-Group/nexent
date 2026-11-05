@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
+import { Badge } from "@/components/common/Badge";
 import {
   createElement,
   useCallback,
@@ -13,7 +13,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, Modal, Spin, Tag } from "antd";
+import { App, Modal, Spin } from "antd";
 import {
   GitBranch,
   History,
@@ -23,7 +23,6 @@ import {
   X,
 } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-
 import AgentConfig from "./agent-config";
 import AgentAvatar from "../components/agent-avatar";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
@@ -56,7 +55,6 @@ import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
 } from "../../newchat/adapter/remote-chat-model-adapter";
-
 function resolveDraftFocusTarget(
   updatedFields: readonly Nl2AgentDraftField[]
 ): Nl2AgentConfigFocusTarget | null {
@@ -74,7 +72,6 @@ function resolveDraftFocusTarget(
   }
   return null;
 }
-
 interface PanelCardProps {
   title: string;
   children: ReactNode;
@@ -88,7 +85,6 @@ interface PanelCardProps {
   showHeader?: boolean;
   headerTestId?: string;
 }
-
 function PanelCard({
   title,
   children,
@@ -136,7 +132,6 @@ function PanelCard({
     </section>
   );
 }
-
 function AgentSetupContent({
   onBack,
   onManageVersions,
@@ -147,7 +142,9 @@ function AgentSetupContent({
   const { t } = useTranslation("common");
   const searchParams = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const { agentId } = useParams<{ agentId: string }>();
+  const { agentId } = useParams<{
+    agentId: string;
+  }>();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
@@ -233,19 +230,15 @@ function AgentSetupContent({
     tenantId,
     userId: user?.id,
   });
-
   useEffect(() => {
     resetFlow(currentAgentId);
   }, [currentAgentId, resetFlow]);
-
   useEffect(() => {
     if (previousTenantIdRef.current === undefined) {
       previousTenantIdRef.current = tenantId;
       return;
     }
-
     if (previousTenantIdRef.current === tenantId) return;
-
     // Discard the previous tenant's draft before an agent id can be reused.
     previousTenantIdRef.current = tenantId;
     resetAgentStore();
@@ -253,20 +246,17 @@ function AgentSetupContent({
     queryClient.removeQueries({ queryKey: ["agents"] });
     queryClient.removeQueries({ queryKey: ["tools"] });
   }, [queryClient, resetAgentStore, tenantId]);
-
   const enqueueSnapshotRefresh = useCallback(
     (agentId: number, focusTarget: Nl2AgentConfigFocusTarget | null = null) => {
       snapshotRefreshQueue.current = snapshotRefreshQueue.current
         .then(async () => {
           const initialState = useAgentStore.getState();
           if (initialState.currentAgentId !== agentId) return false;
-
           const autosaveSucceeded = await initialState.waitForIdle();
           if (!autosaveSucceeded) {
             throw new Error("Pending Agent edits could not be saved");
           }
           if (useAgentStore.getState().currentAgentId !== agentId) return false;
-
           const result = await searchAgentInfo(agentId, undefined, 0);
           if (!result.success || !result.data) {
             throw new Error(result.message);
@@ -276,7 +266,6 @@ function AgentSetupContent({
           if (!currentState.replaceServerSnapshot(agentId, result.data)) {
             throw new Error("Agent context changed during synchronization");
           }
-
           await queryClient.invalidateQueries({ queryKey: ["agents"] });
           if (focusTarget) requestConfigFocus(agentId, focusTarget);
           return true;
@@ -292,7 +281,6 @@ function AgentSetupContent({
     },
     [queryClient, requestConfigFocus]
   );
-
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
       void enqueueSnapshotRefresh(agentId).then((synchronized) => {
@@ -302,7 +290,6 @@ function AgentSetupContent({
     },
     [enqueueSnapshotRefresh, markCompletionSyncFailed, markCompletionSynced]
   );
-
   const handleStateEvent = useCallback(
     (event: Nl2AgentStateEvent) => {
       if (event.event === "prompt_generation_failed") {
@@ -326,25 +313,20 @@ function AgentSetupContent({
       synchronizeCompletion,
     ]
   );
-
   const handleGenerationStopped = useCallback(
     (agentId: number) => markGenerationStopped(agentId),
     [markGenerationStopped]
   );
-
   const handleManualUnlock = useCallback(() => {
     if (!canManualUnlock || currentAgentId === null) return;
     nl2AgentChatPanelRef.current?.cancelRun();
     markGenerationStopped(currentAgentId);
   }, [canManualUnlock, currentAgentId, markGenerationStopped]);
-
   const retryCompletionSync = useCallback(() => {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
-
   const handleAgentPublished = () => {
     if (currentAgentId === null) return;
-
     void Promise.all([
       refetchAgentInfo(),
       queryClient.invalidateQueries({
@@ -360,7 +342,6 @@ function AgentSetupContent({
     setIsGenerationVisible(false);
     setIsPublicationVisible(true);
   };
-
   return (
     <div
       ref={workspaceRef}
@@ -422,7 +403,8 @@ function AgentSetupContent({
                   <Button
                     icon={<RefreshCw size={14} />}
                     onClick={retryCompletionSync}
-                    size="small"
+                    variant="outline"
+                    size="xs"
                   >
                     {t("nl2agent.completion.retry", "Retry")}
                   </Button>
@@ -477,21 +459,23 @@ function AgentSetupContent({
             headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-6 py-3"
             leftAction={
               <Button
-                type="text"
                 aria-label={t("common.back")}
                 icon={<ArrowLeft size={14} />}
                 onClick={onBack}
                 className="!size-[14px] !p-0 !text-[#191919]"
+                variant="ghost"
+                size="sm"
               />
             }
             rightAction={
               <div className="flex min-w-0 max-w-full grow items-center gap-2">
                 <Button
-                  type="text"
                   icon={<GitBranch size={16} />}
                   aria-label={t("agent.version.manage")}
                   className="shrink-0"
                   onClick={onManageVersions}
+                  variant="ghost"
+                  size="sm"
                 />
                 {agentInfo?.current_version_no && total > 0 ? (
                   <div className="flex min-w-0 items-center gap-1">
@@ -499,19 +483,19 @@ function AgentSetupContent({
                     <span className="shrink-0 whitespace-nowrap">
                       {t("agent.version.current")}:
                     </span>
-                    <Tag
-                      color="cyan"
-                      variant="outlined"
+                    <Badge
                       title={
                         agentVersionDetail?.version.version_name ||
                         `V${agentInfo.current_version_no}`
                       }
                       className="!m-0 min-w-0 cursor-pointer truncate rounded-md font-mono text-sm"
                       onClick={() => setIsShowVersionManagePanel(true)}
+                      variant={"info"}
+                      size="sm"
                     >
                       {agentVersionDetail?.version.version_name ||
                         `V${agentInfo.current_version_no}`}
-                    </Tag>
+                    </Badge>
                     <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
                       / {t("agent.version.totalVersions", { count: total })}
                     </span>
@@ -520,9 +504,10 @@ function AgentSetupContent({
                 <Button
                   icon={<Sparkles size={16} />}
                   onClick={() => setIsGenerationVisible((visible) => !visible)}
-                  type="text"
                   aria-label={t("agent.page.panel.nl2agent")}
                   className="ml-auto shrink-0"
+                  variant="ghost"
+                  size="sm"
                 ></Button>
               </div>
             }
@@ -635,12 +620,14 @@ function AgentSetupContent({
     </div>
   );
 }
-
 export default function AgentEditor() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
-  const { agentId, locale } = useParams<{ agentId: string; locale: string }>();
+  const { agentId, locale } = useParams<{
+    agentId: string;
+    locale: string;
+  }>();
   const requestedAgentId = Number(agentId);
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
@@ -651,10 +638,8 @@ export default function AgentEditor() {
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
   const { isLoading: isDraftLoading, error: draftLoadError } =
     useAgentEditorDraft(requestedAgentId);
-
   useEffect(() => {
     if (isReturningRef.current) return;
-
     if (!isValidAgentId) {
       router.replace(`/${locale}/agents`);
       return;
@@ -664,9 +649,7 @@ export default function AgentEditor() {
       router.replace(`/${locale}/agents`);
     }
   }, [draftLoadError, isValidAgentId, locale, message, router, t]);
-
   if (!isValidAgentId) return null;
-
   if (isDraftLoading || draftLoadError) {
     return (
       <div
@@ -678,7 +661,6 @@ export default function AgentEditor() {
       </div>
     );
   }
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">
       <div className="min-h-0 flex-1">

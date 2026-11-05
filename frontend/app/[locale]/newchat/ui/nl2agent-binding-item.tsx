@@ -13,7 +13,7 @@ import {
   Target,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import type { Tool } from "@/types/agentConfig";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import type { BindingItemState } from "./installed-resource-binding-card";

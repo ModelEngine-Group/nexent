@@ -4,7 +4,7 @@
 
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 
 export function UserMessageEditComposer() {
   const { t } = useTranslation();
@@ -31,21 +31,24 @@ export function UserMessageEditComposer() {
       />
       <div className="flex items-center justify-end gap-2">
         <ComposerPrimitive.Cancel asChild>
-          <StandardButton
-            htmlType="button"
+          <Button
+            type="button"
             className="!rounded-full !bg-background"
+            variant="outline"
+            size="sm"
           >
             {t("common.cancel")}
-          </StandardButton>
+          </Button>
         </ComposerPrimitive.Cancel>
         <ComposerPrimitive.Send asChild>
-          <StandardButton
-            htmlType="button"
-            variant="primary"
+          <Button
+            type="button"
+            variant="default"
             className="!rounded-full !bg-foreground !text-background"
+            size="sm"
           >
             {t("chat.composer.send")}
-          </StandardButton>
+          </Button>
         </ComposerPrimitive.Send>
       </div>
     </ComposerPrimitive.Root>

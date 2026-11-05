@@ -1,22 +1,33 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentListTable, {
   formatAgentUpdateTime,
 } from "../../app/[locale]/agents/components/agent-list-table";
-import {
-  DEFAULT_AGENT_COLUMN_WIDTHS,
-  resizeAgentColumns,
-} from "../../app/[locale]/agents/components/agent-table-column-widths";
-import AgentTableHeader from "../../app/[locale]/agents/components/agent-list-table-header";
 import type { Agent } from "@/types/agentConfig";
 
 const session = vi.hoisted(() => ({ provider: "local" }));
+const bulkDelete = vi.hoisted(() => ({
+  isPending: false,
+  mutateAsync: vi.fn(),
+}));
+const showNotice = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/uiNotices", () => ({ showInfoNotice: showNotice }));
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { authProvider: session.provider } }),
+}));
+
+vi.mock("@/hooks/agent/useAgentBulkDelete", () => ({
+  useAgentBulkDelete: () => bulkDelete,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -96,6 +107,9 @@ const secondAgent = {
 describe("AgentListTable", () => {
   beforeEach(() => {
     session.provider = "local";
+    bulkDelete.isPending = false;
+    bulkDelete.mutateAsync.mockReset();
+    showNotice.mockReset();
   });
 
   it.each([
@@ -123,10 +137,10 @@ describe("AgentListTable", () => {
         within(firstRow).queryByText(provider === "cas" ? "刘晨" : "平台作者")
       ).not.toBeInTheDocument();
       expect(screen.getByText("Imported Author")).toBeInTheDocument();
-      expect(screen.getAllByRole("separator")).toHaveLength(7);
-      expect(screen.getByRole("columnheader", { name: "操作" })).toHaveClass(
-        "ant-table-cell-fix-end"
-      );
+      expect(screen.getAllByRole("separator")).toHaveLength(6);
+      expect(
+        screen.getByRole("columnheader", { name: "操作" })
+      ).not.toHaveClass("sticky");
       expect(agent.author).toBe("刘晨");
       expect(agent.author_cas_username).toBe("平台作者");
     }
@@ -150,7 +164,7 @@ describe("AgentListTable", () => {
     ).toEqual(["名称", "类型", "描述", "状态", "创建人", "更新时间", "操作"]);
     const table = screen.getAllByRole("table")[0];
     expect(table).toBeInTheDocument();
-    expect(table.closest(".agent-list-table")).toBeInTheDocument();
+    expect(table).toHaveAttribute("data-slot", "table");
 
     const rows = [firstAgent, secondAgent].map((agent) =>
       screen.getByRole("button", { name: agent.display_name }).closest("tr")!
@@ -159,15 +173,10 @@ describe("AgentListTable", () => {
     expect(within(rows[0]).getByText("2026-09-18")).toBeInTheDocument();
     expect(within(rows[0]).queryByText("2026-09-17")).not.toBeInTheDocument();
     expect(within(rows[1]).getAllByText("-")).toHaveLength(2);
-    expect(getByTestId("agent-list-table-scroll")).toHaveClass(
-      "flex-1",
-      "min-h-0"
-    );
-    expect(
-      table.closest(".agent-list-table")?.querySelector(".ant-pagination")
-    ).toBeNull();
-    expect(screen.getByRole("columnheader", { name: "操作" })).toHaveClass(
-      "ant-table-cell-fix-end"
+    expect(getByTestId("agent-list-table-scroll")).toHaveClass("min-h-0");
+    expect(table.querySelector(".ant-pagination")).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "操作" })).not.toHaveClass(
+      "sticky"
     );
   });
 
@@ -241,6 +250,77 @@ describe("AgentListTable", () => {
     expect(actions).toHaveAttribute("data-variant", "table");
   });
 
+  it("requires confirmation and retains failed selections after partial deletion", async () => {
+    bulkDelete.mutateAsync.mockResolvedValue({
+      deleted: [firstAgent],
+      failed: [secondAgent],
+    });
+    render(
+      <AgentListTable
+        agents={[firstAgent, secondAgent]}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onPublish={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "table.selectAll" }));
+    expect(bulkDelete.mutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "agentConfig.list.bulkDelete" })
+    );
+    expect(bulkDelete.mutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "common.confirm",
+      })
+    );
+    await waitFor(() => expect(showNotice).toHaveBeenCalledOnce());
+    expect(bulkDelete.mutateAsync).toHaveBeenCalledExactlyOnceWith([
+      firstAgent,
+      secondAgent,
+    ]);
+    const rowCheckbox = (name: string) =>
+      within(screen.getByRole("button", { name }).closest("tr")!).getByRole(
+        "checkbox"
+      );
+    expect(rowCheckbox(firstAgent.display_name!)).not.toBeChecked();
+    expect(rowCheckbox(secondAgent.display_name!)).toBeChecked();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("cancels deletion without a request and excludes read-only rows", () => {
+    render(
+      <AgentListTable
+        agents={[firstAgent, { ...secondAgent, permission: "READ_ONLY" }]}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onPublish={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+    const readOnlyRow = screen
+      .getByRole("button", { name: secondAgent.display_name })
+      .closest("tr")!;
+    expect(within(readOnlyRow).getByRole("checkbox")).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "table.selectAll" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "agentConfig.list.bulkDelete" })
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText(firstAgent.display_name!)
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(secondAgent.display_name!)
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "common.cancel" })
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(bulkDelete.mutateAsync).not.toHaveBeenCalled();
+  });
+
   it("formats only valid update timestamps", () => {
     expect(formatAgentUpdateTime("2026-09-18T10:30:00")).toBe("2026-09-18");
     expect(formatAgentUpdateTime("2026-02-30T10:30:00")).toBeNull();
@@ -249,93 +329,18 @@ describe("AgentListTable", () => {
   });
 });
 
-describe("Agent table column resizing", () => {
-  it("resizes columns without changing their order and protects neighboring minimum widths", () => {
-    const wider = resizeAgentColumns(DEFAULT_AGENT_COLUMN_WIDTHS, "name", 300);
-    expect(wider.name).toBe(300);
-    expect(wider.type).toBe(88);
-    expect(wider.description).toBe(DEFAULT_AGENT_COLUMN_WIDTHS.description);
-    expect(Object.keys(wider)).toEqual(
-      Object.keys(DEFAULT_AGENT_COLUMN_WIDTHS)
-    );
-    const narrower = resizeAgentColumns(wider, "name", -100);
-    expect(narrower.name).toBe(180);
-    expect(narrower.type).toBe(208);
-    expect(resizeAgentColumns(wider, "name", NaN)).toBe(wider);
-    expect(resizeAgentColumns(wider, "name", Infinity)).toBe(wider);
-  });
-
-  it("connects accessible header resizing to the controlled page preferences", () => {
-    const onColumnWidthsChange = vi.fn();
+describe("Agent table presentation", () => {
+  it("renders the shared table with column resize controls", () => {
     render(
       <AgentListTable
         agents={[firstAgent]}
-        columnWidths={DEFAULT_AGENT_COLUMN_WIDTHS}
-        onColumnWidthsChange={onColumnWidthsChange}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
         onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
-    expect(screen.getAllByRole("separator")).toHaveLength(7);
-    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize 名称" }), {
-      key: "ArrowRight",
-    });
-    expect(onColumnWidthsChange).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 256, type: 88 })
-    );
-  });
-
-  it("captures pointer dragging, enforces bounds, and stops after release or cancellation", () => {
-    const onResizeWidth = vi.fn();
-    render(
-      <table>
-        <thead>
-          <tr>
-            <AgentTableHeader
-              resizeWidth={240}
-              minWidth={180}
-              resizeLabel="Resize name"
-              onResizeWidth={onResizeWidth}
-            >
-              Name
-            </AgentTableHeader>
-          </tr>
-        </thead>
-      </table>
-    );
-    const handle = screen.getByRole("separator", { name: "Resize name" });
-    handle.setPointerCapture = vi.fn();
-    handle.hasPointerCapture = vi.fn(() => true);
-    handle.releasePointerCapture = vi.fn();
-    const pointer = (type: string, x: number, button = 0) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, {
-        clientX: { value: x },
-        button: { value: button },
-        pointerId: { value: 1 },
-        isPrimary: { value: true },
-      });
-      fireEvent(handle, event);
-    };
-    pointer("pointerdown", 100, 2);
-    pointer("pointermove", 140);
-    expect(onResizeWidth).not.toHaveBeenCalled();
-    pointer("pointerdown", 100);
-    pointer("pointermove", 160);
-    expect(onResizeWidth).toHaveBeenLastCalledWith(300);
-    expect(handle.setPointerCapture).toHaveBeenCalledWith(1);
-    pointer("pointermove", -100);
-    expect(onResizeWidth).toHaveBeenLastCalledWith(180);
-    pointer("pointerup", -100);
-    onResizeWidth.mockClear();
-    pointer("pointermove", 180);
-    expect(onResizeWidth).not.toHaveBeenCalled();
-    expect(handle.releasePointerCapture).toHaveBeenCalledWith(1);
-    pointer("pointerdown", 100);
-    pointer("pointercancel", 100);
-    pointer("pointermove", 200);
-    expect(onResizeWidth).not.toHaveBeenCalled();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByRole("separator")).toHaveLength(6);
   });
 });

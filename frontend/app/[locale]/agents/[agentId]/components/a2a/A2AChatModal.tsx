@@ -1,28 +1,28 @@
-"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"use client";
+import { Badge } from "@/components/common/Badge";
+import { Textarea } from "@/components/common/Textarea";
+import { Button } from "@/components/common/Button";
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Button, Input, Tag, Typography } from "antd";
+import { Modal, Typography } from "antd";
 import { Globe, Send, User, Bot, Loader2 } from "lucide-react";
 import { A2AExternalAgent, a2aClientService } from "@/services/a2aService";
 import log from "@/lib/logger";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
-
 const { Text } = Typography;
-
 export interface ChatMessage {
   id: string;
   role: "user" | "agent";
   content: string;
   timestamp: Date;
 }
-
 interface A2AChatModalProps {
   open: boolean;
   onClose: () => void;
   agent: A2AExternalAgent;
 }
-
 export default function A2AChatModal({
   open,
   onClose,
@@ -36,11 +36,9 @@ export default function A2AChatModal({
     Record<string, unknown>
   >({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-
   /**
    * Extract text content from A2A SendMessage response.
    * Supports multiple response formats:
@@ -50,7 +48,6 @@ export default function A2AChatModal({
    */
   const extractAgentContent = (data: any): string => {
     if (!data) return t("a2a.chat.noResponse");
-
     // Format 1: Direct message with parts
     if (data.message?.parts) {
       const parts = data.message.parts;
@@ -58,12 +55,10 @@ export default function A2AChatModal({
         return parts[0].text || t("a2a.chat.noResponse");
       }
     }
-
     // Format 1 fallback: Direct message as string
     if (typeof data.message === "string") {
       return data.message;
     }
-
     // Format 2: Task wrapper (A2A SendMessage standard)
     if (data.task?.status?.message?.parts) {
       const parts = data.task.status.message.parts;
@@ -71,24 +66,22 @@ export default function A2AChatModal({
         return parts[0].text || t("a2a.chat.noResponse");
       }
     }
-
     // Format 2 fallback: Task status message as string
     if (typeof data.task?.status?.message === "string") {
       return data.task.status.message;
     }
-
     // Format 3: Look for text in common locations
     if (data.text) return data.text;
-    if (data.content) return typeof data.content === "string" ? data.content : data.content?.text;
+    if (data.content)
+      return typeof data.content === "string"
+        ? data.content
+        : data.content?.text;
     if (data.result?.text) return data.result.text;
     if (data.result?.message?.text) return data.result.message.text;
-
     // Last resort: stringify meaningful data
     if (data.message) return JSON.stringify(data.message);
-
     return t("a2a.chat.noResponse");
   };
-
   useEffect(() => {
     if (open) {
       setMessages([]);
@@ -96,47 +89,39 @@ export default function A2AChatModal({
       setRuntimeMetadata({});
     }
   }, [open]);
-
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-
   const handleSend = async () => {
     if (!inputValue.trim() || sending) {
       return;
     }
-
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
       content: inputValue.trim(),
       timestamp: new Date(),
     };
-
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
     setSending(true);
-
     try {
       const result = await a2aClientService.sendChatMessage(
         String(agent.id),
         userMessage.content,
         runtimeMetadata
       );
-
       if (result.success) {
         // Support both direct message format and Task wrapper format (A2A SendMessage standard)
         // Format 1: { message: { parts: [...] } }
         // Format 2: { task: { status: { message: { parts: [...] } } } }
         const agentContent = extractAgentContent(result.data);
-
         const agentMessage: ChatMessage = {
           id: `agent-${Date.now()}`,
           role: "agent",
           content: agentContent,
           timestamp: new Date(),
         };
-
         setMessages((prev) => [...prev, agentMessage]);
       } else {
         const errorMessage: ChatMessage = {
@@ -157,21 +142,17 @@ export default function A2AChatModal({
       };
       setMessages((prev) => [...prev, errorMessage]);
     }
-
     setSending(false);
   };
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
-
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
-
   const renderMessageContent = (content: string) => {
     return content.split("\n").map((line, index) => (
       <span key={index}>
@@ -180,18 +161,21 @@ export default function A2AChatModal({
       </span>
     ));
   };
-
   return (
     <Modal
       title={
         <div className="flex items-center gap-2">
           <Globe size={18} className="text-blue-500" />
           <span>{t("a2a.chat.title")}</span>
-          <Tag color={agent.is_available ? "success" : "error"} className="ml-2">
+          <Badge
+            className="ml-2"
+            variant={agent.is_available ? "success" : "destructive"}
+            size="sm"
+          >
             {agent.is_available
               ? t("a2a.status.available")
               : t("a2a.status.unavailable")}
-          </Tag>
+          </Badge>
         </div>
       }
       open={open}
@@ -230,14 +214,10 @@ export default function A2AChatModal({
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`flex gap-2 max-w-[80%] ${
-                  message.role === "user" ? "flex-row-reverse" : "flex-row"
-                }`}
+                className={`flex gap-2 max-w-[80%] ${message.role === "user" ? "flex-row-reverse" : "flex-row"}`}
               >
                 <div
                   className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
@@ -266,9 +246,7 @@ export default function A2AChatModal({
                   </div>
                   <Text
                     type="secondary"
-                    className={`text-xs mt-1 block ${
-                      message.role === "user" ? "text-right" : "text-left"
-                    }`}
+                    className={`text-xs mt-1 block ${message.role === "user" ? "text-right" : "text-left"}`}
                   >
                     {formatTime(message.timestamp)}
                   </Text>
@@ -304,22 +282,24 @@ export default function A2AChatModal({
             />
           </div>
           <div className="flex gap-2">
-            <Input.TextArea
+            <Textarea
               placeholder={t("a2a.chat.placeholder")}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={2}
-              autoSize={{ minRows: 2, maxRows: 4 }}
               disabled={sending || !agent.is_available}
+              minRows={2}
+              maxRows={4}
             />
             <Button
-              type="primary"
               icon={<Send size={16} />}
               onClick={handleSend}
               loading={sending}
               disabled={!inputValue.trim() || !agent.is_available}
               className="h-auto"
+              variant="default"
+              size="sm"
             >
               {t("a2a.chat.send")}
             </Button>

@@ -4,21 +4,31 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "@/components/common/Modal";
 
 function renderModal(onOpenChange = vi.fn()) {
   render(
-    <StandardModal
+    <Modal
       open
       title="创建智能体"
       closeLabel="关闭"
-      cancelText="取消"
-      confirmText="确定"
-      onOpenChange={onOpenChange}
-      onClose={() => undefined}
+      onClose={() => {
+        if (((() => undefined) as () => boolean | void)() === false) return;
+        onOpenChange(false);
+      }}
+      actions={{
+        cancelLabel: "取消",
+        confirmLabel: "确定",
+        onCancel: () => {
+          onOpenChange(false);
+        },
+        onConfirm: () => {
+          onOpenChange(false);
+        },
+      }}
     >
       <input aria-label="名称" />
-    </StandardModal>
+    </Modal>
   );
   return onOpenChange;
 }
@@ -37,18 +47,28 @@ describe("StandardModal keyboard dismissal (WCAG 2.1.2 / ARIA APG)", () => {
   it("keeps Escape inert only when closeOnEscape is explicitly disabled", async () => {
     const onOpenChange = vi.fn();
     render(
-      <StandardModal
+      <Modal
         open
         title="长表单"
         closeLabel="关闭"
-        cancelText="取消"
-        confirmText="确定"
         closeOnEscape={false}
-        onOpenChange={onOpenChange}
-        onClose={() => undefined}
+        onClose={() => {
+          if (((() => undefined) as () => boolean | void)() === false) return;
+          onOpenChange(false);
+        }}
+        actions={{
+          cancelLabel: "取消",
+          confirmLabel: "确定",
+          onCancel: () => {
+            onOpenChange(false);
+          },
+          onConfirm: () => {
+            onOpenChange(false);
+          },
+        }}
       >
         <input aria-label="名称" />
-      </StandardModal>
+      </Modal>
     );
     const dialog = await screen.findByRole("dialog");
 

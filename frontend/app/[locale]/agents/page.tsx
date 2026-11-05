@@ -4,22 +4,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
+import { App, Empty, Modal, Spin } from "antd";
 import {
   ChevronDown,
   ChevronUp,
   FileInput,
   LayoutGrid,
   List,
-  Search,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Button } from "@/components/common/Button";
+import { SearchInput } from "@/components/common/SearchInput";
+import { Pagination } from "@/components/common/Pagination";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -37,11 +36,8 @@ import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
-import AgentListTable, {
-  DEFAULT_AGENT_COLUMN_WIDTHS,
-} from "./components/agent-list-table";
+import AgentListTable from "./components/agent-list-table";
 import AgentVersion from "./agent-version";
-import "./agent-list.css";
 
 export default function AgentsPage() {
   const { t } = useTranslation("common");
@@ -52,10 +48,9 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
-  const [jumpPage, setJumpPage] = useState<number | null>(null);
-  const [tableColumnWidths, setTableColumnWidths] = useState(
-    DEFAULT_AGENT_COLUMN_WIDTHS
-  );
+  const [tableColumnWidths, setTableColumnWidths] = useState<
+    Record<string, number>
+  >({});
   const [view, setView] = useState<"grid" | "list">("grid");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
@@ -135,6 +130,10 @@ export default function AgentsPage() {
     ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
     ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
   });
+  useEffect(() => {
+    if (pagination && page > Math.max(1, pagination.totalPages))
+      setPage(Math.max(1, pagination.totalPages));
+  }, [page, pagination]);
   const isEmptyAgentList =
     !isLoading &&
     !isError &&
@@ -203,7 +202,7 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
+    <div className="[font-family:HarmonyOS_Sans_SC,Huawei_Sans,system-ui,sans-serif] [&_.ant-select]:[font-family:inherit] [&_.ant-input-number]:[font-family:inherit] flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
           {t("sidebar.agentConfig")}
@@ -264,30 +263,27 @@ export default function AgentsPage() {
                   </span>
                 }
               >
-                <StandardButton
-                  variant="primary"
+                <Button
+                  variant="default"
                   onClick={() => setIsCreateOpen(true)}
+                  size="sm"
                 >
                   {t("agent.action.create")}
-                </StandardButton>
+                </Button>
               </Empty>
             </div>
           ) : (
             <>
               <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
-                <div
-                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
-                >
-                  <StandardInput
-                    allowClear
-                    prefix={<Search className="size-4 text-[#777777]" />}
+                <div className="flex w-full min-w-0 items-center gap-2 lg:w-1/2">
+                  <SearchInput
                     placeholder={t("agentSelector.searchPlaceholder")}
                     value={search}
                     onChange={(event) => {
                       setSearch(event.target.value);
                       setPage(1);
                     }}
-                    className="!h-8 !w-full"
+                    className="min-w-0 flex-1"
                   />
                   <TagFilterPopover
                     definitions={tagDefinitions ?? []}
@@ -300,24 +296,27 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
-                  <StandardButton
+                  <Button
                     icon={<FileInput className="size-4" />}
                     onClick={handleImport}
+                    variant="outline"
+                    size="sm"
                   >
                     {t("agentConfig.button.import")}
-                  </StandardButton>
-                  <StandardButton
-                    variant="primary"
+                  </Button>
+                  <Button
+                    variant="default"
                     onClick={() => setIsCreateOpen(true)}
+                    size="sm"
                   >
                     {t("agentConfig.list.new")}
-                  </StandardButton>
+                  </Button>
                   <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
                     <button
                       type="button"
                       className={`flex size-[30px] items-center justify-center ${
                         view === "list"
-                          ? "bg-[#0067d1] text-white"
+                          ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active"
                           : "text-[#777777]"
                       }`}
                       aria-label={t("agentConfig.list.listView")}
@@ -330,7 +329,7 @@ export default function AgentsPage() {
                       type="button"
                       className={`flex size-[30px] items-center justify-center ${
                         view === "grid"
-                          ? "bg-[#0067d1] text-white"
+                          ? "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active"
                           : "text-[#777777]"
                       }`}
                       aria-label={t("agentConfig.list.gridView")}
@@ -360,9 +359,13 @@ export default function AgentsPage() {
                     <p className="text-sm text-slate-500">
                       {t("agentRepository.mine.loadError")}
                     </p>
-                    <StandardButton onClick={() => refetch()}>
+                    <Button
+                      onClick={() => refetch()}
+                      variant="outline"
+                      size="sm"
+                    >
                       {t("repository.common.retry")}
-                    </StandardButton>
+                    </Button>
                   </div>
                 ) : (
                   <div
@@ -396,70 +399,17 @@ export default function AgentsPage() {
                     ) : (
                       <Empty className="py-12" />
                     )}
-                    <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
-                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
-                        {t("agentConfig.list.total", {
-                          count: pagination?.total ?? 0,
-                        })}
-                      </span>
-                      <div className="flex h-auto flex-wrap items-center justify-end gap-2 md:h-8">
-                        <Select
-                          aria-label={t("agentConfig.list.pageSize")}
-                          value={pageSize}
-                          options={[10, 12, 20, 50].map((size) => ({
-                            value: size,
-                            label: t("agentConfig.list.perPage", {
-                              count: size,
-                            }),
-                          }))}
-                          onChange={(nextSize) => {
-                            setPageSize(nextSize);
-                            setPage(1);
-                            setJumpPage(null);
-                          }}
-                          className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
-                        />
-                        <StandardPaginator
-                          current={pagination?.page ?? page}
-                          pageSize={pageSize}
-                          total={pagination?.total ?? 0}
-                          showSizeChanger={false}
-                          onChange={setPage}
-                        />
-                        <InputNumber
-                          aria-label={t("agentConfig.list.jumpPage")}
-                          min={1}
-                          max={Math.max(
-                            1,
-                            Math.ceil((pagination?.total ?? 0) / pageSize)
-                          )}
-                          controls={false}
-                          value={jumpPage}
-                          onChange={setJumpPage}
-                          className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
-                        />
-                        <StandardButton
-                          className="!px-2"
-                          onClick={() => {
-                            if (jumpPage !== null) {
-                              setPage(
-                                Math.min(
-                                  jumpPage,
-                                  Math.max(
-                                    1,
-                                    Math.ceil(
-                                      (pagination?.total ?? 0) / pageSize
-                                    )
-                                  )
-                                )
-                              );
-                            }
-                          }}
-                        >
-                          {t("agentConfig.list.jump")}
-                        </StandardButton>
-                      </div>
-                    </div>
+                    <Pagination
+                      current={pagination?.page ?? page}
+                      pageSize={pageSize}
+                      total={pagination?.total ?? 0}
+                      showTotal
+                      showSizeChanger
+                      showQuickJumper
+                      pageSizeOptions={[10, 12, 20, 50]}
+                      onPageSizeChange={setPageSize}
+                      onPageChange={setPage}
+                    />
                   </div>
                 )}
               </div>

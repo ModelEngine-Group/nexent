@@ -3,7 +3,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RawStreamPreviewViewer } from "@/components/common/rawStreamPreviewViewer";
+import { RawStreamPreviewViewer } from "@/components/preview/rawStreamPreviewViewer";
 import { fetchPreviewBlobWithMeta } from "@/lib/filePreviewUtils";
 import { pptxGroupRotationStyle } from "@/lib/officePreview";
 import { renderAsync } from "docx-preview";

@@ -40,7 +40,7 @@ import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
 import { deriveWelcomeSuggestions } from "./welcome-suggestions";
 import newChatStyles from "./newchat-design.module.css";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +48,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/common/Dialog";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -440,7 +440,12 @@ export const Thread: FC<ThreadProps> = ({
           open={Boolean(manualShareUrl)}
           onOpenChange={(open) => !open && setManualShareUrl(null)}
         >
-          <DialogContent className="max-w-lg">
+          <DialogContent
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            className="max-w-lg"
+          >
             <DialogHeader>
               <DialogTitle>
                 {t("chatInterface.shareLinkReady", "分享链接已生成")}

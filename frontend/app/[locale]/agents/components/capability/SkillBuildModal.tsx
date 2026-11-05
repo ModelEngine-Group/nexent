@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/common/Button";
 import {
   useState,
   useEffect,
@@ -11,17 +12,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Tabs,
-  Form,
-  Input,
-  Button,
-  message,
-  Flex,
-  Spin,
-  Tooltip,
-} from "antd";
+import { Modal, Tabs, Form, message, Flex, Spin } from "antd";
 import { Upload as UploadIcon, Trash2, MessageCircle, Box } from "lucide-react";
 import { extractSkillInfo } from "@/lib/skillFileUtils";
 import yaml from "js-yaml";
@@ -54,16 +45,12 @@ import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManageme
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { Nl2SkillChatPanel } from "../../../newchat/assistant-ui/nl2skill-chat-panel";
 import type { Nl2SkillStreamEvent } from "../../../newchat/adapter/remote-chat-model-adapter";
-
-const { TextArea } = Input;
-
 const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
   USER_ROLES.SU,
   USER_ROLES.ADMIN,
   USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
-
 interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
@@ -73,13 +60,11 @@ interface SkillBuildModalProps {
   zIndex?: number;
   initialTab?: "interactive" | "upload";
 }
-
 interface StreamedFrontmatter {
   name: string;
   description: string;
   tags: string[];
 }
-
 function parseStreamedFrontmatter(content: string): StreamedFrontmatter | null {
   try {
     const parsed = yaml.load(content) as Record<string, unknown> | null;
@@ -98,22 +83,21 @@ function parseStreamedFrontmatter(content: string): StreamedFrontmatter | null {
     return null;
   }
 }
-
 function stripLeadingSkillFrontmatter(content: string): string {
   let normalizedContent = content;
   const frontmatterPattern = /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/;
-
   while (frontmatterPattern.test(normalizedContent)) {
     normalizedContent = normalizedContent.replace(frontmatterPattern, "");
   }
-
   return normalizedContent;
 }
-
 function flattenSkillFiles(
   nodes: SkillFileNode[],
   skillName: string
-): Array<{ path: string; previewStatus: "readable" | "unsupported" }> {
+): Array<{
+  path: string;
+  previewStatus: "readable" | "unsupported";
+}> {
   const paths: Array<{
     path: string;
     previewStatus: "readable" | "unsupported";
@@ -141,7 +125,6 @@ function flattenSkillFiles(
   walk(nodes);
   return paths;
 }
-
 function sortSkillTabs(tabs: SkillFileContent[]): SkillFileContent[] {
   return [...tabs].sort((a, b) => {
     if (a.path === "SKILL.md") return -1;
@@ -149,7 +132,6 @@ function sortSkillTabs(tabs: SkillFileContent[]): SkillFileContent[] {
     return a.path.localeCompare(b.path);
   });
 }
-
 export default function SkillBuildModal({
   isOpen,
   onCancel,
@@ -216,33 +198,27 @@ export default function SkillBuildModal({
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
-  const {
-    data: tagDefinitions,
-    refresh: refreshTagDefinitions,
-  } = useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
-
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions, refresh: refreshTagDefinitions } =
+    useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
-
   // Content input streaming state - multi-file tabs
   const [skillTabs, setSkillTabs] = useState<SkillFileContent[]>([
     { path: "SKILL.md", content: "" },
   ]);
   const [activeSkillTab, setActiveSkillTab] = useState<string>("SKILL.md");
   const [isStreaming, setIsStreaming] = useState(false);
-
   const skillBodyBufferRef = useRef("");
   const streamedBodyLengthRef = useRef(0);
   const streamHasDraftRef = useRef(false);
   const previousTabsRef = useRef<SkillFileContent[] | null>(null);
   const previousDraftFieldsRef = useRef<Partial<SkillFormData> | null>(null);
-
   // Refs for per-tab scroll state: tracks whether each textarea should auto-scroll
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const textareaRefs = useRef<Record<string, any>>({});
   const shouldAutoScrollRef = useRef<Record<string, boolean>>({});
-
   // Detect if the textarea is currently near the bottom (within threshold pixels)
   const isTextareaAtBottom = (tabPath: string): boolean => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -253,12 +229,10 @@ export default function SkillBuildModal({
       textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 20
     );
   };
-
   // Update shouldAutoScrollRef when user scrolls manually
   const handleTextareaScroll = (tabPath: string) => {
     shouldAutoScrollRef.current[tabPath] = isTextareaAtBottom(tabPath);
   };
-
   // Scroll textarea to bottom, respecting user scroll preference and throttled via RAF
   const scrollTextareaToBottom = (tabPath: string) => {
     if (!shouldAutoScrollRef.current[tabPath]) return;
@@ -271,12 +245,10 @@ export default function SkillBuildModal({
       }
     });
   };
-
   // Track current tabs during streaming to avoid stale closure issues
   const streamingTabsRef = useRef<SkillFileContent[]>([
     { path: "SKILL.md", content: "" },
   ]);
-
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -293,7 +265,6 @@ export default function SkillBuildModal({
       cancelled = true;
     };
   }, [isOpen]);
-
   useEffect(() => {
     if (!isOpen || isEditMode) return;
     form.setFieldsValue({
@@ -301,7 +272,6 @@ export default function SkillBuildModal({
       ingroup_permission: "READ_ONLY",
     });
   }, [accessibleGroupIds, form, isEditMode, isOpen]);
-
   useEffect(() => {
     if (!isOpen) {
       creationConversationId.current = undefined;
@@ -326,7 +296,6 @@ export default function SkillBuildModal({
       setIsLoadingEditFiles(false);
     }
   }, [isOpen, initialTab]);
-
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);
   useEffect(() => {
@@ -338,14 +307,14 @@ export default function SkillBuildModal({
       setUploadIsCreateMode(true);
     }
   }, [uploadExtractedSkillName, allSkills]);
-
   useEffect(() => {
     if (!isOpen || !editingSkill) return;
     const skillName = editingSkill.name?.trim() || "";
     let cancelled = false;
-
     const applySkillInfo = (
-      skill: Partial<SkillListItem> & { content?: string | null }
+      skill: Partial<SkillListItem> & {
+        content?: string | null;
+      }
     ) => {
       if (cancelled) return;
       const nextName = skill.name?.trim() || skillName;
@@ -359,12 +328,10 @@ export default function SkillBuildModal({
         ingroup_permission: skill.ingroup_permission || "READ_ONLY",
       });
     };
-
     setActiveTab("interactive");
     setEditFilesError(null);
     setLoadedEditSkillId(null);
     setIsLoadingEditFiles(true);
-
     const loadEditFiles = async () => {
       try {
         const result = await fetchSkillById(editingSkill.skill_id);
@@ -442,14 +409,11 @@ export default function SkillBuildModal({
         }
       }
     };
-
     void loadEditFiles();
-
     return () => {
       cancelled = true;
     };
   }, [isOpen, editingSkill?.skill_id]);
-
   const handleNameChange = (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
     setInteractiveSkillName(value);
@@ -460,17 +424,14 @@ export default function SkillBuildModal({
       setActiveSkillTab("SKILL.md");
     }
   };
-
   const closeModal = () => {
     form.resetFields();
     onCancel();
   };
-
   // Cleanup when modal is closed
   const handleModalClose = () => {
     closeModal();
   };
-
   const handleManualSubmit = async () => {
     try {
       if (isEditMode && (isLoadingEditFiles || editFilesError)) {
@@ -487,10 +448,8 @@ export default function SkillBuildModal({
         }
       }
       setIsSubmitting(true);
-
       const skillTab = skillTabs.find((t) => t.path === "SKILL.md");
       const content = skillTab?.content || "";
-
       const extraFiles = skillTabs
         .filter(
           (t) =>
@@ -503,13 +462,12 @@ export default function SkillBuildModal({
           content: t.content || "",
           encoding: t.encoding,
         }));
-
       await submitSkillForm(
         {
           ...values,
           // Legacy flat tags are compatibility-only. Existing values are
           // preserved on edit; new assignments use the structured modal.
-          tags: isEditMode ? editingSkill?.tags ?? [] : [],
+          tags: isEditMode ? (editingSkill?.tags ?? []) : [],
           content,
           files: extraFiles.length > 0 ? extraFiles : undefined,
         } as SkillData,
@@ -545,18 +503,15 @@ export default function SkillBuildModal({
       setIsSubmitting(false);
     }
   };
-
   const handleUploadSubmit = async () => {
     if (!uploadFile) {
       message.warning(t("skillManagement.message.pleaseSelectFile"));
       return;
     }
-
     if (!uploadExtractedSkillName.trim()) {
       message.warning(t("skillManagement.form.nameRequired"));
       return;
     }
-
     setIsSubmitting(true);
     try {
       await submitSkillFromFile(
@@ -571,11 +526,9 @@ export default function SkillBuildModal({
       setIsSubmitting(false);
     }
   };
-
   useEffect(() => {
     streamingTabsRef.current = skillTabs;
   }, [skillTabs]);
-
   const parseAndApplyStreamedFrontmatter = (frontmatterYaml: string) => {
     const parsed = parseStreamedFrontmatter(frontmatterYaml);
     if (!parsed) return;
@@ -588,7 +541,6 @@ export default function SkillBuildModal({
     if (parsed.tags.length > 0) updates.tags = parsed.tags;
     if (Object.keys(updates).length > 0) form.setFieldsValue(updates);
   };
-
   const getDraftSnapshot = useCallback((): Record<string, unknown> => {
     const values = form.getFieldsValue();
     return {
@@ -602,9 +554,7 @@ export default function SkillBuildModal({
         .map((tab) => ({ ...tab })),
     };
   }, [form]);
-
   const targetedFilesRef = useRef<string[] | null>(null);
-
   const beginDraftStream = () => {
     if (streamHasDraftRef.current) return;
     previousTabsRef.current = streamingTabsRef.current.map((tab) => ({
@@ -630,7 +580,6 @@ export default function SkillBuildModal({
     setSkillTabs(initialTabs);
     setActiveSkillTab("SKILL.md");
   };
-
   const appendFileDelta = (path: string, content: string) => {
     setSkillTabs((previous) => {
       const next = previous.some((tab) => tab.path === path)
@@ -642,7 +591,6 @@ export default function SkillBuildModal({
       return next;
     });
   };
-
   const appendSkillBodyDelta = (content: string) => {
     skillBodyBufferRef.current += content;
     const normalized = skillBodyBufferRef.current.replace(/^\r?\n/, "");
@@ -652,7 +600,6 @@ export default function SkillBuildModal({
       if (delta) appendFileDelta("SKILL.md", delta);
       return;
     }
-
     const frontmatterEnd = normalized.search(/\r?\n---(?:\r?\n|$)/);
     if (frontmatterEnd < 0) {
       parseAndApplyStreamedFrontmatter(
@@ -660,7 +607,6 @@ export default function SkillBuildModal({
       );
       return;
     }
-
     const frontmatter = normalized
       .slice(3, frontmatterEnd)
       .replace(/^\r?\n/, "");
@@ -672,7 +618,6 @@ export default function SkillBuildModal({
     streamedBodyLengthRef.current = body.length;
     if (delta) appendFileDelta("SKILL.md", delta);
   };
-
   const rollbackDraftStream = () => {
     if (previousTabsRef.current) {
       const restored = previousTabsRef.current.map((tab) => ({ ...tab }));
@@ -690,18 +635,13 @@ export default function SkillBuildModal({
     streamHasDraftRef.current = false;
     setIsStreaming(false);
   };
-
   const handleAttemptRollback = (event: Nl2SkillStreamEvent): boolean => {
-    if (
-      event.type === "model_attempt_control" &&
-      event.phase === "rollback"
-    ) {
+    if (event.type === "model_attempt_control" && event.phase === "rollback") {
       rollbackDraftStream();
       return true;
     }
     return false;
   };
-
   const handleNl2SkillStreamEvent = useCallback(
     (event: Nl2SkillStreamEvent) => {
       if (event.type === "target_files") {
@@ -711,7 +651,6 @@ export default function SkillBuildModal({
         setIsStreaming(true);
       }
       if (handleAttemptRollback(event)) return;
-
       if (event.type === "skill_body" || event.type === "file_content") {
         beginDraftStream();
         setIsStreaming(true);
@@ -743,29 +682,24 @@ export default function SkillBuildModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isEditMode, t]
   );
-
   const modalBodyFrame = "min(92vh, 760px)";
   const modalViewportFrame = "calc(100vh - 32px)";
   const editingSkillName =
     editingSkill?.name?.trim() || interactiveSkillName.trim();
   const isEditContentReady =
     !isEditMode || loadedEditSkillId === editingSkill?.skill_id;
-
   const renderUploadTab = () => {
     const existingSkill = allSkills.find(
       (s) =>
         s.name.trim().toLowerCase() ===
         uploadExtractedSkillName.trim().toLowerCase()
     );
-
     const handleFileSelection = async (files: FileList | null) => {
       if (!files || files.length === 0) return;
       const file = files[files.length - 1];
-
       if (uploadFile) {
         message.warning(t("skillManagement.message.onlyOneFileAllowed"));
       }
-
       setUploadFile(file);
       setUploadExtractingName(true);
       try {
@@ -785,7 +719,6 @@ export default function SkillBuildModal({
         setUploadExtractingName(false);
       }
     };
-
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
@@ -810,13 +743,22 @@ export default function SkillBuildModal({
                   "skillManagement.form.uploadSkillNamePlaceholder"
                 )}
                 style={{ fontWeight: 500 }}
-                status={
-                  existingSkill
+                aria-invalid={
+                  (existingSkill
                     ? "error"
                     : !uploadExtractedSkillName && uploadFile
                       ? "warning"
-                      : undefined
+                      : undefined) === "error"
                 }
+                className={cn(
+                  (existingSkill
+                    ? "error"
+                    : !uploadExtractedSkillName && uploadFile
+                      ? "warning"
+                      : undefined) === "warning"
+                    ? "border-amber-500 focus-visible:border-amber-500"
+                    : undefined
+                )}
               />
               {uploadExtractedSkillName && existingSkill ? (
                 <span className="ml-1 text-xs text-red-500">
@@ -883,10 +825,12 @@ export default function SkillBuildModal({
                   </div>
                 </div>
                 <Button
-                  type="text"
-                  danger
-                  size="small"
-                  className="ml-2 flex-shrink-0"
+                  className={[
+                    "ml-2 flex-shrink-0",
+                    "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   onClick={(event) => {
                     event.stopPropagation();
                     setUploadFile(null);
@@ -896,6 +840,8 @@ export default function SkillBuildModal({
                     ) as HTMLInputElement;
                     if (input) input.value = "";
                   }}
+                  variant="ghost"
+                  size="xs"
                 >
                   <Trash2 size={14} />
                 </Button>
@@ -909,13 +855,15 @@ export default function SkillBuildModal({
   const bindSavedSkill = async (id: number) => {
     savedCreatorSkillId.current = id;
     if (creationConversationId.current) {
-      await conversationService.bindTarget(Number(creationConversationId.current), {
-        type: "skill",
-        id,
-      });
+      await conversationService.bindTarget(
+        Number(creationConversationId.current),
+        {
+          type: "skill",
+          id,
+        }
+      );
     }
   };
-
   const renderChatPanel = () => (
     <Nl2SkillChatPanel
       getDraftSnapshot={getDraftSnapshot}
@@ -931,7 +879,6 @@ export default function SkillBuildModal({
       onSkillFileSelect={setActiveSkillTab}
     />
   );
-
   const renderDraftPanel = () => (
     <SkillDraftPanel
       form={form}
@@ -957,7 +904,6 @@ export default function SkillBuildModal({
       canAssignTags={editingSkill?.permission !== "READ_ONLY"}
     />
   );
-
   const tabItems = [
     {
       key: "interactive",
@@ -979,7 +925,6 @@ export default function SkillBuildModal({
     },
   ];
   const visibleTabItems = isEditMode ? [tabItems[0]] : tabItems;
-
   const getConfirmButtonText = () => {
     if (isEditMode) {
       return t("skillManagement.mode.saveChanges");
@@ -989,151 +934,157 @@ export default function SkillBuildModal({
     }
     return t("skillManagement.mode.create");
   };
-
   return (
     <>
-    <Modal
-      title={
-        <div>
-          <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
-            {isEditMode
-              ? t("skillManagement.edit.title")
-              : t("skillManagement.title")}
+      <Modal
+        title={
+          <div>
+            <div className="text-xl font-semibold leading-7 text-slate-900 dark:text-slate-100">
+              {isEditMode
+                ? t("skillManagement.edit.title")
+                : t("skillManagement.title")}
+            </div>
+            <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
+              {isEditMode
+                ? t("skillManagement.edit.subtitle", { name: editingSkillName })
+                : t("skillManagement.create.subtitle")}
+            </div>
           </div>
-          <div className="mt-1 text-sm font-normal text-slate-500 dark:text-slate-400">
-            {isEditMode
-              ? t("skillManagement.edit.subtitle", { name: editingSkillName })
-              : t("skillManagement.create.subtitle")}
-          </div>
-        </div>
-      }
-      open={isOpen}
-      onCancel={handleModalClose}
-      destroyOnHidden
-      zIndex={zIndex}
-      centered
-      width="min(1180px, calc(100vw - 32px))"
-      styles={{
-        container: {
-          display: "flex",
-          flexDirection: "column",
-          maxHeight: modalViewportFrame,
-          overflow: "hidden",
-        },
-        body: {
-          display: "flex",
-          flex: "1 1 auto",
-          flexDirection: "column",
-          height: modalBodyFrame,
-          maxHeight: modalBodyFrame,
-          minHeight: 0,
-          overflow: "hidden",
-        },
-      }}
-      footer={[
-        <Button key="cancel" onClick={handleModalClose}>
-          {t("common.cancel")}
-        </Button>,
-        isEditMode || activeTab === "interactive" ? (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleManualSubmit}
-            disabled={
-              isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ) : (
-          <Button
-            key="submit"
-            type="primary"
-            loading={isSubmitting}
-            onClick={handleUploadSubmit}
-            disabled={
-              !uploadFile ||
-              !uploadExtractedSkillName.trim() ||
-              !uploadIsCreateMode
-            }
-          >
-            {getConfirmButtonText()}
-          </Button>
-        ),
-      ]}
-    >
-      <Tabs
-        activeKey={isEditMode ? "interactive" : activeTab}
-        onChange={(key) => {
-          if (!isEditMode) {
-            setActiveTab(key);
-          }
+        }
+        open={isOpen}
+        onCancel={handleModalClose}
+        destroyOnHidden
+        zIndex={zIndex}
+        centered
+        width="min(1180px, calc(100vw - 32px))"
+        styles={{
+          container: {
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: modalViewportFrame,
+            overflow: "hidden",
+          },
+          body: {
+            display: "flex",
+            flex: "1 1 auto",
+            flexDirection: "column",
+            height: modalBodyFrame,
+            maxHeight: modalBodyFrame,
+            minHeight: 0,
+            overflow: "hidden",
+          },
         }}
-        items={visibleTabItems}
-        className="skill-build-tabs shrink-0"
+        footer={[
+          <Button
+            key="cancel"
+            onClick={handleModalClose}
+            variant="outline"
+            size="sm"
+          >
+            {t("common.cancel")}
+          </Button>,
+          isEditMode || activeTab === "interactive" ? (
+            <Button
+              key="submit"
+              loading={isSubmitting}
+              onClick={handleManualSubmit}
+              disabled={
+                isEditMode && (isLoadingEditFiles || Boolean(editFilesError))
+              }
+              variant="default"
+              size="sm"
+            >
+              {getConfirmButtonText()}
+            </Button>
+          ) : (
+            <Button
+              key="submit"
+              loading={isSubmitting}
+              onClick={handleUploadSubmit}
+              disabled={
+                !uploadFile ||
+                !uploadExtractedSkillName.trim() ||
+                !uploadIsCreateMode
+              }
+              variant="default"
+              size="sm"
+            >
+              {getConfirmButtonText()}
+            </Button>
+          ),
+        ]}
+      >
+        <Tabs
+          activeKey={isEditMode ? "interactive" : activeTab}
+          onChange={(key) => {
+            if (!isEditMode) {
+              setActiveTab(key);
+            }
+          }}
+          items={visibleTabItems}
+          className="skill-build-tabs shrink-0"
+        />
+        {isEditMode && !isEditContentReady ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Spin spinning={isLoadingEditFiles}>
+              {editFilesError ? (
+                <p className="text-sm text-red-500">{editFilesError}</p>
+              ) : (
+                <div className="h-16 w-16" />
+              )}
+            </Spin>
+          </div>
+        ) : isEditMode || activeTab === "interactive" ? (
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            {renderChatPanel()}
+            {renderDraftPanel()}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1">{renderUploadTab()}</div>
+        )}
+        <style jsx global>{`
+          .skill-build-info-form .ant-form-item-label {
+            padding-bottom: 3px !important;
+          }
+
+          .skill-build-info-form .ant-form-item-label > label {
+            height: 20px;
+            color: #475569;
+            font-size: 12px;
+            line-height: 20px;
+          }
+
+          .expanded-file-editor textarea {
+            max-height: 70vh !important;
+            overflow-y: auto !important;
+            resize: none !important;
+          }
+        `}</style>
+      </Modal>
+      <ResourceTagAssignmentModal
+        open={assignTagsOpen}
+        onClose={() => {
+          setAssignTagsOpen(false);
+          setTagPreviewRefreshKey((current) => current + 1);
+        }}
+        resourceType="skill"
+        resourceId={String(editingSkill?.skill_id ?? "")}
+        definitions={tagDefinitions ?? []}
+        canEdit={editingSkill?.permission !== "READ_ONLY"}
+        onManageDefinitions={() => {
+          setTagManagementOpen(true);
+        }}
       />
-      {isEditMode && !isEditContentReady ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <Spin spinning={isLoadingEditFiles}>
-            {editFilesError ? (
-              <p className="text-sm text-red-500">{editFilesError}</p>
-            ) : (
-              <div className="h-16 w-16" />
-            )}
-          </Spin>
-        </div>
-      ) : isEditMode || activeTab === "interactive" ? (
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {renderChatPanel()}
-          {renderDraftPanel()}
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1">{renderUploadTab()}</div>
-      )}
-      <style jsx global>{`
-        .skill-build-info-form .ant-form-item-label {
-          padding-bottom: 3px !important;
-        }
-
-        .skill-build-info-form .ant-form-item-label > label {
-          height: 20px;
-          color: #475569;
-          font-size: 12px;
-          line-height: 20px;
-        }
-
-        .expanded-file-editor textarea {
-          max-height: 70vh !important;
-          overflow-y: auto !important;
-          resize: none !important;
-        }
-      `}</style>
-    </Modal>
-    <ResourceTagAssignmentModal
-      open={assignTagsOpen}
-      onClose={() => {
-        setAssignTagsOpen(false);
-        setTagPreviewRefreshKey((current) => current + 1);
-      }}
-      resourceType="skill"
-      resourceId={String(editingSkill?.skill_id ?? "")}
-      definitions={tagDefinitions ?? []}
-      canEdit={editingSkill?.permission !== "READ_ONLY"}
-      onManageDefinitions={() => {
-        setTagManagementOpen(true);
-      }}
-    />
-    <TagDefinitionManagementModal
-      open={tagManagementOpen}
-      onClose={() => {
-        setTagManagementOpen(false);
-        void refreshTagDefinitions();
-      }}
-      bucketId={defaultTagLibrary?.bucket_id ?? 0}
-      bucketName={defaultTagLibrary?.bucket_name ?? ""}
-      canManage={editingSkill?.permission !== "READ_ONLY"}
-    />
+      <TagDefinitionManagementModal
+        open={tagManagementOpen}
+        onClose={() => {
+          setTagManagementOpen(false);
+          void refreshTagDefinitions();
+        }}
+        bucketId={defaultTagLibrary?.bucket_id ?? 0}
+        bucketName={defaultTagLibrary?.bucket_name ?? ""}
+        canManage={editingSkill?.permission !== "READ_ONLY"}
+      />
     </>
   );
 }

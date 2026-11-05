@@ -45,8 +45,8 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
-import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
+import { MarkdownRenderer } from "@/components/common/markdown/MarkdownRenderer";
+import { FilePreviewDrawer } from "@/components/preview/filePreviewDrawer";
 
 import {
   UI_CONFIG,
@@ -87,7 +87,7 @@ import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentMo
 import TagChips from "@/components/tag/TagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Pagination } from "@/components/common/Pagination";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
@@ -1767,12 +1767,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                       }}
                       className="!h-8 !w-[116px]"
                     />
-                    <StandardPaginator
+                    <Pagination
                       current={currentDocumentPage}
                       pageSize={documentPageSize}
                       total={filteredDocumentCount}
                       showSizeChanger={false}
-                      onChange={setDocumentPage}
+                      onPageChange={setDocumentPage}
                     />
                   </div>
                 </div>

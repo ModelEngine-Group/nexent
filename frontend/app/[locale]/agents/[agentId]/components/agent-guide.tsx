@@ -1,23 +1,21 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import { Button, Form, Input, Tooltip } from "antd";
+import { Button } from "@/components/common/Button";
+import { Textarea } from "@/components/common/Textarea";
+import { Hint } from "@/components/common/Hint";
+import { Form } from "antd";
 import { Plus, Trash2 } from "lucide-react";
-
 import { useTranslation } from "react-i18next";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
-import { StandardInput } from "@/components/common/StandardInput";
+import { Input } from "@/components/ui/input";
+import { InputField } from "@/components/common/InputField";
 import HighFidelityTextArea from "./HighFidelityTextArea";
-
 const MAX_EXAMPLE_QUESTIONS = 6;
 const HIGH_FIDELITY_MAX_EXAMPLE_QUESTIONS = 5;
-
 interface AgentConversationGuideProps {
   highFidelity?: boolean;
 }
-
 export default function AgentConversationGuide({
   highFidelity = false,
 }: AgentConversationGuideProps) {
@@ -31,15 +29,13 @@ export default function AgentConversationGuide({
     : MAX_EXAMPLE_QUESTIONS;
   const cannotAddQuestion =
     isReadOnly || exampleQuestions.length >= maxQuestions;
-
   const addQuestion = () => {
     if (cannotAddQuestion) return;
     updateAgentConfig({
       example_questions: [...exampleQuestions, ""],
     });
   };
-  const QuestionInput = highFidelity ? StandardInput : Input;
-
+  const QuestionInput = highFidelity ? InputField : Input;
   const renderQuestion = (question: string, index: number) => (
     <div
       key={index}
@@ -62,8 +58,6 @@ export default function AgentConversationGuide({
         }}
       />
       <Button
-        type="text"
-        size="small"
         disabled={isReadOnly}
         aria-label={t("agent.guide.example.removeAria")}
         icon={<Trash2 size={14} />}
@@ -75,10 +69,11 @@ export default function AgentConversationGuide({
             ),
           })
         }
+        variant="ghost"
+        size="xs"
       />
     </div>
   );
-
   return (
     <div className={highFidelity ? "flex flex-col gap-4" : "space-y-4"}>
       <Form.Item
@@ -99,16 +94,11 @@ export default function AgentConversationGuide({
               updateAgentConfig({ greeting_message: event.target.value })
             }
             placeholder={t("agent.highFidelity.greetingPlaceholder")}
-            classNames={{
-              root: "!h-16 !rounded-[4px] !border-[#c9c9c9]",
-              textarea:
-                "!h-[62px] !min-h-[62px] !resize-none !rounded-[4px] !px-3 !py-[5px] !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
-              count:
-                "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-            }}
+            className="!h-[62px] !min-h-[62px] !resize-none !rounded-[4px] !px-3 !py-[5px] !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+            countClassName="absolute bottom-2 right-3 !text-xs !leading-[22px] !text-[#808080]"
           />
         ) : (
-          <Input.TextArea
+          <Textarea
             value={editedAgent.greeting_message || ""}
             aria-label={t("agent.guide.opening.label")}
             disabled={isReadOnly}
@@ -116,7 +106,8 @@ export default function AgentConversationGuide({
               updateAgentConfig({ greeting_message: event.target.value })
             }
             placeholder={t("agent.guide.opening.placeholder")}
-            autoSize={{ minRows: 3, maxRows: 6 }}
+            minRows={3}
+            maxRows={6}
           />
         )}
       </Form.Item>
@@ -142,8 +133,8 @@ export default function AgentConversationGuide({
                   : "agent.greeting.questionsTitle"
               )}
             </span>
-            <Tooltip
-              title={t("agent.validation.exampleQuestionsMax", {
+            <Hint
+              content={t("agent.validation.exampleQuestionsMax", {
                 max: maxQuestions,
               })}
             >
@@ -156,11 +147,11 @@ export default function AgentConversationGuide({
               >
                 ({exampleQuestions.length}/{maxQuestions})
               </span>
-            </Tooltip>
+            </Hint>
           </div>
           {!highFidelity && (
-            <Tooltip
-              title={
+            <Hint
+              content={
                 exampleQuestions.length >= maxQuestions
                   ? t("agent.validation.exampleQuestionsMax", {
                       max: maxQuestions,
@@ -170,15 +161,16 @@ export default function AgentConversationGuide({
             >
               <span>
                 <Button
-                  size="middle"
                   icon={<Plus size={14} />}
                   disabled={cannotAddQuestion}
                   onClick={addQuestion}
+                  variant="outline"
+                  size="sm"
                 >
                   {t("agent.greeting.addQuestion")}
                 </Button>
               </span>
-            </Tooltip>
+            </Hint>
           )}
         </div>
         {exampleQuestions.length > 0 && (
@@ -188,8 +180,8 @@ export default function AgentConversationGuide({
         )}
         {highFidelity && (
           <>
-            <Tooltip
-              title={
+            <Hint
+              content={
                 exampleQuestions.length >= maxQuestions
                   ? t("agent.validation.exampleQuestionsMax", {
                       max: maxQuestions,
@@ -199,17 +191,17 @@ export default function AgentConversationGuide({
             >
               <span className="flex h-[22px] w-fit">
                 <Button
-                  type="link"
-                  autoInsertSpace={false}
-                  className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+                  className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-primary disabled:!text-[#dfdfdf]"
                   icon={<Plus size={14} />}
                   disabled={cannotAddQuestion}
                   onClick={addQuestion}
+                  variant="link"
+                  size="sm"
                 >
                   {t("agent.highFidelity.addPresetQuestion")}
                 </Button>
               </span>
-            </Tooltip>
+            </Hint>
           </>
         )}
       </div>

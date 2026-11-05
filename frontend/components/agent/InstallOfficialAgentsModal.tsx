@@ -1,17 +1,12 @@
-"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"use client";
+import { Button } from "@/components/common/Button";
+import { Badge } from "@/components/common/Badge";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  App,
-  Button,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Spin,
-  Steps,
-  Tag,
-} from "antd";
+import { App, Modal, Select, Space, Spin, Steps } from "antd";
 import {
   Bot,
   CircleCheck,
@@ -37,20 +32,20 @@ import type {
   OfficialAgentInstallStep,
   OfficialAgentItem,
 } from "@/types/agentRepository";
-
 interface InstallOfficialAgentsModalProps {
   open: boolean;
   onClose: () => void;
   onInstalled?: () => void;
   tenantId?: string;
 }
-
 interface ConflictItem {
   bundleName: string;
   agentName: string;
-  conflictAgents: Array<{ name?: string; display_name?: string }>;
+  conflictAgents: Array<{
+    name?: string;
+    display_name?: string;
+  }>;
 }
-
 export function InstallOfficialAgentsModal({
   open,
   onClose,
@@ -60,9 +55,10 @@ export function InstallOfficialAgentsModal({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
-  const params = useParams<{ locale: string }>();
+  const params = useParams<{
+    locale: string;
+  }>();
   const locale = params.locale || "zh";
-
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
@@ -79,11 +75,9 @@ export function InstallOfficialAgentsModal({
   const [lastResults, setLastResults] = useState<
     OfficialAgentInstallItem[] | null
   >(null);
-
   const { data: agents, isLoading } = useOfficialAgents(open, tenantId);
   const installMutation = useInstallOfficialAgents(tenantId);
   const { availableLlmModels, models: allModels } = useModelList();
-
   // Available vector/embedding models (embedding + multi_embedding), used for
   // the knowledge bases created during install.
   const availableEmbeddingModels = useMemo(
@@ -95,7 +89,6 @@ export function InstallOfficialAgentsModal({
       ),
     [allModels]
   );
-
   useEffect(() => {
     if (!open) return;
     setCurrentStep(0);
@@ -109,7 +102,6 @@ export function InstallOfficialAgentsModal({
     setIsInstalling(false);
     setLastResults(null);
   }, [open]);
-
   const allAgents = useMemo(() => agents ?? [], [agents]);
   const installableAgents = useMemo(
     () => allAgents.filter((agent) => agent.status === "installable"),
@@ -125,15 +117,12 @@ export function InstallOfficialAgentsModal({
   const someSelected =
     installableAgents.some((agent) => selectedNames.has(agent.name)) &&
     !allSelected;
-
-  const hasSelectedMcps = selectedAgents.some(
-    (a) => (a.mcps?.length ?? 0) > 0
-  );
-
+  const hasSelectedMcps = selectedAgents.some((a) => (a.mcps?.length ?? 0) > 0);
   const steps = useMemo(() => {
-    const items: Array<{ key: string; title: string }> = [
-      { key: "select", title: t("officialAgent.wizard.select") },
-    ];
+    const items: Array<{
+      key: string;
+      title: string;
+    }> = [{ key: "select", title: t("officialAgent.wizard.select") }];
     if (conflicts.length > 0) {
       items.push({ key: "rename", title: t("officialAgent.wizard.rename") });
     }
@@ -143,9 +132,7 @@ export function InstallOfficialAgentsModal({
     items.push({ key: "model", title: t("officialAgent.wizard.model") });
     return items;
   }, [conflicts.length, hasSelectedMcps, t]);
-
   const currentStepKey = steps[currentStep]?.key;
-
   // Pre-select the first available LLM for every selected bundle on the model step.
   useEffect(() => {
     if (currentStepKey !== "model" || !availableLlmModels.length) return;
@@ -163,7 +150,6 @@ export function InstallOfficialAgentsModal({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepKey, availableLlmModels, selectedAgents]);
-
   // Pre-select the first available embedding model for KB-bearing bundles.
   useEffect(() => {
     if (currentStepKey !== "model" || !availableEmbeddingModels.length) return;
@@ -181,11 +167,9 @@ export function InstallOfficialAgentsModal({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepKey, availableEmbeddingModels, selectedAgents]);
-
   const goConfigureModel = () => {
     router.push(`/${locale}/models`);
   };
-
   const handleToggleAll = () => {
     if (allSelected) {
       setSelectedNames(new Set());
@@ -193,12 +177,10 @@ export function InstallOfficialAgentsModal({
       setSelectedNames(new Set(installableAgents.map((agent) => agent.name)));
     }
   };
-
   const handleCancel = () => {
     if (isInstalling) return;
     onClose();
   };
-
   // select -> conflict pre-check -> rename / mcp / model
   const handleSelectNext = async () => {
     if (selectedNames.size === 0) {
@@ -207,8 +189,14 @@ export function InstallOfficialAgentsModal({
     }
     setChecking(true);
     try {
-      const items: Array<{ name: string; display_name?: string }> = [];
-      const meta: Array<{ bundleName: string; agentName: string }> = [];
+      const items: Array<{
+        name: string;
+        display_name?: string;
+      }> = [];
+      const meta: Array<{
+        bundleName: string;
+        agentName: string;
+      }> = [];
       for (const b of selectedAgents) {
         for (const a of b.agents ?? []) {
           items.push({
@@ -239,7 +227,6 @@ export function InstallOfficialAgentsModal({
       const drafts: Record<string, string> = {};
       for (const c of found) drafts[c.agentName] = c.agentName;
       setRenameDrafts(drafts);
-
       // Advance to the first available step after select.
       const nextKeys = [
         "select",
@@ -247,13 +234,13 @@ export function InstallOfficialAgentsModal({
         ...(hasSelectedMcps ? ["mcp"] : []),
         "model",
       ];
-      const target = found.length > 0 ? "rename" : hasSelectedMcps ? "mcp" : "model";
+      const target =
+        found.length > 0 ? "rename" : hasSelectedMcps ? "mcp" : "model";
       setCurrentStep(nextKeys.indexOf(target));
     } finally {
       setChecking(false);
     }
   };
-
   const handleNext = () => {
     if (currentStepKey === "select") {
       handleSelectNext();
@@ -271,7 +258,6 @@ export function InstallOfficialAgentsModal({
     }
     setCurrentStep(currentStep + 1);
   };
-
   const handleInstall = async () => {
     const finalModelIds: Record<string, number> = { ...modelSelections };
     for (const b of selectedAgents) {
@@ -284,7 +270,6 @@ export function InstallOfficialAgentsModal({
       }
     }
     setModelSelections(finalModelIds);
-
     // Embedding model for KB-bearing bundles, defaulting to the first available.
     const finalEmbeddingModelIds: Record<string, number> = {
       ...embeddingModelSelections,
@@ -299,7 +284,6 @@ export function InstallOfficialAgentsModal({
         finalEmbeddingModelIds[b.name] = availableEmbeddingModels[0].id;
       }
     }
-
     setIsInstalling(true);
     try {
       const results = await installMutation.mutateAsync({
@@ -324,7 +308,6 @@ export function InstallOfficialAgentsModal({
       setIsInstalling(false);
     }
   };
-
   const canProceed = () => {
     if (checking) return false;
     if (currentStepKey === "select") {
@@ -335,7 +318,6 @@ export function InstallOfficialAgentsModal({
     }
     return true;
   };
-
   const renderStepContent = () => {
     if (isInstalling) {
       return <InstallStepsView installing />;
@@ -414,9 +396,7 @@ export function InstallOfficialAgentsModal({
     }
     return null;
   };
-
   const isLastStep = currentStep === steps.length - 1;
-
   return (
     <Modal
       title={
@@ -431,35 +411,41 @@ export function InstallOfficialAgentsModal({
       destroyOnHidden
       footer={
         <div className="flex justify-between">
-          <Button onClick={handleCancel}>
+          <Button onClick={handleCancel} variant="outline" size="sm">
             {t("common.cancel", "Cancel")}
           </Button>
           <Space>
             {currentStep > 0 && !isInstalling && !lastResults && (
-              <Button onClick={() => setCurrentStep(currentStep - 1)}>
+              <Button
+                onClick={() => setCurrentStep(currentStep - 1)}
+                variant="outline"
+                size="sm"
+              >
                 {t("officialAgent.wizard.back", "Previous")}
               </Button>
             )}
             {lastResults ? (
-              <Button type="primary" onClick={onClose}>
+              <Button onClick={onClose} variant="default" size="sm">
                 {t("common.confirm", "OK")}
               </Button>
             ) : !isLastStep ? (
               <Button
-                type="primary"
                 onClick={handleNext}
                 disabled={!canProceed()}
                 loading={checking}
+                variant="default"
+                size="sm"
               >
                 {t("officialAgent.wizard.next", "Next")}
               </Button>
             ) : (
               <Button
-                type="primary"
                 onClick={handleInstall}
                 disabled={!canProceed()}
                 loading={isInstalling}
                 icon={<Download size={16} />}
+                variant="default"
+                size="sm"
               >
                 {isInstalling
                   ? t("officialAgent.wizard.installing", "Installing...")
@@ -484,7 +470,6 @@ export function InstallOfficialAgentsModal({
     </Modal>
   );
 }
-
 function SelectStep({
   agents,
   selectedNames,
@@ -503,7 +488,6 @@ function SelectStep({
   onGoConfigure: () => void;
 }) {
   const { t } = useTranslation("common");
-
   return (
     <div className="space-y-4">
       <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -571,19 +555,20 @@ function SelectStep({
                 <div className="shrink-0">
                   {agent.status === "needs_model" ? (
                     <Button
-                      type="link"
-                      size="small"
                       className="flex items-center gap-1 p-0 text-amber-600"
                       onClick={onGoConfigure}
+                      variant="link"
+                      size="xs"
                     >
                       <CircleOff className="size-3.5" />
                       <span>{t("officialAgent.install.goConfigure")}</span>
                       <ExternalLink className="size-3" />
                     </Button>
                   ) : agent.status === "installed" ? (
-                    <Tag color="success" icon={<CircleCheck size={14} />}>
+                    <Badge variant={"success"} size="sm">
+                      {<CircleCheck size={14} />}
                       {t("officialAgent.status.installed")}
-                    </Tag>
+                    </Badge>
                   ) : null}
                 </div>
               </div>
@@ -594,7 +579,6 @@ function SelectStep({
     </div>
   );
 }
-
 function RenameStep({
   conflicts,
   drafts,
@@ -605,7 +589,6 @@ function RenameStep({
   onChange: (agentName: string, value: string) => void;
 }) {
   const { t } = useTranslation("common");
-
   return (
     <div className="space-y-6">
       <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-2">
@@ -624,7 +607,9 @@ function RenameStep({
             className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
           >
             <div className="flex items-center gap-2">
-              <Tag color="purple">{c.bundleName}</Tag>
+              <Badge variant={"info"} size="sm">
+                {c.bundleName}
+              </Badge>
               <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
                 {c.agentName}
               </h4>
@@ -637,7 +622,13 @@ function RenameStep({
                 </p>
                 <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-300">
                   {c.conflictAgents.map(
-                    (agent: { name?: string; display_name?: string }, idx: number) => (
+                    (
+                      agent: {
+                        name?: string;
+                        display_name?: string;
+                      },
+                      idx: number
+                    ) => (
                       <li key={idx}>
                         {[agent.name, agent.display_name]
                           .filter(Boolean)
@@ -657,7 +648,7 @@ function RenameStep({
                 value={drafts[c.agentName] ?? c.agentName}
                 onChange={(e) => onChange(c.agentName, e.target.value)}
                 placeholder={c.agentName}
-                size="large"
+                className={cn("h-10")}
               />
             </div>
           </div>
@@ -666,10 +657,8 @@ function RenameStep({
     </div>
   );
 }
-
 function McpPreviewStep({ agents }: { agents: OfficialAgentItem[] }) {
   const { t } = useTranslation("common");
-
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -701,20 +690,22 @@ function McpPreviewStep({ agents }: { agents: OfficialAgentItem[] }) {
                       </span>
                     </div>
                     {m.installed ? (
-                      <Tag
-                        icon={<CircleCheck size={14} />}
-                        color="success"
+                      <Badge
                         className="inline-flex items-center gap-1 text-xs"
+                        variant={"success"}
+                        size="sm"
                       >
+                        {<CircleCheck size={14} />}
                         {t("officialAgent.mcpPreview.installed")}
-                      </Tag>
+                      </Badge>
                     ) : (
-                      <Tag
-                        color="blue"
+                      <Badge
                         className="inline-flex items-center gap-1 text-xs"
+                        variant={"info"}
+                        size="sm"
                       >
                         {t("officialAgent.mcpPreview.toInstall")}
-                      </Tag>
+                      </Badge>
                     )}
                   </div>
                 ))}
@@ -726,7 +717,6 @@ function McpPreviewStep({ agents }: { agents: OfficialAgentItem[] }) {
     </div>
   );
 }
-
 function ModelStep({
   agents,
   selections,
@@ -745,7 +735,6 @@ function ModelStep({
   availableEmbeddingModels: ModelOption[];
 }) {
   const { t } = useTranslation("common");
-
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -817,10 +806,8 @@ function ModelStep({
     </div>
   );
 }
-
 function AgentCountChips({ agent }: { agent: OfficialAgentItem }) {
   const chips: React.ReactNode[] = [];
-
   if (agent.mcp_count > 0) {
     chips.push(
       <span
@@ -857,18 +844,18 @@ function AgentCountChips({ agent }: { agent: OfficialAgentItem }) {
       </span>
     );
   }
-
   return <span className="flex items-center gap-1.5">{chips}</span>;
 }
-
 // Install steps shown during (installing) and after (steps) an install.
-const INSTALL_STEP_NAMES: Array<{ key: string; i18n: string }> = [
+const INSTALL_STEP_NAMES: Array<{
+  key: string;
+  i18n: string;
+}> = [
   { key: "mcp", i18n: "officialAgent.step.mcp" },
   { key: "skill", i18n: "officialAgent.step.skill" },
   { key: "knowledge_base", i18n: "officialAgent.step.knowledgeBase" },
   { key: "agent", i18n: "officialAgent.step.agent" },
 ];
-
 function InstallStepsView({
   installing,
   steps,
@@ -877,9 +864,7 @@ function InstallStepsView({
   steps?: OfficialAgentInstallStep[];
 }) {
   const { t } = useTranslation("common");
-
   const stepMap = new Map(steps?.map((s) => [s.name, s]) ?? []);
-
   return (
     <div className="space-y-3">
       {INSTALL_STEP_NAMES.map(({ key, i18n }) => {
@@ -942,7 +927,6 @@ function InstallStepsView({
     </div>
   );
 }
-
 function InstallResultsView({
   results,
   onGoConfigure,
@@ -951,12 +935,12 @@ function InstallResultsView({
   onGoConfigure: () => void;
 }) {
   const { t } = useTranslation("common");
-
   return (
     <div className="space-y-3">
       {results.map((result) => {
         const isInstalled =
-          result.status === "installed" || result.status === "already_installed";
+          result.status === "installed" ||
+          result.status === "already_installed";
         const title = result.name || t("officialAgent.card.untitled");
         return (
           <div
@@ -968,13 +952,15 @@ function InstallResultsView({
                 {title}
               </span>
               {isInstalled ? (
-                <Tag color="success" icon={<CircleCheck size={14} />}>
+                <Badge variant={"success"} size="sm">
+                  {<CircleCheck size={14} />}
                   {t("officialAgent.status.installed")}
-                </Tag>
+                </Badge>
               ) : (
-                <Tag color="error" icon={<CircleOff size={14} />}>
+                <Badge variant={"destructive"} size="sm">
+                  {<CircleOff size={14} />}
                   {t("officialAgent.installModal.failed")}
-                </Tag>
+                </Badge>
               )}
             </div>
             <div className="mt-3">
@@ -990,9 +976,10 @@ function InstallResultsView({
       })}
       {results.some((r) => r.status === "needs_model") ? (
         <Button
-          type="link"
           className="flex items-center gap-1 p-0 text-primary"
           onClick={onGoConfigure}
+          variant="link"
+          size="sm"
         >
           {t("officialAgent.install.goConfigure")}
           <ExternalLink className="size-3" />

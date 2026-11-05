@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Info } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/common/Badge";
 import {
   Select,
   SelectContent,
@@ -18,7 +18,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 import { cn } from "@/lib/utils";
 
 import { ModelOption, ModelType } from "@/types/modelConfig";

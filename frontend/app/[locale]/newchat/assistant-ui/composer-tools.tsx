@@ -5,12 +5,12 @@
 import { AuiIf, ComposerPrimitive } from "@assistant-ui/react";
 import { Mic, MicOff, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 import { ComposerAddAttachment } from "../ui/attachment";
 
 export function ComposerAttachment() {

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useMemo, type FC } from "react";
@@ -16,7 +18,7 @@ import {
   normalizeSkillDirectivePath,
   skillDirectiveFormatter,
   skillDirectiveIconMap,
-} from "./skill-directives";
+} from "@/lib/skillDirectives";
 
 interface SkillFileMentionPopoverProps {
   files: readonly SkillFileContent[];

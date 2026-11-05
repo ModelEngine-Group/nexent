@@ -5,8 +5,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { StandardModal } from "@/components/common/StandardModal";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Modal } from "@/components/common/Modal";
+import { Button } from "@/components/common/Button";
 import HighFidelityTextArea from "./HighFidelityTextArea";
 
 interface HighFidelityPromptEditModalProps {
@@ -28,29 +28,30 @@ export default function HighFidelityPromptEditModal({
   const [editContent, setEditContent] = useState(content);
 
   return (
-    <StandardModal
+    <Modal
       open
       title={title}
       width={1000}
       closeLabel={t("common.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      onConfirm={() => {
-        if (readOnly) return false;
-        onSave(editContent);
-      }}
       footer={
         readOnly ? (
           <div className="flex justify-end">
-            <StandardButton onClick={onClose}>
+            <Button onClick={onClose} variant="outline" size="sm">
               {t("common.close")}
-            </StandardButton>
+            </Button>
           </div>
         ) : undefined
       }
+      onClose={onClose}
+      actions={{
+        cancelLabel: t("common.cancel"),
+        confirmLabel: t("common.confirm"),
+        onConfirm: () => {
+          if (readOnly) return;
+          onSave(editContent);
+          onClose();
+        },
+      }}
     >
       <HighFidelityTextArea
         limit={100000}
@@ -58,12 +59,9 @@ export default function HighFidelityPromptEditModal({
         onChange={(event) => setEditContent(event.target.value)}
         disabled={readOnly}
         aria-label={title}
-        classNames={{
-          textarea:
-            "!min-h-[400px] !rounded-[4px] !border-[#c9c9c9] !px-3 !py-2 !text-sm !leading-[22px]",
-          count: "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-        }}
+        className="!min-h-[400px] !rounded-[4px] !border-[#c9c9c9] !px-3 !py-2 !text-sm !leading-[22px]"
+        countClassName="absolute bottom-2 right-3 !text-xs !leading-[22px] !text-[#808080]"
       />
-    </StandardModal>
+    </Modal>
   );
 }

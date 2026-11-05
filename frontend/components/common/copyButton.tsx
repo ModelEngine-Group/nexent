@@ -1,17 +1,20 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Copy } from "lucide-react";
 
 import { copyToClipboard } from "@/lib/clipboard";
 import log from "@/lib/logger";
-import { Button } from "antd";
+import { Button } from "@/components/common/Button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-
+} from "@/components/common/Tooltip";
 
 interface CopyButtonProps {
   content: string;
@@ -115,8 +118,8 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            type="text"
-            size="small"
+            variant="ghost"
+            size="icon"
             className={`${variantStyles.button} ${sizeStyles} ${className}`}
             onClick={handleCopy}
             disabled={disabled || copied}

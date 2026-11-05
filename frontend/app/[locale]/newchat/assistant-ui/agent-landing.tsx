@@ -21,8 +21,8 @@ import { useRouter } from "next/navigation";
 import type { PublishedAgent, Agent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useTranslation } from "react-i18next";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { InputField } from "@/components/common/InputField";
+import { Pagination } from "@/components/common/Pagination";
 
 const LAST_USED_AGENT_KEY = "nexent_last_used_agent_id";
 const RECENT_AGENT_IDS_KEY = "nexent_recent_agent_ids";
@@ -223,7 +223,7 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
       </ConfigProvider>
 
       <div className="w-[360px] max-w-full">
-        <StandardInput
+        <InputField
           value={search}
           onChange={(event) => handleSearchChange(event.target.value)}
           placeholder={t("chat.agentLanding.searchPlaceholderName")}
@@ -256,15 +256,14 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
           </span>
         </div>
         <ConfigProvider locale={antdLocale}>
-          <StandardPaginator
+          <Pagination
             current={page}
             pageSize={pageSize}
             total={totalCount}
             showSizeChanger
             showQuickJumper
             pageSizeOptions={[10, 12, 20, 50]}
-            className="[&_.ant-pagination-options]:!contents [&_.ant-pagination-options>.ant-select]:!order-first [&_.ant-pagination-options>.ant-select]:!mx-2 [&_.ant-pagination-options-quick-jumper]:!order-last [&_.ant-pagination-options-quick-jumper]:!ml-2"
-            onChange={(nextPage, nextPageSize) => {
+            onPageChange={(nextPage, nextPageSize) => {
               setPage(nextPage);
               setPageSize(nextPageSize);
             }}

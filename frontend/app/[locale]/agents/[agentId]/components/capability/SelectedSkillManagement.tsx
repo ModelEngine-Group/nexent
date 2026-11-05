@@ -1,11 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Button } from "@/components/common/Button";
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Tooltip } from "antd";
 import {
   ChevronRight,
   Eye,
@@ -15,18 +14,19 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../../../components/capability/SkillDetailModal";
 import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
-
 type SkillSourceKey = "official" | "custom";
-
 const SOURCE_META: Record<
   SkillSourceKey,
-  { label: string; dot: string; accentClass: string }
+  {
+    label: string;
+    dot: string;
+    accentClass: string;
+  }
 > = {
   official: {
     label: "skillPool.group.official",
@@ -39,22 +39,18 @@ const SOURCE_META: Record<
     accentClass: "bg-violet-500/10 text-violet-600",
   },
 };
-
 interface SelectedSkillGroup {
   key: SkillSourceKey;
   skills: Skill[];
 }
-
 type PersistedSkill = Skill & {
   skill_name?: string;
   skill_description?: string;
   skill_content?: string;
 };
-
 function toSourceKey(source?: string): SkillSourceKey {
   return (source || "").trim() === "official" ? "official" : "custom";
 }
-
 interface SelectedSkillManagementProps {
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
@@ -63,7 +59,6 @@ interface SelectedSkillManagementProps {
   readonly highFidelity?: boolean;
   readonly addEntry?: ReactNode;
 }
-
 export default function SelectedSkillManagement({
   currentAgentId,
   isReadOnly = false,
@@ -84,7 +79,6 @@ export default function SelectedSkillManagement({
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<SkillSourceKey, boolean>
   >({ official: false, custom: false });
-
   // Agent detail responses contain persisted skill-instance values, while the
   // skill catalog owns display metadata such as name, tags, and source. Merge
   // them by ID so an agent reloaded after saving keeps both its selection and
@@ -97,7 +91,6 @@ export default function SelectedSkillManagement({
       ["official", []],
       ["custom", []],
     ]);
-
     selectedSkills.forEach((selectedSkill) => {
       const persistedSkill = selectedSkill as PersistedSkill;
       const canonicalSkill = catalogById.get(Number(selectedSkill.skill_id));
@@ -131,18 +124,15 @@ export default function SelectedSkillManagement({
       };
       grouped.get(toSourceKey(hydratedSkill.source))!.push(hydratedSkill);
     });
-
     return (["official", "custom"] as SkillSourceKey[])
       .map((key) => ({ key, skills: grouped.get(key)! }))
       .filter((group) => group.skills.length > 0);
   }, [catalogSkills, selectedSkills]);
-
   const removeSkill = (skillId: number) => {
     updateSkills(
       selectedSkills.filter((skill) => Number(skill.skill_id) !== skillId)
     );
   };
-
   const saveConfig = (skill: Skill, params: SkillParam[]) => {
     const configValues: Record<string, unknown> = {};
     params.forEach((param) => {
@@ -157,7 +147,6 @@ export default function SelectedSkillManagement({
     );
     setConfigSkill(null);
   };
-
   if (selectedSkills.length === 0 && !(highFidelity && addEntry)) {
     if (hideEmpty) return null;
     return (
@@ -166,7 +155,6 @@ export default function SelectedSkillManagement({
       </div>
     );
   }
-
   if (highFidelity) {
     return (
       <>
@@ -183,7 +171,6 @@ export default function SelectedSkillManagement({
                   ? "skillManagement.edit.title"
                   : "skillPool.viewDetails"
               );
-
               return (
                 <div
                   key={skill.skill_id}
@@ -196,11 +183,11 @@ export default function SelectedSkillManagement({
                     aria-hidden="true"
                   />
                   <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                    <Tooltip title={skill.name}>
+                    <Hint content={skill.name}>
                       <span className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[#191919]">
                         {skill.name}
                       </span>
-                    </Tooltip>
+                    </Hint>
                     {(skill.tags || []).slice(0, 2).map((tag) => (
                       <span
                         key={tag}
@@ -210,10 +197,8 @@ export default function SelectedSkillManagement({
                       </span>
                     ))}
                   </div>
-                  <Tooltip title={detailActionLabel}>
+                  <Hint content={detailActionLabel}>
                     <Button
-                      type="text"
-                      size="small"
                       icon={
                         canEditSkill ? <Pencil size={14} /> : <Eye size={14} />
                       }
@@ -226,32 +211,34 @@ export default function SelectedSkillManagement({
                         setDetailSkill(skill);
                       }}
                       className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                      variant="ghost"
+                      size="xs"
                     />
-                  </Tooltip>
+                  </Hint>
                   {canConfigure ? (
-                    <Tooltip title={t("skillPool.configure")}>
+                    <Hint content={t("skillPool.configure")}>
                       <Button
-                        type="text"
-                        size="small"
                         icon={<Settings size={14} />}
                         aria-label={`${t("skillPool.configure")} ${skill.name}`}
                         disabled={isReadOnly}
                         onClick={() => setConfigSkill(skill)}
                         className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                        variant="ghost"
+                        size="xs"
                       />
-                    </Tooltip>
+                    </Hint>
                   ) : null}
-                  <Tooltip title={t("skillPool.remove")}>
+                  <Hint content={t("skillPool.remove")}>
                     <Button
-                      type="text"
-                      size="small"
                       icon={<Trash2 size={14} />}
                       aria-label={`${t("skillPool.remove")} ${skill.name}`}
                       disabled={isReadOnly}
                       onClick={() => removeSkill(skill.skill_id)}
                       className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+                      variant="ghost"
+                      size="xs"
                     />
-                  </Tooltip>
+                  </Hint>
                 </div>
               );
             })
@@ -276,7 +263,6 @@ export default function SelectedSkillManagement({
       </>
     );
   }
-
   return (
     <>
       <div className="h-full overflow-y-auto pr-1">
@@ -290,7 +276,6 @@ export default function SelectedSkillManagement({
           {groupedSkills.map((group) => {
             const isCollapsed = collapsedGroups[group.key];
             const sourceMeta = SOURCE_META[group.key];
-
             return (
               <div
                 key={group.key}
@@ -304,14 +289,10 @@ export default function SelectedSkillManagement({
                       [group.key]: !current[group.key],
                     }))
                   }
-                  className={`flex w-full items-center gap-1.5 px-3 py-2 text-left transition-colors hover:bg-gray-50 ${
-                    !isCollapsed ? "border-b border-gray-100" : ""
-                  }`}
+                  className={`flex w-full items-center gap-1.5 px-3 py-2 text-left transition-colors hover:bg-gray-50 ${!isCollapsed ? "border-b border-gray-100" : ""}`}
                 >
                   <ChevronRight
-                    className={`size-3.5 shrink-0 text-gray-400 transition-transform ${
-                      !isCollapsed ? "rotate-90" : ""
-                    }`}
+                    className={`size-3.5 shrink-0 text-gray-400 transition-transform ${!isCollapsed ? "rotate-90" : ""}`}
                   />
                   <span
                     className={`size-1.5 shrink-0 rounded-full ${sourceMeta.dot}`}
@@ -333,7 +314,6 @@ export default function SelectedSkillManagement({
                         !isReadOnly &&
                         skill.permission === "EDIT" &&
                         Boolean(onEditSkill);
-
                       return (
                         <div
                           key={skill.skill_id}
@@ -359,8 +339,8 @@ export default function SelectedSkillManagement({
                               </p>
                             ) : null}
                           </div>
-                          <Tooltip
-                            title={t(
+                          <Hint
+                            content={t(
                               canEditSkill
                                 ? "skillManagement.edit.title"
                                 : "skillPool.viewDetails"
@@ -383,9 +363,9 @@ export default function SelectedSkillManagement({
                                 <Eye className="size-4" />
                               )}
                             </button>
-                          </Tooltip>
+                          </Hint>
                           {(skill.config_schemas || []).length > 0 ? (
-                            <Tooltip title={t("skillPool.configure")}>
+                            <Hint content={t("skillPool.configure")}>
                               <button
                                 type="button"
                                 disabled={isReadOnly}
@@ -394,7 +374,7 @@ export default function SelectedSkillManagement({
                               >
                                 <Settings className="size-4" />
                               </button>
-                            </Tooltip>
+                            </Hint>
                           ) : null}
                           <button
                             type="button"

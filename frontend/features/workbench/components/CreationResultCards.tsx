@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -10,7 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import type { buildSkillSavePayload } from "../creationRuntime";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { fetchMyEditableSkills } from "@/services/skillRepositoryService";

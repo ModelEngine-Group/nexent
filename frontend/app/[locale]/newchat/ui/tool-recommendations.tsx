@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { type FC } from "react";
@@ -10,7 +12,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/common/Badge";
 import type {
   Nl2aLocalMcpRecommendationPayload,
   Nl2aToolRecommendation,

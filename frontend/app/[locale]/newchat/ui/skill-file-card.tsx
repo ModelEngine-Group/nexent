@@ -5,7 +5,7 @@
 import { useState, type FC } from "react";
 import { ChevronDownIcon, FileCode2Icon, FileTextIcon } from "lucide-react";
 
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdown/MarkdownRenderer";
 import {
   Collapsible,
   CollapsibleContent,

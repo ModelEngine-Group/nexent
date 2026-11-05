@@ -14,9 +14,9 @@ import { useConversationActivitySync } from "@/hooks/chat/useConversationActivit
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useEffect, useRef, useState } from "react";
 import { message, Typography } from "antd";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardButton } from "@/components/common/StandardButton";
-import { ConversationExpandButton } from "@/components/common/ConversationExpandButton";
+import { InputField } from "@/components/common/InputField";
+import { Button } from "@/components/common/Button";
+import { ConversationExpandButton } from "@/components/chat/ConversationExpandButton";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,8 @@ import {
   SidebarFooter,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import type { SidebarProps } from "@/components/ui/sidebar";
+import type { ComponentProps } from "react";
+type SidebarProps = ComponentProps<typeof Sidebar>;
 import { ThreadListPrimitive } from "@assistant-ui/react";
 import {
   BatchSelectionProvider,
@@ -39,7 +40,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { Agent } from "@/types/agentConfig";
-import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
+import toolbarStyles from "@/components/chat/ConversationToolbar.module.css";
 
 type RenameSuccessHandler = (
   threadId: string,
@@ -377,14 +378,15 @@ export function ThreadListSidebar({
                         />
                       </div>
                       {onNewConversation ? (
-                        <StandardButton
-                          variant="default"
+                        <Button
+                          variant="outline"
                           className="!bg-white flex !h-9 min-w-0 !w-full items-center justify-center gap-2 !rounded-lg border border-[#d9d9d9] shadow-sm font-medium hover:brightness-95"
                           onClick={onNewConversation}
+                          size="sm"
                         >
                           <SquarePen className="size-4 shrink-0" aria-hidden />
                           {t("workbench.sidebar.newConversation")}
-                        </StandardButton>
+                        </Button>
                       ) : (
                         <ThreadListPrimitive.New
                           className="flex h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-[#191919]"
@@ -396,7 +398,7 @@ export function ThreadListSidebar({
                       )}
                       {searchOpen && (
                         <div data-workbench-history-search>
-                          <StandardInput
+                          <InputField
                             autoFocus
                             value={legacySearchQuery}
                             onChange={(event) =>
@@ -448,7 +450,7 @@ export function ThreadListSidebar({
                     // Toggled search field mirrors the pill's box (h-9,
                     // rounded-lg) and sits below it so the header reads as
                     // one evenly spaced stack.
-                    <StandardInput
+                    <InputField
                       autoFocus
                       className="!h-9 !rounded-lg"
                       value={conversationSearch}

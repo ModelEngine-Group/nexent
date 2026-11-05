@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -22,7 +24,7 @@ vi.mock('antd', async original => {
 vi.mock('@/components/permission/Can', () => ({
   Can: ({ children }: { children: React.ReactNode }) => fx.allowed ? children : null,
 }));
-vi.mock('@/components/common/markdownRenderer', () => ({
+vi.mock('@/components/common/markdown/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="memory-content">{content}</div>,
 }));
 vi.mock('@/app/[locale]/memory/DreamingConfigCards', () => ({ DreamingConfigCards: () => null }));

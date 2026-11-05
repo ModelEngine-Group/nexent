@@ -1,7 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { InputField } from "@/components/common/InputField";
+import { Textarea } from "@/components/common/Textarea";
+import { Button } from "@/components/common/Button";
+import { Hint } from "@/components/common/Hint";
 import { useEffect, useState } from "react";
 import type {
   ChangeEvent,
@@ -11,7 +13,7 @@ import type {
   SetStateAction,
 } from "react";
 import type { FormInstance } from "antd";
-import { Button, Col, Form, Input, Modal, Row, Select, Tooltip } from "antd";
+import { Col, Form, Modal, Row, Select } from "antd";
 import {
   Eye,
   FileQuestion as FileQuestionMark,
@@ -23,15 +25,12 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { Can } from "@/components/permission/Can";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdown/MarkdownRenderer";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
 import { SkillCodePreview } from "./SkillCodePreview";
 import { isCodeFile, resolveLanguageFromPath } from "./skillFileLanguage";
-
-const { TextArea } = Input;
 interface SkillDraftPanelProps {
   form: FormInstance<SkillFormData>;
   skillTabs: SkillFileContent[];
@@ -44,7 +43,10 @@ interface SkillDraftPanelProps {
   textareaRefs?: MutableRefObject<Record<string, unknown>>;
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
   onTextareaScroll?: (tabPath: string) => void;
-  groupSelectOptions?: Array<{ label: string; value: number }>;
+  groupSelectOptions?: Array<{
+    label: string;
+    value: number;
+  }>;
   groupNamesById?: Map<number, string>;
   canEditGroupSettings?: boolean;
   tagResourceId?: string;
@@ -53,7 +55,6 @@ interface SkillDraftPanelProps {
   canAssignTags?: boolean;
   className?: string;
 }
-
 export default function SkillDraftPanel({
   form,
   skillTabs,
@@ -81,13 +82,11 @@ export default function SkillDraftPanel({
   const [expandedEditorPath, setExpandedEditorPath] = useState("");
   const [expandedEditorContent, setExpandedEditorContent] = useState("");
   const [sourceEditorPath, setSourceEditorPath] = useState("");
-
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
     tabs.filter(
       (tab, index, self) =>
         self.findIndex((item) => item.path === tab.path) === index
     );
-
   const visibleSkillTabs = dedupeSkillTabs(skillTabs);
   const activeFile =
     visibleSkillTabs.find((tab) => tab.path === activeSkillTab) ||
@@ -113,7 +112,6 @@ export default function SkillDraftPanel({
   const canEditFiles = !readOnly && !isStreaming;
   const expandedEditorIsPreview =
     readOnly || sourceEditorPath !== expandedEditorPath;
-
   const handleSkillDirectiveClick = (path: string) => {
     const targetFile = visibleSkillTabs.find((tab) => tab.path === path);
     if (!targetFile) return;
@@ -122,7 +120,6 @@ export default function SkillDraftPanel({
     setExpandedEditorPath("");
     setExpandedEditorContent("");
   };
-
   const renameTab = (fromPath: string | null, toPath: string) => {
     if (!fromPath || !toPath.trim()) return;
     const nextPath = toPath.trim();
@@ -135,7 +132,6 @@ export default function SkillDraftPanel({
       setActiveSkillTab(nextPath);
     }
   };
-
   const renderFileActions = (tab: SkillFileContent) => {
     if (
       !canEditFiles ||
@@ -174,7 +170,6 @@ export default function SkillDraftPanel({
       </div>
     );
   };
-
   const handleFileRowKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
     path: string
@@ -187,20 +182,16 @@ export default function SkillDraftPanel({
       setActiveSkillTab(path);
     }
   };
-
   const renderFileName = (tab: SkillFileContent, displayName: string) => {
     if (editingTabKey !== tab.path) {
       return (
         <span
-          className={`min-w-0 flex-1 truncate ${
-            tab.status === "read_error" ? "text-red-500" : ""
-          }`}
+          className={`min-w-0 flex-1 truncate ${tab.status === "read_error" ? "text-red-500" : ""}`}
         >
           {displayName}
         </span>
       );
     }
-
     return (
       <input
         className="min-w-0 flex-1 rounded border border-blue-400 px-1 py-0.5 text-xs"
@@ -229,7 +220,6 @@ export default function SkillDraftPanel({
       />
     );
   };
-
   return (
     <div
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
@@ -258,11 +248,12 @@ export default function SkillDraftPanel({
                   },
                 ]}
               >
-                <Input
+                <InputField
                   onChange={onNameChange}
                   placeholder={t("skillManagement.form.namePlaceholder")}
                   allowClear={!readOnly}
                   readOnly={readOnly}
+                  disabled={readOnly}
                 />
               </Form.Item>
             </Col>
@@ -289,7 +280,6 @@ export default function SkillDraftPanel({
               </Form.Item>
             </Col>
           </Row>
-
           {!readOnly ? (
             <Can permission="group:read">
               <Row gutter={16}>
@@ -349,7 +339,6 @@ export default function SkillDraftPanel({
               </Row>
             </Can>
           ) : null}
-
           <Form.Item
             name="description"
             label={t("skillManagement.form.description")}
@@ -361,11 +350,12 @@ export default function SkillDraftPanel({
               },
             ]}
           >
-            <TextArea
+            <Textarea
               rows={2}
               placeholder={t("skillManagement.form.descriptionPlaceholder")}
               readOnly={readOnly}
               style={{ resize: "none" }}
+              disabled={readOnly}
             />
           </Form.Item>
           {tagResourceId ? (
@@ -384,7 +374,7 @@ export default function SkillDraftPanel({
                   />
                 </div>
                 {canAssignTags && onAssignTags ? (
-                  <Button type="link" size="small" onClick={onAssignTags}>
+                  <Button onClick={onAssignTags} variant="link" size="xs">
                     {t("tagManagement.action.editTags")}
                   </Button>
                 ) : null}
@@ -393,7 +383,6 @@ export default function SkillDraftPanel({
           ) : null}
         </Form>
       </div>
-
       <div
         className={`flex min-h-0 flex-1 flex-col ${readOnly ? "min-h-[300px]" : ""}`}
       >
@@ -405,8 +394,6 @@ export default function SkillDraftPanel({
               </span>
               {canEditFiles ? (
                 <Button
-                  type="text"
-                  size="small"
                   icon={<Plus size={14} />}
                   onClick={() => {
                     const newPath = `file_${Date.now()}.md`;
@@ -419,6 +406,8 @@ export default function SkillDraftPanel({
                       shouldAutoScrollRef.current[newPath] = true;
                     }
                   }}
+                  variant="ghost"
+                  size="xs"
                 />
               ) : null}
             </div>
@@ -526,14 +515,12 @@ export default function SkillDraftPanel({
                 (activeFileIsMarkdown || activeFileIsPreviewable) &&
                 !readOnly &&
                 !isStreaming ? (
-                  <Tooltip
-                    title={t(
+                  <Hint
+                    content={t(
                       isEditingActiveFile ? "common.preview" : "common.edit"
                     )}
                   >
                     <Button
-                      type="text"
-                      size="small"
                       icon={
                         isEditingActiveFile ? (
                           <Eye size={15} />
@@ -546,21 +533,23 @@ export default function SkillDraftPanel({
                           isEditingActiveFile ? "" : activeFile.path
                         )
                       }
+                      variant="ghost"
+                      size="xs"
                     />
-                  </Tooltip>
+                  </Hint>
                 ) : null}
                 {!activeFileUnavailable ? (
-                  <Tooltip title={t("skillManagement.detail.expand")}>
+                  <Hint content={t("skillManagement.detail.expand")}>
                     <Button
-                      type="text"
-                      size="small"
                       icon={<Maximize2 size={15} />}
                       onClick={() => {
                         setExpandedEditorPath(activeFile.path);
                         setExpandedEditorContent(activeFile.content);
                       }}
+                      variant="ghost"
+                      size="xs"
                     />
-                  </Tooltip>
+                  </Hint>
                 ) : null}
               </div>
               {activeFileUnavailable ? (
@@ -588,13 +577,13 @@ export default function SkillDraftPanel({
                   />
                 </div>
               ) : (
-                <TextArea
+                <Textarea
                   className="min-h-0 flex-1 rounded-none border-0 font-mono text-xs shadow-none focus:border-0 focus:shadow-none"
                   placeholder={
                     isStreaming ? "" : `${activeFile.path} content...`
                   }
                   value={activeFile.content}
-                  disabled={isStreaming}
+                  disabled={readOnly || isStreaming}
                   readOnly={readOnly}
                   style={{ resize: "none" }}
                   ref={(el) => {
@@ -625,7 +614,6 @@ export default function SkillDraftPanel({
           ) : null}
         </div>
       </div>
-
       <Modal
         title={expandedEditorPath}
         open={Boolean(expandedEditorPath)}
@@ -647,12 +635,13 @@ export default function SkillDraftPanel({
                     setExpandedEditorPath("");
                     setExpandedEditorContent("");
                   }}
+                  variant="outline"
+                  size="sm"
                 >
                   {t("common.cancel")}
                 </Button>,
                 <Button
                   key="save-expanded-editor"
-                  type="primary"
                   disabled={isStreaming}
                   onClick={() => {
                     setSkillTabs((prev) =>
@@ -665,6 +654,8 @@ export default function SkillDraftPanel({
                     setExpandedEditorPath("");
                     setExpandedEditorContent("");
                   }}
+                  variant="default"
+                  size="sm"
                 >
                   {t("common.save")}
                 </Button>,
@@ -689,17 +680,18 @@ export default function SkillDraftPanel({
             />
           </div>
         ) : (
-          <TextArea
+          <Textarea
             value={expandedEditorContent}
-            disabled={isStreaming}
+            disabled={readOnly || isStreaming}
             readOnly={readOnly}
-            autoSize={{ minRows: 16, maxRows: 32 }}
             className="rounded-none border-0 font-mono text-sm shadow-none focus:border-0 focus:shadow-none"
             style={{ resize: "none" }}
             onChange={(e) => {
               if (readOnly) return;
               setExpandedEditorContent(e.target.value);
             }}
+            minRows={16}
+            maxRows={32}
           />
         )}
       </Modal>

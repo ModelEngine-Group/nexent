@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import {
   AuiIf,
   ComposerPrimitive,
@@ -47,12 +47,12 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@/components/common/Popover";
 import { ModelSelector, type ModelOption } from "../ui/model-selector";
 import { ComposerAttachments } from "../ui/attachment";
 import {
@@ -73,11 +73,11 @@ import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import type { SkillFileContent } from "@/types/skill";
 import { SkillFileMentionPopover } from "../ui/skill-file-mention";
-import { DirectiveChip } from "../ui/directive-text";
+import { DirectiveChip } from "@/components/common/markdown/DirectiveChip";
 import {
   combinedSkillDirectiveFormatter,
   skillDirectiveIconMap,
-} from "../ui/skill-directives";
+} from "@/lib/skillDirectives";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";

@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
-import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
+import { ConversationSidebarProvider } from "@/components/chat/ConversationSidebarProvider";
+import toolbarStyles from "@/components/chat/ConversationToolbar.module.css";
 
 interface WorkbenchConversationLayoutProps {
   ready: boolean;

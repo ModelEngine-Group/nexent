@@ -1,14 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/common/Textarea";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Form, Input } from "antd";
+import { App, Form } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
-
-const { TextArea } = Input;
-
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import {
@@ -20,7 +17,6 @@ import {
   ParamDialog,
   ParamLabel,
 } from "@/components/resource-picker/ParamDialog";
-
 export interface AgentVersionPubulishModalProps {
   open: boolean;
   onClose: () => void;
@@ -35,7 +31,6 @@ export interface AgentVersionPubulishModalProps {
   onPublished?: () => void;
   onUpdated?: () => void;
 }
-
 export default function AgentVersionPubulishModal({
   open,
   onClose,
@@ -50,13 +45,10 @@ export default function AgentVersionPubulishModal({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-
   // Get version list for duplicate name validation
   const { agentVersionList } = useAgentVersionList(agentId ?? null);
-
   const [isLoading, setIsLoading] = useState(false);
   const [publishForm] = Form.useForm();
-
   // Reset form when modal opens or initialValues changes
   useEffect(() => {
     if (open) {
@@ -70,31 +62,26 @@ export default function AgentVersionPubulishModal({
       }
     }
   }, [open, isEdit, initialValues, defaultVersionName, publishForm]);
-
   // Custom validator for duplicate version name
   const validateVersionName = {
     validator(_: unknown, value: string) {
       if (!value) {
         return Promise.resolve();
       }
-
       // Find duplicate version name (exclude current version if editing)
       const duplicate = (agentVersionList || []).find(
         (v) =>
           v.version_name?.toLowerCase() === value.toLowerCase() &&
           (!isEdit || v.version_no !== versionNo)
       );
-
       if (duplicate) {
         return Promise.reject(
           new Error(t("agent.version.versionNameDuplicate"))
         );
       }
-
       return Promise.resolve();
     },
   };
-
   const handleSubmit = async (values: {
     version_name?: string;
     release_note?: string;
@@ -105,7 +92,6 @@ export default function AgentVersionPubulishModal({
       await handlePublish(values);
     }
   };
-
   const handlePublish = async (values: {
     version_name?: string;
     release_note?: string;
@@ -114,12 +100,10 @@ export default function AgentVersionPubulishModal({
       message.error(t("agent.error.agentNotFound"));
       return;
     }
-
     if (isLoading) {
       log.warn("Publish request already in progress, ignoring duplicate click");
       return;
     }
-
     try {
       setIsLoading(true);
       const result = await publishVersion(agentId, values);
@@ -141,7 +125,6 @@ export default function AgentVersionPubulishModal({
       setIsLoading(false);
     }
   };
-
   const handleUpdate = async (values: {
     version_name?: string;
     release_note?: string;
@@ -150,12 +133,10 @@ export default function AgentVersionPubulishModal({
       message.error(t("agent.error.agentNotFound"));
       return;
     }
-
     if (isLoading) {
       log.warn("Update request already in progress, ignoring duplicate click");
       return;
     }
-
     try {
       setIsLoading(true);
       const result = await updateVersion(agentId, versionNo, values);
@@ -176,7 +157,6 @@ export default function AgentVersionPubulishModal({
       setIsLoading(false);
     }
   };
-
   return (
     <>
       <ParamDialog
@@ -214,7 +194,7 @@ export default function AgentVersionPubulishModal({
             label={<ParamLabel label={t("agent.version.releaseNote")} />}
             name="release_note"
           >
-            <TextArea
+            <Textarea
               rows={4}
               placeholder={t("agent.version.releaseNotePlaceholder")}
             />

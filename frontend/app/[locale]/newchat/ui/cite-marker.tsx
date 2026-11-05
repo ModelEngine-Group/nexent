@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { memo, type ReactNode, useEffect, useRef, useState } from "react";
@@ -12,8 +14,8 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { CiteIndexBadge } from "@/components/common/highlightedSourceText";
+} from "@/components/common/Tooltip";
+import { CiteIndexBadge } from "@/components/chat/sources/HighlightedSourceText";
 import { cn } from "@/lib/utils";
 
 export interface CiteMarkerProps {
@@ -58,7 +60,7 @@ function renderSafeHtml(node: Node, key: string): ReactNode {
 
   const element = node as HTMLElement;
   const children = Array.from(element.childNodes).map((child, index) =>
-    renderSafeHtml(child, `${key}-${index}`),
+    renderSafeHtml(child, `${key}-${index}`)
   );
 
   if (!allowedTags.has(element.tagName.toLowerCase())) return children;
@@ -67,7 +69,11 @@ function renderSafeHtml(node: Node, key: string): ReactNode {
     case "br":
       return <br key={key} />;
     case "p":
-      return <p key={key} className="mb-2 last:mb-0">{children}</p>;
+      return (
+        <p key={key} className="mb-2 last:mb-0">
+          {children}
+        </p>
+      );
     case "strong":
     case "b":
       return <strong key={key}>{children}</strong>;
@@ -77,19 +83,37 @@ function renderSafeHtml(node: Node, key: string): ReactNode {
     case "table":
       return (
         <div key={key} className="my-2 overflow-x-auto last:mb-0">
-          <table className="w-full border-collapse text-left text-xs leading-5">{children}</table>
+          <table className="w-full border-collapse text-left text-xs leading-5">
+            {children}
+          </table>
         </div>
       );
     case "thead":
-      return <thead key={key} className="border-b border-border">{children}</thead>;
+      return (
+        <thead key={key} className="border-b border-border">
+          {children}
+        </thead>
+      );
     case "tbody":
       return <tbody key={key}>{children}</tbody>;
     case "tr":
-      return <tr key={key} className="border-b border-border/60 last:border-0">{children}</tr>;
+      return (
+        <tr key={key} className="border-b border-border/60 last:border-0">
+          {children}
+        </tr>
+      );
     case "th":
-      return <th key={key} className="px-2 py-1.5 align-top font-semibold">{children}</th>;
+      return (
+        <th key={key} className="px-2 py-1.5 align-top font-semibold">
+          {children}
+        </th>
+      );
     case "td":
-      return <td key={key} className="px-2 py-1.5 align-top">{children}</td>;
+      return (
+        <td key={key} className="px-2 py-1.5 align-top">
+          {children}
+        </td>
+      );
     default:
       return null;
   }
@@ -103,12 +127,16 @@ function CitationPreview({ text }: { text: string }) {
     template.innerHTML = text;
     setNodes(
       Array.from(template.content.childNodes).map((node, index) =>
-        renderSafeHtml(node, String(index)),
-      ),
+        renderSafeHtml(node, String(index))
+      )
     );
   }, [text]);
 
-  return <div className="max-h-64 overflow-y-auto text-xs leading-5 text-gray-600">{nodes}</div>;
+  return (
+    <div className="max-h-64 overflow-y-auto text-xs leading-5 text-gray-600">
+      {nodes}
+    </div>
+  );
 }
 
 const CiteMarkerImpl = ({
@@ -152,14 +180,12 @@ const CiteMarkerImpl = ({
             onClick={() => onClick?.(markerRef.current)}
             disabled={loading}
             aria-label={
-              loading
-                ? `${label} is loading`
-                : `Open ${label}: ${title}`
+              loading ? `${label} is loading` : `Open ${label}: ${title}`
             }
             className={cn(
               "mx-1 inline-flex size-[18px] items-center justify-center rounded-full bg-sky-100 p-0 align-middle text-[11px] font-medium leading-none text-sky-700 transition-colors",
               stateClassName,
-              className,
+              className
             )}
           >
             {displayIndex}

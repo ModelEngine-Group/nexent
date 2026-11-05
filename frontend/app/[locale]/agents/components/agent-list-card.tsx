@@ -1,19 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import { Tag } from "antd";
+import { Badge } from "@/components/common/Badge";
 import { Clock3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import { normalizeTags } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
-
 import AgentAvatar from "./agent-avatar";
 import AgentConfigActions from "./agent-config-actions";
 import AgentListIndicators from "./agent-list-indicators";
-
 export interface AgentListCardProps {
   agent: Agent;
   onOpen: (agent: Agent) => void;
@@ -21,17 +16,14 @@ export interface AgentListCardProps {
   onPublish: (agentId: number) => void;
   onManageVersions: (agentId: number) => void;
 }
-
 export function formatAgentListDate(agent: Agent): {
   date: string;
   isUpdate: boolean;
 } | null {
   const source = agent.update_time || agent.create_time;
   if (!source) return null;
-
   const isoDate = /^\d{4}-\d{2}-\d{2}/.exec(source)?.[0];
   if (isoDate) return { date: isoDate, isUpdate: Boolean(agent.update_time) };
-
   const parsed = new Date(source);
   if (Number.isNaN(parsed.getTime())) return null;
   return {
@@ -39,7 +31,6 @@ export function formatAgentListDate(agent: Agent): {
     isUpdate: Boolean(agent.update_time),
   };
 }
-
 export default function AgentListCard({
   agent,
   onOpen,
@@ -55,9 +46,8 @@ export default function AgentListCard({
     : undefined;
   const date = formatAgentListDate(agent);
   const agentId = Number(agent.id);
-
   return (
-    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
+    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[var(--color-brand-hover)] focus-within:ring-primary">
       <button
         type="button"
         onClick={() => onOpen(agent)}
@@ -89,12 +79,14 @@ export default function AgentListCard({
         </p>
         <div className="mt-1 flex h-[22px] w-full min-w-0 items-center">
           {category ? (
-            <Tag
+            <Badge
               title={category}
-              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-full !border-0 !bg-[#E6F2FD] !px-2.5 !text-[12px] font-normal !leading-5 !text-[#0067D1]"
+              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-full !border-0 !bg-brand-soft !px-2.5 !text-[12px] font-normal !leading-5 !text-primary"
+              variant="outline"
+              size="sm"
             >
               <span className="min-w-0 truncate">{category}</span>
-            </Tag>
+            </Badge>
           ) : null}
         </div>
       </button>
@@ -128,7 +120,7 @@ export default function AgentListCard({
           <span
             data-testid="agent-card-status-dot"
             aria-hidden="true"
-            className={`size-2 shrink-0 rounded-full ${agent.current_version_no ? "bg-[#0067d1]" : "bg-[#d9d9d9]"}`}
+            className={`size-2 shrink-0 rounded-full ${agent.current_version_no ? "bg-primary" : "bg-[#d9d9d9]"}`}
           />
           {agent.current_version_no
             ? t("agentConfig.list.online")

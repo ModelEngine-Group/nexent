@@ -7,7 +7,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 import { Checkbox, message } from "antd";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {

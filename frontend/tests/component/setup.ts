@@ -37,6 +37,7 @@ Object.defineProperty(navigator, "clipboard", {
 });
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
+window.HTMLElement.prototype.scrollTo = vi.fn();
 // Radix Select (shadcn) opens via pointer capture; jsdom lacks the APIs.
 // Mirrors tests/workbench/setup.ts.
 window.HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);

@@ -1,21 +1,22 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Badge } from "@/components/common/Badge";
+import { PasswordInput } from "@/components/common/PasswordInput";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/common/Button";
+import { InputField } from "@/components/common/InputField";
+import { Textarea } from "@/components/common/Textarea";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
-  Button,
-  Input,
   Form,
   Tabs,
   Table,
-  Tag,
   Space,
   Typography,
   Card,
-  Tooltip,
   message,
   Select,
   Popover,
@@ -42,42 +43,40 @@ import { a2aClientService, A2AExternalAgent } from "@/services/a2aService";
 import A2AChatModal from "./A2AChatModal";
 import NacosDiscoveryPanel from "./NacosDiscoveryPanel";
 import log from "@/lib/logger";
-
 const { Text, Title } = Typography;
-
 // Protocol type constants
 const PROTOCOL_TYPES = [
   { value: "JSONRPC", label: "JSONRPC" },
   { value: "HTTP+JSON", label: "HTTP+JSON" },
   { value: "GRPC", label: "GRPC", disabled: true },
 ];
-
 // Protocol binding to protocol type mapping
 const PROTOCOL_BINDING_MAP: Record<string, string> = {
   "http-json-rpc": "JSONRPC",
-  "jsonrpc": "JSONRPC",
-  "httpjsonrpc": "JSONRPC",
-  "httprest": "HTTP+JSON",
-  "rest": "HTTP+JSON",
+  jsonrpc: "JSONRPC",
+  httpjsonrpc: "JSONRPC",
+  httprest: "HTTP+JSON",
+  rest: "HTTP+JSON",
   "http+json": "HTTP+JSON",
-  "grpc": "GRPC",
+  grpc: "GRPC",
 };
-
 interface AgentSecuritySettingProps {
   agent: A2AExternalAgent;
   onSaved: () => void;
 }
-
-function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingProps>) {
+function AgentSecuritySetting({
+  agent,
+  onSaved,
+}: Readonly<AgentSecuritySettingProps>) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<number | undefined>(
-    agent.selected_security_requirement_index ?? undefined,
-  );
+  const [selectedRequirementIndex, setSelectedRequirementIndex] = useState<
+    number | undefined
+  >(agent.selected_security_requirement_index ?? undefined);
   const [configuredSchemeIds, setConfiguredSchemeIds] = useState<string[]>(
-    agent.configured_security_scheme_ids || [],
+    agent.configured_security_scheme_ids || []
   );
   const schemes = agent.security_schemes || {};
   const requirements = agent.security_requirements || [];
@@ -87,39 +86,48 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
     if (apiKeyScheme) {
       return [{ schemeId, ...apiKeyScheme }];
     }
-
     const httpAuthScheme = securityScheme.httpAuthSecurityScheme;
-    if (typeof httpAuthScheme?.scheme === "string" && httpAuthScheme.scheme.trim()) {
+    if (
+      typeof httpAuthScheme?.scheme === "string" &&
+      httpAuthScheme.scheme.trim()
+    ) {
       const authScheme = httpAuthScheme.scheme.trim();
       const isHttpBearer = authScheme.toLowerCase() === "bearer";
-      return [{
-        schemeId,
-        name: "Authorization",
-        location: "header",
-        description: isHttpBearer && httpAuthScheme.bearerFormat
-          ? `${httpAuthScheme.bearerFormat} token`
-          : `${authScheme} credential`,
-        isHttpBearer,
-      }];
+      return [
+        {
+          schemeId,
+          name: "Authorization",
+          location: "header",
+          description:
+            isHttpBearer && httpAuthScheme.bearerFormat
+              ? `${httpAuthScheme.bearerFormat} token`
+              : `${authScheme} credential`,
+          isHttpBearer,
+        },
+      ];
     }
-
     return [];
   });
-
   useEffect(() => {
     setConfiguredSchemeIds(agent.configured_security_scheme_ids || []);
-    setSelectedRequirementIndex(agent.selected_security_requirement_index ?? undefined);
-  }, [agent.configured_security_scheme_ids, agent.selected_security_requirement_index]);
-
+    setSelectedRequirementIndex(
+      agent.selected_security_requirement_index ?? undefined
+    );
+  }, [
+    agent.configured_security_scheme_ids,
+    agent.selected_security_requirement_index,
+  ]);
   if (entries.length === 0 || requirements.length === 0) {
     return null;
   }
-
   const handleSave = async () => {
     const configuredValues = Object.fromEntries(
-      Object.entries(values).filter(([, value]) => value.trim()),
+      Object.entries(values).filter(([, value]) => value.trim())
     );
-    if (Object.keys(configuredValues).length === 0 && configuredSchemeIds.length === 0) {
+    if (
+      Object.keys(configuredValues).length === 0 &&
+      configuredSchemeIds.length === 0
+    ) {
       message.error(t("a2a.security.valueRequired"));
       return;
     }
@@ -127,17 +135,21 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
       message.error(t("a2a.security.requirementRequired"));
       return;
     }
-
     setSaving(true);
     const result = await a2aClientService.updateAgentSecurityCredentials(
       String(agent.id),
       configuredValues,
-      selectedRequirementIndex,
+      selectedRequirementIndex
     );
     setSaving(false);
     if (result.success) {
-      setConfiguredSchemeIds(result.data?.configured_security_scheme_ids || configuredSchemeIds);
-      setSelectedRequirementIndex(result.data?.selected_security_requirement_index ?? selectedRequirementIndex);
+      setConfiguredSchemeIds(
+        result.data?.configured_security_scheme_ids || configuredSchemeIds
+      );
+      setSelectedRequirementIndex(
+        result.data?.selected_security_requirement_index ??
+          selectedRequirementIndex
+      );
       message.success(t("a2a.security.saveSuccess"));
       setValues({});
       setOpen(false);
@@ -146,17 +158,24 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
       message.error(result.message || t("a2a.security.saveFailed"));
     }
   };
-
   return (
     <Popover
       content={
         <div style={{ width: 320 }}>
-          <Text type="secondary" className="text-xs block" style={{ marginBottom: 12 }}>
+          <Text
+            type="secondary"
+            className="text-xs block"
+            style={{ marginBottom: 12 }}
+          >
             {t("a2a.security.requirementsHint")}
           </Text>
           {requirements.length > 1 && (
             <div style={{ marginBottom: 12 }}>
-              <Text strong className="text-xs block" style={{ marginBottom: 4 }}>
+              <Text
+                strong
+                className="text-xs block"
+                style={{ marginBottom: 4 }}
+              >
                 {t("a2a.security.requirementLabel")}
               </Text>
               <Select
@@ -167,45 +186,74 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
                 onChange={setSelectedRequirementIndex}
                 options={requirements.map((requirement, index) => ({
                   value: index,
-                  label: Object.keys(requirement?.schemes || {}).join(" + ") || `${t("a2a.security.requirementLabel")} ${index + 1}`,
+                  label:
+                    Object.keys(requirement?.schemes || {}).join(" + ") ||
+                    `${t("a2a.security.requirementLabel")} ${index + 1}`,
                 }))}
               />
             </div>
           )}
           <Space direction="vertical" size="small" style={{ width: "100%" }}>
-            {entries.map(({ schemeId, description, location, name, isHttpBearer }) => {
-              const isConfigured = configuredSchemeIds.includes(schemeId);
-              return (
-                <div key={schemeId}>
-                  <Space size="small" style={{ marginBottom: 4 }}>
-                    {isHttpBearer && (
-                      <Tooltip title={t("a2a.security.bearerTokenHint")}>
-                        <Info size={14} className="text-gray-400" />
-                      </Tooltip>
-                    )}
-                    <Text strong className="text-xs">{name || schemeId}</Text>
-                    {location && <Tag>{location}</Tag>}
-                    {isConfigured && (
-                      <Tag color="green">{t("a2a.security.configured")}</Tag>
-                    )}
-                  </Space>
-                  <Input.Password
-                    size="small"
-                    placeholder={isConfigured ? t("a2a.security.replacePlaceholder") : (description || t("a2a.security.valuePlaceholder"))}
-                    value={values[schemeId] || ""}
-                    onChange={(event) => setValues((current) => ({
-                      ...current,
-                      [schemeId]: event.target.value,
-                    }))}
-                  />
-                </div>
-              );
-            })}
+            {entries.map(
+              ({ schemeId, description, location, name, isHttpBearer }) => {
+                const isConfigured = configuredSchemeIds.includes(schemeId);
+                return (
+                  <div key={schemeId}>
+                    <Space size="small" style={{ marginBottom: 4 }}>
+                      {isHttpBearer && (
+                        <Hint content={t("a2a.security.bearerTokenHint")}>
+                          <Info size={14} className="text-gray-400" />
+                        </Hint>
+                      )}
+                      <Text strong className="text-xs">
+                        {name || schemeId}
+                      </Text>
+                      {location && (
+                        <Badge variant="outline" size="sm">
+                          {location}
+                        </Badge>
+                      )}
+                      {isConfigured && (
+                        <Badge variant={"success"} size="sm">
+                          {t("a2a.security.configured")}
+                        </Badge>
+                      )}
+                    </Space>
+                    <PasswordInput
+                      placeholder={
+                        isConfigured
+                          ? t("a2a.security.replacePlaceholder")
+                          : description || t("a2a.security.valuePlaceholder")
+                      }
+                      value={values[schemeId] || ""}
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          [schemeId]: event.target.value,
+                        }))
+                      }
+                      className={cn("h-6 text-xs")}
+                    />
+                  </div>
+                );
+              }
+            )}
           </Space>
           <div style={{ marginTop: 12, textAlign: "right" }}>
             <Space>
-              <Button size="small" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
-              <Button type="primary" size="small" loading={saving} onClick={handleSave}>
+              <Button
+                onClick={() => setOpen(false)}
+                variant="outline"
+                size="xs"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                loading={saving}
+                onClick={handleSave}
+                variant="default"
+                size="xs"
+              >
                 {t("common.save")}
               </Button>
             </Space>
@@ -217,13 +265,12 @@ function AgentSecuritySetting({ agent, onSaved }: Readonly<AgentSecuritySettingP
       open={open}
       onOpenChange={setOpen}
     >
-      <Tooltip title={t("a2a.security.settings")}>
-        <Button type="text" size="small" icon={<KeyRound size={14} />} />
-      </Tooltip>
+      <Hint content={t("a2a.security.settings")}>
+        <Button icon={<KeyRound size={14} />} variant="ghost" size="xs" />
+      </Hint>
     </Popover>
   );
 }
-
 interface A2AAgentDiscoveryModalProps {
   open: boolean;
   onClose: () => void;
@@ -232,13 +279,13 @@ interface A2AAgentDiscoveryModalProps {
   nacosConfigId?: string;
   localAgentId?: number;
 }
-
 // Helper function to extract available protocols from supported interfaces
-function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]): string[] {
+function extractAvailableProtocols(
+  supportedInterfaces?: Record<string, any>[]
+): string[] {
   if (!supportedInterfaces || supportedInterfaces.length === 0) {
     return ["JSONRPC"]; // Default protocol
   }
-
   const protocols = new Set<string>();
   for (const iface of supportedInterfaces) {
     const binding = (iface.protocolBinding || "").toLowerCase();
@@ -247,37 +294,35 @@ function extractAvailableProtocols(supportedInterfaces?: Record<string, any>[]):
       protocols.add(protocol);
     }
   }
-
   return protocols.size > 0 ? Array.from(protocols) : ["JSONRPC"];
 }
-
 // Agent Protocol Setting Popover Component
 interface AgentProtocolSettingProps {
   agent: A2AExternalAgent;
   onProtocolChange: (agentId: string, protocolType: string) => void;
 }
-
-function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtocolSettingProps>) {
+function AgentProtocolSetting({
+  agent,
+  onProtocolChange,
+}: Readonly<AgentProtocolSettingProps>) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState(
     (agent as any).protocol_type || "JSONRPC"
   );
   const [saving, setSaving] = useState(false);
-
-  const availableProtocols = extractAvailableProtocols(agent.supported_interfaces);
-
+  const availableProtocols = extractAvailableProtocols(
+    agent.supported_interfaces
+  );
   useEffect(() => {
     setSelectedProtocol((agent as any).protocol_type || "JSONRPC");
   }, [(agent as any).protocol_type]);
-
   const handleSave = () => {
     setSaving(true);
     onProtocolChange(String(agent.id), selectedProtocol);
     setSaving(false);
     setOpen(false);
   };
-
   return (
     <Popover
       content={
@@ -304,9 +349,13 @@ function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtoco
                   <Space>
                     <span>{protocol.label}</span>
                     {!isAvailable && (
-                      <Tag color="default" style={{ marginLeft: 8 }}>
+                      <Badge
+                        style={{ marginLeft: 8 }}
+                        variant={"outline"}
+                        size="sm"
+                      >
                         N/A
-                      </Tag>
+                      </Badge>
                     )}
                   </Space>
                 </Radio>
@@ -315,14 +364,18 @@ function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtoco
           </Radio.Group>
           <div style={{ marginTop: 12, textAlign: "right" }}>
             <Space>
-              <Button size="small" onClick={() => setOpen(false)}>
+              <Button
+                onClick={() => setOpen(false)}
+                variant="outline"
+                size="xs"
+              >
                 {t("common.cancel")}
               </Button>
               <Button
-                type="primary"
-                size="small"
                 onClick={handleSave}
                 loading={saving}
+                variant="default"
+                size="xs"
               >
                 {t("common.save")}
               </Button>
@@ -335,17 +388,12 @@ function AgentProtocolSetting({ agent, onProtocolChange }: Readonly<AgentProtoco
       open={open}
       onOpenChange={setOpen}
     >
-      <Tooltip title={t("a2a.protocol.settings")}>
-        <Button
-          type="text"
-          size="small"
-          icon={<Settings size={14} />}
-        />
-      </Tooltip>
+      <Hint content={t("a2a.protocol.settings")}>
+        <Button icon={<Settings size={14} />} variant="ghost" size="xs" />
+      </Hint>
     </Popover>
   );
 }
-
 export default function A2AAgentDiscoveryModal({
   open,
   onClose,
@@ -356,28 +404,26 @@ export default function A2AAgentDiscoveryModal({
 }: Readonly<A2AAgentDiscoveryModalProps>) {
   const { t } = useTranslation("common");
   const [messageApi, contextHolder] = message.useMessage();
-
   // Chat modal state
   const [chatModalOpen, setChatModalOpen] = useState(false);
   const [chatAgent, setChatAgent] = useState<A2AExternalAgent | null>(null);
-
   // Discovery mode
   const [mode, setMode] = useState<"url" | "nacos" | "list">("url");
   const [loading, setLoading] = useState(false);
-  const [discoveredAgents, setDiscoveredAgents] = useState<A2AExternalAgent[]>([]);
-
+  const [discoveredAgents, setDiscoveredAgents] = useState<A2AExternalAgent[]>(
+    []
+  );
   // URL mode state
   const [url, setUrl] = useState("");
   const [customHeaders, setCustomHeaders] = useState("");
   const [sslVerify, setSslVerify] = useState(true);
-  const [selectedAgent, setSelectedAgent] = useState<A2AExternalAgent | null>(null);
-
+  const [selectedAgent, setSelectedAgent] = useState<A2AExternalAgent | null>(
+    null
+  );
   // List mode state
   const [agents, setAgents] = useState<A2AExternalAgent[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
-
-
   const loadAgents = async () => {
     setLoadingAgents(true);
     const result = await a2aClientService.listAgents();
@@ -386,7 +432,6 @@ export default function A2AAgentDiscoveryModal({
     }
     setLoadingAgents(false);
   };
-
   // Discover from URL
   const handleDiscoverFromUrl = async () => {
     if (loading) return;
@@ -394,14 +439,12 @@ export default function A2AAgentDiscoveryModal({
       messageApi.error(t("a2a.discovery.urlRequired"));
       return;
     }
-
     try {
       new URL(url);
     } catch {
       messageApi.error(t("a2a.discovery.invalidUrl"));
       return;
     }
-
     let parsedCustomHeaders: Record<string, string> | undefined;
     if (customHeaders.trim()) {
       try {
@@ -421,7 +464,6 @@ export default function A2AAgentDiscoveryModal({
         return;
       }
     }
-
     setLoading(true);
     try {
       const result = await a2aClientService.discoverFromUrl({
@@ -429,7 +471,6 @@ export default function A2AAgentDiscoveryModal({
         custom_headers: parsedCustomHeaders,
         ssl_verify: sslVerify,
       });
-
       if (result.success && result.data) {
         setSelectedAgent(result.data);
         setDiscoveredAgents([result.data]);
@@ -447,13 +488,11 @@ export default function A2AAgentDiscoveryModal({
       setLoading(false);
     }
   };
-
   // Refresh agent card
   const handleRefresh = async (agentId: string) => {
     setRefreshingId(agentId);
     const result = await a2aClientService.refreshAgent(agentId);
     setRefreshingId(null);
-
     if (result.success) {
       messageApi.success(t("a2a.discovery.refreshSuccess"));
       loadAgents();
@@ -461,7 +500,6 @@ export default function A2AAgentDiscoveryModal({
       messageApi.error(result.message || t("a2a.discovery.refreshFailed"));
     }
   };
-
   // Delete agent
   const handleDelete = async (agentId: string) => {
     const result = await a2aClientService.deleteAgent(agentId);
@@ -472,10 +510,15 @@ export default function A2AAgentDiscoveryModal({
       messageApi.error(result.message || t("a2a.discovery.deleteFailed"));
     }
   };
-
   // Update agent protocol
-  const handleProtocolChange = async (agentId: string, protocolType: string) => {
-    const result = await a2aClientService.updateAgentProtocol(agentId, protocolType);
+  const handleProtocolChange = async (
+    agentId: string,
+    protocolType: string
+  ) => {
+    const result = await a2aClientService.updateAgentProtocol(
+      agentId,
+      protocolType
+    );
     if (result.success) {
       messageApi.success(t("a2a.protocol.updateSuccess"));
       loadAgents();
@@ -483,19 +526,13 @@ export default function A2AAgentDiscoveryModal({
       messageApi.error(result.message || t("a2a.protocol.updateFailed"));
     }
   };
-
   // Add to local agent
   const handleAddToLocalAgent = async (agent: A2AExternalAgent) => {
     if (!localAgentId) {
       messageApi.error(t("a2a.discovery.noLocalAgent"));
       return;
     }
-
-    const result = await a2aClientService.addRelation(
-      localAgentId,
-      agent.id
-    );
-
+    const result = await a2aClientService.addRelation(localAgentId, agent.id);
     if (result.success) {
       messageApi.success(t("a2a.discovery.addRelationSuccess"));
       if (onAgentDiscovered) {
@@ -505,36 +542,33 @@ export default function A2AAgentDiscoveryModal({
       messageApi.error(result.message || t("a2a.discovery.addRelationFailed"));
     }
   };
-
   // Open chat modal
   const handleOpenChat = (agent: A2AExternalAgent) => {
     setChatAgent(agent);
     setChatModalOpen(true);
   };
-
   // Get status icon
   const getStatusIcon = (agent: A2AExternalAgent) => {
     if (!agent.is_available) {
       return (
-        <Tooltip title={agent.last_check_result || t("a2a.status.unavailable")}>
+        <Hint content={agent.last_check_result || t("a2a.status.unavailable")}>
           <XCircle className="text-red-500" size={16} />
-        </Tooltip>
+        </Hint>
       );
     }
     if (agent.last_check_result === "OK") {
       return (
-        <Tooltip title={t("a2a.status.available")}>
+        <Hint content={t("a2a.status.available")}>
           <CheckCircle className="text-green-500" size={16} />
-        </Tooltip>
+        </Hint>
       );
     }
     return (
-      <Tooltip title={t("a2a.status.unknown")}>
+      <Hint content={t("a2a.status.unknown")}>
         <AlertCircle className="text-yellow-500" size={16} />
-      </Tooltip>
+      </Hint>
     );
   };
-
   // Agent columns for table
   const agentColumns = [
     {
@@ -554,11 +588,11 @@ export default function A2AAgentDiscoveryModal({
       key: "description",
       ellipsis: true,
       render: (desc: string) => (
-        <Tooltip title={desc}>
+        <Hint content={desc}>
           <Text type="secondary" className="max-w-xs truncate block">
             {desc || "-"}
           </Text>
-        </Tooltip>
+        </Hint>
       ),
     },
     {
@@ -567,9 +601,9 @@ export default function A2AAgentDiscoveryModal({
       key: "source_type",
       width: 100,
       render: (type: string) => (
-        <Tag color={type === "url" ? "blue" : "green"}>
+        <Badge variant={type === "url" ? "info" : "success"} size="sm">
           {type === "url" ? "URL" : "Nacos"}
-        </Tag>
+        </Badge>
       ),
     },
     {
@@ -578,57 +612,58 @@ export default function A2AAgentDiscoveryModal({
       width: 280,
       render: (_: any, record: A2AExternalAgent) => (
         <Space size="small">
-          <Tooltip title={t("a2a.discovery.refresh")}>
+          <Hint content={t("a2a.discovery.refresh")}>
             <Button
-              type="text"
-              size="small"
               icon={
                 <RefreshCw
                   size={14}
-                  className={refreshingId === String(record.id) ? "animate-spin" : ""}
+                  className={
+                    refreshingId === String(record.id) ? "animate-spin" : ""
+                  }
                 />
               }
               onClick={() => handleRefresh(String(record.id))}
               loading={refreshingId === String(record.id)}
+              variant="ghost"
+              size="xs"
             />
-          </Tooltip>
+          </Hint>
           <AgentProtocolSetting
             agent={record}
             onProtocolChange={handleProtocolChange}
           />
           <AgentSecuritySetting agent={record} onSaved={loadAgents} />
-          <Tooltip title={t("a2a.chat.title")}>
+          <Hint content={t("a2a.chat.title")}>
             <Button
-              type="text"
-              size="small"
               icon={<MessageCircle size={14} />}
               onClick={() => handleOpenChat(record)}
+              variant="ghost"
+              size="xs"
             />
-          </Tooltip>
+          </Hint>
           {localAgentId && (
-            <Tooltip title={t("a2a.discovery.addAsSubAgent")}>
+            <Hint content={t("a2a.discovery.addAsSubAgent")}>
               <Button
-                type="text"
-                size="small"
                 icon={<Plus size={14} />}
                 onClick={() => handleAddToLocalAgent(record)}
+                variant="ghost"
+                size="xs"
               />
-            </Tooltip>
+            </Hint>
           )}
-          <Tooltip title={t("common.delete")}>
+          <Hint content={t("common.delete")}>
             <Button
-              type="text"
-              size="small"
-              danger
               icon={<Trash2 size={14} />}
               onClick={() => handleDelete(String(record.id))}
+              variant="ghost"
+              size="xs"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             />
-          </Tooltip>
+          </Hint>
         </Space>
       ),
     },
   ];
-
   return (
     <>
       {contextHolder}
@@ -663,7 +698,13 @@ export default function A2AAgentDiscoveryModal({
               {
                 key: "url",
                 label: (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
                     <ExternalLink style={{ width: 16, height: 16 }} />
                     {t("a2a.discovery.tab.url")}
                   </span>
@@ -671,7 +712,11 @@ export default function A2AAgentDiscoveryModal({
                 children: (
                   <div className="space-y-4">
                     <Card size="small">
-                      <Space direction="vertical" style={{ width: "100%" }} size="middle">
+                      <Space
+                        direction="vertical"
+                        style={{ width: "100%" }}
+                        size="middle"
+                      >
                         <Form layout="vertical">
                           <Form.Item
                             label={t("a2a.discovery.urlLabel")}
@@ -679,7 +724,7 @@ export default function A2AAgentDiscoveryModal({
                             tooltip={t("a2a.discovery.urlTooltip")}
                           >
                             <div className="flex gap-2">
-                              <Input
+                              <InputField
                                 placeholder="https://example.com/.well-known/agent-xxx.json"
                                 value={url}
                                 onChange={(e) => setUrl(e.target.value)}
@@ -687,10 +732,11 @@ export default function A2AAgentDiscoveryModal({
                                 className="flex-1"
                               />
                               <Button
-                                type="primary"
                                 onClick={handleDiscoverFromUrl}
                                 loading={loading}
                                 icon={<Search size={14} />}
+                                variant="default"
+                                size="sm"
                               >
                                 {t("a2a.discovery.button")}
                               </Button>
@@ -709,11 +755,14 @@ export default function A2AAgentDiscoveryModal({
                             label={t("a2a.discovery.customHeadersLabel")}
                             tooltip={t("a2a.discovery.customHeadersTooltip")}
                           >
-                            <Input.TextArea
-                              autoSize={{ minRows: 2, maxRows: 5 }}
-                              placeholder={t("a2a.discovery.customHeadersPlaceholder")}
+                            <Textarea
+                              placeholder={t(
+                                "a2a.discovery.customHeadersPlaceholder"
+                              )}
                               value={customHeaders}
                               onChange={(e) => setCustomHeaders(e.target.value)}
+                              minRows={2}
+                              maxRows={5}
                             />
                           </Form.Item>
                         </Form>
@@ -732,7 +781,9 @@ export default function A2AAgentDiscoveryModal({
                       <AgentDetailCard
                         agent={selectedAgent}
                         onAddToLocalAgent={
-                          localAgentId ? () => handleAddToLocalAgent(selectedAgent) : undefined
+                          localAgentId
+                            ? () => handleAddToLocalAgent(selectedAgent)
+                            : undefined
                         }
                       />
                     )}
@@ -743,7 +794,13 @@ export default function A2AAgentDiscoveryModal({
               {
                 key: "nacos",
                 label: (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
                     <Globe style={{ width: 16, height: 16 }} />
                     {t("a2a.discovery.tab.nacos")}
                   </span>
@@ -761,7 +818,13 @@ export default function A2AAgentDiscoveryModal({
               {
                 key: "list",
                 label: (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
                     <Eye style={{ width: 16, height: 16 }} />
                     {t("a2a.discovery.tab.list")}
                   </span>
@@ -769,7 +832,12 @@ export default function A2AAgentDiscoveryModal({
                 children: (
                   <div className="space-y-4">
                     <div className="flex justify-end">
-                      <Button onClick={loadAgents} icon={<RefreshCw size={14} />}>
+                      <Button
+                        onClick={loadAgents}
+                        icon={<RefreshCw size={14} />}
+                        variant="outline"
+                        size="sm"
+                      >
                         {t("common.refresh")}
                       </Button>
                     </div>
@@ -795,28 +863,33 @@ export default function A2AAgentDiscoveryModal({
     </>
   );
 }
-
 // Agent Detail Card Component
 interface AgentDetailCardProps {
   agent: A2AExternalAgent;
   onAddToLocalAgent?: () => void;
 }
-
-function AgentDetailCard({ agent, onAddToLocalAgent }: Readonly<AgentDetailCardProps>) {
+function AgentDetailCard({
+  agent,
+  onAddToLocalAgent,
+}: Readonly<AgentDetailCardProps>) {
   const { t } = useTranslation("common");
-
   return (
     <div className="border rounded-lg p-4 bg-gray-50">
       <div className="flex justify-between items-start">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
             <Globe size={18} className="text-blue-500" />
-            <Text strong className="text-lg">{agent.name}</Text>
-            <Tag color={agent.is_available ? "success" : "error"}>
+            <Text strong className="text-lg">
+              {agent.name}
+            </Text>
+            <Badge
+              variant={agent.is_available ? "success" : "destructive"}
+              size="sm"
+            >
               {agent.is_available
                 ? t("a2a.status.available")
                 : t("a2a.status.unavailable")}
-            </Tag>
+            </Badge>
           </div>
 
           {agent.description && (
@@ -826,28 +899,45 @@ function AgentDetailCard({ agent, onAddToLocalAgent }: Readonly<AgentDetailCardP
           )}
 
           <div className="space-y-1">
-            {agent.supported_interfaces && agent.supported_interfaces.length > 0 && (
-              <div className="mt-2">
-                <Text type="secondary" className="text-xs">{t("a2a.agent.supportedInterfaces")}:</Text>
-                <div className="mt-1 space-y-1 pl-4">
-                  {agent.supported_interfaces.map((iface: any, idx: number) => (
-                    <div key={idx} className="flex items-center gap-2 text-xs">
-                      <Tag color="blue" className="text-xs px-1 py-0">{iface.protocolBinding}</Tag>
-                      <span className="text-gray-500">{iface.url}</span>
-                      <span className="text-gray-400 text-[10px]">v{iface.protocolVersion}</span>
-                    </div>
-                  ))}
+            {agent.supported_interfaces &&
+              agent.supported_interfaces.length > 0 && (
+                <div className="mt-2">
+                  <Text type="secondary" className="text-xs">
+                    {t("a2a.agent.supportedInterfaces")}:
+                  </Text>
+                  <div className="mt-1 space-y-1 pl-4">
+                    {agent.supported_interfaces.map(
+                      (iface: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <Badge
+                            className="text-xs px-1 py-0"
+                            variant={"info"}
+                            size="sm"
+                          >
+                            {iface.protocolBinding}
+                          </Badge>
+                          <span className="text-gray-500">{iface.url}</span>
+                          <span className="text-gray-400 text-[10px]">
+                            v{iface.protocolVersion}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
           </div>
         </div>
 
         {onAddToLocalAgent && (
           <Button
-            type="primary"
             icon={<Plus size={14} />}
             onClick={onAddToLocalAgent}
+            variant="default"
+            size="sm"
           >
             {t("a2a.discovery.addAsSubAgent")}
           </Button>

@@ -54,7 +54,7 @@ import {
 } from "@/lib/mcpTools";
 import { calculateConversationViewport } from "@/lib/conversationViewport";
 import { shouldContinueConversationPageLoading } from "@/lib/conversationLoadPolicy";
-import { extractMarkdownHeadings } from "@/components/common/markdownRenderer";
+import { extractMarkdownHeadings } from "@/components/common/markdown/MarkdownRenderer";
 import { extractSkillInfoFromContent, isSkillMdFile, normalizeSkillFiles } from "@/lib/skillFileUtils";
 import { getQuotaConflictTranslationKey, getQuotaExceededMessage, isQuotaExceededError } from "@/types/quota";
 import { validateAidpFiles, validateFileType } from "@/services/uploadService";

@@ -5,7 +5,7 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { CircleHelp, Send } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/common/Button";
 import { cn } from "@/lib/utils";
 
 import type {

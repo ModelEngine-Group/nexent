@@ -91,7 +91,7 @@ vi.mock('@/components/ui/button', () => ({
   Button: () => null,
 }));
 
-vi.mock('@/components/common/highlightedSourceText', () => ({
+vi.mock('@/components/chat/sources/HighlightedSourceText', () => ({
   CiteIndexBadge: () => null,
   HighlightedChunkText: () => null,
 }));

@@ -9,11 +9,11 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { Button } from "antd";
+import { Button } from "@/components/common/Button";
 import { useTranslation } from "react-i18next";
 
 import { useGuidePreference } from "@/hooks/useGuidePreference";
-import { StandardTour } from "@/components/common/StandardTour";
+import { CreationGuideTour } from "@/components/agent/CreationGuideTour";
 import { hasCompletedAgentCreationGuide } from "@/lib/agentCreationGuide";
 
 const TARGETS = ["assistant", "core", "resources", "workflow"] as const;
@@ -75,7 +75,7 @@ export function AgentCreationGuide({
     const frame = window.requestAnimationFrame(() => {
       document
         .querySelector<HTMLButtonElement>(
-          ".agent-creation-guide .ant-btn-primary"
+          ".agent-creation-guide [data-ui-tour-next]"
         )
         ?.focus({ preventScroll: true });
     });
@@ -95,7 +95,7 @@ export function AgentCreationGuide({
   return (
     <>
       <span ref={initializeGuide} hidden />
-      <StandardTour
+      <CreationGuideTour
         open={open}
         current={current}
         onChange={setCurrent}
@@ -104,7 +104,7 @@ export function AgentCreationGuide({
         actionsRender={(actions) =>
           current === 0 ? (
             <>
-              <Button size="small" onClick={dismiss}>
+              <Button variant="outline" size="sm" onClick={dismiss}>
                 {t("agent.creationGuide.skip")}
               </Button>
               {actions}

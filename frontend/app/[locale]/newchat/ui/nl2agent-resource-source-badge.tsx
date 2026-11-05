@@ -1,8 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useTranslation } from "react-i18next";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@/components/common/Badge";
 import type { Nl2aResourceCandidate } from "../adapter/remote-chat-model-adapter";
 
 export type ResourceAvailability = "local" | "installed" | "uninstalled";
@@ -29,8 +31,7 @@ export function Nl2AgentResourceSourceBadge({
   const { t } = useTranslation("common");
   const availability = availabilityOverride || AVAILABILITY_BY_SOURCE[source];
   const isTenantRepository =
-    source === "TENANT_SKILL_REPOSITORY" ||
-    source === "TENANT_MCP_REPOSITORY";
+    source === "TENANT_SKILL_REPOSITORY" || source === "TENANT_MCP_REPOSITORY";
   const label = {
     local: t("nl2agent.resourceSource.local", "Local"),
     installed: t("nl2agent.resourceSource.installed", "Installed"),
@@ -39,10 +40,7 @@ export function Nl2AgentResourceSourceBadge({
           "nl2agent.resourceSource.uninstalledTenantRepository",
           "Not installed · Tenant repository"
         )
-      : t(
-          "nl2agent.resourceSource.uninstalledOther",
-          "Not installed · Other"
-        ),
+      : t("nl2agent.resourceSource.uninstalledOther", "Not installed · Other"),
   }[availability];
 
   return (

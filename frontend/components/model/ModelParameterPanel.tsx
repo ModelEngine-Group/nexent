@@ -10,8 +10,8 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardCard } from "@/components/common/StandardCard";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/common/Button";
 
 /** Shared by onboarding, batch configuration, and saved outlet editing. */
 export function ModelParameterPanel({
@@ -58,14 +58,15 @@ export function ModelParameterPanel({
               </span>
             </span>
             {onReset && (
-              <StandardButton
+              <Button
+                variant="outline"
                 className="!h-auto !border-0 !bg-transparent !p-0 !text-xs !shadow-none"
                 icon={<RotateCcw size={12} />}
                 disabled={pending}
                 onClick={onReset}
               >
                 {t("modelProfile.layout.reset")}
-              </StandardButton>
+              </Button>
             )}
           </div>
           {(
@@ -75,12 +76,11 @@ export function ModelParameterPanel({
               ["capacityGroup", Layers, capacity],
             ] as const
           ).map(([key, Icon, content]) => (
-            <StandardCard
+            <Card
               key={key}
-              bordered
               role="region"
               aria-label={t(`modelProfile.${key}`)}
-              className="!mb-3 !bg-background shadow-sm [&_.ant-card-body]:!p-4"
+              className="mb-3 gap-0 bg-background p-4 shadow-sm"
             >
               <h4 className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <span className="text-primary">
@@ -89,7 +89,7 @@ export function ModelParameterPanel({
                 {t(`modelProfile.${key}`)}
               </h4>
               {content}
-            </StandardCard>
+            </Card>
           ))}
         </>
       )}

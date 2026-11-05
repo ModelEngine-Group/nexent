@@ -1,14 +1,37 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/common/Badge";
 import React, { useState, useEffect, useRef } from "react";
-import { Modal, Steps, Button, Select, Input, Form, Tag, Space, Spin, App, Collapse, Radio } from "antd";
-import { Download, CircleCheck, CircleX, Plus, Wrench, AlertTriangle } from "lucide-react";
+import {
+  Modal,
+  Steps,
+  Select,
+  Form,
+  Space,
+  Spin,
+  App,
+  Collapse,
+  Radio,
+} from "antd";
+import {
+  Download,
+  CircleCheck,
+  CircleX,
+  Plus,
+  Wrench,
+  AlertTriangle,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModelOption } from "@/types/modelConfig";
 import { modelService } from "@/services/modelService";
-import { getMcpServerList, addMcpServer, updateToolList } from "@/services/mcpService";
+import {
+  getMcpServerList,
+  addMcpServer,
+  updateToolList,
+} from "@/services/mcpService";
 import { McpServer } from "@/types/agentConfig";
 import { ImportAgentData } from "@/lib/agentImportUtils";
 import {
@@ -23,7 +46,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import log from "@/lib/logger";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
-
 export interface AgentImportWizardProps {
   visible: boolean;
   onCancel: () => void;
@@ -33,7 +55,6 @@ export interface AgentImportWizardProps {
   agentDisplayName?: string; // Optional display name for preview
   agentDescription?: string; // Optional description for preview
 }
-
 interface ConfigField {
   agentKey: string; // key in agent_info, e.g. "1"
   agentDisplayName: string; // display name for grouping / hint
@@ -43,7 +64,6 @@ interface ConfigField {
   currentValue: string;
   valueKey: string; // unique key for configValues map (agentKey + fieldPath)
 }
-
 interface McpServerToInstall {
   mcp_server_name: string;
   mcp_url: string;
@@ -51,20 +71,19 @@ interface McpServerToInstall {
   isUrlEditable: boolean; // true if url is <TO_CONFIG>
   editedUrl?: string;
 }
-
 const needsConfig = (value: any): boolean => {
   if (typeof value === "string") {
     return /<TO_CONFIG(?::[^>]+)?>/.test(value);
   }
   return false;
 };
-
 const extractPromptHint = (value: string): string | undefined => {
   if (typeof value !== "string") return undefined;
-  const hints = [...value.matchAll(/<TO_CONFIG:([^>]+)>/g)].map((match) => match[1]);
+  const hints = [...value.matchAll(/<TO_CONFIG:([^>]+)>/g)].map(
+    (match) => match[1]
+  );
   return hints.length ? hints.join("; ") : undefined;
 };
-
 // Parse Markdown links in text and convert to React elements
 const parseMarkdownLinks = (text: string): React.ReactNode[] => {
   const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -72,7 +91,6 @@ const parseMarkdownLinks = (text: string): React.ReactNode[] => {
   let lastIndex = 0;
   let match;
   let key = 0;
-
   while ((match = linkRegex.exec(text)) !== null) {
     // Add text before the link
     if (match.index > lastIndex) {
@@ -99,10 +117,8 @@ const parseMarkdownLinks = (text: string): React.ReactNode[] => {
   if (lastIndex < text.length) {
     parts.push(text.substring(lastIndex));
   }
-
   return parts.length > 0 ? parts : [text];
 };
-
 export default function AgentImportWizard({
   visible,
   onCancel,
@@ -115,60 +131,103 @@ export default function AgentImportWizard({
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-
   const [currentStep, setCurrentStep] = useState(0);
   const [llmModels, setLlmModels] = useState<ModelOption[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-
   // Model selection mode: "unified" (one model for all) or "individual" (separate model for each agent)
-  const [modelSelectionMode, setModelSelectionMode] = useState<"unified" | "individual">("unified");
-
+  const [modelSelectionMode, setModelSelectionMode] = useState<
+    "unified" | "individual"
+  >("unified");
   // Unified mode: single model for all agents
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [selectedModelName, setSelectedModelName] = useState<string>("");
-
   // Individual mode: model for each agent
-  const [selectedModelsByAgent, setSelectedModelsByAgent] = useState<Record<string, { modelId: number | null; modelName: string }>>({});
-
+  const [selectedModelsByAgent, setSelectedModelsByAgent] = useState<
+    Record<
+      string,
+      {
+        modelId: number | null;
+        modelName: string;
+      }
+    >
+  >({});
   const [configFields, setConfigFields] = useState<ConfigField[]>([]);
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
-
   const [mcpServers, setMcpServers] = useState<McpServerToInstall[]>([]);
   const [existingMcpServers, setExistingMcpServers] = useState<McpServer[]>([]);
   const [loadingMcpServers, setLoadingMcpServers] = useState(false);
-  const [installingMcp, setInstallingMcp] = useState<Record<string, boolean>>({});
+  const [installingMcp, setInstallingMcp] = useState<Record<string, boolean>>(
+    {}
+  );
   const [isImporting, setIsImporting] = useState(false);
   const [checkingSkillConflicts, setCheckingSkillConflicts] = useState(false);
   const [skillConflicts, setSkillConflicts] = useState<SkillConflict[]>([]);
-  const [skillResolutionActions, setSkillResolutionActions] = useState<Record<string, SkillResolution["action"]>>({});
-  const [availableTools, setAvailableTools] = useState<Array<{ name?: string; origin_name?: string; usage?: string; source?: string }>>([]);
-  const [missingTools, setMissingTools] = useState<Array<{ name: string; source?: string; usage?: string; agents: string[] }>>([]);
+  const [skillResolutionActions, setSkillResolutionActions] = useState<
+    Record<string, SkillResolution["action"]>
+  >({});
+  const [availableTools, setAvailableTools] = useState<
+    Array<{
+      name?: string;
+      origin_name?: string;
+      usage?: string;
+      source?: string;
+    }>
+  >([]);
+  const [missingTools, setMissingTools] = useState<
+    Array<{
+      name: string;
+      source?: string;
+      usage?: string;
+      agents: string[];
+    }>
+  >([]);
   const [loadingTools, setLoadingTools] = useState(false);
-
   // Name conflict checking and renaming
   // Structure: agentKey -> { hasConflict, conflictAgents, renamedName, renamedDisplayName }
-  const [agentNameConflicts, setAgentNameConflicts] = useState<Record<string, {
-    hasConflict: boolean;
-    conflictAgents: Array<{ name?: string; display_name?: string }>;
-    renamedName: string;
-    renamedDisplayName: string;
-  }>>({});
+  const [agentNameConflicts, setAgentNameConflicts] = useState<
+    Record<
+      string,
+      {
+        hasConflict: boolean;
+        conflictAgents: Array<{
+          name?: string;
+          display_name?: string;
+        }>;
+        renamedName: string;
+        renamedDisplayName: string;
+      }
+    >
+  >({});
   const [checkingName, setCheckingName] = useState(false);
   const [regeneratingAll, setRegeneratingAll] = useState(false);
   // Track which agents have been successfully renamed (no conflicts)
-  const [successfullyRenamedAgents, setSuccessfullyRenamedAgents] = useState<Set<string>>(new Set());
+  const [successfullyRenamedAgents, setSuccessfullyRenamedAgents] = useState<
+    Set<string>
+  >(new Set());
   // Debounce timer for manual name changes - use ref to avoid stale closures
   const nameCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
   // Store latest agentNameConflicts in ref to avoid stale closures in timer callbacks
-  const agentNameConflictsRef = useRef<Record<string, {
-    hasConflict: boolean;
-    conflictAgents: Array<{ name?: string; display_name?: string }>;
-    renamedName: string;
-    renamedDisplayName: string;
-  }>>({});
+  const agentNameConflictsRef = useRef<
+    Record<
+      string,
+      {
+        hasConflict: boolean;
+        conflictAgents: Array<{
+          name?: string;
+          display_name?: string;
+        }>;
+        renamedName: string;
+        renamedDisplayName: string;
+      }
+    >
+  >({});
   // Keep the original ZIP payloads available when retrying after conflict resolution.
-  const skillZipsRef = useRef<Array<{ skill_name: string; skill_zip_base64: string }>>([]);
-
+  const skillZipsRef = useRef<
+    Array<{
+      skill_name: string;
+      skill_zip_base64: string;
+    }>
+  >([]);
   // Helper: Refresh tools and agents after MCP changes
   const refreshToolsAndAgents = async () => {
     try {
@@ -180,7 +239,6 @@ export default function AgentImportWizard({
       log.error("Failed to refresh tools and agents after MCP install:", error);
     }
   };
-
   // Load LLM models
   useEffect(() => {
     if (visible) {
@@ -188,19 +246,17 @@ export default function AgentImportWizard({
       loadAvailableTools();
     }
   }, [visible]);
-
   // Check name conflict immediately after file upload
   useEffect(() => {
     if (visible && initialData) {
       checkNameConflict();
     }
   }, [visible, initialData]);
-
   // Check bundled skill names early so conflicts can be handled in the final wizard step.
   useEffect(() => {
     let cancelled = false;
-    const skillNames = initialData?.skills?.map(skill => skill.skill_name) ?? [];
-
+    const skillNames =
+      initialData?.skills?.map((skill) => skill.skill_name) ?? [];
     if (!visible || skillNames.length === 0) {
       setCheckingSkillConflicts(false);
       setSkillConflicts([]);
@@ -209,29 +265,28 @@ export default function AgentImportWizard({
         cancelled = true;
       };
     }
-
     setSkillConflicts([]);
     setSkillResolutionActions({});
     setCheckingSkillConflicts(true);
-    void checkAgentSkillConflicts(skillNames).then(result => {
+    void checkAgentSkillConflicts(skillNames).then((result) => {
       if (cancelled) return;
       if (result.success) {
         setSkillConflicts(result.data);
-        setSkillResolutionActions(Object.fromEntries(
-          result.data.map(conflict => [conflict.skill_name, "rename"])
-        ));
+        setSkillResolutionActions(
+          Object.fromEntries(
+            result.data.map((conflict) => [conflict.skill_name, "rename"])
+          )
+        );
       } else {
         setSkillConflicts([]);
         setSkillResolutionActions({});
       }
       setCheckingSkillConflicts(false);
     });
-
     return () => {
       cancelled = true;
     };
   }, [visible, initialData]);
-
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -240,7 +295,6 @@ export default function AgentImportWizard({
       }
     };
   }, []);
-
   // Parse agent data for config fields and MCP servers
   useEffect(() => {
     if (visible && initialData) {
@@ -251,55 +305,59 @@ export default function AgentImportWizard({
       skillZipsRef.current = initialData.skills ?? [];
     }
   }, [visible, initialData]);
-
   // Recompute missing tools when available tool list changes
   useEffect(() => {
     if (visible) {
       computeMissingTools();
     }
   }, [visible, availableTools]);
-
   // Initialize model selection for individual mode
   const initializeModelSelection = () => {
     if (!initialData?.agent_info) return;
-
-    const initialModels: Record<string, { modelId: number | null; modelName: string }> = {};
-
-    Object.keys(initialData.agent_info).forEach(agentKey => {
+    const initialModels: Record<
+      string,
+      {
+        modelId: number | null;
+        modelName: string;
+      }
+    > = {};
+    Object.keys(initialData.agent_info).forEach((agentKey) => {
       initialModels[agentKey] = { modelId: null, modelName: "" };
     });
-
     setSelectedModelsByAgent(initialModels);
   };
-
   // Check name conflict for all agents (main agent + sub-agents)
   const checkNameConflict = async () => {
     if (!initialData?.agent_info) return;
-
     setCheckingName(true);
-    const conflicts: Record<string, {
-      hasConflict: boolean;
-      conflictAgents: Array<{ name?: string; display_name?: string }>;
-      renamedName: string;
-      renamedDisplayName: string;
-    }> = {};
-
+    const conflicts: Record<
+      string,
+      {
+        hasConflict: boolean;
+        conflictAgents: Array<{
+          name?: string;
+          display_name?: string;
+        }>;
+        renamedName: string;
+        renamedDisplayName: string;
+      }
+    > = {};
     try {
       // Check all agents in agent_info
       const agentInfoMap = initialData.agent_info;
-      const items = Object.entries(agentInfoMap).map(([agentKey, agentInfo]: [string, any]) => ({
-        key: agentKey,
-        name: agentInfo?.name || "",
-        display_name: agentInfo?.display_name,
-      }));
-
+      const items = Object.entries(agentInfoMap).map(
+        ([agentKey, agentInfo]: [string, any]) => ({
+          key: agentKey,
+          name: agentInfo?.name || "",
+          display_name: agentInfo?.display_name,
+        })
+      );
       const result = await checkAgentNameConflictBatch({
         items: items.map((item) => ({
           name: item.name,
           display_name: item.display_name,
         })),
       });
-
       if (!result.success || !Array.isArray(result.data)) {
         log.warn("Skip name conflict check due to fetch failure");
         setAgentNameConflicts({});
@@ -307,34 +365,41 @@ export default function AgentImportWizard({
         setCheckingName(false);
         return;
       }
-
       result.data.forEach((res: any, idx: number) => {
         const item = items[idx];
         const agentKey = item.key;
         const hasNameConflict = res?.name_conflict || false;
         const hasDisplayNameConflict = res?.display_name_conflict || false;
-        const conflictAgentsRaw = Array.isArray(res?.conflict_agents) ? res.conflict_agents : [];
+        const conflictAgentsRaw = Array.isArray(res?.conflict_agents)
+          ? res.conflict_agents
+          : [];
         // Deduplicate by name/display_name
         const seen = new Set<string>();
-        const conflictAgents = conflictAgentsRaw.reduce((acc: Array<{ name?: string; display_name?: string }>, curr: any) => {
-          const key = `${curr?.name || ""}||${curr?.display_name || ""}`;
-          if (seen.has(key)) return acc;
-          seen.add(key);
-          acc.push({ name: curr?.name, display_name: curr?.display_name });
-          return acc;
-        }, []);
-
+        const conflictAgents = conflictAgentsRaw.reduce(
+          (
+            acc: Array<{
+              name?: string;
+              display_name?: string;
+            }>,
+            curr: any
+          ) => {
+            const key = `${curr?.name || ""}||${curr?.display_name || ""}`;
+            if (seen.has(key)) return acc;
+            seen.add(key);
+            acc.push({ name: curr?.name, display_name: curr?.display_name });
+            return acc;
+          },
+          []
+        );
         const hasConflict = hasNameConflict || hasDisplayNameConflict;
-          conflicts[agentKey] = {
-            hasConflict,
-            conflictAgents,
-            renamedName: item.name,
-            renamedDisplayName: item.display_name || "",
-          };
+        conflicts[agentKey] = {
+          hasConflict,
+          conflictAgents,
+          renamedName: item.name,
+          renamedDisplayName: item.display_name || "",
+        };
       });
-
       setAgentNameConflicts(conflicts);
-
       // Update successfully renamed agents based on initial check
       // Only add to successfullyRenamedAgents if there was a conflict that was resolved
       // For initial check, we don't add anything since no renaming has happened yet
@@ -349,11 +414,13 @@ export default function AgentImportWizard({
       setCheckingName(false);
     }
   };
-
   // Check name conflict for a specific agent after renaming
-  const checkSingleAgentConflict = async (agentKey: string, name: string, displayName?: string) => {
+  const checkSingleAgentConflict = async (
+    agentKey: string,
+    name: string,
+    displayName?: string
+  ) => {
     if (!initialData?.agent_info) return;
-
     try {
       const result = await checkAgentNameConflictBatch({
         items: [
@@ -363,27 +430,35 @@ export default function AgentImportWizard({
           },
         ],
       });
-
       if (!result.success || !Array.isArray(result.data) || !result.data[0]) {
         return;
       }
-
       const checkResult = result.data[0];
       const hasNameConflict = checkResult?.name_conflict || false;
-      const hasDisplayNameConflict = checkResult?.display_name_conflict || false;
+      const hasDisplayNameConflict =
+        checkResult?.display_name_conflict || false;
       const hasConflict = hasNameConflict || hasDisplayNameConflict;
-      const conflictAgentsRaw = Array.isArray(checkResult?.conflict_agents) ? checkResult.conflict_agents : [];
-
+      const conflictAgentsRaw = Array.isArray(checkResult?.conflict_agents)
+        ? checkResult.conflict_agents
+        : [];
       // Deduplicate by name/display_name
       const seen = new Set<string>();
-      const conflictAgents = conflictAgentsRaw.reduce((acc: Array<{ name?: string; display_name?: string }>, curr: any) => {
-        const key = `${curr?.name || ""}||${curr?.display_name || ""}`;
-        if (seen.has(key)) return acc;
-        seen.add(key);
-        acc.push({ name: curr?.name, display_name: curr?.display_name });
-        return acc;
-      }, []);
-
+      const conflictAgents = conflictAgentsRaw.reduce(
+        (
+          acc: Array<{
+            name?: string;
+            display_name?: string;
+          }>,
+          curr: any
+        ) => {
+          const key = `${curr?.name || ""}||${curr?.display_name || ""}`;
+          if (seen.has(key)) return acc;
+          seen.add(key);
+          acc.push({ name: curr?.name, display_name: curr?.display_name });
+          return acc;
+        },
+        []
+      );
       setAgentNameConflicts((prev) => {
         const next = { ...prev };
         if (!next[agentKey]) {
@@ -405,7 +480,6 @@ export default function AgentImportWizard({
         agentNameConflictsRef.current = next;
         return next;
       });
-
       // Update success status
       setSuccessfullyRenamedAgents((prev) => {
         const next = new Set(prev);
@@ -416,23 +490,19 @@ export default function AgentImportWizard({
         }
         return next;
       });
-
       return hasConflict;
     } catch (error) {
       log.error("Failed to check single agent conflict:", error);
       return true; // Assume conflict on error to be safe
     }
   };
-
   // One-click regenerate all conflicted agents using selected model(s)
   const handleRegenerateAll = async () => {
     if (!initialData?.agent_info) return;
-
     const agentsWithConflicts = Object.entries(agentNameConflicts).filter(
       ([_, conflict]) => conflict.hasConflict
     );
     if (agentsWithConflicts.length === 0) return;
-
     setRegeneratingAll(true);
     try {
       const payload = {
@@ -440,22 +510,29 @@ export default function AgentImportWizard({
           const agentInfo = initialData.agent_info[agentKey] as any;
           return {
             name: conflict.renamedName || agentInfo?.name || "",
-            display_name: conflict.renamedDisplayName || agentInfo?.display_name || "",
-            task_description: agentInfo?.business_description || agentInfo?.description || "",
+            display_name:
+              conflict.renamedDisplayName || agentInfo?.display_name || "",
+            task_description:
+              agentInfo?.business_description || agentInfo?.description || "",
             language: "zh",
           };
         }),
       };
-
       const result = await regenerateAgentNameBatch(payload);
-
       if (!result.success || !Array.isArray(result.data)) {
-        message.error(result.message || t("market.install.error.nameRegenerationFailed", "Failed to regenerate name"));
+        message.error(
+          result.message ||
+            t(
+              "market.install.error.nameRegenerationFailed",
+              "Failed to regenerate name"
+            )
+        );
         return;
       }
-
-      const regenerated = result.data as Array<{ name?: string; display_name?: string }>;
-
+      const regenerated = result.data as Array<{
+        name?: string;
+        display_name?: string;
+      }>;
       // Update conflicts state with regenerated names
       setAgentNameConflicts((prev) => {
         const next = { ...prev };
@@ -464,45 +541,62 @@ export default function AgentImportWizard({
           const data = regenerated[idx] || {};
           next[agentKey] = {
             ...next[agentKey],
-            renamedName: data.name || conflict.renamedName || agentInfo?.name || "",
+            renamedName:
+              data.name || conflict.renamedName || agentInfo?.name || "",
             renamedDisplayName:
-              data.display_name || conflict.renamedDisplayName || agentInfo?.display_name || "",
+              data.display_name ||
+              conflict.renamedDisplayName ||
+              agentInfo?.display_name ||
+              "",
           };
         });
         agentNameConflictsRef.current = next;
         return next;
       });
-
       // Re-check conflicts for all regenerated agents
-      const checkPromises = agentsWithConflicts.map(async ([agentKey, conflict], idx) => {
-        const data = regenerated[idx] || {};
-        const newName = data.name || conflict.renamedName || "";
-        const newDisplayName = data.display_name || conflict.renamedDisplayName || "";
-        return checkSingleAgentConflict(agentKey, newName, newDisplayName);
-      });
-
+      const checkPromises = agentsWithConflicts.map(
+        async ([agentKey, conflict], idx) => {
+          const data = regenerated[idx] || {};
+          const newName = data.name || conflict.renamedName || "";
+          const newDisplayName =
+            data.display_name || conflict.renamedDisplayName || "";
+          return checkSingleAgentConflict(agentKey, newName, newDisplayName);
+        }
+      );
       const checkResults = await Promise.all(checkPromises);
       const allResolved = checkResults.every((hasConflict) => !hasConflict);
-
       if (allResolved) {
-        message.success(t("market.install.success.nameRegeneratedAndResolved", "Agent names regenerated successfully and all conflicts resolved"));
+        message.success(
+          t(
+            "market.install.success.nameRegeneratedAndResolved",
+            "Agent names regenerated successfully and all conflicts resolved"
+          )
+        );
       } else {
-        message.success(t("market.install.success.nameRegenerated", "Agent name regenerated successfully"));
+        message.success(
+          t(
+            "market.install.success.nameRegenerated",
+            "Agent name regenerated successfully"
+          )
+        );
       }
     } catch (error) {
       log.error("Failed to regenerate agent names:", error);
-      message.error(t("market.install.error.nameRegenerationFailed", "Failed to regenerate name"));
+      message.error(
+        t(
+          "market.install.error.nameRegenerationFailed",
+          "Failed to regenerate name"
+        )
+      );
     } finally {
       setRegeneratingAll(false);
     }
   };
-
   const loadLLMModels = async () => {
     setLoadingModels(true);
     try {
       const models = await modelService.getLLMModels();
-      setLlmModels(models.filter(m => m.connect_status === "available"));
-
+      setLlmModels(models.filter((m) => m.connect_status === "available"));
       // Auto-select first available model
       if (models.length > 0 && models[0].connect_status === "available") {
         setSelectedModelId(models[0].id);
@@ -510,12 +604,13 @@ export default function AgentImportWizard({
       }
     } catch (error) {
       log.error("Failed to load LLM models:", error);
-      message.error(t("market.install.error.loadModels", "Failed to load models"));
+      message.error(
+        t("market.install.error.loadModels", "Failed to load models")
+      );
     } finally {
       setLoadingModels(false);
     }
   };
-
   const loadAvailableTools = async () => {
     setLoadingTools(true);
     try {
@@ -533,27 +628,28 @@ export default function AgentImportWizard({
       setLoadingTools(false);
     }
   };
-
   const parseConfigFields = () => {
     if (!initialData?.agent_info) {
       setConfigFields([]);
       setConfigValues({});
       return;
     }
-
     const fields: ConfigField[] = [];
     const agentInfoMap = initialData.agent_info;
     const mainAgentId = String(initialData.agent_id);
-
     // Iterate through all agents (main agent + sub-agents)
     Object.entries(agentInfoMap).forEach(([agentKey, rawInfo]) => {
       const info = rawInfo as any;
       const agentDisplayName =
-        info.display_name || info.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+        info.display_name ||
+        info.name ||
+        `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
       const isMainAgent = agentKey === mainAgentId;
-
       // Check basic fields for this agent
-      const basicFields: Array<{ key: string; label: string }> = [
+      const basicFields: Array<{
+        key: string;
+        label: string;
+      }> = [
         {
           key: "description",
           label: t("market.detail.description", "Description"),
@@ -567,7 +663,6 @@ export default function AgentImportWizard({
           label: t("market.detail.prompt", "Prompt"),
         },
       ];
-
       basicFields.forEach(({ key, label }) => {
         const value = info[key];
         if (needsConfig(value)) {
@@ -583,7 +678,6 @@ export default function AgentImportWizard({
           });
         }
       });
-
       // Check tool params for this agent
       if (Array.isArray(info.tools)) {
         info.tools.forEach((tool: any, toolIndex: number) => {
@@ -607,24 +701,20 @@ export default function AgentImportWizard({
         });
       }
     });
-
     setConfigFields(fields);
-
     // Initialize config values using valueKey
     const initialValues: Record<string, string> = {};
-    fields.forEach(field => {
+    fields.forEach((field) => {
       initialValues[field.valueKey] = "";
     });
     setConfigValues(initialValues);
   };
-
   // Detect missing tools in imported agents compared to available tools
   const computeMissingTools = () => {
     if (!initialData?.agent_info) {
       setMissingTools([]);
       return;
     }
-
     const availableNameSet = new Set<string>();
     availableTools.forEach((tool) => {
       if (tool.name) {
@@ -634,11 +724,20 @@ export default function AgentImportWizard({
         availableNameSet.add(tool.origin_name.toLowerCase());
       }
     });
-
-    const missingMap: Record<string, { name: string; source?: string; usage?: string; agents: Set<string> }> = {};
-
+    const missingMap: Record<
+      string,
+      {
+        name: string;
+        source?: string;
+        usage?: string;
+        agents: Set<string>;
+      }
+    > = {};
     Object.entries(initialData.agent_info).forEach(([agentKey, agentInfo]) => {
-      const agentDisplayName = (agentInfo as any)?.display_name || (agentInfo as any)?.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+      const agentDisplayName =
+        (agentInfo as any)?.display_name ||
+        (agentInfo as any)?.name ||
+        `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
       if (Array.isArray((agentInfo as any)?.tools)) {
         (agentInfo as any).tools.forEach((tool: any) => {
           // Skip MCP tools as they will be handled in the MCP server installation step
@@ -646,13 +745,11 @@ export default function AgentImportWizard({
           if (toolSource === "mcp") {
             return;
           }
-
           const rawName = tool?.name || tool?.origin_name || tool?.class_name;
           const name = typeof rawName === "string" ? rawName.trim() : "";
           if (!name) return;
           const key = name.toLowerCase();
           if (availableNameSet.has(key)) return;
-
           if (!missingMap[key]) {
             missingMap[key] = {
               name,
@@ -665,166 +762,187 @@ export default function AgentImportWizard({
         });
       }
     });
-
     const missingList = Object.values(missingMap).map((item) => ({
       name: item.name,
       source: item.source,
       usage: item.usage,
       agents: Array.from(item.agents),
     }));
-
     setMissingTools(missingList);
   };
-
   const parseMcpServers = async () => {
     // Use mcp_info as the source of truth
     if (!initialData?.mcp_info || initialData.mcp_info.length === 0) {
       setMcpServers([]);
       return;
     }
-
     setLoadingMcpServers(true);
     try {
       // Load existing MCP servers from system
       const result = await getMcpServerList();
       const existing = result.success ? result.data : [];
       setExistingMcpServers(existing);
-
       // Check each MCP server from mcp_info
-      const serversToInstall: McpServerToInstall[] = initialData.mcp_info.map((mcp: any) => {
-        const isUrlConfigNeeded = needsConfig(mcp.mcp_url);
-
-        // Check if already installed (match by both name and url)
-        const isInstalled = !isUrlConfigNeeded && existing.some(
-          (existingMcp: McpServer) =>
-            existingMcp.service_name === mcp.mcp_server_name &&
-            existingMcp.mcp_url === mcp.mcp_url
-        );
-
-        return {
-          mcp_server_name: mcp.mcp_server_name,
-          mcp_url: mcp.mcp_url,
-          isInstalled,
-          isUrlEditable: isUrlConfigNeeded,
-          editedUrl: isUrlConfigNeeded ? "" : mcp.mcp_url,
-        };
-      });
-
+      const serversToInstall: McpServerToInstall[] = initialData.mcp_info.map(
+        (mcp: any) => {
+          const isUrlConfigNeeded = needsConfig(mcp.mcp_url);
+          // Check if already installed (match by both name and url)
+          const isInstalled =
+            !isUrlConfigNeeded &&
+            existing.some(
+              (existingMcp: McpServer) =>
+                existingMcp.service_name === mcp.mcp_server_name &&
+                existingMcp.mcp_url === mcp.mcp_url
+            );
+          return {
+            mcp_server_name: mcp.mcp_server_name,
+            mcp_url: mcp.mcp_url,
+            isInstalled,
+            isUrlEditable: isUrlConfigNeeded,
+            editedUrl: isUrlConfigNeeded ? "" : mcp.mcp_url,
+          };
+        }
+      );
       setMcpServers(serversToInstall);
     } catch (error) {
       log.error("Failed to check MCP servers:", error);
-      message.error(t("market.install.error.checkMcp", "Failed to check MCP servers"));
+      message.error(
+        t("market.install.error.checkMcp", "Failed to check MCP servers")
+      );
     } finally {
       setLoadingMcpServers(false);
     }
   };
-
   const handleMcpUrlChange = (index: number, newUrl: string) => {
-    setMcpServers(prev => {
+    setMcpServers((prev) => {
       const updated = [...prev];
       updated[index].editedUrl = newUrl;
       return updated;
     });
   };
-
   const handleInstallMcp = async (index: number) => {
     const mcp = mcpServers[index];
     const urlToUse = mcp.editedUrl || mcp.mcp_url;
-
     if (!urlToUse || urlToUse.trim() === "") {
-      message.error(t("market.install.error.mcpUrlRequired", "MCP URL is required"));
+      message.error(
+        t("market.install.error.mcpUrlRequired", "MCP URL is required")
+      );
       return;
     }
-
     const key = `${index}`;
-    setInstallingMcp(prev => ({ ...prev, [key]: true }));
-
+    setInstallingMcp((prev) => ({ ...prev, [key]: true }));
     try {
       const result = await addMcpServer(urlToUse, mcp.mcp_server_name);
       if (result.success) {
         // After creating MCP server, refresh tool list and agent availability
         await refreshToolsAndAgents();
-
-        message.success(t("market.install.success.mcpInstalled", "MCP server installed successfully"));
+        message.success(
+          t(
+            "market.install.success.mcpInstalled",
+            "MCP server installed successfully"
+          )
+        );
         // Mark as installed - update state directly without re-fetching
-        setMcpServers(prev => {
+        setMcpServers((prev) => {
           const updated = [...prev];
           updated[index].isInstalled = true;
           updated[index].editedUrl = urlToUse;
           return updated;
         });
       } else {
-        message.error(result.message || t("market.install.error.mcpInstall", "Failed to install MCP server"));
+        message.error(
+          result.message ||
+            t("market.install.error.mcpInstall", "Failed to install MCP server")
+        );
       }
     } catch (error) {
       log.error("Failed to install MCP server:", error);
-      message.error(t("market.install.error.mcpInstall", "Failed to install MCP server"));
+      message.error(
+        t("market.install.error.mcpInstall", "Failed to install MCP server")
+      );
     } finally {
-      setInstallingMcp(prev => ({ ...prev, [key]: false }));
+      setInstallingMcp((prev) => ({ ...prev, [key]: false }));
     }
   };
-
   const handleNext = () => {
     const currentStepKey = steps[currentStep]?.key;
-
     if (currentStepKey === "rename") {
       // no mandatory name check
     } else if (currentStepKey === "model") {
       // Step 1: Model selection validation
       if (modelSelectionMode === "unified") {
         if (!selectedModelId || !selectedModelName) {
-          message.error(t("market.install.error.modelRequired", "Please select a model"));
+          message.error(
+            t("market.install.error.modelRequired", "Please select a model")
+          );
           return;
         }
       } else {
         // Individual mode: check all agents have models selected
         const agentInfoMap = initialData?.agent_info;
         if (agentInfoMap) {
-          const missingModels = Object.keys(agentInfoMap).filter(agentKey => {
+          const missingModels = Object.keys(agentInfoMap).filter((agentKey) => {
             const model = selectedModelsByAgent[agentKey];
             return !model || !model.modelId || !model.modelName;
           });
           if (missingModels.length > 0) {
-            message.error(t("market.install.error.allModelsRequired", "Please select models for all agents"));
+            message.error(
+              t(
+                "market.install.error.allModelsRequired",
+                "Please select models for all agents"
+              )
+            );
             return;
           }
         }
       }
     } else if (currentStepKey === "config") {
       // Step 2: Config fields validation
-      const emptyFields = configFields.filter(field => !configValues[field.valueKey]?.trim());
+      const emptyFields = configFields.filter(
+        (field) => !configValues[field.valueKey]?.trim()
+      );
       if (emptyFields.length > 0) {
-        message.error(t("market.install.error.configRequired", "Please fill in all required fields"));
+        message.error(
+          t(
+            "market.install.error.configRequired",
+            "Please fill in all required fields"
+          )
+        );
         return;
       }
     }
-
-    setCurrentStep(prev => prev + 1);
+    setCurrentStep((prev) => prev + 1);
   };
-
   const handlePrevious = () => {
-    setCurrentStep(prev => prev - 1);
+    setCurrentStep((prev) => prev - 1);
   };
-
   const handleImport = async () => {
     // Check for potential issues that could make the agent unusable
     const issues: string[] = [];
-
     // Check for unresolved agent name conflicts
-    const unresolvedConflicts = Object.values(agentNameConflicts).filter(conflict => conflict.hasConflict);
+    const unresolvedConflicts = Object.values(agentNameConflicts).filter(
+      (conflict) => conflict.hasConflict
+    );
     if (unresolvedConflicts.length > 0) {
-      issues.push(t("market.install.warning.nameConflict", "Unresolved name conflicts exist"));
+      issues.push(
+        t(
+          "market.install.warning.nameConflict",
+          "Unresolved name conflicts exist"
+        )
+      );
     }
-
     // Check for uninstalled MCP servers
-    const uninstalledMcpServers = mcpServers.filter(mcp => !mcp.isInstalled);
+    const uninstalledMcpServers = mcpServers.filter((mcp) => !mcp.isInstalled);
     if (uninstalledMcpServers.length > 0) {
-      const serverNames = uninstalledMcpServers.map(mcp => mcp.mcp_server_name);
-      issues.push(`${t("market.install.warning.mcpNotInstalled", "Uninstalled MCP services exist")} : ${serverNames.join("、")}`);
+      const serverNames = uninstalledMcpServers.map(
+        (mcp) => mcp.mcp_server_name
+      );
+      issues.push(
+        `${t("market.install.warning.mcpNotInstalled", "Uninstalled MCP services exist")} : ${serverNames.join("、")}`
+      );
     }
-
     // If there are issues, show confirmation dialog
-      if (issues.length > 0) {
+    if (issues.length > 0) {
       Modal.confirm({
         width: 460,
         icon: null,
@@ -843,21 +961,27 @@ export default function AgentImportWizard({
             <div className="ml-3">
               {/* Warning header - similar to rename step */}
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 space-y-3 w-full">
-              <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
-                {t("market.install.warning.description", "The following issues may make the agent unusable:")}
-              </p>
-              <div className="space-y-2">
-                <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
-                  {issues.map((issue, index) => (
-                    <li key={index}>{issue}</li>
-                  ))}
-                </ul>
-              </div>
+                <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-200">
+                  {t(
+                    "market.install.warning.description",
+                    "The following issues may make the agent unusable:"
+                  )}
+                </p>
+                <div className="space-y-2">
+                  <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                    {issues.map((issue, index) => (
+                      <li key={index}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
 
               {/* Question */}
               <p className="text-sm text-gray-700 dark:text-gray-300 mt-2 ml-1">
-                {t("market.install.warning.question", "Do you want to continue with the installation anyway?")}
+                {t(
+                  "market.install.warning.question",
+                  "Do you want to continue with the installation anyway?"
+                )}
               </p>
             </div>
           </div>
@@ -876,30 +1000,32 @@ export default function AgentImportWizard({
         onCancel: () => {
           // Go back to the appropriate step
           if (unresolvedConflicts.length > 0) {
-            setCurrentStep(steps.findIndex(step => step.key === "rename"));
+            setCurrentStep(steps.findIndex((step) => step.key === "rename"));
           } else if (uninstalledMcpServers.length > 0) {
-            setCurrentStep(steps.findIndex(step => step.key === "mcp"));
+            setCurrentStep(steps.findIndex((step) => step.key === "mcp"));
           }
         },
       });
       return;
     }
-
     // No issues found, proceed with import
     await performImport();
   };
-
-  const doImport = async (data: ImportAgentData, skillResolutions?: SkillResolution[]) => {
+  const doImport = async (
+    data: ImportAgentData,
+    skillResolutions?: SkillResolution[]
+  ) => {
     const result = await importAgent(data, {
       forceImport: false,
       skillZips: skillZipsRef.current,
       skillResolutions,
     });
-
     if (result.success) {
       const importedAgentId = Number(result.data?.agent_id);
       if (!Number.isInteger(importedAgentId) || importedAgentId <= 0) {
-        message.error(t("market.install.error.installFailed", "Failed to install agent"));
+        message.error(
+          t("market.install.error.installFailed", "Failed to install agent")
+        );
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -907,15 +1033,21 @@ export default function AgentImportWizard({
       handleCancel();
     } else {
       const errDetail = (result.data as any)?.detail;
-      if (errDetail?.type === "skill_duplicate" && Array.isArray(errDetail.duplicate_skills)) {
-        const conflicts: SkillConflict[] = Array.isArray(errDetail.skill_conflicts)
+      if (
+        errDetail?.type === "skill_duplicate" &&
+        Array.isArray(errDetail.duplicate_skills)
+      ) {
+        const conflicts: SkillConflict[] = Array.isArray(
+          errDetail.skill_conflicts
+        )
           ? errDetail.skill_conflicts.filter(
-            (conflict: unknown): conflict is SkillConflict =>
-              typeof conflict === "object" &&
-              conflict !== null &&
-              typeof (conflict as SkillConflict).skill_name === "string" &&
-              typeof (conflict as SkillConflict).suggested_new_name === "string"
-          )
+              (conflict: unknown): conflict is SkillConflict =>
+                typeof conflict === "object" &&
+                conflict !== null &&
+                typeof (conflict as SkillConflict).skill_name === "string" &&
+                typeof (conflict as SkillConflict).suggested_new_name ===
+                  "string"
+            )
           : [];
         if (conflicts.length === 0) {
           message.error(
@@ -926,18 +1058,22 @@ export default function AgentImportWizard({
           return;
         }
         setSkillConflicts(conflicts);
-        setSkillResolutionActions(Object.fromEntries(
-          conflicts.map(conflict => [
-            conflict.skill_name,
-            skillResolutionActions[conflict.skill_name] ?? "rename",
-          ])
-        ));
-        const skillStepIndex = steps.findIndex(step => step.key === "skills");
+        setSkillResolutionActions(
+          Object.fromEntries(
+            conflicts.map((conflict) => [
+              conflict.skill_name,
+              skillResolutionActions[conflict.skill_name] ?? "rename",
+            ])
+          )
+        );
+        const skillStepIndex = steps.findIndex((step) => step.key === "skills");
         setCurrentStep(skillStepIndex >= 0 ? skillStepIndex : steps.length);
-        message.warning(t(
-          "market.install.skillDuplicate.changed",
-          "Skill names have changed. Please confirm the conflict resolutions again."
-        ));
+        message.warning(
+          t(
+            "market.install.skillDuplicate.changed",
+            "Skill names have changed. Please confirm the conflict resolutions again."
+          )
+        );
       } else {
         message.error(
           getTenantResourceLimitMessage(result.error, t) ||
@@ -947,47 +1083,47 @@ export default function AgentImportWizard({
       }
     }
   };
-
   const performImport = async () => {
     const importData = prepareImportData();
-
     if (!importData) {
-      message.error(t("market.install.error.invalidData", "Invalid agent data"));
+      message.error(
+        t("market.install.error.invalidData", "Invalid agent data")
+      );
       return;
     }
-
     log.info("Importing agent with data:", importData);
-
-    const skillResolutions: SkillResolution[] = skillConflicts.map(conflict => {
-      const action = skillResolutionActions[conflict.skill_name] ?? "rename";
-      return {
-        skill_name: conflict.skill_name,
-        action,
-        ...(action === "rename" ? { new_name: conflict.suggested_new_name } : {}),
-      };
-    });
-
+    const skillResolutions: SkillResolution[] = skillConflicts.map(
+      (conflict) => {
+        const action = skillResolutionActions[conflict.skill_name] ?? "rename";
+        return {
+          skill_name: conflict.skill_name,
+          action,
+          ...(action === "rename"
+            ? { new_name: conflict.suggested_new_name }
+            : {}),
+        };
+      }
+    );
     setIsImporting(true);
     try {
       await doImport(importData, skillResolutions);
     } catch (error) {
       log.error("Failed to install agent:", error);
-      message.error(t("market.install.error.installFailed", "Failed to install agent"));
+      message.error(
+        t("market.install.error.installFailed", "Failed to install agent")
+      );
     } finally {
       setIsImporting(false);
     }
   };
-
   const prepareImportData = (): ImportAgentData | null => {
     if (!initialData) return null;
-
     // Clone agent data structure
     const agentJson = JSON.parse(JSON.stringify(initialData));
-
     // Preserve business logic model fields from initial data (passed from market)
     const preservedBusinessLogicModelId = initialData.business_logic_model_id;
-    const preservedBusinessLogicModelName = initialData.business_logic_model_name;
-
+    const preservedBusinessLogicModelName =
+      initialData.business_logic_model_name;
     // Update all agents' name/display_name if renamed
     Object.entries(agentNameConflicts).forEach(([agentKey, conflict]) => {
       if (agentJson.agent_info[agentKey]) {
@@ -995,44 +1131,45 @@ export default function AgentImportWizard({
           agentJson.agent_info[agentKey].name = conflict.renamedName;
         }
         if (conflict.renamedDisplayName) {
-          agentJson.agent_info[agentKey].display_name = conflict.renamedDisplayName;
+          agentJson.agent_info[agentKey].display_name =
+            conflict.renamedDisplayName;
         }
       }
     });
-
     // Update model information based on selection mode
     if (modelSelectionMode === "unified") {
       // Unified mode: apply selected model to all agents
-      Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
-        if (selectedModelId !== null) {
-          agentInfo.model_ids = [selectedModelId];
+      Object.entries(agentJson.agent_info).forEach(
+        ([agentKey, agentInfo]: [string, any]) => {
+          if (selectedModelId !== null) {
+            agentInfo.model_ids = [selectedModelId];
+          }
         }
-      });
+      );
     } else {
       // Individual mode: apply models to all agents
-      Object.entries(agentJson.agent_info).forEach(([agentKey, agentInfo]: [string, any]) => {
-        const modelSelection = selectedModelsByAgent[agentKey];
-        if (modelSelection && modelSelection.modelId) {
-          agentInfo.model_ids = [modelSelection.modelId];
+      Object.entries(agentJson.agent_info).forEach(
+        ([agentKey, agentInfo]: [string, any]) => {
+          const modelSelection = selectedModelsByAgent[agentKey];
+          if (modelSelection && modelSelection.modelId) {
+            agentInfo.model_ids = [modelSelection.modelId];
+          }
         }
-      });
+      );
     }
-
     // Apply business logic model fields to all agents
     Object.values(agentJson.agent_info).forEach((agentInfo: any) => {
       agentInfo.business_logic_model_id = preservedBusinessLogicModelId ?? null;
-      agentInfo.business_logic_model_name = preservedBusinessLogicModelName ?? null;
+      agentInfo.business_logic_model_name =
+        preservedBusinessLogicModelName ?? null;
     });
-
     // Update config fields for all agents (main + sub-agents)
-    configFields.forEach(field => {
+    configFields.forEach((field) => {
       const value = configValues[field.valueKey];
       if (!value) return; // Skip empty values
-
       // Find the target agent by agentKey
       const targetAgentInfo = agentJson.agent_info[field.agentKey];
       if (!targetAgentInfo) return;
-
       if (field.fieldPath.includes("tools[")) {
         // Handle tool params
         const match = field.fieldPath.match(/tools\[(\d+)\]\.params\.(.+)/);
@@ -1051,12 +1188,11 @@ export default function AgentImportWizard({
         targetAgentInfo[field.fieldPath] = value;
       }
     });
-
     // Update MCP info
     if (agentJson.mcp_info) {
       agentJson.mcp_info = agentJson.mcp_info.map((mcp: any) => {
         const matchingServer = mcpServers.find(
-          s => s.mcp_server_name === mcp.mcp_server_name
+          (s) => s.mcp_server_name === mcp.mcp_server_name
         );
         if (matchingServer && matchingServer.editedUrl) {
           return {
@@ -1067,10 +1203,8 @@ export default function AgentImportWizard({
         return mcp;
       });
     }
-
     return agentJson;
   };
-
   const handleCancel = () => {
     // Reset state
     setCurrentStep(0);
@@ -1096,16 +1230,17 @@ export default function AgentImportWizard({
     }
     onCancel();
   };
-
   // Filter only required steps for navigation
   // Show rename step if name conflict check is complete and there are any agents that had conflicts
   // (even if all conflicts are now resolved, we still want to show the step so users can see the success state)
-  const hasAnyAgentsWithConflicts = !checkingName && (
+  const hasAnyAgentsWithConflicts =
+    !checkingName &&
     // Check if any agent has a current conflict
-    Object.values(agentNameConflicts).some(conflict => conflict.hasConflict) ||
-    // OR if any agent was successfully renamed (meaning it had a conflict that was resolved)
-    successfullyRenamedAgents.size > 0
-  );
+    (Object.values(agentNameConflicts).some(
+      (conflict) => conflict.hasConflict
+    ) ||
+      // OR if any agent was successfully renamed (meaning it had a conflict that was resolved)
+      successfullyRenamedAgents.size > 0);
   const hasMissingTools = !loadingTools && missingTools.length > 0;
   // Tools check should be the first step when there are missing tools
   const steps = [
@@ -1133,8 +1268,10 @@ export default function AgentImportWizard({
       key: "skills",
       title: t("market.install.step.skills", "Resolve Skills"),
     },
-  ].filter(Boolean) as Array<{ key: string; title: string }>;
-
+  ].filter(Boolean) as Array<{
+    key: string;
+    title: string;
+  }>;
   // Check if can proceed to next step
   const canProceed = () => {
     // Disable buttons while checking name conflict
@@ -1144,9 +1281,7 @@ export default function AgentImportWizard({
     if (checkingSkillConflicts) {
       return false;
     }
-
     const currentStepKey = steps[currentStep]?.key;
-
     if (currentStepKey === "rename") {
       return true;
     } else if (currentStepKey === "tools") {
@@ -1158,27 +1293,28 @@ export default function AgentImportWizard({
         // Individual mode: check all agents have models
         const agentInfoMap = initialData?.agent_info;
         if (!agentInfoMap) return false;
-        return Object.keys(agentInfoMap).every(agentKey => {
+        return Object.keys(agentInfoMap).every((agentKey) => {
           const model = selectedModelsByAgent[agentKey];
           return model && model.modelId && model.modelName;
         });
       }
     } else if (currentStepKey === "config") {
-      return configFields.every(field => configValues[field.valueKey]?.trim());
+      return configFields.every((field) =>
+        configValues[field.valueKey]?.trim()
+      );
     } else if (currentStepKey === "mcp") {
       // All non-editable MCPs should be installed or have edited URLs
-      return mcpServers.every(mcp =>
-        mcp.isInstalled ||
-        (mcp.isUrlEditable && mcp.editedUrl && mcp.editedUrl.trim() !== "") ||
-        (!mcp.isUrlEditable && mcp.mcp_url && mcp.mcp_url.trim() !== "")
+      return mcpServers.every(
+        (mcp) =>
+          mcp.isInstalled ||
+          (mcp.isUrlEditable && mcp.editedUrl && mcp.editedUrl.trim() !== "") ||
+          (!mcp.isUrlEditable && mcp.mcp_url && mcp.mcp_url.trim() !== "")
       );
     } else if (currentStepKey === "skills") {
       return true;
     }
-
     return true;
   };
-
   const renderStepContent = () => {
     // Show loading state while checking name conflict
     if (checkingName) {
@@ -1191,9 +1327,7 @@ export default function AgentImportWizard({
         </div>
       );
     }
-
     const currentStepKey = steps[currentStep]?.key;
-
     if (currentStepKey === "rename") {
       // Get all agents that had conflicts (including resolved ones)
       // Show all agents in agentNameConflicts - they either have conflicts or were successfully renamed
@@ -1213,30 +1347,29 @@ export default function AgentImportWizard({
           if (keyB === mainAgentId) return 1;
           return 0;
         });
-
       // Get agents that still have conflicts
       const agentsWithConflicts = allAgentsWithConflicts.filter(
         ([, conflict]) => conflict.hasConflict
       );
-
       // If no agents had conflicts at all, do not show rename step content
       if (allAgentsWithConflicts.length === 0) {
         return null;
       }
-
       // Check if all conflicts are resolved
       const allConflictsResolved =
         agentsWithConflicts.length === 0 && allAgentsWithConflicts.length > 0;
-      const hasResolvedAgents = allAgentsWithConflicts.some(
-        ([agentKey]) => successfullyRenamedAgents.has(agentKey)
+      const hasResolvedAgents = allAgentsWithConflicts.some(([agentKey]) =>
+        successfullyRenamedAgents.has(agentKey)
       );
-
       return (
         <div className="space-y-6">
           {allConflictsResolved ? (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2">
-                <CircleCheck className="text-green-600 dark:text-green-400 text-lg" size={16} />
+                <CircleCheck
+                  className="text-green-600 dark:text-green-400 text-lg"
+                  size={16}
+                />
                 <p className="text-sm font-semibold text-green-800 dark:text-green-200">
                   {t(
                     "market.install.rename.success",
@@ -1250,7 +1383,10 @@ export default function AgentImportWizard({
               {hasResolvedAgents && (
                 <div className="mb-2 pb-2 border-b border-yellow-300 dark:border-yellow-700">
                   <div className="flex items-center gap-2">
-                    <CircleCheck className="text-green-600 dark:text-green-400 text-sm" size={16} />
+                    <CircleCheck
+                      className="text-green-600 dark:text-green-400 text-sm"
+                      size={16}
+                    />
                     <p className="text-xs text-green-700 dark:text-green-300">
                       {t(
                         "market.install.rename.partialSuccess",
@@ -1279,10 +1415,11 @@ export default function AgentImportWizard({
                 )}
               </p>
               <Button
-                type="primary"
                 onClick={handleRegenerateAll}
                 loading={regeneratingAll}
                 disabled={regeneratingAll}
+                variant="default"
+                size="sm"
               >
                 {t("market.install.rename.oneClick", "One-click Rename")}
               </Button>
@@ -1299,7 +1436,6 @@ export default function AgentImportWizard({
               const isMainAgent = agentKey === String(initialData?.agent_id);
               const originalName = agentInfo?.name || "";
               const originalDisplayName = agentInfo?.display_name || "";
-
               return (
                 <div
                   key={agentKey}
@@ -1319,7 +1455,10 @@ export default function AgentImportWizard({
                   {successfullyRenamedAgents.has(agentKey) ? (
                     <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-2 mb-3">
                       <div className="flex items-center gap-2">
-                        <CircleCheck className="text-green-600 dark:text-green-400 text-sm" size={16} />
+                        <CircleCheck
+                          className="text-green-600 dark:text-green-400 text-sm"
+                          size={16}
+                        />
                         <p className="text-xs text-green-700 dark:text-green-300">
                           {t(
                             "market.install.rename.agentResolved",
@@ -1340,7 +1479,13 @@ export default function AgentImportWizard({
                         </p>
                         <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-300">
                           {conflict.conflictAgents.map(
-                            (agent: { name?: string; display_name?: string }, idx: number) => (
+                            (
+                              agent: {
+                                name?: string;
+                                display_name?: string;
+                              },
+                              idx: number
+                            ) => (
                               <li key={idx}>
                                 {[agent.name, agent.display_name]
                                   .filter(Boolean)
@@ -1369,12 +1514,10 @@ export default function AgentImportWizard({
                               renamedName: newName,
                             },
                           };
-
                           // Clear existing timer
                           if (nameCheckTimerRef.current) {
                             clearTimeout(nameCheckTimerRef.current);
                           }
-
                           // Set new timer for debounced check (500ms delay)
                           nameCheckTimerRef.current = setTimeout(() => {
                             // Read latest value from ref when timer fires
@@ -1388,14 +1531,13 @@ export default function AgentImportWizard({
                               );
                             }
                           }, 500);
-
                           agentNameConflictsRef.current = updated;
                           return updated;
                         });
                       }}
                       placeholder={originalName}
-                      size="large"
                       disabled={regeneratingAll}
+                      className={cn("h-10")}
                     />
                   </div>
 
@@ -1415,12 +1557,10 @@ export default function AgentImportWizard({
                               renamedDisplayName: newDisplayName,
                             },
                           };
-
                           // Clear existing timer
                           if (nameCheckTimerRef.current) {
                             clearTimeout(nameCheckTimerRef.current);
                           }
-
                           // Set new timer for debounced check (500ms delay)
                           nameCheckTimerRef.current = setTimeout(() => {
                             // Read latest value from ref when timer fires
@@ -1434,14 +1574,13 @@ export default function AgentImportWizard({
                               );
                             }
                           }, 500);
-
                           agentNameConflictsRef.current = updated;
                           return updated;
                         });
                       }}
                       placeholder={originalDisplayName}
-                      size="large"
                       disabled={regeneratingAll}
+                      className={cn("h-10")}
                     />
                   </div>
                 </div>
@@ -1491,10 +1630,10 @@ export default function AgentImportWizard({
                       </span>
                     </div>
                     {tool.source && (
-                      <Tag color="gold" className="text-xs">
+                      <Badge className="text-xs" variant={"warning"} size="sm">
                         {t("market.install.tools.source", "Source")}:{" "}
                         {tool.source}
-                      </Tag>
+                      </Badge>
                     )}
                   </div>
                   {tool.usage && (
@@ -1561,10 +1700,16 @@ export default function AgentImportWizard({
                 className="w-full"
               >
                 <Radio value="unified">
-                  {t("market.install.model.mode.unified", "Unified: Use one model for all agents")}
+                  {t(
+                    "market.install.model.mode.unified",
+                    "Unified: Use one model for all agents"
+                  )}
                 </Radio>
                 <Radio value="individual">
-                  {t("market.install.model.mode.individual", "Individual: Select model for each agent")}
+                  {t(
+                    "market.install.model.mode.individual",
+                    "Individual: Select model for each agent"
+                  )}
                 </Radio>
               </Radio.Group>
             </div>
@@ -1573,7 +1718,10 @@ export default function AgentImportWizard({
               // Unified mode: single model selection for all agents
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  {t("market.install.model.description.unified", "Select a model from your configured models. This model will be applied to all agents (main agent and sub-agents).")}
+                  {t(
+                    "market.install.model.description.unified",
+                    "Select a model from your configured models. This model will be applied to all agents (main agent and sub-agents)."
+                  )}
                 </p>
 
                 <div className="flex items-center gap-3">
@@ -1588,16 +1736,25 @@ export default function AgentImportWizard({
                       <Select
                         value={selectedModelName || undefined}
                         onChange={(value, option) => {
-                          const modelId = option && 'key' in option ? Number(option.key) : null;
+                          const modelId =
+                            option && "key" in option
+                              ? Number(option.key)
+                              : null;
                           setSelectedModelName(value);
                           setSelectedModelId(modelId);
                         }}
                         size="large"
                         style={{ width: "100%" }}
-                        placeholder={t("market.install.model.placeholder", "Select a model")}
+                        placeholder={t(
+                          "market.install.model.placeholder",
+                          "Select a model"
+                        )}
                       >
                         {llmModels.map((model) => (
-                          <Select.Option key={model.id} value={model.displayName}>
+                          <Select.Option
+                            key={model.id}
+                            value={model.displayName}
+                          >
                             {model.displayName}
                           </Select.Option>
                         ))}
@@ -1608,7 +1765,10 @@ export default function AgentImportWizard({
 
                 {llmModels.length === 0 && !loadingModels && (
                   <div className="text-sm text-red-600 mt-2">
-                    {t("market.install.model.noModels", "No available models. Please configure models first.")}
+                    {t(
+                      "market.install.model.noModels",
+                      "No available models. Please configure models first."
+                    )}
                   </div>
                 )}
               </div>
@@ -1616,86 +1776,121 @@ export default function AgentImportWizard({
               // Individual mode: model selection for each agent
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                  {t("market.install.model.description.individual", "Select a model for each agent (main agent and sub-agents).")}
+                  {t(
+                    "market.install.model.description.individual",
+                    "Select a model for each agent (main agent and sub-agents)."
+                  )}
                 </p>
 
-                {initialData?.agent_info && (() => {
-                  // Sort agents: main agent first, then sub-agents
-                  const agentEntries = Object.entries(initialData.agent_info as Record<string, any>);
-                  const mainAgentKey = String(initialData.agent_id);
-                  const sortedEntries = agentEntries.sort(([keyA], [keyB]) => {
-                    if (keyA === mainAgentKey) return -1;
-                    if (keyB === mainAgentKey) return 1;
-                    return 0;
-                  });
-
-                  return (
-                    <div className="space-y-4">
-                      {sortedEntries.map(([agentKey, agentInfo]: [string, any]) => {
-                        const agentDisplayName = agentInfo.display_name || agentInfo.name || `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
-                        const isMainAgent = agentKey === mainAgentKey;
-                        const currentSelection = selectedModelsByAgent[agentKey] || { modelId: null, modelName: "" };
-
-                        return (
-                          <div
-                            key={agentKey}
-                            className={`border rounded-lg p-4 ${
-                              isMainAgent
-                                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                                : "border-gray-200 dark:border-gray-700"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 mb-3">
-                              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                {agentDisplayName}
-                              </label>
-                              {isMainAgent && (
-                                <Tag color="blue" className="text-xs">
-                                  {t("market.install.agent.main", "Main")}
-                                </Tag>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                {t("market.install.model.label", "Model")}
-                                <span className="text-red-500 ml-1">*</span>
-                              </label>
-                              <div className="flex-1">
-                                {loadingModels ? (
-                                  <Spin />
-                                ) : (
-                                  <Select
-                                    value={currentSelection.modelName || undefined}
-                                    onChange={(value, option) => {
-                                      const modelId = option && 'key' in option ? Number(option.key) : null;
-                                      setSelectedModelsByAgent(prev => ({
-                                        ...prev,
-                                        [agentKey]: { modelId, modelName: value },
-                                      }));
-                                    }}
-                                    size="large"
-                                    style={{ width: "100%" }}
-                                    placeholder={t("market.install.model.placeholder", "Select a model")}
-                                  >
-                                    {llmModels.map((model) => (
-                                      <Select.Option key={model.id} value={model.displayName}>
-                                        {model.displayName}
-                                      </Select.Option>
-                                    ))}
-                                  </Select>
-                                )}
+                {initialData?.agent_info &&
+                  (() => {
+                    // Sort agents: main agent first, then sub-agents
+                    const agentEntries = Object.entries(
+                      initialData.agent_info as Record<string, any>
+                    );
+                    const mainAgentKey = String(initialData.agent_id);
+                    const sortedEntries = agentEntries.sort(
+                      ([keyA], [keyB]) => {
+                        if (keyA === mainAgentKey) return -1;
+                        if (keyB === mainAgentKey) return 1;
+                        return 0;
+                      }
+                    );
+                    return (
+                      <div className="space-y-4">
+                        {sortedEntries.map(
+                          ([agentKey, agentInfo]: [string, any]) => {
+                            const agentDisplayName =
+                              agentInfo.display_name ||
+                              agentInfo.name ||
+                              `${t("market.install.agent.defaultName", "Agent")} ${agentKey}`;
+                            const isMainAgent = agentKey === mainAgentKey;
+                            const currentSelection = selectedModelsByAgent[
+                              agentKey
+                            ] || { modelId: null, modelName: "" };
+                            return (
+                              <div
+                                key={agentKey}
+                                className={`border rounded-lg p-4 ${
+                                  isMainAgent
+                                    ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+                                    : "border-gray-200 dark:border-gray-700"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-3">
+                                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {agentDisplayName}
+                                  </label>
+                                  {isMainAgent && (
+                                    <Badge
+                                      className="text-xs"
+                                      variant={"info"}
+                                      size="sm"
+                                    >
+                                      {t("market.install.agent.main", "Main")}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                    {t("market.install.model.label", "Model")}
+                                    <span className="text-red-500 ml-1">*</span>
+                                  </label>
+                                  <div className="flex-1">
+                                    {loadingModels ? (
+                                      <Spin />
+                                    ) : (
+                                      <Select
+                                        value={
+                                          currentSelection.modelName ||
+                                          undefined
+                                        }
+                                        onChange={(value, option) => {
+                                          const modelId =
+                                            option && "key" in option
+                                              ? Number(option.key)
+                                              : null;
+                                          setSelectedModelsByAgent((prev) => ({
+                                            ...prev,
+                                            [agentKey]: {
+                                              modelId,
+                                              modelName: value,
+                                            },
+                                          }));
+                                        }}
+                                        size="large"
+                                        style={{ width: "100%" }}
+                                        placeholder={t(
+                                          "market.install.model.placeholder",
+                                          "Select a model"
+                                        )}
+                                      >
+                                        {llmModels.map((model) => (
+                                          <Select.Option
+                                            key={model.id}
+                                            value={model.displayName}
+                                          >
+                                            {model.displayName}
+                                          </Select.Option>
+                                        ))}
+                                      </Select>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
+                            );
+                          }
+                        )}
+                      </div>
+                    );
+                  })()}
 
                 {llmModels.length === 0 && !loadingModels && (
                   <div className="text-sm text-red-600 mt-2">
-                    {t("market.install.model.noModels", "No available models. Please configure models first.")}
+                    {t(
+                      "market.install.model.noModels",
+                      "No available models. Please configure models first."
+                    )}
                   </div>
                 )}
               </div>
@@ -1705,51 +1900,69 @@ export default function AgentImportWizard({
       );
     } else if (currentStepKey === "config") {
       // Group config fields by agent first, then by tool within each agent
-      const groupedFields = configFields.reduce((acc, field) => {
-        if (!acc[field.agentKey]) {
-          acc[field.agentKey] = {
-            agentDisplayName: field.agentDisplayName,
-            tools: {} as Record<string, { toolName: string; fields: ConfigField[] }>,
-            basicFields: [] as ConfigField[]
-          };
-        }
-
-        // Parse fieldPath to determine if it's a tool parameter or basic field
-        const toolMatch = field.fieldPath.match(/^tools\[(\d+)\]\.params\.(.+)$/);
-
-        if (toolMatch) {
-          // It's a tool parameter
-          const toolIndex = parseInt(toolMatch[1]);
-          const toolKey = `tool_${toolIndex}`;
-
-          // Get tool info from agent data
-          const agentInfo = initialData?.agent_info?.[field.agentKey];
-          const tool = agentInfo?.tools?.[toolIndex];
-          const toolName = tool?.name || tool?.class_name || `Tool ${toolIndex}`;
-
-          if (!acc[field.agentKey].tools[toolKey]) {
-            acc[field.agentKey].tools[toolKey] = {
-              toolName,
-              fields: []
+      const groupedFields = configFields.reduce(
+        (acc, field) => {
+          if (!acc[field.agentKey]) {
+            acc[field.agentKey] = {
+              agentDisplayName: field.agentDisplayName,
+              tools: {} as Record<
+                string,
+                {
+                  toolName: string;
+                  fields: ConfigField[];
+                }
+              >,
+              basicFields: [] as ConfigField[],
             };
           }
-          acc[field.agentKey].tools[toolKey].fields.push(field);
-        } else {
-          // It's a basic field
-          acc[field.agentKey].basicFields.push(field);
-        }
-
-        return acc;
-      }, {} as Record<string, {
-        agentDisplayName: string;
-        tools: Record<string, { toolName: string; fields: ConfigField[] }>;
-        basicFields: ConfigField[];
-      }>);
-
+          // Parse fieldPath to determine if it's a tool parameter or basic field
+          const toolMatch = field.fieldPath.match(
+            /^tools\[(\d+)\]\.params\.(.+)$/
+          );
+          if (toolMatch) {
+            // It's a tool parameter
+            const toolIndex = parseInt(toolMatch[1]);
+            const toolKey = `tool_${toolIndex}`;
+            // Get tool info from agent data
+            const agentInfo = initialData?.agent_info?.[field.agentKey];
+            const tool = agentInfo?.tools?.[toolIndex];
+            const toolName =
+              tool?.name || tool?.class_name || `Tool ${toolIndex}`;
+            if (!acc[field.agentKey].tools[toolKey]) {
+              acc[field.agentKey].tools[toolKey] = {
+                toolName,
+                fields: [],
+              };
+            }
+            acc[field.agentKey].tools[toolKey].fields.push(field);
+          } else {
+            // It's a basic field
+            acc[field.agentKey].basicFields.push(field);
+          }
+          return acc;
+        },
+        {} as Record<
+          string,
+          {
+            agentDisplayName: string;
+            tools: Record<
+              string,
+              {
+                toolName: string;
+                fields: ConfigField[];
+              }
+            >;
+            basicFields: ConfigField[];
+          }
+        >
+      );
       return (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            {t("market.install.config.description", "Please configure the following required fields for this agent and its sub-agents.")}
+            {t(
+              "market.install.config.description",
+              "Please configure the following required fields for this agent and its sub-agents."
+            )}
           </p>
 
           {Object.keys(groupedFields).length > 0 ? (
@@ -1763,126 +1976,156 @@ export default function AgentImportWizard({
                   return 0;
                 })
                 .map(([agentKey, agentGroup]) => (
-                <div
-                  key={agentKey}
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
-                >
-                  {/* Agent Header */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                      {agentKey === String(initialData?.agent_id) && (
-                        <span className="text-purple-600 dark:text-purple-400 mr-2">
-                          {t("market.install.agent.main", "Main")}
-                        </span>
-                      )}
-                      {agentGroup.agentDisplayName}
-                    </h4>
-                  </div>
-
-                  {/* Basic Fields */}
-                  {agentGroup.basicFields.length > 0 && (
-                    <>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                          {t("market.install.config.basicFields", "Basic Configuration")}
-                        </span>
-                      </div>
-                      <div className="space-y-3 ml-4">
-                        {agentGroup.basicFields.map((field) => {
-                          const paramLabel = field.fieldLabel.replace(`${agentGroup.agentDisplayName} - `, "");
-                          return (
-                            <div key={field.valueKey}>
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                  {paramLabel}:
-                                </span>
-                                <Input
-                                  value={configValues[field.valueKey] || ""}
-                                  onChange={(e) => {
-                                    setConfigValues(prev => ({
-                                      ...prev,
-                                      [field.valueKey]: e.target.value,
-                                    }));
-                                  }}
-                                  placeholder={t("market.install.config.placeholderWithParam", { param: paramLabel })}
-                                  size="middle"
-                                  style={{ flex: 1 }}
-                                  className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}
-                                />
-                              </div>
-                              {/* Show hint with clickable links if available */}
-                              {field.promptHint && (
-                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
-                                  <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
-                                    {parseMarkdownLinks(field.promptHint)}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-
-                  {/* Tools */}
-                  {Object.entries(agentGroup.tools).map(([toolKey, toolGroup]) => (
-                    <div key={toolKey} className="space-y-3">
-                      {/* Tool Header */}
-                      <div className="flex items-center gap-2">
-                        <Wrench className="h-4 w-4 text-blue-500" />
-                        <span className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                          {toolGroup.toolName}
-                        </span>
-                      </div>
-
-                      {/* Tool Parameters */}
-                      <div className="space-y-3 ml-6">
-                        {toolGroup.fields.map((field) => {
-                          const toolMatch = field.fieldPath.match(/^tools\[\d+\]\.params\.(.+)$/);
-                          const paramKey = toolMatch ? toolMatch[1] : field.fieldPath;
-                          const paramLabel = paramKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-
-                          return (
-                            <div key={field.valueKey}>
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                  {paramLabel}:
-                                </span>
-                                <Input
-                                  value={configValues[field.valueKey] || ""}
-                                  onChange={(e) => {
-                                    setConfigValues(prev => ({
-                                      ...prev,
-                                      [field.valueKey]: e.target.value,
-                                    }));
-                                  }}
-                                  placeholder={t("market.install.config.placeholderWithParam", { param: paramLabel })}
-                                  size="middle"
-                                  style={{ flex: 1 }}
-                                  className={needsConfig(field.currentValue) ? "bg-gray-50 dark:bg-gray-800" : ""}
-                                />
-                              </div>
-                              {/* Show hint with clickable links if available */}
-                              {field.promptHint && (
-                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
-                                  <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
-                                    {parseMarkdownLinks(field.promptHint)}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                  <div
+                    key={agentKey}
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4"
+                  >
+                    {/* Agent Header */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                        {agentKey === String(initialData?.agent_id) && (
+                          <span className="text-purple-600 dark:text-purple-400 mr-2">
+                            {t("market.install.agent.main", "Main")}
+                          </span>
+                        )}
+                        {agentGroup.agentDisplayName}
+                      </h4>
                     </div>
-                  ))}
-                </div>
-              ))}
+
+                    {/* Basic Fields */}
+                    {agentGroup.basicFields.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {t(
+                              "market.install.config.basicFields",
+                              "Basic Configuration"
+                            )}
+                          </span>
+                        </div>
+                        <div className="space-y-3 ml-4">
+                          {agentGroup.basicFields.map((field) => {
+                            const paramLabel = field.fieldLabel.replace(
+                              `${agentGroup.agentDisplayName} - `,
+                              ""
+                            );
+                            return (
+                              <div key={field.valueKey}>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                    {paramLabel}:
+                                  </span>
+                                  <Input
+                                    value={configValues[field.valueKey] || ""}
+                                    onChange={(e) => {
+                                      setConfigValues((prev) => ({
+                                        ...prev,
+                                        [field.valueKey]: e.target.value,
+                                      }));
+                                    }}
+                                    placeholder={t(
+                                      "market.install.config.placeholderWithParam",
+                                      { param: paramLabel }
+                                    )}
+                                    style={{ flex: 1 }}
+                                    className={cn(
+                                      needsConfig(field.currentValue)
+                                        ? "bg-gray-50 dark:bg-gray-800"
+                                        : "",
+                                      "h-10"
+                                    )}
+                                  />
+                                </div>
+                                {/* Show hint with clickable links if available */}
+                                {field.promptHint && (
+                                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                    <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                                      {parseMarkdownLinks(field.promptHint)}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Tools */}
+                    {Object.entries(agentGroup.tools).map(
+                      ([toolKey, toolGroup]) => (
+                        <div key={toolKey} className="space-y-3">
+                          {/* Tool Header */}
+                          <div className="flex items-center gap-2">
+                            <Wrench className="h-4 w-4 text-blue-500" />
+                            <span className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                              {toolGroup.toolName}
+                            </span>
+                          </div>
+
+                          {/* Tool Parameters */}
+                          <div className="space-y-3 ml-6">
+                            {toolGroup.fields.map((field) => {
+                              const toolMatch = field.fieldPath.match(
+                                /^tools\[\d+\]\.params\.(.+)$/
+                              );
+                              const paramKey = toolMatch
+                                ? toolMatch[1]
+                                : field.fieldPath;
+                              const paramLabel = paramKey
+                                .replace(/_/g, " ")
+                                .replace(/\b\w/g, (l) => l.toUpperCase());
+                              return (
+                                <div key={field.valueKey}>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                      {paramLabel}:
+                                    </span>
+                                    <Input
+                                      value={configValues[field.valueKey] || ""}
+                                      onChange={(e) => {
+                                        setConfigValues((prev) => ({
+                                          ...prev,
+                                          [field.valueKey]: e.target.value,
+                                        }));
+                                      }}
+                                      placeholder={t(
+                                        "market.install.config.placeholderWithParam",
+                                        { param: paramLabel }
+                                      )}
+                                      style={{ flex: 1 }}
+                                      className={cn(
+                                        needsConfig(field.currentValue)
+                                          ? "bg-gray-50 dark:bg-gray-800"
+                                          : "",
+                                        "h-10"
+                                      )}
+                                    />
+                                  </div>
+                                  {/* Show hint with clickable links if available */}
+                                  {field.promptHint && (
+                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                                      <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                                        {parseMarkdownLinks(field.promptHint)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                ))}
             </div>
           ) : (
             <p className="text-sm text-gray-500 text-center py-4">
-              {t("market.install.config.noFields", "No configuration fields required.")}
+              {t(
+                "market.install.config.noFields",
+                "No configuration fields required."
+              )}
             </p>
           )}
         </div>
@@ -1891,7 +2134,10 @@ export default function AgentImportWizard({
       return (
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            {t("market.install.mcp.description", "This agent requires the following MCP servers. Please install or configure them.")}
+            {t(
+              "market.install.mcp.description",
+              "This agent requires the following MCP servers. Please install or configure them."
+            )}
           </p>
 
           {loadingMcpServers ? (
@@ -1911,33 +2157,38 @@ export default function AgentImportWizard({
                         {mcp.mcp_server_name}
                       </span>
                       {mcp.isInstalled ? (
-                        <Tag
-                          icon={<CircleCheck size={14} />}
-                          color="success"
+                        <Badge
                           className="inline-flex items-center gap-1 text-xs"
+                          variant={"success"}
+                          size="sm"
                         >
+                          {<CircleCheck size={14} />}
                           {t("market.install.mcp.installed", "Installed")}
-                        </Tag>
+                        </Badge>
                       ) : (
-                        <Tag
-                          icon={<CircleX size={14} />}
-                          color="default"
+                        <Badge
                           className="inline-flex items-center gap-1 text-xs"
+                          variant={"outline"}
+                          size="sm"
                         >
-                          {t("market.install.mcp.notInstalled", "Not Installed")}
-                        </Tag>
+                          {<CircleX size={14} />}
+                          {t(
+                            "market.install.mcp.notInstalled",
+                            "Not Installed"
+                          )}
+                        </Badge>
                       )}
                     </div>
 
                     {!mcp.isInstalled && (
                       <Button
-                        type="primary"
-                        size="middle"
                         icon={<Plus size={16} />}
                         onClick={() => handleInstallMcp(index)}
                         loading={installingMcp[String(index)]}
                         disabled={!mcp.editedUrl || mcp.editedUrl.trim() === ""}
                         className="flex-shrink-0"
+                        variant="default"
+                        size="sm"
                       >
                         {t("market.install.mcp.install", "Install")}
                       </Button>
@@ -1949,18 +2200,28 @@ export default function AgentImportWizard({
                       <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
                         MCP URL:
                       </span>
-                      {(mcp.isUrlEditable || !mcp.isInstalled) ? (
+                      {mcp.isUrlEditable || !mcp.isInstalled ? (
                         <Input
                           value={mcp.editedUrl || ""}
-                          onChange={(e) => handleMcpUrlChange(index, e.target.value)}
-                          placeholder={mcp.isUrlEditable
-                            ? t("market.install.mcp.urlPlaceholder", "Enter MCP server URL")
-                            : mcp.mcp_url
+                          onChange={(e) =>
+                            handleMcpUrlChange(index, e.target.value)
                           }
-                          size="middle"
+                          placeholder={
+                            mcp.isUrlEditable
+                              ? t(
+                                  "market.install.mcp.urlPlaceholder",
+                                  "Enter MCP server URL"
+                                )
+                              : mcp.mcp_url
+                          }
                           disabled={mcp.isInstalled}
                           style={{ maxWidth: "400px" }}
-                          className={mcp.isUrlEditable && needsConfig(mcp.mcp_url) ? "bg-gray-100 dark:bg-gray-800" : ""}
+                          className={cn(
+                            mcp.isUrlEditable && needsConfig(mcp.mcp_url)
+                              ? "bg-gray-100 dark:bg-gray-800"
+                              : "",
+                            "h-10"
+                          )}
                         />
                       ) : (
                         <span className="text-sm text-gray-700 dark:text-gray-300 break-all">
@@ -1969,17 +2230,24 @@ export default function AgentImportWizard({
                       )}
                     </div>
                     {/* Show hint if URL needs configuration */}
-                    {mcp.isUrlEditable && needsConfig(mcp.mcp_url) && (() => {
-                      const hint = extractPromptHint(mcp.mcp_url);
-                      const hintText = hint || t("market.install.mcp.defaultConfigHint", "Please enter the MCP server URL");
-                      return (
-                        <div className="ml-0 text-xs text-gray-500 dark:text-gray-400 max-w-md">
-                          <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
-                            {parseMarkdownLinks(hintText)}
-                          </span>
-                        </div>
-                      );
-                    })()}
+                    {mcp.isUrlEditable &&
+                      needsConfig(mcp.mcp_url) &&
+                      (() => {
+                        const hint = extractPromptHint(mcp.mcp_url);
+                        const hintText =
+                          hint ||
+                          t(
+                            "market.install.mcp.defaultConfigHint",
+                            "Please enter the MCP server URL"
+                          );
+                        return (
+                          <div className="ml-0 text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                            <span className="text-gray-600 dark:text-gray-400 inline-flex flex-wrap items-center gap-1">
+                              {parseMarkdownLinks(hintText)}
+                            </span>
+                          </div>
+                        );
+                      })()}
                   </div>
                 </div>
               ))}
@@ -1997,18 +2265,22 @@ export default function AgentImportWizard({
             )}
           </p>
           <div className="space-y-3">
-            {skillConflicts.map(conflict => (
+            {skillConflicts.map((conflict) => (
               <div
                 key={conflict.skill_name}
                 className="rounded-lg border border-gray-200 dark:border-gray-700 p-4"
               >
                 <div className="mb-3">
-                  <Tag color="orange" style={{ fontSize: 14 }}>{conflict.skill_name}</Tag>
+                  <Badge style={{ fontSize: 14 }} variant={"warning"} size="sm">
+                    {conflict.skill_name}
+                  </Badge>
                 </div>
                 <Radio.Group
-                  value={skillResolutionActions[conflict.skill_name] ?? "rename"}
-                  onChange={event => {
-                    setSkillResolutionActions(current => ({
+                  value={
+                    skillResolutionActions[conflict.skill_name] ?? "rename"
+                  }
+                  onChange={(event) => {
+                    setSkillResolutionActions((current) => ({
                       ...current,
                       [conflict.skill_name]: event.target.value,
                     }));
@@ -2016,7 +2288,10 @@ export default function AgentImportWizard({
                 >
                   <Space direction="vertical" size={8}>
                     <Radio value="rename">
-                      {t("market.install.skillDuplicate.rename", "Install as a new skill")}
+                      {t(
+                        "market.install.skillDuplicate.rename",
+                        "Install as a new skill"
+                      )}
                       <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
                         {t("market.install.skillDuplicate.renameTarget", {
                           name: conflict.suggested_new_name,
@@ -2044,12 +2319,9 @@ export default function AgentImportWizard({
         </div>
       );
     }
-
     return null;
   };
-
   const isLastStep = currentStep === steps.length - 1;
-
   return (
     <Modal
       title={
@@ -2064,31 +2336,33 @@ export default function AgentImportWizard({
       zIndex={1050}
       footer={
         <div className="flex justify-between">
-          <Button onClick={handleCancel}>
+          <Button onClick={handleCancel} variant="outline" size="sm">
             {t("common.cancel", "Cancel")}
           </Button>
           <Space>
             {currentStep > 0 && (
-              <Button onClick={handlePrevious}>
+              <Button onClick={handlePrevious} variant="outline" size="sm">
                 {t("market.install.button.previous", "Previous")}
               </Button>
             )}
             {!isLastStep && (
               <Button
-                type="primary"
                 onClick={handleNext}
                 disabled={!canProceed()}
+                variant="default"
+                size="sm"
               >
                 {t("market.install.button.next", "Next")}
               </Button>
             )}
             {isLastStep && (
               <Button
-                type="primary"
                 onClick={handleImport}
                 disabled={!canProceed()}
                 loading={isImporting}
                 icon={<Download size={16} />}
+                variant="default"
+                size="sm"
               >
                 {isImporting
                   ? t("market.install.button.installing", "Installing...")
@@ -2102,7 +2376,7 @@ export default function AgentImportWizard({
       <div className="py-4">
         <Steps
           current={currentStep}
-          items={steps.map(step => ({
+          items={steps.map((step) => ({
             title: step.title,
           }))}
           className="mb-6"

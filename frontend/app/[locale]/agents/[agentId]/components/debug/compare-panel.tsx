@@ -23,7 +23,7 @@ import {
   type AssistantRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import { useConfig } from "@/hooks/useConfig";
 import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";

@@ -1,11 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { forwardRef, type ChangeEventHandler } from "react";
-import { Input } from "antd";
-import type { TextAreaProps, TextAreaRef } from "antd/es/input/TextArea";
+import { Textarea, type TextareaProps } from "@/components/common/Textarea";
 
 interface HighFidelityTextAreaProps extends Omit<
-  TextAreaProps,
+  TextareaProps,
   "maxLength" | "showCount" | "onChange" | "value"
 > {
   limit: number;
@@ -13,27 +14,29 @@ interface HighFidelityTextAreaProps extends Omit<
   onChange?: ChangeEventHandler<HTMLTextAreaElement>;
 }
 
-const HighFidelityTextArea = forwardRef<TextAreaRef, HighFidelityTextAreaProps>(
-  function HighFidelityTextArea(
-    { limit, value = "", onChange, ...props },
-    ref
-  ) {
-    return (
-      <Input.TextArea
-        {...props}
-        ref={ref}
-        value={value}
-        maxLength={value.length > limit ? undefined : limit}
-        showCount={{ formatter: ({ count }) => `${count}/${limit}` }}
-        onChange={(event) => {
-          const nextLength = event.target.value.length;
-          // Existing oversized values remain editable without silently truncating them.
-          if (nextLength <= limit || nextLength <= value.length)
-            onChange?.(event);
-        }}
-      />
-    );
-  }
-);
+const HighFidelityTextArea = forwardRef<
+  HTMLTextAreaElement,
+  HighFidelityTextAreaProps
+>(function HighFidelityTextArea(
+  { limit, value = "", onChange, ...props },
+  ref
+) {
+  return (
+    <Textarea
+      {...props}
+      ref={ref}
+      value={value}
+      maxLength={value.length > limit ? undefined : limit}
+      showCount
+      countLimit={limit}
+      onChange={(event) => {
+        const nextLength = event.target.value.length;
+        // Existing oversized values remain editable without silently truncating them.
+        if (nextLength <= limit || nextLength <= value.length)
+          onChange?.(event);
+      }}
+    />
+  );
+});
 
 export default HighFidelityTextArea;

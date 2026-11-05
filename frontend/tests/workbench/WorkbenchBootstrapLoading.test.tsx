@@ -44,7 +44,7 @@ vi.mock("@/app/newchat/adapter/attachment-adapter", () => ({
 vi.mock("@/app/newchat/adapter/server-dictation-adapter", () => ({
   ServerDictationAdapter: class {},
 }));
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@/components/common/Tooltip", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/hooks/agent/usePublishedAgentList", () => ({

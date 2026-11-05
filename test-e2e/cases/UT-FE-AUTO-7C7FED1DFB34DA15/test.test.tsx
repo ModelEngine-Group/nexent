@@ -51,7 +51,7 @@ import {
 import {
   CiteIndexBadge,
   HighlightedChunkText,
-} from "@/components/common/highlightedSourceText";
+} from "@/components/chat/sources/HighlightedSourceText";
 import {
   SourcesPanel,
   type PanelSourceItem,

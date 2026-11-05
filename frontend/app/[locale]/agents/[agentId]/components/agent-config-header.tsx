@@ -1,20 +1,17 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
 import { createElement, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Avatar, Button, Tooltip } from "antd";
+import { Avatar } from "antd";
 import { LockOpen, Send } from "lucide-react";
-
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button as ProjectButton } from "@/components/common/Button";
 import { API_ENDPOINTS } from "@/services/api";
 import {
   getAgentIcon,
   getAgentUploadedIconRevision,
 } from "@/lib/chat/agentIconUtils";
 import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
-
 interface AgentConfigHeaderProps {
   agent: AgentDraft;
   agentId: number | null;
@@ -30,7 +27,6 @@ interface AgentConfigHeaderProps {
   actionAreaRef?: React.Ref<HTMLDivElement>;
   published?: boolean;
 }
-
 export function AgentConfigHeader({
   agent,
   agentId,
@@ -65,7 +61,6 @@ export function AgentConfigHeader({
           getAgentUploadedIconRevision(agent.icon_url)
         )
       : undefined;
-
   return (
     <div
       ref={actionAreaRef}
@@ -115,7 +110,7 @@ export function AgentConfigHeader({
                     : t("agent.highFidelity.savedWithoutTime")}
             </span>
             <span className="inline-flex items-center gap-1 text-[#191919]">
-              <span className="size-1 rounded-full bg-[#2673e5]" />
+              <span className="size-1 rounded-full bg-primary" />
               {t(
                 published
                   ? "agent.highFidelity.published"
@@ -126,70 +121,74 @@ export function AgentConfigHeader({
         </div>
       </div>
       <div
-        className="flex shrink-0 items-center gap-1 rounded-[6px] bg-[rgba(25,25,25,0.05)] p-[2px] [&_.ant-btn]:!h-7 [&_.ant-btn]:!min-w-[102px] [&_.ant-btn]:!whitespace-nowrap [&_.ant-btn]:!px-4 [&_.ant-btn]:!py-[3px] [&_.ant-btn]:!text-sm [&_.ant-btn]:!font-normal [&_.ant-btn]:!leading-[22px] [&_.ant-btn]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
+        className="flex shrink-0 items-center gap-1 rounded-[6px] bg-[rgba(25,25,25,0.05)] p-[2px] [&_[data-slot=button]]:!h-7 [&_[data-slot=button]]:!min-w-[102px] [&_[data-slot=button]]:!whitespace-nowrap [&_[data-slot=button]]:!px-4 [&_[data-slot=button]]:!py-[3px] [&_[data-slot=button]]:!text-sm [&_[data-slot=button]]:!font-normal [&_[data-slot=button]]:!leading-[22px] [&_[data-slot=button]]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
         role="group"
         aria-label={t("agent.highFidelity.workflowModes")}
       >
-        <Button
-          type="text"
+        <ProjectButton
           aria-pressed={!debugVisible && !publicationVisible}
           disabled={false}
           onClick={onConfigure}
           className={
             !debugVisible && !publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
+          variant="ghost"
+          size="sm"
         >
           {t("agent.highFidelity.configureMode")}
-        </Button>
-        <Button
-          type="text"
+        </ProjectButton>
+        <ProjectButton
           aria-pressed={debugVisible}
           disabled={agentId === null}
           onClick={onDebug}
           className={
             debugVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
+          variant="ghost"
+          size="sm"
         >
           {t("agent.highFidelity.debugMode")}
-        </Button>
-        <Button
-          type="text"
+        </ProjectButton>
+        <ProjectButton
           aria-pressed={publicationVisible}
           disabled={agentId === null}
           onClick={onPublication}
           className={
             publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
+          variant="ghost"
+          size="sm"
         >
           {t("agent.highFidelity.publishMode")}
-        </Button>
+        </ProjectButton>
       </div>
       <div className="flex shrink-0 items-center gap-2 justify-self-end">
         {canManualUnlock && (
-          <Tooltip title={t("agent.page.panel.nl2agent.manualUnlockAction")}>
-            <Button
-              type="text"
+          <Hint content={t("agent.page.panel.nl2agent.manualUnlockAction")}>
+            <ProjectButton
               aria-label={t("agent.page.panel.nl2agent.manualUnlockAction")}
               icon={<LockOpen size={16} />}
               onClick={onManualUnlock}
+              variant="ghost"
+              size="sm"
             />
-          </Tooltip>
+          </Hint>
         )}
-        <StandardButton
-          variant="primary"
+        <ProjectButton
+          variant="default"
           icon={<Send size={16} />}
           disabled={agentId === null || readOnly}
           onClick={onPublish}
-          className="!bg-[#2673e5]"
+          size="sm"
         >
           {t("agent.config.button.publish")}
-        </StandardButton>
+        </ProjectButton>
       </div>
     </div>
   );

@@ -24,7 +24,7 @@ import {
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
-import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
+import toolbarStyles from "@/components/chat/ConversationToolbar.module.css";
 import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
@@ -49,8 +49,8 @@ import {
   writeLastChatViewConversation,
   type LastChatViewState,
 } from "./last-chat-view";
-import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConversationSidebarProvider } from "@/components/chat/ConversationSidebarProvider";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import {
   ConversationModelControlsProvider,

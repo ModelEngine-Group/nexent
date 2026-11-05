@@ -7,7 +7,7 @@ import { BookOpen, Check, Sparkles } from "lucide-react";
 import type { Nl2aKnowledgeRecommendation } from "../adapter/remote-chat-model-adapter";
 import { useTranslation } from "react-i18next";
 import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import type { ManagedKnowledgeToolName } from "@/lib/managedKnowledgeTools";
 import type { Nl2AgentResourceParam } from "./nl2agent-resource-config";
@@ -134,21 +134,28 @@ export function Nl2AgentKnowledgePicker({
             "nl2agent.resourceBinding.knowledgeLoadFailed",
             "Failed to load knowledge bases."
           )}
-          <StandardButton disabled={disabled} onClick={() => void refetch()}>
+          <Button
+            disabled={disabled}
+            onClick={() => void refetch()}
+            variant="outline"
+            size="sm"
+          >
             {t("nl2agent.resourceBinding.retry", "Retry failed")}
-          </StandardButton>
+          </Button>
         </div>
       ) : null}
       {!hideTrigger ? (
-        <StandardButton
+        <Button
           disabled={disabled || isLoading || isError}
           onClick={onOpen}
+          variant="outline"
+          size="sm"
         >
           {t(
             "nl2agent.resourceBinding.selectKnowledge",
             "Select knowledge bases"
           )}
-        </StandardButton>
+        </Button>
       ) : null}
       {open && !disabled ? (
         <KnowledgeDrawer

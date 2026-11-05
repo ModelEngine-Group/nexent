@@ -1,29 +1,24 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
 import { useTranslation } from "react-i18next";
-
 import { useCallback, useEffect, useState } from "react";
-import { Button, List, Modal, Spin, message } from "antd";
+import { List, Modal, Spin, message } from "antd";
 import { Trash2 } from "lucide-react";
 import {
   deleteOfficialAgent,
   fetchOfficialAgentManagement,
 } from "@/services/agentRepositoryService";
 import type { OfficialAgentManagementItem } from "@/types/agentRepository";
-
 interface Props {
   open: boolean;
   onClose: () => void;
 }
-
 export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
   const { t } = useTranslation();
   const [items, setItems] = useState<OfficialAgentManagementItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -34,11 +29,9 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
       setLoading(false);
     }
   }, [t]);
-
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
-
   const remove = async (item: OfficialAgentManagementItem) => {
     setBusyId(item.agent_repository_id);
     try {
@@ -55,7 +48,6 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
       setBusyId(null);
     }
   };
-
   const confirmRemove = (item: OfficialAgentManagementItem) => {
     Modal.confirm({
       title: t("ui.localization.deleteOfficialAgentTitle"),
@@ -66,7 +58,6 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
       onOk: () => remove(item),
     });
   };
-
   return (
     <Modal
       open={open}
@@ -88,11 +79,12 @@ export default function ManageOfficialAgentsModal({ open, onClose }: Props) {
               actions={[
                 <Button
                   key="delete"
-                  danger
-                  type="text"
                   icon={<Trash2 className="h-4 w-4" />}
                   loading={busyId === item.agent_repository_id}
                   onClick={() => confirmRemove(item)}
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                 />,
               ]}
             >

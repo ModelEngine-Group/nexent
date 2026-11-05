@@ -3,7 +3,7 @@
 import { Suspense, use, useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { RouteLoadingSkeleton } from "@/components/common/RouteLoadingSkeleton";
+import { RouteLoadingSkeleton } from "@/components/navigation/RouteLoadingSkeleton";
 import { RouteTransitionContent } from "@/components/navigation/RouteTransitionContent";
 import { ClientLayout } from "@/app/layout.client";
 

@@ -5,8 +5,8 @@
 import { RotateCcw } from "lucide-react";
 import { Form, Input, InputNumber, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardButton } from "@/components/common/StandardButton";
+import { InputField } from "@/components/common/InputField";
+import { Button } from "@/components/common/Button";
 import type { ModelParameterRule } from "@/types/modelProfile";
 
 interface ModelParameterFieldProps {
@@ -139,7 +139,7 @@ export function ModelParameterField({
     );
   else
     control = (
-      <StandardInput
+      <InputField
         aria-label={label ?? rule.key}
         value={
           typeof value === "string"
@@ -174,7 +174,8 @@ export function ModelParameterField({
           Object.hasOwn(values, rule.key) &&
           !disabled &&
           !(scope === "outlet" && rule.required) && (
-            <StandardButton
+            <Button
+              variant="outline"
               className="!w-8 !shrink-0 !px-0"
               aria-label={resetLabel ?? t("modelProfile.reset")}
               title={resetLabel ?? t("modelProfile.reset")}

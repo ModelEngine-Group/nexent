@@ -20,14 +20,14 @@ import {
   LoaderCircleIcon,
   XIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Button } from "@/components/common/Button";
+import { Pagination } from "@/components/common/Pagination";
 import { cn } from "@/lib/utils";
 import { getCitationKey } from "@/lib/citationDisplay";
 import {
   CiteIndexBadge,
   HighlightedChunkText,
-} from "@/components/common/highlightedSourceText";
+} from "@/components/chat/sources/HighlightedSourceText";
 import {
   extractHighlightTerms,
   mergeHighlightTerms,
@@ -43,7 +43,7 @@ import {
 import { AuthenticatedImage } from "./authenticated-image";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
-import { SourceMetadata } from "@/components/common/sourceMetadata";
+import { SourceMetadata } from "@/components/chat/sources/SourceMetadata";
 import log from "@/lib/logger";
 
 export { getCitationKey } from "@/lib/citationDisplay";
@@ -302,13 +302,13 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           aria-label={t("chat.sources.pagination")}
           className="flex shrink-0 justify-center border-t border-slate-200 px-3 py-3"
         >
-          <StandardPaginator
-            size="small"
+          <Pagination
+            compact={"small" === "small"}
             current={currentPage}
             pageSize={20}
             total={total}
             showSizeChanger={false}
-            onChange={(page) => navigate(activeTab, page)}
+            onPageChange={(page) => navigate(activeTab, page)}
           />
         </nav>
       )}

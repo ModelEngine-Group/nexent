@@ -22,7 +22,7 @@ import {
   thinkingDegreePrefill,
 } from "./ModelThinkingSettings";
 import { ModelThinkingToggle } from "@/components/chat/ModelThinkingToggle";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "@/components/common/Button";
 import {
   getModelOutlet,
   getConversationModelPreferences,
@@ -448,7 +448,10 @@ function PreferenceEditor({
                 rule.key === key &&
                 rule.visible &&
                 rule.allowed_scopes.includes("conversation") &&
-                parameterIsActive(rule.condition, { ...saved.defaults, ...values })
+                parameterIsActive(rule.condition, {
+                  ...saved.defaults,
+                  ...values,
+                })
             )
         )
         .map((key) => (
@@ -457,9 +460,9 @@ function PreferenceEditor({
             type="error"
             title={key}
             action={
-              <StandardButton onClick={() => update(key)}>
+              <Button variant="outline" onClick={() => update(key)}>
                 {t("common.delete")}
-              </StandardButton>
+              </Button>
             }
           />
         ))}

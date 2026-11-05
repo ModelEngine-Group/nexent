@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-import { PdfViewer } from "@/components/common/PdfViewer";
+import { PdfViewer } from "@/components/preview/PdfViewer";
 
 describe("PdfViewer document resources", () => {
   it("passes stable local font and CMap options to React-PDF across URL changes", () => {

@@ -30,7 +30,7 @@ Use Ant Design's question icon temporarily.
 Use the reusable component:
 
 ```tsx
-import { StandardQuestionIcon } from "@/components/common/StandardQuestionIcon";
+import { CircleHelp } from "lucide-react";
 ```
 
 ## Placeholder icon

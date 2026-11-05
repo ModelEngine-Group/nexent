@@ -7,15 +7,15 @@ import { useTranslation } from "react-i18next";
 import { App } from "antd";
 import { Loader2, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/components/common/Dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -351,7 +351,12 @@ export const ModelEditDialog = ({
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+      >
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle className="text-base">
             {t("modelConfig.editDialog.title", { defaultValue: "编辑模型" })}

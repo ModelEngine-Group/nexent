@@ -95,7 +95,7 @@ vi.mock('@/components/ui/button', () => ({
   Button: () => null,
 }));
 
-vi.mock('@/components/common/highlightedSourceText', () => ({
+vi.mock('@/components/chat/sources/HighlightedSourceText', () => ({
   CiteIndexBadge: ({ index }: { index?: number }) => Number.isFinite(index)
     ? <span data-testid='citation-index-badge'>{index}</span>
     : null,

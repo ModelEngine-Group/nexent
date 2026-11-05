@@ -15,7 +15,10 @@
     "test:components": "vitest run",
     "test:workbench": "vitest run --config vitest.workbench.config.ts",
     "test:e2e:external-memory": "playwright test e2e/external-memory-provider.spec.ts",
-    "check-all": "npm run type-check && npm run lint && npm run format:check && npm run build"
+    "check-all": "npm run check:ui && npm run type-check && npm run lint && npm run format:check && npm run build",
+    "check:ui": "node scripts/ui-boundaries.mjs",
+    "ui:upstream": "node scripts/ui-upstream.mjs",
+    "test:ui-tools": "node --test scripts/__tests__/ui-maintenance.test.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "6.2.5",
@@ -85,7 +88,8 @@
     "unified": "^11.0.0",
     "unist-util-visit": "^5.0.0",
     "uuid": "^11.1.0",
-    "zustand": "^5.0.9"
+    "zustand": "^5.0.9",
+    "@radix-ui/colors": "3.0.0"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

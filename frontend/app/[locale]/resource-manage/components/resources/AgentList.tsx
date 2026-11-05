@@ -82,10 +82,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view modal state
   const [fullscreenEdit, setFullscreenEdit] = useState<{
     visible: boolean;
-    field:
-      | "description"
-      | "prompt"
-      | null;
+    field: "description" | "prompt" | null;
     title: string;
     value: string;
   }>({
@@ -257,8 +254,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   // Fullscreen view handlers
   const openFullscreenEdit = (
-    field:
-      "description" | "prompt",
+    field: "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";

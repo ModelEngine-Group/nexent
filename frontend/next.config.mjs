@@ -16,6 +16,8 @@ try {
 const nextConfig = {
   output: "standalone",
   basePath: BASE_PATH,
+  // The local preview uses this loopback hostname in the in-app browser.
+  allowedDevOrigins: ["127.0.0.1"],
   typescript: {
     ignoreBuildErrors: true,
   },

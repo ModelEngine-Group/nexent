@@ -3,7 +3,7 @@
 import type { ComponentType, ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { act, render as testingRender, screen } from "@testing-library/react";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import { MarkdownText } from "@/app/newchat/ui/markdown-text";
 import { Reasoning } from "@/app/newchat/ui/reasoning";
 

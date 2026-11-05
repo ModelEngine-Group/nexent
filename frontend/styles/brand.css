@@ -1,0 +1,45 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+/* Brand subset from xyq/update_skills (45cd133de), color-tokens.css.
+ * The source defines Light states only; no independent Dark palette is specified.
+ */
+@layer base {
+  :root,
+  .light {
+    --palette-brand-05: #e6f2fd;
+    --palette-brand-10: #b8d9f9;
+    --palette-brand-20: #8abef3;
+    --palette-brand-30: #5ca2e9;
+    --palette-brand-40: #2e86de;
+    --palette-brand-50: #0067d1;
+    --palette-brand-60: #004ea8;
+    --palette-brand-70: #003d83;
+    --palette-brand-80: #002e6a;
+    --palette-brand-90: #00214b;
+    --palette-gray-90: #191919;
+    --color-brand: var(--palette-brand-50);
+    --color-brand-hover: var(--palette-brand-40);
+    --color-brand-focus: var(--palette-brand-50);
+    --color-brand-active: var(--palette-brand-60);
+    --color-brand-disabled: var(--palette-brand-20);
+    --color-icon-hover: var(--palette-brand-40);
+    --color-icon-focus: var(--palette-brand-50);
+    --color-icon-active: var(--palette-brand-60);
+    --color-border-focus: var(--palette-brand-50);
+    --color-border-hover: var(--palette-gray-90);
+    --color-select: var(--palette-brand-05);
+    --ui-layer-modal: 1100;
+    --ui-layer-popover: 1200;
+    --ui-layer-tour: 1300;
+    --primary: var(--color-brand);
+    --primary-hover: var(--color-brand-hover);
+    --primary-selected: var(--color-brand-focus);
+    --primary-active: var(--color-brand-active);
+    --primary-disabled: var(--color-brand-disabled);
+    --primary-foreground: 0 0% 100%;
+    --ring: var(--color-border-focus);
+    --brand-soft: var(--color-select);
+    --brand-soft-foreground: var(--color-brand);
+    --sidebar-primary: var(--color-brand-focus);
+    --sidebar-ring: var(--color-border-focus);
+  }
+}

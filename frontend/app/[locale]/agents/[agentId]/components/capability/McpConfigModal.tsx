@@ -1,24 +1,24 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Button } from "@/components/common/Button";
+import { Hint } from "@/components/common/Hint";
+import { Badge } from "@/components/common/Badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/common/Textarea";
+import { PasswordInput } from "@/components/common/PasswordInput";
 import { useState, useEffect, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
-  Button,
-  Input,
   InputNumber,
   Table,
   Space,
   Typography,
   Card,
   Divider,
-  Tooltip,
   App,
   Upload,
   Tabs,
-  Tag,
 } from "antd";
 import {
   Trash,
@@ -33,7 +33,6 @@ import {
   Import,
   RefreshCw,
 } from "lucide-react";
-
 import { McpConfigModalProps } from "@/types/agentConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { UploadFile } from "antd/es/upload/interface";
@@ -47,9 +46,7 @@ import {
   deleteOpenApiService,
 } from "@/services/mcpService";
 import log from "@/lib/logger";
-
 const { Text, Title } = Typography;
-
 export default function McpConfigModal({
   visible,
   onCancel,
@@ -59,7 +56,6 @@ export default function McpConfigModal({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
   const { message, modal } = App.useApp();
-
   // Use shared hook for MCP config logic
   const {
     serverList,
@@ -82,7 +78,6 @@ export default function McpConfigModal({
     handleViewLogs,
     handleGetMcpRecord,
   } = useMcpConfig({ enabled: visible });
-
   // OpenAPI to MCP state
   const [openApiJson, setOpenApiJson] = useState("");
   const [openApiServiceName, setOpenApiServiceName] = useState("");
@@ -91,43 +86,36 @@ export default function McpConfigModal({
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
-
   // Local UI state
   const [addingServer, setAddingServer] = useState(false);
   const [newServerName, setNewServerName] = useState("");
   const [newServerUrl, setNewServerUrl] = useState("");
-  const [newServerAuthorizationToken, setNewServerAuthorizationToken] = useState("");
+  const [newServerAuthorizationToken, setNewServerAuthorizationToken] =
+    useState("");
   const [newServerCustomHeaders, setNewServerCustomHeaders] = useState("");
-
   const [toolsModalVisible, setToolsModalVisible] = useState(false);
   const [currentServerTools, setCurrentServerTools] = useState<any[]>([]);
   const [currentServerName, setCurrentServerName] = useState("");
   const [loadingTools, setLoadingTools] = useState(false);
-
   const [editServerModalVisible, setEditServerModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState<any>(null);
   const [updatingServer, setUpdatingServer] = useState(false);
   const [loadingMcpRecord, setLoadingMcpRecord] = useState(false);
-
   const [addingContainer, setAddingContainer] = useState(false);
   const [containerConfigJson, setContainerConfigJson] = useState("");
   const [containerPort, setContainerPort] = useState<number | undefined>(
     undefined
   );
   const [containerServiceName, setContainerServiceName] = useState("");
-
   const [logsModalVisible, setLogsModalVisible] = useState(false);
   const [currentContainerId, setCurrentContainerId] = useState("");
-
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
   const [uploadPort, setUploadPort] = useState<number | undefined>(undefined);
   const [uploadServiceName, setUploadServiceName] = useState("");
   const [uploadAuthorizationToken, setUploadAuthorizationToken] = useState("");
-
   const actionsLocked = updatingTools || addingContainer || uploadingImage;
   const noMcpEditPermissionTitle = t("mcpConfig.permission.noEdit");
-
   const renderPermissionControlledButton = (props: {
     isReadOnly: boolean;
     button: Omit<ComponentProps<typeof Button>, "disabled" | "onClick"> & {
@@ -137,29 +125,19 @@ export default function McpConfigModal({
   }) => {
     const { isReadOnly, button } = props;
     const { onClick, disabled, ...rest } = button;
-
     const finalDisabled = Boolean(disabled) || isReadOnly;
     const finalOnClick = finalDisabled ? undefined : onClick;
-
     const element = (
-      <Button
-        {...rest}
-        onClick={finalOnClick}
-        disabled={finalDisabled}
-      />
+      <Button {...rest} onClick={finalOnClick} disabled={finalDisabled} />
     );
-
     if (!isReadOnly) return element;
-
     return (
-      <Tooltip title={noMcpEditPermissionTitle}>
+      <Hint content={noMcpEditPermissionTitle}>
         <span style={{ display: "inline-flex" }}>{element}</span>
-      </Tooltip>
+      </Hint>
     );
   };
-
   // Data loading is handled by React Query (enabled: visible)
-
   // Handlers
   const prepareAgentForDelete = async () => {
     try {
@@ -171,7 +149,6 @@ export default function McpConfigModal({
       return false;
     }
   };
-
   const refreshAgentAfterDelete = async () => {
     try {
       await onMcpDeleted?.();
@@ -180,35 +157,39 @@ export default function McpConfigModal({
       message.warning(t("agent.config.refreshAvailabilityFailed"));
     }
   };
-
   const onAddServer = async () => {
     if (!newServerName.trim() || !newServerUrl.trim()) {
       message.error(t("mcpConfig.message.completeServerInfo"));
       return;
     }
-
     const serverName = newServerName.trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(serverName)) {
       message.error(t("mcpConfig.message.invalidServerName"));
       return;
     }
-
     if (serverName.length > 20) {
       message.error(t("mcpConfig.message.serverNameTooLong"));
       return;
     }
-
-    if (serverList.some((s) => s.service_name === serverName || s.mcp_url === newServerUrl.trim())) {
+    if (
+      serverList.some(
+        (s) =>
+          s.service_name === serverName || s.mcp_url === newServerUrl.trim()
+      )
+    ) {
       message.error(t("mcpConfig.message.serverExists"));
       return;
     }
-
     // Parse custom headers
     let parsedCustomHeaders: Record<string, string> | null = null;
     if (newServerCustomHeaders.trim()) {
       try {
         parsedCustomHeaders = JSON.parse(newServerCustomHeaders.trim());
-        if (typeof parsedCustomHeaders !== 'object' || parsedCustomHeaders === null || Array.isArray(parsedCustomHeaders)) {
+        if (
+          typeof parsedCustomHeaders !== "object" ||
+          parsedCustomHeaders === null ||
+          Array.isArray(parsedCustomHeaders)
+        ) {
           message.error(t("mcpConfig.message.invalidCustomHeaders"));
           return;
         }
@@ -217,7 +198,6 @@ export default function McpConfigModal({
         return;
       }
     }
-
     setAddingServer(true);
     const result = await handleAddServer(
       newServerUrl.trim(),
@@ -230,13 +210,20 @@ export default function McpConfigModal({
       setNewServerUrl("");
       setNewServerAuthorizationToken("");
       setNewServerCustomHeaders("");
-      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addServerSuccess"));
+      message.success(
+        result.messageKey
+          ? t(result.messageKey)
+          : t("mcpService.message.addServerSuccess")
+      );
     } else {
-      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addServerFailed")));
+      message.error(
+        result.messageKey
+          ? t(result.messageKey)
+          : result.message || t("mcpConfig.message.addServerFailed")
+      );
     }
     setAddingServer(false);
   };
-
   const onDeleteServer = (server: any) => {
     confirm({
       title: t("mcpConfig.delete.confirmTitle"),
@@ -246,7 +233,6 @@ export default function McpConfigModal({
       okText: t("common.delete", "Delete"),
       onOk: async () => {
         if (!(await prepareAgentForDelete())) return;
-
         const result = await handleDeleteServer(server);
         if (!result.success) {
           message.error(
@@ -265,22 +251,23 @@ export default function McpConfigModal({
       },
     });
   };
-
   const onViewTools = async (server: any) => {
     setCurrentServerName(server.service_name);
     setLoadingTools(true);
     setToolsModalVisible(true);
-
     const result = await handleViewTools(server);
     if (result.success) {
       setCurrentServerTools(result.data);
     } else {
-      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getToolsFailed")));
+      message.error(
+        result.messageKey
+          ? t(result.messageKey)
+          : result.message || t("mcpConfig.message.getToolsFailed")
+      );
       setCurrentServerTools([]);
     }
     setLoadingTools(false);
   };
-
   const onCheckHealth = async (server: any) => {
     const key = "healthCheck";
     message.info({
@@ -289,7 +276,6 @@ export default function McpConfigModal({
       }),
       key,
     });
-
     try {
       const result = await handleCheckHealth(server);
       if (result.success) {
@@ -314,12 +300,10 @@ export default function McpConfigModal({
       });
     }
   };
-
   const onEditServer = async (server: any) => {
     setEditingServer(server);
     setEditServerModalVisible(true);
     setLoadingMcpRecord(true);
-
     // If mcp_id is available, fetch the latest record data including authorization_token
     if (server.mcp_id) {
       const result = await handleGetMcpRecord(server.mcp_id);
@@ -332,30 +316,35 @@ export default function McpConfigModal({
           custom_headers: result.data.custom_headers,
         });
       } else {
-        message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.getMcpRecordFailed")));
+        message.error(
+          result.messageKey
+            ? t(result.messageKey)
+            : result.message || t("mcpConfig.message.getMcpRecordFailed")
+        );
       }
     }
     setLoadingMcpRecord(false);
   };
-
-  const onSaveEditedServer = async (name: string, url: string, authorizationToken?: string | null, customHeaders?: Record<string, string> | null) => {
+  const onSaveEditedServer = async (
+    name: string,
+    url: string,
+    authorizationToken?: string | null,
+    customHeaders?: Record<string, string> | null
+  ) => {
     if (!editingServer) return;
     if (!name.trim() || !url.trim()) {
       message.error(t("mcpConfig.message.nameAndUrlRequired"));
       return;
     }
-
     const serverName = name.trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(serverName)) {
       message.error(t("mcpConfig.message.invalidServerName"));
       return;
     }
-
     if (serverName.length > 20) {
       message.error(t("mcpConfig.message.serverNameTooLong"));
       return;
     }
-
     setUpdatingServer(true);
     const result = await handleUpdateServer(
       editingServer.mcp_id,
@@ -367,24 +356,29 @@ export default function McpConfigModal({
     if (result.success) {
       setEditServerModalVisible(false);
       setEditingServer(null);
-      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.updateServerSuccess"));
+      message.success(
+        result.messageKey
+          ? t(result.messageKey)
+          : t("mcpService.message.updateServerSuccess")
+      );
     } else {
-      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpService.message.updateServerFailed")));
+      message.error(
+        result.messageKey
+          ? t(result.messageKey)
+          : result.message || t("mcpService.message.updateServerFailed")
+      );
     }
     setUpdatingServer(false);
   };
-
   const onAddContainer = async () => {
     if (!containerConfigJson.trim()) {
       message.error(t("mcpConfig.message.containerConfigRequired"));
       return;
     }
-
     if (!containerPort || containerPort < 1 || containerPort > 65535) {
       message.error(t("mcpConfig.message.validPortRequired"));
       return;
     }
-
     let config;
     try {
       config = JSON.parse(containerConfigJson);
@@ -392,47 +386,52 @@ export default function McpConfigModal({
       message.error(t("mcpConfig.message.invalidJsonConfig"));
       return;
     }
-
     if (!config.mcpServers || typeof config.mcpServers !== "object") {
       message.error(t("mcpConfig.message.invalidConfigStructure"));
       return;
     }
-
     setAddingContainer(true);
-    const result = await handleAddContainer(config, containerPort, containerServiceName.trim() || undefined);
+    const result = await handleAddContainer(
+      config,
+      containerPort,
+      containerServiceName.trim() || undefined
+    );
     if (!result.success) {
-      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.addContainerFailed")));
+      message.error(
+        result.messageKey
+          ? t(result.messageKey)
+          : result.message || t("mcpConfig.message.addContainerFailed")
+      );
     } else {
       setContainerConfigJson("");
       setContainerPort(undefined);
       setContainerServiceName("");
-      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.addContainerSuccess"));
+      message.success(
+        result.messageKey
+          ? t(result.messageKey)
+          : t("mcpService.message.addContainerSuccess")
+      );
     }
     setAddingContainer(false);
   };
-
   const onUploadImage = async () => {
     if (uploadFileList.length === 0) {
       message.error(t("mcpConfig.message.uploadImageFileRequired"));
       return;
     }
-
     if (!uploadPort || uploadPort < 1 || uploadPort > 65535) {
       message.error(t("mcpConfig.message.uploadImageValidPortRequired"));
       return;
     }
-
     const file = uploadFileList[0].originFileObj;
     if (!file) {
       message.error(t("mcpConfig.message.uploadImageFileRequired"));
       return;
     }
-
     if (!file.name.toLowerCase().endsWith(".tar")) {
       message.error(t("mcpConfig.message.uploadImageInvalidFileType"));
       return;
     }
-
     setUploadingImage(true);
     const result = await handleUploadImage(
       file,
@@ -441,17 +440,24 @@ export default function McpConfigModal({
       uploadAuthorizationToken.trim() || undefined
     );
     if (!result.success) {
-      message.error(result.messageKey ? t(result.messageKey) : (result.message || t("mcpConfig.message.uploadImageFailed")));
+      message.error(
+        result.messageKey
+          ? t(result.messageKey)
+          : result.message || t("mcpConfig.message.uploadImageFailed")
+      );
     } else {
       setUploadFileList([]);
       setUploadPort(undefined);
       setUploadServiceName("");
       setUploadAuthorizationToken("");
-      message.success(result.messageKey ? t(result.messageKey) : t("mcpService.message.uploadImageSuccess"));
+      message.success(
+        result.messageKey
+          ? t(result.messageKey)
+          : t("mcpService.message.uploadImageSuccess")
+      );
     }
     setUploadingImage(false);
   };
-
   const onDeleteContainer = (container: any) => {
     confirm({
       title: t("mcpConfig.deleteContainer.confirmTitle"),
@@ -461,7 +467,6 @@ export default function McpConfigModal({
       okText: t("common.delete", "Delete"),
       onOk: async () => {
         if (!(await prepareAgentForDelete())) return;
-
         const result = await handleDeleteContainer(container);
         if (!result.success) {
           message.error(
@@ -480,12 +485,10 @@ export default function McpConfigModal({
       },
     });
   };
-
   const onViewLogs = async (containerId: string) => {
     setCurrentContainerId(containerId);
     setLogsModalVisible(true);
   };
-
   // OpenAPI to MCP handlers
   const loadOpenapiServices = async () => {
     setLoadingOpenapiServices(true);
@@ -502,7 +505,6 @@ export default function McpConfigModal({
     }
     setLoadingOpenapiServices(false);
   };
-
   const onImportOpenApiService = async () => {
     if (!openApiServiceName.trim()) {
       message.error(t("mcpConfig.openapiService.message.serviceNameRequired"));
@@ -516,7 +518,6 @@ export default function McpConfigModal({
       message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
       return;
     }
-
     let parsedJson;
     try {
       parsedJson = JSON.parse(openApiJson);
@@ -533,16 +534,16 @@ export default function McpConfigModal({
       message.error(t("mcpConfig.openApiToMcp.message.invalidOpenApi"));
       return;
     }
-
     setImportingOpenApi(true);
     try {
       await importOpenApiService({
         service_name: openApiServiceName.trim(),
         server_url: openApiServerUrl.trim(),
         openapi_json: parsedJson,
-        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
+        headers_template: openApiHeadersTemplate.trim()
+          ? JSON.parse(openApiHeadersTemplate.trim())
+          : null,
       });
-
       message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
       setOpenApiJson("");
       setOpenApiServiceName("");
@@ -556,7 +557,6 @@ export default function McpConfigModal({
     }
     setImportingOpenApi(false);
   };
-
   const onDeleteOpenapiService = (service: any) => {
     confirm({
       title: t("mcpConfig.delete.confirmTitle"),
@@ -577,7 +577,6 @@ export default function McpConfigModal({
       },
     });
   };
-
   // Server list table columns
   const serverColumns = [
     {
@@ -606,15 +605,15 @@ export default function McpConfigModal({
       render: (_: any, record: any) => {
         const isEnabled = record.enabled;
         return isEnabled ? (
-          <Tag color="#229954" variant="solid">
+          <Badge variant={"success"} size="sm">
             {t("mcpConfig.serverList.enabled.yes")}
-          </Tag>
+          </Badge>
         ) : (
-          <Tooltip title={t("mcpConfig.serverList.enabled.tooltip")}>
-            <Tag color="#AEB6BF" variant="solid" style={{ cursor: "pointer" }}>
+          <Hint content={t("mcpConfig.serverList.enabled.tooltip")}>
+            <Badge style={{ cursor: "pointer" }} variant={"muted"} size="sm">
               {t("mcpConfig.serverList.enabled.no")}
-            </Tag>
-          </Tooltip>
+            </Badge>
+          </Hint>
         );
       },
     },
@@ -628,7 +627,6 @@ export default function McpConfigModal({
         return (
           <Space size="small">
             <Button
-              type="link"
               icon={
                 <RefreshCw
                   size={16}
@@ -636,41 +634,47 @@ export default function McpConfigModal({
                 />
               }
               onClick={() => onCheckHealth(record)}
-              size="small"
               loading={healthCheckLoading[key]}
               disabled={actionsLocked}
+              variant="link"
+              size="xs"
             >
               {t("mcpConfig.serverList.button.healthCheck")}
             </Button>
             {record.status ? (
               <Button
-                type="link"
                 icon={<Eye size={16} />}
                 onClick={() => onViewTools(record)}
-                size="small"
                 disabled={actionsLocked}
+                variant="link"
+                size="xs"
               >
                 {t("mcpConfig.serverList.button.viewTools")}
               </Button>
             ) : (
-              <Tooltip
-                title={t("mcpConfig.serverList.button.viewToolsDisabledHint")}
-                placement="top"
+              <Hint
+                content={t("mcpConfig.serverList.button.viewToolsDisabledHint")}
+                side={"top"}
               >
-                  <span style={{ display: "inline-flex" }}>
-                    <Button type="link" icon={<Eye size={16} />} size="small" disabled>
-                      {t("mcpConfig.serverList.button.viewTools")}
-                    </Button>
-                  </span>
-              </Tooltip>
+                <span style={{ display: "inline-flex" }}>
+                  <Button
+                    icon={<Eye size={16} />}
+                    disabled
+                    variant="link"
+                    size="xs"
+                  >
+                    {t("mcpConfig.serverList.button.viewTools")}
+                  </Button>
+                </span>
+              </Hint>
             )}
             {renderPermissionControlledButton({
               isReadOnly,
               button: {
-                type: "link",
+                variant: "link",
                 icon: <Settings size={16} />,
                 onClick: () => onEditServer(record),
-                size: "small",
+                size: "xs",
                 disabled: actionsLocked,
                 children: t("mcpConfig.serverList.button.edit"),
               },
@@ -678,11 +682,11 @@ export default function McpConfigModal({
             {renderPermissionControlledButton({
               isReadOnly,
               button: {
-                type: "link",
-                danger: true,
+                variant: "link",
+                className: "text-destructive hover:text-destructive",
                 icon: <Trash size={16} />,
                 onClick: () => onDeleteServer(record),
-                size: "small",
+                size: "xs",
                 disabled: actionsLocked,
                 children: t("mcpConfig.serverList.button.delete"),
               },
@@ -692,7 +696,6 @@ export default function McpConfigModal({
       },
     },
   ];
-
   // Container list table columns
   const containerColumns = [
     {
@@ -743,22 +746,22 @@ export default function McpConfigModal({
         return (
           <Space size="small">
             <Button
-              type="link"
               icon={<FileText className="size-4" />}
               onClick={() => onViewLogs(record.container_id)}
-              size="small"
               disabled={updatingTools}
+              variant="link"
+              size="xs"
             >
               {t("mcpConfig.containerList.button.viewLogs")}
             </Button>
             {renderPermissionControlledButton({
               isReadOnly,
               button: {
-                type: "link",
-                danger: true,
+                variant: "link",
+                className: "text-destructive hover:text-destructive",
                 icon: <Trash className="size-4" />,
                 onClick: () => onDeleteContainer(record),
-                size: "small",
+                size: "xs",
                 disabled: actionsLocked,
                 children: t("mcpConfig.containerList.button.delete"),
               },
@@ -768,7 +771,6 @@ export default function McpConfigModal({
       },
     },
   ];
-
   // OpenAPI Services table columns
   const openapiServicesColumns = [
     {
@@ -795,11 +797,11 @@ export default function McpConfigModal({
           {renderPermissionControlledButton({
             isReadOnly: false,
             button: {
-              type: "link",
-              danger: true,
+              variant: "link",
+              className: "text-destructive hover:text-destructive",
               icon: <Trash size={16} />,
               onClick: () => onDeleteOpenapiService(record),
-              size: "small",
+              size: "xs",
               disabled: actionsLocked,
               children: t("mcpConfig.serverList.button.delete"),
             },
@@ -808,14 +810,12 @@ export default function McpConfigModal({
       ),
     },
   ];
-
   // Load OpenAPI services when modal opens
   useEffect(() => {
     if (visible) {
       loadOpenapiServices();
     }
   }, [visible]);
-
   return (
     <>
       <Modal
@@ -826,7 +826,13 @@ export default function McpConfigModal({
         closable={!actionsLocked}
         mask={{ closable: !actionsLocked }}
         footer={[
-          <Button key="cancel" onClick={onCancel} disabled={actionsLocked}>
+          <Button
+            key="cancel"
+            onClick={onCancel}
+            disabled={actionsLocked}
+            variant="outline"
+            size="sm"
+          >
             {actionsLocked
               ? t("mcpConfig.modal.updatingTools")
               : t("mcpConfig.modal.close")}
@@ -861,7 +867,6 @@ export default function McpConfigModal({
               </Text>
             </div>
           )}
-
           {/* Add MCP server tabs */}
           <Tabs
             defaultActiveKey="remote"
@@ -885,7 +890,11 @@ export default function McpConfigModal({
                 children: (
                   <Card size="small" style={{ marginTop: 8 }}>
                     <Space orientation="vertical" style={{ width: "100%" }}>
-                      <Space orientation="vertical" style={{ width: "100%" }} size="small">
+                      <Space
+                        orientation="vertical"
+                        style={{ width: "100%" }}
+                        size="small"
+                      >
                         <div
                           style={{
                             display: "flex",
@@ -894,7 +903,9 @@ export default function McpConfigModal({
                           }}
                         >
                           <Input
-                            placeholder={t("mcpConfig.addServer.namePlaceholder")}
+                            placeholder={t(
+                              "mcpConfig.addServer.namePlaceholder"
+                            )}
                             value={newServerName}
                             onChange={(e) => setNewServerName(e.target.value)}
                             style={{ flex: 0.8 }}
@@ -903,7 +914,9 @@ export default function McpConfigModal({
                             autoComplete="off"
                           />
                           <Input
-                            placeholder={t("mcpConfig.addServer.urlPlaceholder")}
+                            placeholder={t(
+                              "mcpConfig.addServer.urlPlaceholder"
+                            )}
                             value={newServerUrl}
                             onChange={(e) => setNewServerUrl(e.target.value)}
                             style={{ flex: 3 }}
@@ -911,10 +924,14 @@ export default function McpConfigModal({
                             autoComplete="off"
                           />
                         </div>
-                        <Input.TextArea
-                          placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                        <Textarea
+                          placeholder={t(
+                            "mcpConfig.addServer.customHeadersPlaceholder"
+                          )}
                           value={newServerCustomHeaders}
-                          onChange={(e) => setNewServerCustomHeaders(e.target.value)}
+                          onChange={(e) =>
+                            setNewServerCustomHeaders(e.target.value)
+                          }
                           rows={2}
                           disabled={actionsLocked || addingServer}
                           style={{ fontSize: 14 }}
@@ -926,16 +943,19 @@ export default function McpConfigModal({
                             alignItems: "center",
                           }}
                         >
-                          <Input.Password
-                            placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+                          <PasswordInput
+                            placeholder={t(
+                              "mcpConfig.editServer.authorizationTokenPlaceholder"
+                            )}
                             value={newServerAuthorizationToken}
-                            onChange={(e) => setNewServerAuthorizationToken(e.target.value)}
+                            onChange={(e) =>
+                              setNewServerAuthorizationToken(e.target.value)
+                            }
                             disabled={actionsLocked || addingServer}
                             style={{ flex: 1 }}
                             autoComplete="new-password"
                           />
                           <Button
-                            type="primary"
                             onClick={onAddServer}
                             loading={addingServer || updatingTools}
                             icon={
@@ -949,6 +969,8 @@ export default function McpConfigModal({
                               )
                             }
                             disabled={actionsLocked}
+                            variant="default"
+                            size="sm"
                           >
                             {updatingTools
                               ? t("mcpConfig.addServer.button.updating")
@@ -992,7 +1014,7 @@ export default function McpConfigModal({
                         >
                           {t("mcpConfig.addContainer.configHint")}
                         </Text>
-                        <Input.TextArea
+                        <Textarea
                           placeholder={t(
                             "mcpConfig.addContainer.configPlaceholder"
                           )}
@@ -1024,7 +1046,9 @@ export default function McpConfigModal({
                             "mcpConfig.addContainer.serviceNamePlaceholder"
                           )}
                           value={containerServiceName}
-                          onChange={(e) => setContainerServiceName(e.target.value)}
+                          onChange={(e) =>
+                            setContainerServiceName(e.target.value)
+                          }
                           style={{ width: 150 }}
                           maxLength={20}
                           disabled={actionsLocked}
@@ -1038,7 +1062,9 @@ export default function McpConfigModal({
                           )}
                           value={containerPort}
                           onChange={(value) => {
-                            setContainerPort(value === null ? undefined : value);
+                            setContainerPort(
+                              value === null ? undefined : value
+                            );
                           }}
                           min={1}
                           max={65535}
@@ -1048,7 +1074,6 @@ export default function McpConfigModal({
                         />
                         <div style={{ flex: 1 }} />
                         <Button
-                          type="primary"
                           onClick={onAddContainer}
                           loading={addingContainer || updatingTools}
                           icon={
@@ -1062,6 +1087,8 @@ export default function McpConfigModal({
                             )
                           }
                           disabled={actionsLocked}
+                          variant="default"
+                          size="sm"
                         >
                           {updatingTools
                             ? t("mcpConfig.addContainer.button.updating")
@@ -1119,6 +1146,8 @@ export default function McpConfigModal({
                                 <Button
                                   icon={<UploadIcon size={16} />}
                                   disabled={actionsLocked}
+                                  variant="outline"
+                                  size="sm"
                                 >
                                   {t("mcpConfig.uploadImage.button.selectFile")}
                                 </Button>
@@ -1137,7 +1166,9 @@ export default function McpConfigModal({
                                 )}
                                 value={uploadPort}
                                 onChange={(value) => {
-                                  setUploadPort(value === null ? undefined : value);
+                                  setUploadPort(
+                                    value === null ? undefined : value
+                                  );
                                 }}
                                 min={1}
                                 max={65535}
@@ -1164,8 +1195,10 @@ export default function McpConfigModal({
                                 alignItems: "center",
                               }}
                             >
-                              <Input.Password
-                                placeholder={t("mcpConfig.editServer.authorizationTokenPlaceholder")}
+                              <PasswordInput
+                                placeholder={t(
+                                  "mcpConfig.editServer.authorizationTokenPlaceholder"
+                                )}
                                 value={uploadAuthorizationToken}
                                 onChange={(e) =>
                                   setUploadAuthorizationToken(e.target.value)
@@ -1174,7 +1207,6 @@ export default function McpConfigModal({
                                 style={{ flex: 1 }}
                               />
                               <Button
-                                type="primary"
                                 onClick={onUploadImage}
                                 loading={uploadingImage || updatingTools}
                                 icon={
@@ -1188,6 +1220,8 @@ export default function McpConfigModal({
                                   )
                                 }
                                 disabled={actionsLocked}
+                                variant="default"
+                                size="sm"
                               >
                                 {updatingTools
                                   ? t("mcpConfig.addContainer.button.updating")
@@ -1216,7 +1250,11 @@ export default function McpConfigModal({
                 ),
                 children: (
                   <Card size="small" style={{ marginTop: 8 }}>
-                    <Space direction="vertical" style={{ width: "100%" }} size="small">
+                    <Space
+                      direction="vertical"
+                      style={{ width: "100%" }}
+                      size="small"
+                    >
                       <div
                         style={{
                           display: "flex",
@@ -1225,30 +1263,42 @@ export default function McpConfigModal({
                         }}
                       >
                         <Input
-                          placeholder={t("mcpConfig.openapiService.form.serviceNamePlaceholder")}
+                          placeholder={t(
+                            "mcpConfig.openapiService.form.serviceNamePlaceholder"
+                          )}
                           value={openApiServiceName}
-                          onChange={(e) => setOpenApiServiceName(e.target.value)}
+                          onChange={(e) =>
+                            setOpenApiServiceName(e.target.value)
+                          }
                           disabled={actionsLocked || importingOpenApi}
                           style={{ flex: 0.8 }}
                           maxLength={20}
                         />
                         <Input
-                          placeholder={t("mcpConfig.openapiService.form.serverUrlPlaceholder")}
+                          placeholder={t(
+                            "mcpConfig.openapiService.form.serverUrlPlaceholder"
+                          )}
                           value={openApiServerUrl}
                           onChange={(e) => setOpenApiServerUrl(e.target.value)}
                           disabled={actionsLocked || importingOpenApi}
                           style={{ flex: 3 }}
                         />
                       </div>
-                      <Input.TextArea
-                        placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
+                      <Textarea
+                        placeholder={t(
+                          "mcpConfig.addServer.customHeadersPlaceholder"
+                        )}
                         value={openApiHeadersTemplate}
-                        onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
+                        onChange={(e) =>
+                          setOpenApiHeadersTemplate(e.target.value)
+                        }
                         rows={2}
                         disabled={actionsLocked || importingOpenApi}
                       />
-                      <Input.TextArea
-                        placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                      <Textarea
+                        placeholder={t(
+                          "mcpConfig.openApiToMcp.jsonPlaceholder"
+                        )}
                         value={openApiJson}
                         onChange={(e) => setOpenApiJson(e.target.value)}
                         rows={6}
@@ -1265,7 +1315,6 @@ export default function McpConfigModal({
                         }}
                       >
                         <Button
-                          type="primary"
                           onClick={onImportOpenApiService}
                           loading={importingOpenApi || updatingTools}
                           icon={
@@ -1279,6 +1328,8 @@ export default function McpConfigModal({
                             )
                           }
                           disabled={actionsLocked}
+                          variant="default"
+                          size="sm"
                         >
                           {updatingTools
                             ? t("mcpConfig.openApiToMcp.button.adding")
@@ -1291,9 +1342,7 @@ export default function McpConfigModal({
               },
             ]}
           />
-
           <Divider style={{ margin: "16px 0" }} />
-
           {/* Server list */}
           <div>
             <div
@@ -1319,7 +1368,6 @@ export default function McpConfigModal({
               style={{ width: "100%" }}
             />
           </div>
-
           {/* Container list */}
           <div>
             <div
@@ -1345,7 +1393,6 @@ export default function McpConfigModal({
               style={{ width: "100%" }}
             />
           </div>
-
           {/* OpenAPI Services list */}
           <div>
             <div
@@ -1370,7 +1417,6 @@ export default function McpConfigModal({
           </div>
         </div>
       </Modal>
-
       {/* Tool list modal */}
       <McpToolListModal
         open={toolsModalVisible}
@@ -1379,7 +1425,6 @@ export default function McpConfigModal({
         tools={currentServerTools}
         serverName={currentServerName}
       />
-
       {/* Edit server modal */}
       <McpEditServerModal
         open={editServerModalVisible}
@@ -1394,7 +1439,6 @@ export default function McpConfigModal({
         initialCustomHeaders={editingServer?.custom_headers || null}
         loading={updatingServer || loadingMcpRecord}
       />
-
       {/* Container logs modal */}
       <McpContainerLogsModal
         open={logsModalVisible}

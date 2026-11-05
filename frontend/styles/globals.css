@@ -1,16 +1,26 @@
 @import "tw-shimmer";
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./brand.css";
+
+/* Upstream snapshots are maintenance data, not application class sources. */
+@source not "../vendor/shadcn";
 
 @custom-variant dark (&:is(.dark *));
 
-@theme {
+@theme inline {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
+  --color-ring: var(--ring);
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
-  --color-primary: hsl(var(--primary));
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-selected: var(--primary-selected);
+  --color-primary-disabled: var(--primary-disabled);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-foreground: var(--brand-soft-foreground);
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-secondary: hsl(var(--secondary));
   --color-secondary-foreground: hsl(var(--secondary-foreground));
@@ -26,12 +36,12 @@
   --color-card-foreground: hsl(var(--card-foreground));
   --color-sidebar-background: hsl(var(--sidebar-background));
   --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
   --color-sidebar-accent: hsl(var(--sidebar-accent));
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --color-sidebar-ring: var(--sidebar-ring);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -40,13 +50,21 @@
 }
 
 @keyframes accordion-down {
-  from { height: 0; }
-  to { height: var(--radix-accordion-content-height); }
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
 }
 
 @keyframes accordion-up {
-  from { height: var(--radix-accordion-content-height); }
-  to { height: 0; }
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 @layer base {
@@ -58,8 +76,6 @@
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --primary: 210 100% 50%;
-    --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
     --muted: 210 40% 96.1%;
@@ -70,16 +86,13 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 210 100% 50%;
     --radius: 0.5rem;
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
     --sidebar-primary-foreground: 0 0% 98%;
     --sidebar-accent: 240 4.8% 95.9%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
   .dark {
@@ -89,8 +102,6 @@
     --card-foreground: 210 40% 98%;
     --popover: 222.2 84% 4.9%;
     --popover-foreground: 210 40% 98%;
-    --primary: 210 100% 50%;
-    --primary-foreground: 222.2 47.4% 11.2%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
@@ -101,15 +112,12 @@
     --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
-    --ring: 210 100% 50%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 240 3.7% 15.9%;
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 }
 
@@ -327,7 +335,8 @@ button svg,
 }
 
 .auto-hide-scrollbars[data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover,
-.auto-hide-scrollbars [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
+.auto-hide-scrollbars
+  [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover) !important;
 }
 

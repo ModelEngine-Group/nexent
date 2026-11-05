@@ -19,7 +19,7 @@ import { createShareThreadListAdapter } from "@/app/newchat/adapter/conversation
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { ReadOnlyConversation } from "@/app/newchat/assistant-ui/thread";
 import { compositeAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import type { Agent } from "@/types/agentConfig";
 
 type SharePayload = {

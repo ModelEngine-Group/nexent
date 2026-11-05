@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
+import { Hint } from "@/components/common/Hint";
+import { Button } from "@/components/common/Button";
+import { Badge } from "@/components/common/Badge";
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -9,7 +10,7 @@ import { AidpRetrievalDialog } from "@/components/tool-config/AidpRetrievalDialo
 import { aidpDefaults } from "@/lib/aidpRetrievalConfig";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, Spin, Tag, Tooltip } from "antd";
+import { Modal, Spin } from "antd";
 import {
   AlertTriangle,
   Database,
@@ -18,7 +19,6 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-
 import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
@@ -33,40 +33,33 @@ import {
 } from "@/lib/managedKnowledgeTools";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
-import { ResourceAddButton } from "@/components/common/ResourceAddButton";
+import { ResourceAddButton } from "@/components/resources/ResourceAddButton";
 import type { ResourceSectionProps } from "./resource-section.types";
-
 type KnowledgeSelectorType = "knowledge_base_search" | "aidp_search";
-
 export interface KnowledgeToolProfile {
   toolName: ManagedKnowledgeToolName;
   selectorType: KnowledgeSelectorType;
   selectionParam: "index_names" | "kds_list";
   maxSelect?: number;
 }
-
 const LOCAL_KNOWLEDGE_PROFILE: KnowledgeToolProfile = {
   toolName: "knowledge_base_search",
   selectorType: "knowledge_base_search",
   selectionParam: "index_names",
 };
-
 const AIDP_KNOWLEDGE_PROFILE: KnowledgeToolProfile = {
   toolName: "aidp_search",
   selectorType: "aidp_search",
   selectionParam: "kds_list",
   maxSelect: 10,
 };
-
 const normalizeIds = (values: unknown[]): string[] =>
   Array.from(
     new Set(values.map((value) => String(value).trim()).filter(Boolean))
   );
-
 const parseStringListValue = (value: unknown): string[] => {
   if (Array.isArray(value)) return normalizeIds(value);
   if (typeof value !== "string" || !value.trim()) return [];
-
   try {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return normalizeIds(parsed);
@@ -78,7 +71,6 @@ const parseStringListValue = (value: unknown): string[] => {
   }
   return [];
 };
-
 export function parseSelection(
   tool: Tool | undefined,
   profile: KnowledgeToolProfile
@@ -88,7 +80,6 @@ export function parseSelection(
   )?.value;
   return parseStringListValue(value);
 }
-
 export function serializeSelection(
   ids: string[],
   profile: KnowledgeToolProfile
@@ -98,11 +89,9 @@ export function serializeSelection(
     ? JSON.stringify(normalizedIds)
     : normalizedIds;
 }
-
 function getParamValue(tool: Tool | undefined, name: string): unknown {
   return tool?.initParams?.find((param) => param.name === name)?.value;
 }
-
 function updateParam(
   tool: Tool,
   name: string,
@@ -124,7 +113,6 @@ function updateParam(
   }
   return { ...tool, initParams: params };
 }
-
 function sanitizeManagedTool(tool: Tool, profile: KnowledgeToolProfile): Tool {
   return {
     ...tool,
@@ -137,14 +125,12 @@ function sanitizeManagedTool(tool: Tool, profile: KnowledgeToolProfile): Tool {
     ),
   };
 }
-
 interface SelectedKnowledgeBase {
   id: string;
   displayName: string;
   knowledgeBase?: KnowledgeBase;
   isUnavailable: boolean;
 }
-
 interface KnowledgeBaseConfigState {
   profile: KnowledgeToolProfile;
   selectedIds: string[];
@@ -163,7 +149,6 @@ interface KnowledgeBaseConfigState {
   onParamsChange: (patch: Record<string, unknown>) => void;
   onParamChange: (param: ToolParam, value: unknown) => void;
 }
-
 function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   const selectedTools = useAgentStore(
     (state) => state.editedAgent?.tools ?? []
@@ -174,7 +159,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   const profile = aidpEnabled
     ? AIDP_KNOWLEDGE_PROFILE
     : LOCAL_KNOWLEDGE_PROFILE;
-
   const { availableTools, isLoading: isToolsLoading } = useToolList({
     enabled: isDeploymentReady,
   });
@@ -207,7 +191,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   } = useKnowledgeBasesForToolConfig(
     isDeploymentReady ? profile.selectorType : null
   );
-
   const selectedIds = parseSelection(selectedKnowledgeSearchTool, profile);
   const selectedDisplayNames = selectedKnowledgeSearchTool?.display_names || [];
   const configurableParams = (
@@ -243,21 +226,18 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
         isManagedKnowledgeTool(tool) &&
         getSemanticToolName(tool) !== profile.toolName
     );
-
   const replaceManagedKnowledgeTool = (updatedTool?: Tool) => {
     const otherTools = selectedTools.filter(
       (tool) => !isManagedKnowledgeTool(tool)
     );
     updateTools(updatedTool ? [...otherTools, updatedTool] : otherTools);
   };
-
   const onParamChange = (param: ToolParam, value: unknown) => {
     if (!selectedKnowledgeSearchTool || !configuredKnowledgeSearchTool) return;
     replaceManagedKnowledgeTool(
       updateParam(configuredKnowledgeSearchTool, param.name, value, param.type)
     );
   };
-
   const updateSelection = (ids: string[], displayNames: string[]) => {
     if (!configuredKnowledgeSearchTool) return;
     if (!selectedKnowledgeSearchTool && ids.length === 0) return;
@@ -265,7 +245,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
       replaceManagedKnowledgeTool();
       return;
     }
-
     const updatedTool = updateParam(
       configuredKnowledgeSearchTool,
       profile.selectionParam,
@@ -277,7 +256,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
       display_names: displayNames,
     });
   };
-
   const onKnowledgeBaseConfirm = (knowledgeBaseList: KnowledgeBase[]) => {
     const ids = knowledgeBaseList.map((knowledgeBase) =>
       profile.toolName === "aidp_search"
@@ -292,7 +270,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     );
     updateSelection(ids, displayNames);
   };
-
   const onKnowledgeBaseRemove = (knowledgeBaseId: string) => {
     const nextItems = selectedKnowledgeBases.filter(
       (knowledgeBase) => knowledgeBase.id !== knowledgeBaseId
@@ -302,11 +279,9 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
       nextItems.map((knowledgeBase) => knowledgeBase.displayName)
     );
   };
-
   if (!isDeploymentReady || isToolsLoading || !configuredKnowledgeSearchTool) {
     return null;
   }
-
   return {
     profile,
     selectedIds,
@@ -341,10 +316,9 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     onParamChange,
   };
 }
-
 function KnowledgeBaseUnavailableWarning({ message }: { message: string }) {
   return (
-    <Tooltip title={message}>
+    <Hint content={message}>
       <span
         role="img"
         aria-label={message}
@@ -352,33 +326,32 @@ function KnowledgeBaseUnavailableWarning({ message }: { message: string }) {
       >
         <AlertTriangle size={14} aria-hidden="true" />
       </span>
-    </Tooltip>
+    </Hint>
   );
 }
-
 export function KnowledgeBaseConfigActions() {
   const { t } = useTranslation("common");
   const state = useKnowledgeBaseConfigState();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-
   if (!state) return null;
-
   return (
     <>
       <Button
-        size="middle"
         icon={<Settings size={14} />}
         disabled={state.isReadOnly || !state.hasCurrentTool}
         onClick={() => setConfigOpen(true)}
+        variant="outline"
+        size="sm"
       >
         {t("agent.knowledge.button.configure")}
       </Button>
       <Button
-        size="middle"
         icon={<Plus size={14} />}
         disabled={state.isReadOnly}
         onClick={() => setSelectorOpen(true)}
+        variant="outline"
+        size="sm"
       >
         {t("agent.knowledge.button.select")}
       </Button>
@@ -443,7 +416,6 @@ export function KnowledgeBaseConfigActions() {
     </>
   );
 }
-
 export default function KnowledgeBaseConfig({
   highFidelity = false,
   renderSection,
@@ -454,7 +426,6 @@ export default function KnowledgeBaseConfig({
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const isReadOnly = useAgentReadOnly();
-
   if (highFidelity) {
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const isAidpSearch = state?.profile.selectorType === "aidp_search";
@@ -480,7 +451,6 @@ export default function KnowledgeBaseConfig({
                       : undefined,
                   ].filter((value): value is string => Boolean(value))
                 : [];
-
             return (
               <div
                 key={selectedKnowledgeBase.id}
@@ -495,21 +465,21 @@ export default function KnowledgeBaseConfig({
                   <Database size={16} strokeWidth={2} className="text-white" />
                 </span>
                 <div className="mx-2 flex min-w-0 flex-1 items-center gap-2">
-                  <Tooltip title={selectedKnowledgeBase.displayName}>
+                  <Hint content={selectedKnowledgeBase.displayName}>
                     <span
                       data-testid="agent-selected-knowledge-base-name"
                       className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[#191919]"
                     >
                       {selectedKnowledgeBase.displayName}
                     </span>
-                  </Tooltip>
+                  </Hint>
                   {selectedKnowledgeBase.isUnavailable ? (
                     <KnowledgeBaseUnavailableWarning
                       message={t("agent.knowledge.unavailableHint")}
                     />
                   ) : null}
                   {metadata.length > 0 ? (
-                    <Tooltip title={metadata.join(" | ")}>
+                    <Hint content={metadata.join(" | ")}>
                       <span
                         data-testid="agent-selected-knowledge-base-metadata"
                         className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs leading-[18px] text-[#808080]"
@@ -523,24 +493,22 @@ export default function KnowledgeBaseConfig({
                           </span>
                         ))}
                       </span>
-                    </Tooltip>
+                    </Hint>
                   ) : null}
                 </div>
-                <Tooltip title={t("agent.knowledge.button.configure")}>
+                <Hint content={t("agent.knowledge.button.configure")}>
                   <Button
-                    type="text"
-                    size="small"
                     icon={<Settings size={14} />}
                     aria-label={`${t("agent.knowledge.button.configure")} ${selectedKnowledgeBase.displayName}`}
                     disabled={!state || isReadOnly || !state.hasCurrentTool}
                     onClick={() => setConfigOpen(true)}
                     className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                    variant="ghost"
+                    size="xs"
                   />
-                </Tooltip>
-                <Tooltip title={t("skillPool.remove")}>
+                </Hint>
+                <Hint content={t("skillPool.remove")}>
                   <Button
-                    type="text"
-                    size="small"
                     icon={<Trash2 size={14} />}
                     aria-label={`${t("skillPool.remove")} ${selectedKnowledgeBase.displayName}`}
                     disabled={!state || isReadOnly}
@@ -548,8 +516,10 @@ export default function KnowledgeBaseConfig({
                       state?.onKnowledgeBaseRemove(selectedKnowledgeBase.id)
                     }
                     className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+                    variant="ghost"
+                    size="xs"
                   />
-                </Tooltip>
+                </Hint>
               </div>
             );
           })}
@@ -565,7 +535,7 @@ export default function KnowledgeBaseConfig({
         {state?.isError ? (
           <div className="flex items-center justify-between text-xs text-red-600">
             <span>{t("agent.knowledge.loadFailed")}</span>
-            <Button size="small" onClick={() => state.refetch()}>
+            <Button onClick={() => state.refetch()} variant="outline" size="xs">
               {t("common.retry")}
             </Button>
           </div>
@@ -580,19 +550,20 @@ export default function KnowledgeBaseConfig({
     const actions = (
       <div className="flex h-6 items-center gap-2">
         <Button
-          type="text"
-          size="small"
           icon={<Settings size={14} />}
           aria-label={t("agent.knowledge.button.configure")}
           disabled={!state || isReadOnly || !state.hasCurrentTool}
           onClick={() => setConfigOpen(true)}
           className="!size-6 !p-0 !text-[#191919]"
+          variant="ghost"
+          size="xs"
         />
         <Button
-          type="link"
           disabled={isReadOnly}
           onClick={() => router.push("/knowledges")}
-          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-primary"
+          variant="link"
+          size="sm"
         >
           <span className="inline-flex items-center gap-1">
             {t("agentConfig.layout.newKnowledgeBase")}
@@ -675,11 +646,9 @@ export default function KnowledgeBaseConfig({
       </>
     );
   }
-
   if (!state) {
     return <Spin size="small" />;
   }
-
   return (
     <div className="space-y-3">
       {state.isLoading ? (
@@ -689,22 +658,25 @@ export default function KnowledgeBaseConfig({
       ) : state.isError ? (
         <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
           <span>{t("agent.knowledge.loadFailed")}</span>
-          <Button size="small" onClick={() => state.refetch()}>
+          <Button onClick={() => state.refetch()} variant="outline" size="xs">
             {t("common.retry")}
           </Button>
         </div>
       ) : state.selectedKnowledgeBases.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {state.selectedKnowledgeBases.map((knowledgeBase) => (
-            <Tag
+            <Badge
               key={knowledgeBase.id}
-              closable={!state.isReadOnly}
-              onClose={
+              className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
+              variant="outline"
+              size="sm"
+              onRemove={
                 !state.isReadOnly
-                  ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
+                  ? !state.isReadOnly
+                    ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
+                    : undefined
                   : undefined
               }
-              className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
             >
               <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                 <span className="max-w-full truncate">
@@ -716,7 +688,7 @@ export default function KnowledgeBaseConfig({
                   />
                 ) : null}
               </span>
-            </Tag>
+            </Badge>
           ))}
         </div>
       ) : (

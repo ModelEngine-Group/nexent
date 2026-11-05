@@ -1,16 +1,17 @@
-"use client"
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import * as React from "react"
-import { Avatar as AvatarPrimitive } from "radix-ui"
+"use client";
 
-import { cn } from "@/lib/utils"
+import * as React from "react";
+import { cn } from "@/lib/utils";
+import { Avatar as AvatarPrimitive } from "radix-ui";
 
 function Avatar({
   className,
   size = "default",
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Root> & {
-  size?: "default" | "sm" | "lg"
+  size?: "default" | "sm" | "lg";
 }) {
   return (
     <AvatarPrimitive.Root
@@ -22,7 +23,7 @@ function Avatar({
       )}
       {...props}
     />
-  )
+  );
 }
 
 function AvatarImage({
@@ -35,7 +36,7 @@ function AvatarImage({
       className={cn("aspect-square size-full", className)}
       {...props}
     />
-  )
+  );
 }
 
 function AvatarFallback({
@@ -51,7 +52,7 @@ function AvatarFallback({
       )}
       {...props}
     />
-  )
+  );
 }
 
 function AvatarBadge({ className, ...props }: React.ComponentProps<"span">) {
@@ -67,7 +68,7 @@ function AvatarBadge({ className, ...props }: React.ComponentProps<"span">) {
       )}
       {...props}
     />
-  )
+  );
 }
 
 function AvatarGroup({ className, ...props }: React.ComponentProps<"div">) {
@@ -80,7 +81,7 @@ function AvatarGroup({ className, ...props }: React.ComponentProps<"div">) {
       )}
       {...props}
     />
-  )
+  );
 }
 
 function AvatarGroupCount({
@@ -96,7 +97,7 @@ function AvatarGroupCount({
       )}
       {...props}
     />
-  )
+  );
 }
 
 export {
@@ -106,4 +107,4 @@ export {
   AvatarBadge,
   AvatarGroup,
   AvatarGroupCount,
-}
+};

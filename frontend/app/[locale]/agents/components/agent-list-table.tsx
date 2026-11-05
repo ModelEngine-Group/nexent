@@ -2,34 +2,26 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ConfigProvider, Table, Tag } from "antd";
-import type { ColumnsType } from "antd/es/table";
-import { UserIdentity } from "@/components/auth/UserIdentity";
+import { useState, type Key } from "react";
+import { Trash2 } from "lucide-react";
+import { Button } from "@/components/common/Button";
+import { Modal } from "@/components/common/Modal";
+import { useAgentBulkDelete } from "@/hooks/agent/useAgentBulkDelete";
+import { showInfoNotice } from "@/lib/uiNotices";
 import { useTranslation } from "react-i18next";
-
+import { Badge } from "@/components/common/Badge";
+import { Table, type TableColumn } from "@/components/common/Table";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 import { normalizeTags } from "@/services/agentConfigService";
-import AgentConfigActions from "./agent-config-actions";
-import AgentTableHeader, {
-  type AgentTableHeaderProps,
-} from "./agent-list-table-header";
-import AgentListIndicators from "./agent-list-indicators";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { Agent } from "@/types/agentConfig";
-
-import {
-  DEFAULT_AGENT_COLUMN_WIDTHS,
-  MIN_COLUMN_WIDTHS,
-  resizeAgentColumns,
-  type AgentColumnWidths,
-  type AgentColumnKey,
-} from "./agent-table-column-widths";
-export { DEFAULT_AGENT_COLUMN_WIDTHS } from "./agent-table-column-widths";
+import AgentConfigActions from "./agent-config-actions";
+import AgentListIndicators from "./agent-list-indicators";
 
 export interface AgentListTableProps {
   agents: Agent[];
-  columnWidths?: AgentColumnWidths;
-  onColumnWidthsChange?: (widths: AgentColumnWidths) => void;
+  columnWidths?: Readonly<Record<string, number>>;
+  onColumnWidthsChange?: (widths: Record<string, number>) => void;
   onOpen: (agent: Agent) => void;
   onConfigure: (agentId: number) => void;
   onPublish: (agentId: number) => void;
@@ -38,7 +30,6 @@ export interface AgentListTableProps {
 
 export function formatAgentUpdateTime(updateTime?: string): string | null {
   if (!updateTime) return null;
-
   const isoDate = /^\d{4}-\d{2}-\d{2}/.exec(updateTime)?.[0];
   if (isoDate) {
     const parsedDate = new Date(`${isoDate}T00:00:00.000Z`);
@@ -47,7 +38,6 @@ export function formatAgentUpdateTime(updateTime?: string): string | null {
       ? isoDate
       : null;
   }
-
   const parsed = new Date(updateTime);
   if (Number.isNaN(parsed.getTime())) return null;
   return [parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate()]
@@ -67,170 +57,156 @@ export default function AgentListTable({
   onManageVersions,
 }: AgentListTableProps) {
   const { t } = useTranslation("common");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [bodyHeight, setBodyHeight] = useState<number>();
-  const [containerWidth, setContainerWidth] = useState(0);
-  const [localWidths, setLocalWidths] = useState(DEFAULT_AGENT_COLUMN_WIDTHS);
-  const baseWidths = columnWidths ?? localWidths;
-  const baseTotal = Object.values(baseWidths).reduce(
-    (sum, width) => sum + width,
-    0
-  );
-  const widths = {
-    ...baseWidths,
-    description:
-      baseWidths.description + Math.max(0, containerWidth - baseTotal),
+  const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
+  const [deleteTargets, setDeleteTargets] = useState<readonly Agent[]>([]);
+  const bulkDelete = useAgentBulkDelete();
+  const confirmDelete = async () => {
+    if (!deleteTargets.length || bulkDelete.isPending) return;
+    const result = await bulkDelete.mutateAsync(deleteTargets);
+    const deletedKeys = new Set(
+      result.deleted.map((agent) => String(agent.id))
+    );
+    setSelectedKeys((keys) =>
+      keys.filter((key) => !deletedKeys.has(String(key)))
+    );
+    setDeleteTargets([]);
+    const failedNames = result.failed
+      .map((agent) => agent.display_name || agent.name)
+      .join(", ");
+    showInfoNotice({
+      title: t("agentConfig.list.bulkDeleteResult"),
+      content: (
+        <div className="space-y-2">
+          <p>
+            {t("agentConfig.list.bulkDeleteSummary", {
+              succeeded: result.deleted.length,
+              failed: result.failed.length,
+            })}
+          </p>
+          {failedNames && (
+            <p>
+              {t("agentConfig.list.bulkDeleteFailedNames", {
+                names: failedNames,
+              })}
+            </p>
+          )}
+        </div>
+      ),
+      confirmLabel: t("common.confirm"),
+    });
   };
-  const resizeColumn = (key: AgentColumnKey, width: number) => {
-    const next = resizeAgentColumns(widths, key, width);
-    setLocalWidths(next);
-    onColumnWidthsChange?.(next);
-  };
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateHeight = () => {
-      const headerHeight =
-        container.querySelector(".ant-table-header")?.getBoundingClientRect()
-          .height ?? 44;
-      setBodyHeight(Math.max(1, container.clientHeight - headerHeight - 2));
-      setContainerWidth(Math.max(0, container.clientWidth - 17));
-    };
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(container);
-    updateHeight();
-    return () => observer.disconnect();
-  }, []);
-
-  const columns: ColumnsType<Agent> = [
+  const columns: TableColumn<Agent>[] = [
     {
-      title: t("agentConfig.list.column.name"),
       key: "name",
-      ellipsis: true,
-      render: (_, agent) => {
-        const title = agent.display_name || agent.name;
-        return (
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onOpen(agent)}
-              className="min-w-0 truncate text-left font-medium text-[#1f2937] hover:text-[#0067d1]"
-              title={title}
-            >
-              {title}
-            </button>
-            <AgentListIndicators agent={agent} />
-          </div>
-        );
-      },
-    },
-    {
-      title: t("agentConfig.list.column.type"),
-      key: "type",
-      ellipsis: true,
-      render: (_, agent) => {
-        const rawCategory = normalizeTags(agent.tags)[0];
-        const category = rawCategory
-          ? getAgentRepositoryTagLabel(rawCategory, t)
-          : undefined;
-        return category ? (
-          <Tag className="agent-table-category" title={category}>
-            {category}
-          </Tag>
-        ) : (
-          <span className="text-slate-400">-</span>
-        );
-      },
-    },
-    {
-      title: t("agentConfig.list.column.description"),
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
-      render: (description: string | undefined) => (
-        <span
-          className="block truncate text-[#64748b]"
-          title={description || undefined}
-        >
-          {description || "-"}
-        </span>
-      ),
-    },
-    {
-      title: t("agentConfig.list.column.status"),
-      key: "status",
-      render: (_, agent) => {
-        const isOnline = Boolean(agent.current_version_no);
-        return (
-          <span
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] leading-4 ${isOnline ? "bg-[#edf5ff] text-[#0067d1]" : "bg-[#f1f3f5] text-[#6b7280]"}`}
+      header: t("agentConfig.list.column.name"),
+      minWidth: 200,
+      maxWidth: 300,
+      grow: 0,
+      cell: (agent) => (
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onOpen(agent)}
+            title={agent.display_name || agent.name}
+            className="min-w-0 truncate font-medium hover:text-primary"
           >
-            <span
-              className={`size-1.5 rounded-full ${isOnline ? "bg-[#2070f3]" : "bg-[#aeaeae]"}`}
-              aria-hidden="true"
-            />
-            {t(
-              isOnline ? "agentConfig.list.online" : "agentConfig.list.offline"
-            )}
-          </span>
+            {agent.display_name || agent.name}
+          </button>
+          <AgentListIndicators agent={agent} />
+        </div>
+      ),
+    },
+    {
+      key: "type",
+      header: t("agentConfig.list.column.type"),
+      minWidth: 104,
+      maxWidth: 180,
+      grow: 0,
+      cell: (agent) => {
+        const category = normalizeTags(agent.tags)[0];
+        return category ? (
+          <Badge variant="info" size="sm">
+            {getAgentRepositoryTagLabel(category, t)}
+          </Badge>
+        ) : (
+          "-"
         );
       },
     },
     {
-      title: t("agentConfig.list.column.creator"),
-      dataIndex: "author",
+      key: "description",
+      header: t("agentConfig.list.column.description"),
+      minWidth: 240,
+      grow: 1,
+      cell: (agent) => (
+        <span title={agent.description || undefined}>
+          {agent.description || "-"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: t("agentConfig.list.column.status"),
+      minWidth: 104,
+      grow: 0,
+      cell: (agent) => (
+        <Badge variant={agent.current_version_no ? "info" : "muted"} size="sm">
+          {t(
+            agent.current_version_no
+              ? "agentConfig.list.online"
+              : "agentConfig.list.offline"
+          )}
+        </Badge>
+      ),
+    },
+    {
       key: "creator",
-      ellipsis: true,
-      render: (author: string | undefined, agent: Agent) => (
-        <span className="text-[#64748b]">
-          <UserIdentity
-            casUsername={agent.author_cas_username}
-            fallback={author?.trim() || "-"}
-          />
-        </span>
+      header: t("agentConfig.list.column.creator"),
+      minWidth: 136,
+      maxWidth: 240,
+      grow: 0,
+      cell: (agent) => (
+        <UserIdentity
+          casUsername={agent.author_cas_username}
+          fallback={agent.author?.trim() || "-"}
+        />
       ),
     },
     {
-      title: t("agentConfig.list.column.updatedAt"),
       key: "updatedAt",
-      ellipsis: true,
-      render: (_, agent) => (
-        <span className="tabular-nums text-[#64748b]">
-          {formatAgentUpdateTime(agent.update_time) || "-"}
-        </span>
-      ),
+      header: t("agentConfig.list.column.updatedAt"),
+      minWidth: 128,
+      grow: 0,
+      cell: (agent) => formatAgentUpdateTime(agent.update_time) || "-",
     },
     {
-      title: t("agentConfig.list.column.actions"),
       key: "actions",
-      fixed: "end",
-      render: (_, agent) => {
+      header: t("agentConfig.list.column.actions"),
+      width: 232,
+      resizable: false,
+      cell: (agent) => {
         const agentId = Number(agent.id);
-        const isOnline = Boolean(agent.current_version_no);
-        const agentName = agent.display_name || agent.name;
         return (
-          <div className="flex min-w-0 items-center agent-table-actions gap-3 whitespace-nowrap text-[13px] leading-5">
+          <div className="flex items-center gap-3 text-primary">
             <button
               type="button"
-              className="text-[#0067d1] hover:text-[#0052a8]"
               onClick={() => onConfigure(agentId)}
+              className="hover:text-primary-hover"
             >
               {t("agentConfig.list.configure")}
             </button>
-            {!isOnline ? (
+            {!agent.current_version_no && (
               <button
                 type="button"
-                className="text-[#0067d1] hover:text-[#0052a8]"
                 onClick={() => onPublish(agentId)}
+                className="hover:text-primary-hover"
               >
                 {t("agentConfig.list.publish")}
               </button>
-            ) : null}
+            )}
             <AgentConfigActions
               agentId={agentId}
-              agentName={agentName}
+              agentName={agent.display_name || agent.name}
               readOnly={agent.permission === "READ_ONLY"}
               variant="table"
               onManageVersions={onManageVersions}
@@ -240,74 +216,75 @@ export default function AgentListTable({
       },
     },
   ];
-
-  const resizableColumns = columns.map((column) => {
-    const key = column.key as AgentColumnKey;
-    return {
-      ...column,
-      width: widths[key],
-      onHeaderCell: () =>
-        ({
-          "aria-label":
-            typeof column.title === "string" ? column.title : undefined,
-          className:
-            key === "updatedAt" ? "agent-table-date-header" : undefined,
-          resizeWidth: widths[key],
-          minWidth: MIN_COLUMN_WIDTHS[key],
-          resizeLabel: t("agentConfig.list.resizeColumn", {
-            column: column.title,
-          }),
-          resizeFromStart: key === "actions",
-          onResizeWidth: (width: number) => resizeColumn(key, width),
-        }) as AgentTableHeaderProps,
-    };
-  });
-
   return (
-    <div
-      ref={containerRef}
-      data-testid="agent-list-table-scroll"
-      className="agent-table-container min-h-0 w-full min-w-0 flex-1 overflow-hidden rounded-xl border border-[#e8edf3] bg-white"
-    >
-      <ConfigProvider
-        theme={{
-          components: {
-            Table: {
-              colorText: "#191919",
-              headerBg: "#f7f9fc",
-              headerColor: "#475569",
-              headerSplitColor: "transparent",
-              borderColor: "#eef1f5",
-              cellFontSizeSM: 14,
-              cellPaddingBlockSM: 12,
-              cellPaddingInlineSM: 16,
-              rowHoverBg: "#f0f7ff",
+    <>
+      <Table
+        data-testid="agent-list-table-scroll"
+        className="flex-1"
+        columns={columns}
+        columnWidths={columnWidths}
+        onColumnWidthsChange={onColumnWidthsChange}
+        data={agents}
+        rowKey={(agent) => agent.id}
+        selection={{
+          selectedKeys,
+          onChange: setSelectedKeys,
+          disabled: bulkDelete.isPending,
+          isRowSelectable: (agent) =>
+            agent.permission !== "READ_ONLY" &&
+            Number.isInteger(Number(agent.id)) &&
+            Number(agent.id) > 0,
+          getRowLabel: (agent) => agent.display_name || agent.name,
+          actions: [
+            {
+              key: "delete",
+              label: t("agentConfig.list.bulkDelete"),
+              icon: <Trash2 className="size-4" />,
+              variant: "destructive",
+              loading: bulkDelete.isPending,
+              onClick: (rows) => setDeleteTargets([...rows]),
             },
-          },
+          ],
         }}
+      />
+      <Modal
+        open={deleteTargets.length > 0}
+        title={t("businessLogic.config.modal.deleteTitle")}
+        closeLabel={t("common.close")}
+        onClose={() => {
+          if (!bulkDelete.isPending) setDeleteTargets([]);
+        }}
+        closeOnEscape={!bulkDelete.isPending}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              disabled={bulkDelete.isPending}
+              onClick={() => setDeleteTargets([])}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              loading={bulkDelete.isPending}
+              onClick={() => void confirmDelete()}
+            >
+              {t("common.confirm")}
+            </Button>
+          </>
+        }
       >
-        <Table<Agent>
-          className="agent-list-table"
-          styles={{
-            header: {
-              cell: { height: 44, paddingBlock: 0, fontWeight: 500 },
-            },
-            body: { cell: { height: 52 } },
-          }}
-          components={{ header: { cell: AgentTableHeader } }}
-          columns={resizableColumns}
-          dataSource={agents}
-          pagination={false}
-          rowKey="id"
-          size="small"
-          tableLayout="fixed"
-          scroll={{
-            x: Object.values(widths).reduce((sum, width) => sum + width, 0),
-            y: bodyHeight,
-            scrollToFirstRowOnChange: true,
-          }}
-        />
-      </ConfigProvider>
-    </div>
+        <p>
+          {t("agentConfig.list.bulkDeleteConfirm", {
+            count: deleteTargets.length,
+          })}
+        </p>
+        <ul className="mt-3 max-h-48 list-disc overflow-auto pl-5 text-sm text-muted-foreground">
+          {deleteTargets.map((agent) => (
+            <li key={agent.id}>{agent.display_name || agent.name}</li>
+          ))}
+        </ul>
+      </Modal>
+    </>
   );
 }

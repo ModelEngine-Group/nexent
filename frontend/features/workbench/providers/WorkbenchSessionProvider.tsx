@@ -34,7 +34,7 @@ import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pin
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { createNewChatAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/common/Tooltip";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
 import type { STTModelConfig } from "@/types/modelConfig";

@@ -25,7 +25,7 @@ import {
   emitQuotaUsageChanged,
   QUOTA_USAGE_CHANGED_EVENT,
 } from "@/lib/quotaEvents";
-import { MarkdownRenderer } from "@/components/common/markdownRenderer";
+import { MarkdownRenderer } from "@/components/common/markdown/MarkdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";

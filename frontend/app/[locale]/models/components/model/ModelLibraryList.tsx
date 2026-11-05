@@ -16,8 +16,8 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/common/Badge";
+import { Button } from "@/components/common/Button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -30,7 +30,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/common/Tooltip";
 import { cn } from "@/lib/utils";
 
 import { MODEL_SOURCES } from "@/const/modelConfig";

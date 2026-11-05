@@ -69,7 +69,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string) => (zh as unknown as Record<string, string>)[key] ?? key,
   }),
 }));
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@/components/common/Tooltip", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@assistant-ui/react", () => ({
