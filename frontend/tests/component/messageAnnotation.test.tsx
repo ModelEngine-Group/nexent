@@ -49,10 +49,40 @@ const makeAnnotation = (
 afterEach(cleanup);
 
 describe("toMessageAnnotationWireItems", () => {
+  test("preserves nearby snapshots through outgoing and history mappings", () => {
+    const annotation = createMessageAnnotation(
+      {
+        quotedText: "this approach",
+        sourceMessageId: "assistant-1",
+        contextBefore: "x".repeat(250) + "Redis ",
+        contextAfter: " shares state." + "y".repeat(250),
+      },
+      [],
+      "snapshot"
+    );
+    const wire = toMessageAnnotationWireItems([annotation]);
+    expect(wire[0].context_before).toHaveLength(200);
+    expect(wire[0].context_before?.endsWith("Redis ")).toBe(true);
+    expect(wire[0].context_after).toHaveLength(200);
+    expect(wire[0].context_after?.startsWith(" shares state.")).toBe(true);
+    const restored = fromMessageAnnotationWireItems(wire);
+    expect(restored[0].context_before).toBe(wire[0].context_before?.trim());
+    expect(restored[0].context_after).toBe(wire[0].context_after?.trim());
+    expect(
+      fromMessageAnnotationWireItems([
+        { quoted_text: "q", context_before: 42, context_after: {} },
+      ])[0].context_before
+    ).toBeUndefined();
+  });
   test("maps camelCase annotations onto the snake_case wire shape", () => {
     const items = toMessageAnnotationWireItems([
       makeAnnotation({ comment: "note", sourceExcerpt: "reply intro" }),
-      makeAnnotation({ id: "a2", quotedText: "second", comment: undefined, sourceExcerpt: "" }),
+      makeAnnotation({
+        id: "a2",
+        quotedText: "second",
+        comment: undefined,
+        sourceExcerpt: "",
+      }),
     ]);
 
     expect(items).toEqual([
@@ -66,8 +96,9 @@ describe("toMessageAnnotationWireItems", () => {
   });
 
   test("caps the list length and truncates oversized fields", () => {
-    const many = Array.from({ length: MESSAGE_ANNOTATION_MAX_COUNT + 3 }, (_, i) =>
-      makeAnnotation({ id: `a${i}`, quotedText: `${i}` })
+    const many = Array.from(
+      { length: MESSAGE_ANNOTATION_MAX_COUNT + 3 },
+      (_, i) => makeAnnotation({ id: `a${i}`, quotedText: `${i}` })
     );
     const items = toMessageAnnotationWireItems(many);
     expect(items).toHaveLength(MESSAGE_ANNOTATION_MAX_COUNT);
@@ -78,7 +109,9 @@ describe("toMessageAnnotationWireItems", () => {
         comment: "c".repeat(MESSAGE_ANNOTATION_COMMENT_MAX + 10),
       }),
     ]);
-    expect(oversized[0].quoted_text).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+    expect(oversized[0].quoted_text).toHaveLength(
+      MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
+    );
     expect(oversized[0].comment).toHaveLength(MESSAGE_ANNOTATION_COMMENT_MAX);
   });
 });
@@ -112,7 +145,9 @@ describe("fromMessageAnnotationWireItems", () => {
         source_excerpt: null,
       },
     ]);
-    expect(items[0].quoted_text).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+    expect(items[0].quoted_text).toHaveLength(
+      MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
+    );
   });
 
   test("round-trips payloads produced by the outgoing mapping", () => {
@@ -239,12 +274,63 @@ describe("createMessageAnnotation", () => {
       "generated-id"
     );
 
-    expect(annotation.quotedText).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+    expect(annotation.quotedText).toHaveLength(
+      MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
+    );
     expect(annotation.comment).toHaveLength(MESSAGE_ANNOTATION_COMMENT_MAX);
   });
 });
 
 describe("resolveAnnotationSelection", () => {
+  test("captures the selected occurrence and freezes its surrounding paragraph", () => {
+    const root = document.createElement("div");
+    root.dataset.role = "assistant";
+    root.dataset.messageId = "a1";
+    root.innerHTML = `<div data-slot="aui_assistant-message-content"><p>irrelevant intro</p><p>local cache: same. Redis cache: same is shared.</p></div>`;
+    document.body.append(root);
+    const paragraph = root.querySelectorAll("p")[1];
+    const node = paragraph.firstChild!;
+    const range = document.createRange();
+    const start = node.textContent!.lastIndexOf("same");
+    range.setStart(node, start);
+    range.setEnd(node, start + 4);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const target = resolveAnnotationSelection(selection)!;
+    expect(target.text).toBe("same");
+    expect(target.contextBefore).toBe("local cache: same. Redis cache:");
+    expect(target.contextAfter).toBe("is shared.");
+    paragraph.textContent = "replacement";
+    expect(target.contextAfter).toBe("is shared.");
+    selection.removeAllRanges();
+    root.remove();
+  });
+
+  test("uses nearby paragraphs at boundaries, excludes tools and caps both sides", () => {
+    const root = document.createElement("div");
+    root.dataset.role = "assistant";
+    root.dataset.messageId = "a1";
+    root.innerHTML = `<div data-slot="aui_assistant-message-content"><p>${"b".repeat(250)}</p><div class="aui-tool-group-root">secret tool result</div><p>quote</p><p>${"a".repeat(250)}</p></div>`;
+    document.body.append(root);
+    const node = root.querySelectorAll("p")[1].firstChild!;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const target = resolveAnnotationSelection(selection)!;
+    expect(target.contextBefore).toBe("b".repeat(200));
+    expect(target.contextAfter).toBe("a".repeat(200));
+    // Crossing an excluded card is invalid even with valid endpoints.
+    range.setStart(root.querySelectorAll("p")[0].firstChild!, 0);
+    range.setEnd(node, 5);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(resolveAnnotationSelection(selection)).toBeNull();
+    selection.removeAllRanges();
+    root.remove();
+  });
   const buildAssistantMessage = (id: string) => {
     const root = document.createElement("div");
     root.setAttribute("data-role", "assistant");
@@ -283,7 +369,12 @@ describe("resolveAnnotationSelection", () => {
       anchorNode,
       focusNode,
       toString: () => text,
-      getRangeAt: () => document.createRange(),
+      getRangeAt: () => {
+        const range = document.createRange();
+        range.setStart(anchorNode, 0);
+        range.setEnd(focusNode, focusNode.textContent?.length ?? 0);
+        return range;
+      },
     }) as unknown as Selection;
 
   test("resolves a selection inside one assistant message", () => {
@@ -516,7 +607,11 @@ describe("MessageAnnotationCards", () => {
     const { container } = render(
       <MessageAnnotationCards
         annotations={[
-          { quoted_text: "first quote", comment: "first note", source_excerpt: "intro" },
+          {
+            quoted_text: "first quote",
+            comment: "first note",
+            source_excerpt: "intro",
+          },
           { quoted_text: "second quote", comment: null, source_excerpt: null },
         ]}
       />

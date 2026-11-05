@@ -22,6 +22,7 @@ const LIST_QUOTE_MAX_LENGTH = 80;
 export const MESSAGE_ANNOTATION_QUOTED_TEXT_MAX = 1500;
 export const MESSAGE_ANNOTATION_COMMENT_MAX = 500;
 export const MESSAGE_ANNOTATION_MAX_COUNT = 10;
+export const MESSAGE_ANNOTATION_CONTEXT_MAX = 200;
 
 /**
  * Loose shape of an assistant-ui thread message as consumed by the
@@ -39,6 +40,8 @@ export interface AnnotationMessageLike {
 
 /** A pending selection inside one assistant message, resolved from the DOM. */
 export interface AnnotationSelectionTarget {
+  contextBefore?: string;
+  contextAfter?: string;
   /** assistant-ui message id of the message the selection belongs to. */
   messageId: string;
   /** Normalized selected text (CRLF collapsed to LF). */
@@ -49,6 +52,8 @@ export interface AnnotationSelectionTarget {
 
 /** Draft annotation captured from a completed selection. */
 export interface MessageAnnotationDraft {
+  contextBefore?: string;
+  contextAfter?: string;
   /** The selected text quoted verbatim from the assistant reply. */
   quotedText: string;
   /** Optional user comment attached to the quote. */
@@ -61,7 +66,7 @@ export interface MessageAnnotationDraft {
 export interface MessageAnnotation extends MessageAnnotationDraft {
   /** Runtime identity used for list keys and edit/delete actions. */
   id: string;
-  /** Short excerpt of the source reply, shown in the list and the outgoing text. */
+  /** Display-only source label; nearby context is sent to the model instead. */
   sourceExcerpt: string;
 }
 
@@ -86,6 +91,8 @@ export interface MessageAnnotationsControl {
  * `backend/contracts/annotations.py::MessageAnnotationItem`).
  */
 export interface MessageAnnotationWireItem {
+  context_before?: string | null;
+  context_after?: string | null;
   quoted_text: string;
   comment?: string | null;
   source_excerpt?: string | null;
@@ -152,10 +159,62 @@ export function resolveAnnotationSelection(
   const messageId = messageElement.getAttribute("data-message-id") ?? "";
   if (!messageId) return null;
 
+  const content = anchorElement.closest(MESSAGE_CONTENT_SELECTOR);
+  const range = selection.getRangeAt(0).cloneRange();
+  if (
+    !content ||
+    !content.contains(range.startContainer) ||
+    !content.contains(range.endContainer)
+  ) {
+    return null;
+  }
+  // Endpoints alone cannot detect a selection spanning a tool/reasoning card.
+  if (
+    Array.from(content.querySelectorAll(NON_QUOTABLE_SELECTOR)).some((node) =>
+      range.intersectsNode(node)
+    )
+  ) {
+    return null;
+  }
+
   return {
     messageId,
     text: text.replace(/\r\n/g, "\n"),
-    range: selection.getRangeAt(0).cloneRange(),
+    range,
+    ...captureAnnotationContext(content, range),
+  };
+}
+
+/** Capture positional snapshots, preferring the endpoint paragraphs. */
+function captureAnnotationContext(content: Element, range: Range) {
+  const readSide = (before: boolean, paragraphOnly: boolean): string => {
+    const node = before ? range.startContainer : range.endContainer;
+    const paragraph = elementFromNode(node)?.closest(
+      "p, li, pre, blockquote, td, th"
+    );
+    const root = paragraphOnly ? paragraph : content;
+    if (!root || !content.contains(root)) return "";
+    const nearby = document.createRange();
+    nearby.selectNodeContents(root);
+    if (before) nearby.setEnd(range.startContainer, range.startOffset);
+    else nearby.setStart(range.endContainer, range.endOffset);
+    const fragment = nearby.cloneContents();
+    fragment
+      .querySelectorAll(NON_QUOTABLE_SELECTOR)
+      .forEach((node) => node.remove());
+    fragment
+      .querySelectorAll("p, li, pre, blockquote, tr, h1, h2, h3, h4, h5, h6")
+      .forEach((node) => node.append(document.createTextNode("\n\n")));
+    const text = (fragment.textContent ?? "").replace(/\r\n/g, "\n").trim();
+    return before
+      ? text.slice(-MESSAGE_ANNOTATION_CONTEXT_MAX)
+      : text.slice(0, MESSAGE_ANNOTATION_CONTEXT_MAX);
+  };
+  const contextBefore = readSide(true, true) || readSide(true, false);
+  const contextAfter = readSide(false, true) || readSide(false, false);
+  return {
+    ...(contextBefore ? { contextBefore } : {}),
+    ...(contextAfter ? { contextAfter } : {}),
   };
 }
 
@@ -207,6 +266,21 @@ export function createMessageAnnotation(
   return {
     id,
     ...draft,
+    ...(draft.contextBefore
+      ? {
+          contextBefore: draft.contextBefore.slice(
+            -MESSAGE_ANNOTATION_CONTEXT_MAX
+          ),
+        }
+      : {}),
+    ...(draft.contextAfter
+      ? {
+          contextAfter: draft.contextAfter.slice(
+            0,
+            MESSAGE_ANNOTATION_CONTEXT_MAX
+          ),
+        }
+      : {}),
     // Defensive caps keep the structured payload inside the backend limits.
     quotedText: draft.quotedText.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX),
     comment:
@@ -227,14 +301,32 @@ export function createMessageAnnotation(
 export function toMessageAnnotationWireItems(
   annotations: readonly MessageAnnotation[]
 ): MessageAnnotationWireItem[] {
-  return annotations.slice(0, MESSAGE_ANNOTATION_MAX_COUNT).map((annotation) => ({
-    quoted_text: annotation.quotedText.slice(
-      0,
-      MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
-    ),
-    comment: annotation.comment?.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ?? null,
-    source_excerpt: annotation.sourceExcerpt || null,
-  }));
+  return annotations
+    .slice(0, MESSAGE_ANNOTATION_MAX_COUNT)
+    .map((annotation) => ({
+      quoted_text: annotation.quotedText.slice(
+        0,
+        MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
+      ),
+      comment:
+        annotation.comment?.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ?? null,
+      source_excerpt: annotation.sourceExcerpt || null,
+      ...(annotation.contextBefore
+        ? {
+            context_before: annotation.contextBefore.slice(
+              -MESSAGE_ANNOTATION_CONTEXT_MAX
+            ),
+          }
+        : {}),
+      ...(annotation.contextAfter
+        ? {
+            context_after: annotation.contextAfter.slice(
+              0,
+              MESSAGE_ANNOTATION_CONTEXT_MAX
+            ),
+          }
+        : {}),
+    }));
 }
 
 /**
@@ -265,10 +357,28 @@ export function fromMessageAnnotationWireItems(
         : "";
     items.push({
       quoted_text: quotedText.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX),
-      comment: comment ? comment.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) : null,
+      comment: comment
+        ? comment.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX)
+        : null,
       source_excerpt: sourceExcerpt
         ? sourceExcerpt.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX)
         : null,
+      ...(typeof record.context_before === "string" &&
+      record.context_before.trim()
+        ? {
+            context_before: record.context_before
+              .trim()
+              .slice(-MESSAGE_ANNOTATION_CONTEXT_MAX),
+          }
+        : {}),
+      ...(typeof record.context_after === "string" &&
+      record.context_after.trim()
+        ? {
+            context_after: record.context_after
+              .trim()
+              .slice(0, MESSAGE_ANNOTATION_CONTEXT_MAX),
+          }
+        : {}),
     });
     if (items.length >= MESSAGE_ANNOTATION_MAX_COUNT) break;
   }

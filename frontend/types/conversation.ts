@@ -101,6 +101,8 @@ export interface ApiMessageItem {
 }
 
 export interface ApiMessageAnnotation {
+  context_before?: string | null;
+  context_after?: string | null;
   quoted_text: string;
   comment?: string | null;
   source_excerpt?: string | null;

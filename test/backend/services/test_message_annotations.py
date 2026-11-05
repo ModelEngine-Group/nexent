@@ -27,6 +27,8 @@ ANNOTATION = {
     'quoted_text': 'quoted reply text',
     'comment': 'note',
     'source_excerpt': 'reply intro',
+    'context_before': 'Redis shares the cache.',
+    'context_after': 'Consider expiration.',
 }
 
 
@@ -84,6 +86,33 @@ def test_format_without_annotations_returns_text_unchanged():
     assert format_annotations_for_llm('why stop?', []) == 'why stop?'
 
 
+def test_context_caps_keep_nearest_text_and_reject_invalid_fields():
+    normalized = normalize_message_annotations([{
+        'quoted_text': 'selected',
+        'context_before': 'x' * 250 + ' nearest',
+        'context_after': 'nearest ' + 'y' * 250,
+    }])
+    assert len(normalized[0].context_before) == 200
+    assert normalized[0].context_before.endswith(' nearest')
+    assert len(normalized[0].context_after) == 200
+    assert normalized[0].context_after.startswith('nearest ')
+    assert normalize_message_annotations([{'quoted_text': 'q', 'context_before': {}}]) is None
+    legacy = normalize_message_annotations([{'quoted_text': 'legacy', 'source_excerpt': 'intro'}])
+    assert legacy[0].context_before is None
+    assert format_annotations_for_llm('', legacy) == '1. Quote:\n> legacy'
+
+
+def test_context_is_distinct_from_selection_and_source_label_is_ui_only():
+    merged = format_annotations_for_llm('why?', normalize_message_annotations([ANNOTATION]))
+    assert merged == (
+        '1. Quote:\nContext before (not selected):\n> Redis shares the cache.\n'
+        'Selected text:\n> quoted reply text\n'
+        'Context after (not selected):\n> Consider expiration.\n'
+        'Comment: note\n\n---\n\nwhy?'
+    )
+    assert 'reply intro' not in merged
+
+
 def test_format_merges_blocks_comment_and_source_into_user_text():
     annotations = normalize_message_annotations([
         {'quoted_text': 'line one\nline two', 'comment': 'skip this',
@@ -92,7 +121,7 @@ def test_format_merges_blocks_comment_and_source_into_user_text():
 
     merged = format_annotations_for_llm('why stop?', annotations)
 
-    assert merged == ('1. Quote (from reply "reply intro"):\n'
+    assert merged == ('1. Quote:\n'
                       '> line one\n> line two\n'
                       'Comment: skip this\n\n---\n\nwhy stop?')
 
@@ -287,8 +316,11 @@ def test_historical_turns_merge_annotations_into_model_facing_text(message_db):
 
     assert len(turns) == 1
     assert turns[0]['user_message'] == (
-        '1. Quote (from reply "reply intro"):\n'
+        '1. Quote:\n'
+        'Context before (not selected):\n> Redis shares the cache.\n'
+        'Selected text:\n'
         '> quoted reply text\n'
+        'Context after (not selected):\n> Consider expiration.\n'
         'Comment: note\n\n---\n\nwhy stop?'
     )
     assert turns[0]['assistant_final_answer'] == 'because of the quota'

@@ -1,0 +1,46 @@
+schema_version: "1.0"
+change:
+  change_id: ADD-TO-CHAT-LOCAL-CONTEXT-20261105
+  change_type: requirement
+  requirement_id: ADD-TO-CHAT-LOCAL-CONTEXT-20261105
+  title: Capture nearby reply context for add-to-chat quotes
+  description: >-
+    Preserve the 40-character source display label, but omit it from model
+    input. Capture optional context_before/context_after snapshots at selection
+    time, preferring the selected paragraph and limiting each side to 200
+    characters nearest the selection. Fall back to nearby reply text at paragraph
+    boundaries. Exclude reasoning/tool content. Preserve these fields through
+    request normalization, JSON unit persistence and history restoration.
+    Legacy annotations without context remain readable and sendable.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/messageAnnotation.test.tsx
+      - test/backend/services/test_message_annotations.py
+    behaviors:
+      - Capture positional context for repeated quotes and preserve selection-time snapshots.
+      - Bound nearby context and exclude tool/reasoning text and invalid selections.
+      - Round-trip optional context through wire payloads, persistence and history.
+      - Format context separately from the selected quote and omit source display labels.
+      - Preserve legacy annotations and reject malformed payloads safely.
+    reason: >-
+      Strengthen the existing annotation UT rather than duplicate isolated
+      contracts in new D1 Cases. Existing annotation change records have no
+      formal Feature/Case bindings. D2-D5 runtime/browser/model acceptance is
+      not claimed by these tests; no deployment or external system is changed.
+  notes: >-
+    Baseline: ADD-TO-CHAT-ANNOTATIONS-STRUCTURED-20261102. Initial branch:
+    feat/conversation-artifacts-panel, with unrelated uncommitted changes.
+    The configured sibling nexent-doc repository is absent; external SPEC
+    synchronization remains blocked. This record captures the authorized delta
+    and test intentions without inventing an external SPEC or execution evidence.
