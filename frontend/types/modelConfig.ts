@@ -26,7 +26,8 @@ export type ModelSource =
   | "anthropic"
   | "google"
   | "mistral"
-  | "xai";
+  | "xai"
+  | "atlascloud";
 
 // Model type
 export type ModelType =
