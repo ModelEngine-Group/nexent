@@ -836,3 +836,46 @@ it.each([
   },
   20000
 );
+
+it("AC-RF2 retries failed discovery through the connection summary and clears the error", async () => {
+  legacy.addProviderModel.mockRejectedValueOnce(
+    new Error("controlled-discovery-failure")
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <App>
+        <ModelAddDialog
+          isOpen
+          initialTab="batch"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+      </App>
+    </QueryClientProvider>
+  );
+  fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+    target: { value: "https://models.invalid/v1" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" })
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "modelProfile.checkIssues" })
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "modelProfile.retryCheck" })
+  );
+  await screen.findByText("model-a");
+  expect(legacy.addProviderModel).toHaveBeenCalledTimes(2);
+  expect(legacy.addProviderModel.mock.calls[1]).toEqual(
+    legacy.addProviderModel.mock.calls[0]
+  );
+  expect(
+    screen.queryByRole("button", { name: "modelProfile.checkIssues" })
+  ).not.toBeInTheDocument();
+  expect(api.validateModelOutlet).not.toHaveBeenCalled();
+});

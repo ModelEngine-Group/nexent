@@ -31,8 +31,13 @@ change:
     - Managed-tenant legacy LLM rows cannot silently accept extended settings.
     - Late profile matching invalidates completed checks and ignores stale in-flight results.
     - Save reuses connectivity status only for the same resolved draft; unchanged catalog matching preserves a valid result.
+    - Same-key profile reselection invalidates the prior edit probe through the actual profile-selection patch.
+    - Discovery error retry sends another discovery request and clears the recovered error.
+    - List diagnostics are cleared after edit, revision or status changes while unchanged failures remain visible.
     reason: Real React component events and service boundary assertions prove the missing UI decision. No backend or SDK behavior changes, so no duplicate D1 or new D2/D3 is needed. Existing successful-LLM D4 assets do not prove this rejection; actual container browser verification is recorded separately.
     test_selectors:
     - frontend/tests/component/modelOutletBatch.test.tsx
     - frontend/tests/component/modelAddDialogBatchDuplicate.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/component/modelLibraryChecks.test.tsx
   notes: User approved fixing the PR4097 review defect. A bounded guard is used instead of adding custom Header support to every legacy adapter. Design and AC-BC1 through AC-BC4 are in nexent-doc/docs/Developing/model-access-native-agent/PR4097-BATCH-CONNECTION-20261104.md. Discovery uses the supplied settings; persistence and inference paths are unchanged. No formal Case execution or full model-runtime acceptance is implied by component tests.

@@ -1797,7 +1797,11 @@ function BatchAddForm({
           <ModelCheckSummary
             issues={issues}
             onRetryShared={() => {
-              if (batchChecking || submitting) return;
+              if (batchChecking || submitting || fetching) return;
+              if (issues.__connection) {
+                void fetchModels();
+                return;
+              }
               setBatchChecking(true);
               void Promise.all(
                 fetched.filter((row) => !!issues[row.id]).map(checkRow)

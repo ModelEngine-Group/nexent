@@ -669,3 +669,45 @@ it.each([false, true])(
   },
   20000
 );
+
+it("AC-RF1 invalidates a successful check when reselecting the same upgraded profile", async () => {
+  const saved = await api.getModelOutlet();
+  saved.profile.provenance = {
+    atomic_refs: { model: { key: "vendor/exact-model", revision: "old" } },
+  };
+  api.getModelOutlet.mockResolvedValue(saved);
+  api.listModelProfiles.mockResolvedValue({
+    catalog_revision: "upgraded",
+    items: [
+      { key: "vendor/exact-model", name: "Exact Model", revision: "new" },
+    ],
+  });
+  api.validateModelOutlet.mockResolvedValue({ ok: true });
+  setup(
+    <ModelOutletEditDialog modelId={42} onClose={vi.fn()} onSuccess={vi.fn()} />
+  );
+  const check = await screen.findByRole("button", {
+    name: "modelConfig.editDialog.checkConnectivity",
+  });
+  await waitFor(() => expect(check).toBeEnabled(), { timeout: 5000 });
+  fireEvent.click(check);
+  await screen.findByText("model.status.available");
+  expect(
+    api.validateModelOutlet.mock.calls[0][0].patch.profile_selection
+  ).toBeUndefined();
+  fireEvent.mouseDown(screen.getByLabelText("modelProfile.modelProfile"));
+  fireEvent.click(await screen.findByText("Exact Model", { selector: ".ant-select-item-option-content" }));
+  await waitFor(() =>
+    expect(screen.queryByText("model.status.available")).not.toBeInTheDocument()
+  );
+  await waitForEditSaveReady();
+  fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+  await waitFor(() => expect(api.updateModelOutlet).toHaveBeenCalledOnce());
+  expect(api.updateModelOutlet.mock.calls[0][1]).toMatchObject({
+    profile_selection: {
+      catalog_revision: "upgraded",
+      model_profile: { key: "vendor/exact-model", revision: "new" },
+    },
+  });
+  expect(api.updateModelOutlet.mock.calls[0][1].connect_status).toBeUndefined();
+});

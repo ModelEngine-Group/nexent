@@ -474,6 +474,8 @@ export function ModelOutletAddForm({
     sampling,
     apiKey,
     editing?.config_revision,
+    // Reselecting an unchanged key can adopt a newer catalog definition.
+    editing ? makeEditPatch(draft).profile_selection : undefined,
   ]);
   const currentCheckResult =
     checkResult?.fingerprint === checkFingerprint ? checkResult : undefined;

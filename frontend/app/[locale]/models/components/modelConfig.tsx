@@ -465,12 +465,22 @@ export const ModelConfigSection = forwardRef<
       await invalidate();
 
       const allModels = await modelService.getAllModels();
+      const previousModels = modelsRef.current;
       setModels(allModels);
       setCheckIssues((prev) =>
         Object.fromEntries(
-          Object.entries(prev).filter(([id]) =>
-            allModels.some((model) => String(model.id) === id)
-          )
+          Object.entries(prev).filter(([id]) => {
+            const model = allModels.find((item) => String(item.id) === id);
+            const previous = previousModels.find(
+              (item) => String(item.id) === id
+            );
+            return (
+              model && previous &&
+              previous.configRevision === model.configRevision &&
+              previous.connect_status === model.connect_status &&
+              model.connect_status !== MODEL_STATUS.AVAILABLE
+            );
+          })
         )
       );
 
@@ -604,6 +614,19 @@ export const ModelConfigSection = forwardRef<
       log.error(t("cfg.error.loadList"), error);
       message.error(t("cfg.error.loadListFailed"));
     }
+  };
+
+  const finishModelEdit = async () => {
+    if (editingCardModel) {
+      const id = String(editingCardModel.id);
+      setCheckIssues((previous) => {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
+    }
+    setEditingCardModel(null);
+    await loadModelLists(true);
   };
 
   // Keep the saved-outlet probe diagnostics intact for both page entry points.
@@ -1240,16 +1263,13 @@ export const ModelConfigSection = forwardRef<
 
           {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
           {editingCardModel && editingCardModel.type === "llm" && editingCardModel.profileSchemaVersion ? (
-            <ModelOutletEditDialog modelId={editingCardModel.id} onClose={() => setEditingCardModel(null)} onSuccess={async () => { setEditingCardModel(null); await loadModelLists(true); }} />
+            <ModelOutletEditDialog modelId={editingCardModel.id} onClose={() => setEditingCardModel(null)} onSuccess={finishModelEdit} />
           ) : editingCardModel && (
             <ModelEditDialog
               key={editingCardModel.id}
               model={editingCardModel}
               onClose={() => setEditingCardModel(null)}
-              onSuccess={async () => {
-                setEditingCardModel(null);
-                await loadModelLists(true);
-              }}
+              onSuccess={finishModelEdit}
             />
           )}
         </div>

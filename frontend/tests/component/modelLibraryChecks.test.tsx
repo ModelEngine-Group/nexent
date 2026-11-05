@@ -88,7 +88,11 @@ vi.mock("../../app/[locale]/models/components/model/ModelAddDialog", () => ({
 }));
 vi.mock(
   "../../app/[locale]/models/components/model/ModelOutletEditDialog",
-  () => ({ ModelOutletEditDialog: () => null })
+  () => ({
+    ModelOutletEditDialog: ({ onSuccess }: { onSuccess: () => void }) => (
+      <button onClick={onSuccess}>save edited outlet</button>
+    ),
+  })
 );
 vi.mock("../../app/[locale]/models/components/model/ModelEditDialog", () => ({
   ModelEditDialog: () => null,
@@ -103,11 +107,14 @@ vi.mock("../../app/[locale]/models/components/model/ModelSlotSelect", () => ({
 }));
 // Exercise the real page handlers and summary; only unrelated table rendering is replaced.
 vi.mock("../../app/[locale]/models/components/model/ModelLibraryList", () => ({
-  ModelLibraryList: ({ models, onCheck }: any) =>
+  ModelLibraryList: ({ models, onCheck, onEdit }: any) =>
     models.map((m: any) => (
-      <button key={m.id} onClick={() => onCheck(m.displayName, m.type)}>
-        check {m.displayName}: {m.connect_status}
-      </button>
+      <div key={m.id}>
+        <button onClick={() => onCheck(m.displayName, m.type)}>
+          check {m.displayName}: {m.connect_status}
+        </button>
+        <button onClick={() => onEdit(m)}>edit {m.displayName}</button>
+      </div>
     )),
 }));
 
@@ -304,3 +311,47 @@ it.each(["success", "conflict", "aborted"])("ignores an obsolete library check a
   expect(screen.getByRole("button", { name: "check Kimi: not_detected" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "modelProfile.checkIssues:1" })).not.toBeInTheDocument();
 });
+
+it.each(["revision", "success", "edit-saved", "unchanged"])(
+  "AC-RF3 reconciles stored diagnostics on refresh (%s)",
+  async (mode) => {
+    let revision = 2;
+    let status = "unavailable";
+    mocks.models.mockImplementation(async () => [
+      {
+        id: 37,
+        name: "kimi-k3",
+        displayName: "Kimi",
+        type: "llm",
+        profileSchemaVersion: 1,
+        configRevision: revision,
+        connect_status: status,
+      },
+    ]);
+    mocks.validate.mockResolvedValue(failure);
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /check Kimi:/ }));
+    await screen.findByRole("button", { name: "modelProfile.checkIssues:1" });
+    if (mode === "revision") revision = 3;
+    if (mode === "success") status = "available";
+    if (mode === "edit-saved") {
+      fireEvent.click(screen.getByRole("button", { name: "edit Kimi" }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: "save edited outlet" })
+      );
+    } else {
+      fireEvent.click(
+        screen.getByRole("button", { name: "saved model callback" })
+      );
+    }
+    await waitFor(() => expect(mocks.models).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const summary = screen.queryByRole("button", {
+        name: "modelProfile.checkIssues:1",
+      });
+      if (mode === "unchanged") expect(summary).toBeInTheDocument();
+      else expect(summary).not.toBeInTheDocument();
+    });
+    expect(mocks.validate).toHaveBeenCalledOnce();
+  }
+);
