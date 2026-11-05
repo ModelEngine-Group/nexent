@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-DUPLICATE-NAME-20261022
+  change_type: bugfix
+  bug_id: MODEL-DUPLICATE-NAME-20261022
+  title: Distinguish duplicate outlet names from stale revisions
+  description: Save errors must identify existing display names without overwriting existing models.
+  observed_behavior: Existing names return a version conflict and new ApiError bypasses legacy duplicate handling.
+  expected_behavior: Duplicate names have an explicit 409 business code and actionable single/batch UI feedback; stale revisions retain their own code.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing duplicate unit assertion expected the conflated version error; batch tests did not cover the profile ApiError contract.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen service, app and existing form units; no new module or duplicate D1 needed.
+    behaviors:
+    - Existing display names cannot reach database insertion or success audit.
+    - Duplicate and stale-revision HTTP contracts remain distinguishable.
+    - Single and batch UI preserve inputs and report existing names without automatic overwrite.
+    test_selectors:
+    - test/backend/services/test_model_profile_service.py
+    - test/backend/app/test_model_profile_app.py
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added: []
+    retired: []
+  notes: Existing SPEC duplicate-name behavior is correct; change only application error classification. Adjacent PW-MODEL-01 does not reproduce duplicate creates and is not selected for its unrelated full Agent journey. Focused dev browser/API reproduction supplements owning UT; no new D1, no image build or remote updates.

@@ -9,6 +9,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
 
+# Load the real pure selection policy before this legacy suite replaces consts.
+from management.services.model.resolver import is_model_configured  # noqa: F401
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -3292,8 +3295,8 @@ def test_list_published_agents_impl_multiple_models(monkeypatch):
     assert result[0]["model_name"] == "Model-1"
 
 
-def test_list_published_agents_impl_filters_unavailable_models(monkeypatch):
-    """Published agent responses expose only available bound models."""
+def test_list_published_agents_impl_keeps_explicit_failed_models(monkeypatch):
+    """AC-FIX-03: cached probe failures do not hide explicitly configured models."""
     agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
         return_value=[
             {
@@ -3332,8 +3335,8 @@ def test_list_published_agents_impl_filters_unavailable_models(monkeypatch):
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
-    assert result[0]["model_ids"] == [1]
-    assert result[0]["model_names"] == ["Model-1"]
+    assert result[0]["model_ids"] == [1, 2]
+    assert result[0]["model_names"] == ["Model-1", "Model-2"]
     assert result[0]["model_name"] == "Model-1"
     assert availability_model_ids == [[1, 2]]
 

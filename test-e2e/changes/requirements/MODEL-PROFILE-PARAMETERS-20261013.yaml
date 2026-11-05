@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-PARAMETERS-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-PARAMETERS-20261013
+  title: Introduce finite profile parameter validation
+  description: Implement finite schema compilation, strict value validation and explicit parameter permissions/defaults/fixed values/conditions as an isolated domain policy.
+  affected_features:
+    existing: []
+    added: [SDK-MODEL-PROFILE-PARAMETERS]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Declared schema keywords, nested properties/items and bounds are checked before use; unknown keywords, invalid shapes and nonfinite values fail explicitly.
+    - Value validation preserves null, boolean and numeric distinctions and checks enum/const, ranges, lengths, required properties and additional fields without coercion.
+    - Compiled schemas are immutable snapshots and errors never echo values.
+    - Parameter permissions, scopes, defaults, fixed values and required flags are enforced; explicit inactive parameters fail and dependency cycles are rejected.
+    - Conditional effective views never mutate saved values; declaration order does not alter dependency handling.
+    reason: Existing profile contracts validate source capabilities; they do not implement the finite configurable parameter schema. This increment is isolated domain validation, not a connected component.
+    test_selectors:
+    - test/sdk/core/model_service/test_parameter_schema.py
+    - test/sdk/core/model_service/test_parameter_rules.py
+  no_case_change_reason: Pure schema/value rules stay in UT. These pure schema/policy rules stay isolated; component proof will be designed before connecting TOML supplements and profile composition; existing formal Cases remain unchanged.
+  notes: This increment does not send API requests or alter saved model records.

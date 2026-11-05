@@ -23,7 +23,7 @@ case:
     action: 在本地工作区读取与“ModelConcurrencyLimiter acquire/release、同key冲突limit、等待超时、stop_event取消与引用归零回收｜核心流程”相关的固定 fixture/配置；测试代码不得读取生产凭据。
     expected: acquire 正常返回 ModelConcurrencyPermit 实例；同 key 复用同一条目（limit 一致时不冲突），不同 key 相互独立。
   - order: 2
-    action: 直接导入 sdk/nexent/core/models/model_concurrency.py 的 ModelConcurrencyLimiter、ModelConcurrencyPermit、ModelConcurrencyExceeded，每个用例新建独立
+    action: 直接导入 sdk/nexent/core/model_service/concurrency.py 的 ModelConcurrencyLimiter、ModelConcurrencyPermit、ModelConcurrencyExceeded，每个用例新建独立
       ModelConcurrencyLimiter 实例，不使用模块级全局 model_concurrency_limiter，避免用例串扰。
     expected: limit<=0 或 timeout_seconds<=0 时 acquire 抛 ValueError，且不留残留的 _entries 条目。
   - order: 3

@@ -6515,6 +6515,7 @@
   "nl2agent.history.newFailed": "新会话创建失败，请重试",
   "modelProfile.selectionUnchecked": "未检测",
   "modelProfile": {
+    "legacyConnectionUnsupported": "自定义 Header、忽略 TLS 校验和修改超时目前仅支持当前租户的 LLM 模型出口。列表仍可获取；请取消选择其他模型，或恢复这些连接选项的默认值后再检测、添加，避免保存时丢失配置。",
     "provider": "模型服务提供商",
     "customProvider": "自定义提供商",
     "endpoint": "服务地址",
