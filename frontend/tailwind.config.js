@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 const config = {
   darkMode: ["class"],
   content: [
@@ -20,11 +22,11 @@ const config = {
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
+        ring: "var(--color-brand)",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "hsl(var(--primary))",
+          DEFAULT: "var(--color-brand)",
           foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {
@@ -73,6 +75,6 @@ const config = {
       },
     },
   },
-}
+};
 
-export default config
+export default config;

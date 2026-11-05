@@ -19,10 +19,10 @@ bg-[#fff] border-0 rounded-[8px]
 
 Use `rounded-[8px]` as the default radius and allow a caller-provided class to adjust it. Use Ant Design `Card` for the card behavior.
 
-Use the reusable component:
+Use the native component with the central theme:
 
 ```tsx
-import { StandardCard } from "@/components/common/StandardCard";
+import { Card } from "antd";
 ```
 
 ## Agent repository tag row

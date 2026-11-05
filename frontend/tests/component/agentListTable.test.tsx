@@ -123,7 +123,7 @@ describe("AgentListTable", () => {
         within(firstRow).queryByText(provider === "cas" ? "刘晨" : "平台作者")
       ).not.toBeInTheDocument();
       expect(screen.getByText("Imported Author")).toBeInTheDocument();
-      expect(screen.getAllByRole("separator")).toHaveLength(7);
+      expect(screen.getAllByRole("separator")).toHaveLength(6);
       expect(screen.getByRole("columnheader", { name: "操作" })).toHaveClass(
         "ant-table-cell-fix-end"
       );
@@ -278,7 +278,7 @@ describe("Agent table column resizing", () => {
         onManageVersions={vi.fn()}
       />
     );
-    expect(screen.getAllByRole("separator")).toHaveLength(7);
+    expect(screen.getAllByRole("separator")).toHaveLength(6);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize 名称" }), {
       key: "ArrowRight",
     });

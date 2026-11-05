@@ -16,8 +16,8 @@ Tailwind CSS:
 h-7 rounded-[4px] border border-solid border-[#c9c9c9]
 ```
 
-Use the reusable component:
+Use the native component with the central theme:
 
 ```tsx
-import { StandardInput } from "@/components/common/StandardInput";
+import { Input } from "antd";
 ```

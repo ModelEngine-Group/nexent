@@ -4,7 +4,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
+import {
+  App,
+  Empty,
+  InputNumber,
+  Modal,
+  Select,
+  Spin,
+  Button,
+  Input,
+  Pagination,
+} from "antd";
 import {
   ChevronDown,
   ChevronUp,
@@ -17,9 +27,7 @@ import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { useAgentList } from "@/hooks/agent/useAgentList";
@@ -264,12 +272,9 @@ export default function AgentsPage() {
                   </span>
                 }
               >
-                <StandardButton
-                  variant="primary"
-                  onClick={() => setIsCreateOpen(true)}
-                >
+                <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                   {t("agent.action.create")}
-                </StandardButton>
+                </Button>
               </Empty>
             </div>
           ) : (
@@ -278,7 +283,7 @@ export default function AgentsPage() {
                 <div
                   className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
                 >
-                  <StandardInput
+                  <Input
                     allowClear
                     prefix={<Search className="size-4 text-[#777777]" />}
                     placeholder={t("agentSelector.searchPlaceholder")}
@@ -300,18 +305,15 @@ export default function AgentsPage() {
                   />
                 </div>
                 <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
-                  <StandardButton
+                  <Button
                     icon={<FileInput className="size-4" />}
                     onClick={handleImport}
                   >
                     {t("agentConfig.button.import")}
-                  </StandardButton>
-                  <StandardButton
-                    variant="primary"
-                    onClick={() => setIsCreateOpen(true)}
-                  >
+                  </Button>
+                  <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                     {t("agentConfig.list.new")}
-                  </StandardButton>
+                  </Button>
                   <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
                     <button
                       type="button"
@@ -360,9 +362,9 @@ export default function AgentsPage() {
                     <p className="text-sm text-slate-500">
                       {t("agentRepository.mine.loadError")}
                     </p>
-                    <StandardButton onClick={() => refetch()}>
+                    <Button onClick={() => refetch()}>
                       {t("repository.common.retry")}
-                    </StandardButton>
+                    </Button>
                   </div>
                 ) : (
                   <div
@@ -419,7 +421,7 @@ export default function AgentsPage() {
                           }}
                           className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
                         />
-                        <StandardPaginator
+                        <Pagination
                           current={pagination?.page ?? page}
                           pageSize={pageSize}
                           total={pagination?.total ?? 0}
@@ -438,7 +440,7 @@ export default function AgentsPage() {
                           onChange={setJumpPage}
                           className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
                         />
-                        <StandardButton
+                        <Button
                           className="!px-2"
                           onClick={() => {
                             if (jumpPage !== null) {
@@ -457,7 +459,7 @@ export default function AgentsPage() {
                           }}
                         >
                           {t("agentConfig.list.jump")}
-                        </StandardButton>
+                        </Button>
                       </div>
                     </div>
                   </div>

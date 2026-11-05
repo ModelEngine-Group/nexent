@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { StandardModal } from "@/components/common/StandardModal";
-import { StandardButton } from "@/components/common/StandardButton";
+import { Button } from "antd";
 import HighFidelityTextArea from "./HighFidelityTextArea";
 
 interface HighFidelityPromptEditModalProps {
@@ -45,9 +45,7 @@ export default function HighFidelityPromptEditModal({
       footer={
         readOnly ? (
           <div className="flex justify-end">
-            <StandardButton onClick={onClose}>
-              {t("common.close")}
-            </StandardButton>
+            <Button onClick={onClose}>{t("common.close")}</Button>
           </div>
         ) : undefined
       }

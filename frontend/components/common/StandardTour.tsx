@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { ConfigProvider, Tour, type TourProps } from "antd";
@@ -80,7 +82,6 @@ export function StandardTour(props: TourProps) {
       theme={{
         token: {
           fontFamily: '"HarmonyOS Sans SC", system-ui, sans-serif',
-          colorPrimary: "#0067D1",
           colorText: "#191919",
           colorBorder: "#C9C9C9",
           borderRadius: 4,

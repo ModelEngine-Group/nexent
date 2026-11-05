@@ -955,14 +955,7 @@ export default function KnowledgeSelectorDrawer({
                           justifyContent: "center",
                         }}
                       >
-                        <ConfigProvider
-                          theme={{
-                            token: {
-                              colorPrimary:
-                                canSelect || isSelected ? "#1677ff" : "#90caf9",
-                            },
-                          }}
-                        >
+                        <ConfigProvider>
                           <Checkbox
                             checked={isSelected}
                             disabled={!canSelect && !isSelected}

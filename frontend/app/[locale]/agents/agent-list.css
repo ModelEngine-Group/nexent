@@ -56,7 +56,7 @@
 .agent-table-resize-handle:focus-visible::after,
 .agent-table-resize-handle.is-dragging::after {
   inset-block: 7px;
-  background: #0067d1;
+  background: var(--color-brand);
 }
 
 .agent-list-table .agent-table-category {
@@ -67,7 +67,7 @@
   overflow: hidden;
   border: 0;
   border-radius: 6px;
-  background: #edf5ff;
+  background: var(--color-select);
   color: #3b6eaa;
   font-size: 12px;
   line-height: 20px;
@@ -88,9 +88,4 @@
 .agent-table-container .ant-table-body {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-/* Keep both resize targets accessible beside the fixed actions column. */
-.agent-list-table .agent-table-date-header .agent-table-resize-handle {
-  right: 8px;
 }

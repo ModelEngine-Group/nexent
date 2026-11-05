@@ -1,9 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import type { ReactNode } from "react";
-import { Modal } from "antd";
+import { Modal, Button } from "antd";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { StandardCloseButton } from "@/components/common/StandardCloseButton";
 import { cn } from "@/lib/utils";
 
@@ -56,12 +55,10 @@ export function StandardModal({
 
   const defaultFooter = (
     <div className="flex h-8 w-full flex-nowrap items-center justify-end gap-4">
-      <StandardButton onClick={() => requestClose(onCancel)}>
-        {cancelText}
-      </StandardButton>
-      <StandardButton variant="primary" onClick={() => requestClose(onConfirm)}>
+      <Button onClick={() => requestClose(onCancel)}>{cancelText}</Button>
+      <Button type="primary" onClick={() => requestClose(onConfirm)}>
         {confirmText}
-      </StandardButton>
+      </Button>
     </div>
   );
 
@@ -104,8 +101,7 @@ export function StandardModal({
         header: "!m-0 !h-6 !w-full !shrink-0 !border-0 !p-0",
         body: cn(
           "!m-0 !max-h-[50vh] !overflow-y-auto !px-0 !py-4",
-          hasHeightConstraint &&
-            "!max-h-none !min-h-0 !flex !flex-1 !flex-col",
+          hasHeightConstraint && "!max-h-none !min-h-0 !flex !flex-1 !flex-col",
           bodyClassName
         ),
         footer: "!m-0 !h-8 !w-full !shrink-0 !border-0 !p-0",

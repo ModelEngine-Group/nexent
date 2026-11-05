@@ -3,7 +3,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ConfigProvider } from "antd";
 import { motion } from "framer-motion";
 import { Inbox, ShieldCheck, User, Zap } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -26,10 +25,6 @@ enum SkillRepositoryTab {
   MINE = "mine",
   REVIEW = "review",
 }
-
-const skillRepositoryTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
-};
 
 export default function SkillRepositoryPage() {
   const { t } = useTranslation("common");
@@ -79,7 +74,7 @@ export default function SkillRepositoryPage() {
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
 
   return (
-    <ConfigProvider theme={skillRepositoryTheme}>
+    <>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
@@ -154,6 +149,6 @@ export default function SkillRepositoryPage() {
           </motion.div>
         </div>
       </div>
-    </ConfigProvider>
+    </>
   );
 }

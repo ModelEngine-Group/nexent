@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
 import { LockOpen, Send } from "lucide-react";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { API_ENDPOINTS } from "@/services/api";
 import {
   getAgentIcon,
@@ -181,15 +180,15 @@ export function AgentConfigHeader({
             />
           </Tooltip>
         )}
-        <StandardButton
-          variant="primary"
+        <Button
+          type="primary"
           icon={<Send size={16} />}
           disabled={agentId === null || readOnly}
           onClick={onPublish}
           className="!bg-[#2673e5]"
         >
           {t("agent.config.button.publish")}
-        </StandardButton>
+        </Button>
       </div>
     </div>
   );

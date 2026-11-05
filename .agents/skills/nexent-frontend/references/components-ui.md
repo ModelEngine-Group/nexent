@@ -17,8 +17,8 @@
 
 - For visual component work, use `../docs/前端ui.md` relative to the repository root as the source of truth when it is available. Do not add visual rules that are not stated there.
 - Translate every documented visual value into Tailwind CSS in the English component references. Keep user-facing text localized and use Ant Design first for component behavior.
-- Use the reusable components documented by [button.md](components/button.md) and [drawer.md](components/drawer.md) instead of recreating their contracts in feature code.
-- Use the reusable components documented by [modal.md](components/modal.md), [card.md](components/card.md), [icon.md](components/icon.md), [paginator.md](components/paginator.md), and [input.md](components/input.md) instead of recreating their contracts in feature code.
+- Before introducing common components, follow [theme and common ownership](architecture.md#theme-and-common-ownership). Use native controls with the central theme when they cover the requirement.
+- Preserve meaningful shared modal/tour/close-action contracts. Card, input and pagination use their native AntD APIs; refer to the component documents for the central defaults.
 
 ## Visual conventions
 

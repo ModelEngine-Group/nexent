@@ -3,13 +3,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { App, Empty, Form, Input, Spin } from "antd";
+import { App, Empty, Form, Input, Spin, Button } from "antd";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { StandardModal } from "@/components/common/StandardModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
@@ -182,14 +181,14 @@ export default function CreateAgentModal({
               className="!h-8 !rounded-[4px] !border-[#c9c9c9] !px-3 !py-[5px] !text-[14px] !leading-[22px] ![letter-spacing:0px]"
             />
           </Form.Item>
-          <StandardButton
-            variant="primary"
+          <Button
+            type="primary"
             htmlType="submit"
             loading={isSubmitting}
             className="!mt-[30px] !mb-0"
           >
             {t("agentConfig.createModal.submit")}
-          </StandardButton>
+          </Button>
         </div>
       </Form>
 
@@ -217,12 +216,12 @@ export default function CreateAgentModal({
         ) : templatesQuery.isError ? (
           <div role="alert" className="flex flex-col items-center gap-3 py-6">
             <span>{t("agentConfig.createModal.templates.loadFailed")}</span>
-            <StandardButton
+            <Button
               disabled={templatesQuery.isFetching}
               onClick={() => void templatesQuery.refetch()}
             >
               {t("common.retry")}
-            </StandardButton>
+            </Button>
           </div>
         ) : templates.length === 0 ? (
           <Empty

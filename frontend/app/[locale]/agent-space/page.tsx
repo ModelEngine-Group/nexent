@@ -4,7 +4,6 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ConfigProvider } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { Bot, Inbox, ShieldCheck, User } from "lucide-react";
@@ -23,10 +22,6 @@ enum AgentRepositoryTab {
   MINE = "mine",
   REVIEW = "review",
 }
-
-const agentRepositoryTheme = {
-  token: { colorPrimary: "#2563eb", colorInfo: "#3b82f6" },
-};
 
 export default function AgentRepositoryPage() {
   const { t } = useTranslation("common");
@@ -84,7 +79,7 @@ export default function AgentRepositoryPage() {
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
 
   return (
-    <ConfigProvider theme={agentRepositoryTheme}>
+    <>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
@@ -182,6 +177,6 @@ export default function AgentRepositoryPage() {
           </motion.div>
         </div>
       </div>
-    </ConfigProvider>
+    </>
   );
 }

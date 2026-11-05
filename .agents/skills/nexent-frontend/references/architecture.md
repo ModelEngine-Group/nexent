@@ -10,3 +10,10 @@
 - `frontend/tsconfig.json` maps `@/*` to `frontend/*` and `@/app/*` to `frontend/app/[locale]/*`; omit `[locale]` with the latter alias.
 - Shared client API data uses TanStack React Query, derived filter/sort uses `useMemo`, and mutations use `useMutation` with relevant query invalidation.
 - Keep abstractions proportional to concrete reuse, complexity, or testability needs.
+
+## Theme and common ownership
+
+- `frontend/const/brand.ts` is the approved Light brand palette and theme source. RootProvider applies NEXENT_THEME and the generated semantic CSS variables. AntD components use ConfigProvider tokens; custom controls use semantic variables/useToken. Remove conflicting nested primary overrides rather than adding another local palette. Dark currently inherits Light brand roles, not a separately approved palette.
+- Check native component props and theme tokens before adding wrappers. Use native AntD Button/Input/Pagination/Card/Table when those contracts cover the requirement. Existing shadcn/ui primitives remain available; neither global replacement nor a wrapper around every primitive is required.
+- Common is for meaningful shared layout or interaction: modal close/veto behavior, tour positioning, clipboard feedback or expanded editing. A rename, native-prop alias or token-covered style alone does not justify a wrapper. Do not recreate StandardButton/Input/Paginator/QuestionIcon/Card/Table/Drawer adapters.
+- Common may own generic state, selection/operation presentation and invoking supplied callbacks. The feature owns domain data, permissions, confirmation text, service calls and invalidation. Keep mature table/form behavior in AntD unless a concrete limitation justifies replacement.

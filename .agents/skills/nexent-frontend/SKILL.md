@@ -7,7 +7,7 @@ description: Use when implementing, debugging, or reviewing Nexent frontend page
 
 Repository paths below are relative to the root; reference links resolve from this skill.
 
-1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read the authoritative sibling document `../docs/前端ui.md` from the repository root when it is available, then apply the linked English component references.
+1. Read [architecture](references/architecture.md), the affected feature, and `frontend/package.json` before choosing APIs or dependencies. For frontend visual work, read the authoritative sibling document `../docs/前端ui.md` from the repository root when it is available, then apply the linked English component references and [brand theme](references/components/theme.md).
 2. Load relevant detailed rules only.
 
 | Work                                                               | Reference                                                                                                                |
@@ -18,7 +18,7 @@ Repository paths below are relative to the root; reference links resolve from th
 | Requests, responses, endpoint configuration                        | [API services](references/api-services.md)                                                                               |
 | Shared types, constants, runtime guards                            | [Types](references/types.md)                                                                                             |
 
-3. Keep route entries thin, reuse existing shared UI, and extract abstractions when reuse or complexity warrants it.
+3. Before implementing UI, inspect native component capabilities, central theme coverage and existing common contracts. Prefer native Ant Design with theme tokens when it covers the requirement. Extend/create common only for a concrete reusable composition or interaction; keep business data, permissions, API execution and refresh callbacks in the feature. See [architecture](references/architecture.md#theme-and-common-ownership).
 4. Verify affected behavior, including loading/error states and localization for UI changes. Select checks from `frontend/package.json`; use `npm run check-all` for broad verification when warranted. Do not install dependencies solely because obsolete examples name them.
 5. Report references consulted, checks run, and blocked checks. Do not enforce these conventions by changing unrelated legacy code.
 
