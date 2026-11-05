@@ -1,6 +1,6 @@
 # Buttons
 
-- `components/ui/button.tsx` is the pinned upstream original. Do not change it for project defaults.
+- `components/ui/button.tsx` is the adopted shadcn/Radix primitive. Do not change it for project defaults.
 - `components/common/Button.tsx` is the single project implementation: 40px default height, normal tracking, pointer cursor, brand-color hover/active tokens, safe `type="button"`, optional icon and loading state. Loading disables the native button and exposes `aria-busy`; callers own requests.
 - Submit with `<Button type="submit" loading={pending}>`. There is no separate SubmitButton component.
 - StandardButton has been removed. Migrated callers explicitly select `variant="outline"` or `variant="default"`, shadcn sizes and native `type`. Button supports `href` with disabled/loading link guards.

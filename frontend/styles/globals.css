@@ -3,9 +3,6 @@
 @import "tw-animate-css";
 @import "./brand.css";
 
-/* Upstream snapshots are maintenance data, not application class sources. */
-@source not "../vendor/shadcn";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

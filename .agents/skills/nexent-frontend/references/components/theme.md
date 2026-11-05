@@ -7,11 +7,11 @@
 - Basic controls and presentation primitives live in `components/ui`. Shared behavior such as pending submission or controlled pagination lives in `components/common`. Domain requests, permissions and state stay in their domain. One-off compositions remain local.
 - `common/Button` owns project button defaults and caller-owned loading state. Submit with explicit `type="submit"`; there is no separate SubmitButton. Domain selection controls use the same semantic primary/hover/active tokens. Primary light color is brand-50 (`#0067D1`); never override it with a legacy page-local blue.
 - Standard compatibility adapters have been removed; use the canonical component APIs directly. The common directory has no Ant Design or @ant-design/icons imports. Do not recreate compatibility-only entry points. Business pages and domain components still require incremental migration.
-- Run `npm run check:ui`; do not expand the legacy import budget. Follow `frontend/vendor/shadcn/README.md` before changing upstream-managed code.
+- Run `npm run check:ui` to enforce component dependency layers. Legacy business consumers remain supported without a per-file import budget. Review updates to adopted shadcn/Radix sources before applying them.
 
 - The source of truth is `xyq/update_skills` at `45cd133de`, `references/components/style.md` and `color-tokens.css`. `styles/brand.css` integrates the brand subset, retaining all ten raw brand shades and independent semantic roles.
 - Default: brand-50 `#0067D1`; hover: brand-40 `#2E86DE`; selected: brand-50; pressed: brand-60 `#004EA8`; disabled: brand-20 `#8ABEF3`; soft selection: brand-05 `#E6F2FD`. Hover intentionally becomes lighter. Preserve actual disabled semantics and do not fade the whole primary control in addition to its disabled fill.
 - The source defines Light only. The app currently inherits these brand roles in Dark; this is a fallback, not an approved Dark palette. Do not invent Dark color scales.
-- Keyboard focus-visible uses the ring independently of persistent selected/checked state. Do not change pinned upstream UI sources to apply project colors.
+- Keyboard focus-visible uses the ring independently of persistent selected/checked state. Do not change upstream UI primitives to apply project colors.
 
 - The current migration scope prioritizes ordinary controls under `/agents`. Retain existing Ant Design Table and Form behavior where it already meets requirements; full dependency removal is not a prerequisite for consistent brand styling. Keep the provider bridge while these consumers remain.

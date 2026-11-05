@@ -17,7 +17,6 @@
     "test:e2e:external-memory": "playwright test e2e/external-memory-provider.spec.ts",
     "check-all": "npm run check:ui && npm run type-check && npm run lint && npm run format:check && npm run build",
     "check:ui": "node scripts/ui-boundaries.mjs",
-    "ui:upstream": "node scripts/ui-upstream.mjs",
     "test:ui-tools": "node --test scripts/__tests__/ui-maintenance.test.mjs"
   },
   "dependencies": {

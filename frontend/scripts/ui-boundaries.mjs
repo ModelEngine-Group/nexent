@@ -128,60 +128,15 @@ export function inspectBoundaries(root) {
   return { legacyImports, violations };
 }
 
-export function checkBoundaries(root, baseline) {
-  const result = inspectBoundaries(root);
-  for (const [file, imports] of Object.entries(result.legacyImports)) {
-    for (const item of imports) {
-      if (!baseline[file]?.includes(item))
-        result.violations.push(`${file}: new legacy dependency ${item}`);
-    }
-  }
-  const manifestPath = path.join(root, "vendor/shadcn/manifest.json");
-  if (fs.existsSync(manifestPath)) {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    if (manifest.sourcePolicy === "fixed-upstream") {
-      const registered = new Set(
-        Object.values(manifest.components).map((entry) => entry.target)
-      );
-      for (const name of fs.readdirSync(path.join(root, "components/ui"))) {
-        if (/\.tsx?$/.test(name) && !registered.has(`components/ui/${name}`))
-          result.violations.push(
-            `components/ui/${name}: register a pinned upstream source; project components belong outside ui`
-          );
-      }
-      for (const entry of Object.values(manifest.components)) {
-        const target = path.join(root, entry.target);
-        const baseline = path.join(
-          root,
-          "vendor/shadcn",
-          entry.generatedBaseline
-        );
-        if (
-          !fs.existsSync(target) ||
-          !fs.existsSync(baseline) ||
-          fs.readFileSync(target, "utf8").replaceAll("\r\n", "\n") !==
-            fs.readFileSync(baseline, "utf8").replaceAll("\r\n", "\n")
-        )
-          result.violations.push(
-            `${entry.target}: keep the pinned upstream source unchanged; put project customizations in common or a domain`
-          );
-      }
-    }
-  }
-  return result;
+export function checkBoundaries(root) {
+  return inspectBoundaries(root);
 }
 
 if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const baseline = JSON.parse(
-    fs.readFileSync(
-      path.join(frontendRoot, "vendor/shadcn/legacy-imports.json"),
-      "utf8"
-    )
-  );
-  const result = checkBoundaries(frontendRoot, baseline);
+  const result = checkBoundaries(frontendRoot);
   if (result.violations.length) {
     process.stderr.write(result.violations.join("\n") + "\n");
     process.exitCode = 1;

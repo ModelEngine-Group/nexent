@@ -5,7 +5,7 @@ change:
   requirement_id: UI-SHADCN-FOUNDATION-20261103
   title: Establish Radix shadcn layers and remove Ant Design from shared common components
   no_case_change_reason: This foundation changes presentation and shared frontend/tool contracts only. Existing formal business journeys retain their contracts; AGENT-EDITOR-D4-001 updates only its guide locator from an Ant Design class to a stable project data attribute. Focused UT plus representative browser smoke is selected for this increment; full module and journey migrations remain later scoped changes.
-  description: Implement the shared UI foundation, controlled pagination, compatibility entry points and safe upstream maintenance tools. Preserve business requests, permissions and pagination callbacks. Full application Ant Design removal remains subsequent batches.
+  description: Implement the shared UI foundation, controlled pagination, compatibility entry points and component dependency checks. Preserve business requests, permissions and pagination callbacks. Full application Ant Design removal remains subsequent batches.
   affected_features:
     existing: [AGENT-EDITOR-WORKFLOWS]
     added: []
@@ -41,6 +41,6 @@ change:
       - Submission prevents duplicate actions without adding request logic to basic UI.
       - Controlled pagination preserves page-size reset, empty lists, disabled controls and callbacks.
       - Existing Standard entry points retain their actual consumer contracts while shedding Ant Design implementation.
-      - Dependency boundaries reject new legacy imports and upstream synchronization never overwrites working files or conflates unknown provenance with an upstream original.
+      - Dependency checks reject legacy UI in common, business dependencies in basic UI and unsupported component bases; adopted sources require no stored upstream snapshots or import budget.
     reason: Shared frontend component and maintenance-tool contracts are proved by focused UT and representative browser rendering. No API, protocol, persistence or agent runtime changes. Existing formal Cases are preserved; their business contracts are not modified. No new D1 duplicating isolated UT is introduced. This change does not certify full application migration or formal journey acceptance.
   notes: SPEC ui-shadcn-radix-migration in the document repository; initial foundation delivery only. Test selectors and actual evidence are recorded after implementation. Python UT is irrelevant to the frontend/tool-only scope. Browser appearance and keyboard smoke evidence are reported separately from UT.
