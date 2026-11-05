@@ -368,8 +368,14 @@ async def add_external_agent_relation(
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except ValueError as e:
+        # Duplicate relation is the only ValueError raised by the db layer here;
+        # map it to the standard "already exists" error code (000502, HTTP 409)
+        # so the frontend can show a precise message instead of a generic failure.
         logger.error(f"Add relation failed: {e}")
-        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+        raise AppException(
+            ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,
+            message=str(e)
+        ) from e
     except Exception as e:
         logger.error(f"Add relation failed: {e}", exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to add relation")
