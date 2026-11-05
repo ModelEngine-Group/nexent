@@ -6517,6 +6517,7 @@
   "nl2agent.history.newFailed": "Could not start a new conversation. Please retry.",
   "modelProfile.selectionUnchecked": "Not checked",
   "modelProfile": {
+    "legacyConnectionUnsupported": "Custom headers, skipped TLS verification and modified timeouts are currently supported only by LLM outlets in the current tenant. Model discovery remains available. Deselect other models or restore these connection options to their defaults before checking or adding them, so configuration is not silently lost.",
     "provider": "Model provider",
     "customProvider": "Custom provider",
     "endpoint": "Endpoint",

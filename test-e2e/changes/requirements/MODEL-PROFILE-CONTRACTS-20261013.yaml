@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-CONTRACTS-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-CONTRACTS-20261013
+  title: Add strict model profile contract primitives
+  description: First local implementation slice of the approved model-access / NativeAgent SPEC; no existing runtime is connected or modified.
+  affected_features:
+    existing: []
+    added: [SDK-MODEL-PROFILE-CONTRACTS]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Unknown capacity remains null and known limits reject booleans, numeric strings, zero, negatives and service limits above the combined window.
+      - Toggle, effort and budget controls preserve explicitly declared values and reject duplicate modes/keys, invalid types, ranges, unknown fields and unsupported-with-controls.
+      - Source references retain exact identity/digests, reject unsafe paths and round-trip through strict JSON validation without loading external sources.
+    reason: These are isolated domain validation contracts; existing model UI/runtime Cases do not exercise them, and a duplicate formal D1 would add no component evidence. Catalog parsing/composition and live runtime verification belong to subsequent slices.
+    test_selectors:
+      - test/sdk/core/model_service/test_profile_contracts.py
+  no_case_change_reason: No API, provider, database, tool execution or user journey is connected in this slice. Preserve all historical Cases; formal integration coverage will be added with the owning implementation.
+  notes: Implements only profile primitives under SPEC AC-01/02. Overall feature acceptance remains pending; neither formal runtime acceptance nor model compatibility is claimed.

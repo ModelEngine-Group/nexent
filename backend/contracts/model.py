@@ -66,6 +66,24 @@ class ModelProfilePreviewRequest(BaseModel):
     thinking_mode: Optional[Literal["default", "effort", "budget_tokens"]] = None
 
 
+class ModelProfilePreviewProviderInfo(ModelProfileProviderInfo):
+    base_url: str = Field(default="", max_length=500)
+
+
+class ModelProfilePreviewInput(ModelProfilePreviewRequest):
+    """Allow catalog-only previews without weakening create or probe requirements."""
+    provider_info: ModelProfilePreviewProviderInfo
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    request_model_id: str = Field(default="", max_length=100)
+
+
+class ModelOutletProfileSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    catalog_revision: str = Field(min_length=1, max_length=100)
+    model_profile: Optional[ModelProfileSelection] = None
+    provider_profile: Optional[ModelProfileSelection] = None
+
+
 class ModelOutletCreateRequest(ModelProfilePreviewRequest):
     connect_status: Optional[Literal["available", "unavailable"]] = None
     api_key: Optional[str] = Field(default=None, max_length=500, repr=False)
@@ -81,6 +99,9 @@ class ModelOutletConnectionPatch(BaseModel):
 
 class ModelOutletPatchRequest(BaseModel):
     connect_status: Optional[Literal["available", "unavailable"]] = None
+    reset_parameters: bool = False
+    profile_selection: Optional[ModelOutletProfileSelection] = None
+    request_model_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(gt=0, lt=2**31, strict=True)
     parameter_values: Dict[str, Any] = Field(default_factory=dict)
