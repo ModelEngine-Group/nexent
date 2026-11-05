@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: WB-CREATION-FORMAT-20261104
+  change_type: bugfix
+  bug_id: WB-CREATION-FORMAT-20261104
+  title: Render creation confirmations from safe assigned clarification calls
+  description: Accept literal terminal clarification assignments without executing code and provide precise bounded recovery.
+  observed_behavior: AI correctly recognizes creation intent but result assignment followed by print is rejected as malformed_action, leaving only prose after repeated failures.
+  expected_behavior: Standalone calls and a single simple assignment with an optional print of the same result produce the same validated confirmation event. Mixed executable actions remain rejected. Legacy failures receive actionable correction and stop after three consecutive rejections with a localized retry message.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing parser tests intentionally reject assignments and the controlled D4 starts at an already formed event; neither covered real model assignment-plus-print output.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS, CHAT-CLARIFICATION-HISTORY]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CREATION-INTENT-D4-001]
+    added: []
+    modified: [CHAT-CLARIFICATION-HISTORY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Literal standalone and assigned clarification forms preserve validated fields and never execute code.
+      - Extra actions, shadowed names, dynamic data, unsafe printing and invalid schemas remain rejected.
+      - Real CoreAgent emits one terminal interaction without executor calls in legacy and strict modes.
+      - Legacy correction includes exact format and schema feedback; repeated failures stop safely and a new run resets the limit.
+      - Bilingual runtime policy distinguishes terminal clarification from ordinary assignment and print conventions.
+    test_selectors:
+      - test/sdk/core/agents/test_clarification_protocol.py
+      - test/sdk/core/agents/test_clarification_runtime.py
+      - test/sdk/core/agents/test_creation_mode_form.py
+      - test/sdk/core/agents/test_fixed_system_prompts.py
+    reason: Parser and CoreAgent collaboration are covered by their maintained UT; unchanged D4s prove existing card/navigation/history behavior, and real-browser smoke checks deployed model/runtime delivery separately.
+  notes: >-
+    Baseline ../nexent-doc/nexent/agent-workbench/design.md, WB-CREATION-FORMAT-20261104.
+    Preserve existing D1 assets; no duplicate component Case or new HTTP contract is needed.
+    Runtime ownership is inherited from each Feature; selected D4s are self-contained regressions with browser-context cleanup.
+    The history D4 retains all acceptance assertions and adds the grouped sidebar pagination fixture required by current ordinary chat.
+    No frontend keyword detection, schema relaxation, automatic mode switching, SQL change or deployment-script edit.

@@ -16,10 +16,13 @@ def question(**overrides):
                         {"id": "continue_chat", "label": "继续普通对话"}], **overrides}
 
 
-def test_model_creation_confirmation_retains_request_without_executing_code():
-    form = extract_clarification_form(f"ask_user(questions=[{question()!r}])", "ask_user")
+@pytest.mark.parametrize("mode", ["agent_create", "skill_create"])
+@pytest.mark.parametrize("wrapper", ["{}", "result = {}", "result = {}\nprint(result)"])
+def test_model_creation_confirmation_retains_request_without_executing_code(mode, wrapper):
+    value = question(options=[{"id": mode, "label": "创建"}, {"id": "continue_chat", "label": "继续对话"}])
+    form = extract_clarification_form(wrapper.format(f"ask_user(questions=[{value!r}])"), "ask_user")
     assert form.questions[0].creation_request == "整理长文并保留出处。"
-    assert [item.id for item in form.questions[0].options] == ["agent_create", "continue_chat"]
+    assert [item.id for item in form.questions[0].options] == [mode, "continue_chat"]
 
 
 @pytest.mark.parametrize("change", [
