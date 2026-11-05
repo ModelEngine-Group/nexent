@@ -1,11 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Fixed upstream selection and proxy header policy."""
 
-_RUNTIME_PATHS = (
-    "/agent/run", "/agent/nl2agent/run", "/agent/human-interactions",
-    "/skills/nl2skill/run", "/agent/stop", "/agent/automations",
-    "/conversation", "/share", "/file/preprocess", "/voice/stt/ws", "/voice/tts/ws",
-)
+from gateway.exposure.registry import default_registry
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade",
@@ -17,23 +13,10 @@ _UNTRUSTED_HEADERS = {
 }
 
 
-def select_upstream(method: str, path: str) -> str | None:
-    """Route public API paths; internal service endpoints are never exposed."""
-    if not (path.startswith("/api/") or path.startswith("/nb/") or path.startswith("/user/")):
-        return None
-    if "internal" in path.split("/"):
-        return None
-    path = path.removeprefix("/api") if path.startswith("/api/") else path
-    if path == "/nb" or path.startswith("/nb/"):
-        return "northbound"
-    if not path.startswith("/"):
-        return None
-    if method == "POST" and path.rstrip("/") == "/file/storage":
-        return "runtime"
-    if any(path == prefix or path.startswith(prefix + "/") for prefix in _RUNTIME_PATHS):
-        return "runtime"
-    # Only the /api namespace is a public Management entrypoint.
-    return "management"
+def select_upstream(method: str, path: str, *, transport="http") -> str | None:
+    """Resolve only a declared public method/path/transport to a fixed service."""
+    match = default_registry().match(method, path, transport=transport)
+    return match.target if match else None
 
 
 def filtered_headers(headers, *, request=False):

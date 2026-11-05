@@ -21,6 +21,10 @@ feature:
     description: MCP delegates forwarded external sessions to Gateway through body-bound
       service authentication, verifies the MCP audience and request binding, checks
       tenant ownership and restores request context.
+  - rule_id: GW-AUTH-RULE-04
+    description: Gateway explicitly allowlists public method/path/transport for ordinary
+      Management5010 and Runtime5014 forwarding and Northbound5013 entry; unknown
+      or reserved routes never reach authentication or business upstream.
   required_test_stages:
   - D3
   source:

@@ -1,0 +1,6035 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/agents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-728e09a4dbca76cd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/a2a/client/agents/{external_agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-547dbd3aff2bba1b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/agents/{external_agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-9b951afb1d771840",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/agents/{external_agent_id}/chat",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-93095dd3c8b02ce5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/a2a/client/agents/{external_agent_id}/protocol",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-639600f21168232c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/agents/{external_agent_id}/refresh",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-00ce7ba82008facb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/a2a/client/agents/{external_agent_id}/security-credentials",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-47040caabf6ad380",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/discover/nacos",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-a659391d3650ca58",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/discover/url",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-399ce741bb303e33",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/nacos-configs",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-91651af2a170e0a6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/nacos-configs",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-1c1a04c61676768d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/nacos-configs/test-connection",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-b235ef25dbc1de76",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/a2a/client/nacos-configs/{config_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-29a9f00dff1d5f5a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/nacos-configs/{config_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-2d28c8f6b4838f9c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/a2a/client/nacos-configs/{config_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-5ee7011790a8cf00",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/a2a/client/relations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-81cbc03a666bb945",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/client/relations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-8a29e9d6b4f19ce4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/relations/{local_agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-3fe895e157b21919",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/client/sub-agents/{local_agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_client.py",
+      "route_id": "route-e9826c4571f0f134",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/management/agents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_server.py",
+      "route_id": "route-686a377514f24236",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/management/agents/{agent_id}/disable",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_server.py",
+      "route_id": "route-324b7af56a8a3323",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/a2a/management/agents/{agent_id}/enable",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_server.py",
+      "route_id": "route-dfc92a43b69134b1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/a2a/management/agents/{agent_id}/settings",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_server.py",
+      "route_id": "route-e1160675f7f16231",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/a2a/management/agents/{agent_id}/settings",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/a2a/a2a_server.py",
+      "route_id": "route-403a2bcca6a1d070",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-811cfebc6dacc36e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evaluations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-109e1d1a5b704d08",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evaluations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-2d542ef3ba01ea50",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evaluations/trial-run",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-18f64bd84725a452",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-d37d1020af09d30f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-bcce4fd614ddbb93",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}/analyze",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-cfb008416ac0bd4d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}/annotation-schemas",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-8f68a2db4cf8793d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}/cases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-06ca28ad921e1d9c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}/report",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-e09f8cdfe3c6bb51",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent-evaluations/{agent_evaluation_id}/stats",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/agent_evaluation.py",
+      "route_id": "route-bbc99a88c37c4dc8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/automations",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-5a2a72d2a65fcc5a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/proposals",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-4807e86742b538e6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/automations/proposals/{proposal_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-35d5bc9e33d531a5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/proposals/{proposal_id}/confirm",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-0d15b30a2b15879b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/automations/runs/{run_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-2d8beddbdf84358a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/runs/{run_id}/cancel",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-e95b67344aedbd9c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/automations/{task_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-4510a4a686db0111",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/automations/{task_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-c72461303e35786f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/automations/{task_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-c0d9f4823add1f96",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/{task_id}/pause",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-4570cd3b22153382",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/{task_id}/resume",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-06e791c0084b6446",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/automations/{task_id}/run",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-3e8a2b46eec53820",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/automations/{task_id}/runs",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-d97fa98991293290",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/by-name/{agent_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-3a05697732ce8dd5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/call_relationship/{agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-5c11d1ebf24ba2c0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/check_name",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-b993fc5cd23991de",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/check_skills",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-89a83377780da8df",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/clear_new/{agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-617f5eb608363e0b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/export",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-6ebd6d6b542a1ddb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/generate_guardrail_rules",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-8466dd1890df105c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/import",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-308a246d56bf99be",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-8d89e3b6e15bed93",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/list/page",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-02ad5beab4a08024",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/nl2agent/run",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/runtime/api/agent/execution.py",
+      "route_id": "route-fd91b9ac9324dc2e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/published_list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-c9a32ca524b76035",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/regenerate_name",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-a09df47b26350ac7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/run",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/runtime/api/agent/execution.py",
+      "route_id": "route-fe4884ec2684ecae",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/search_info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-a8c5e6bd752cdde8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/stop/{run_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/runtime/api/agent/execution.py",
+      "route_id": "route-8c19578cd9103a27",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-29a11a928159aeea",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/workbench/bootstrap",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-47e4e7db23ecd4f2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/workbench/capabilities/preview",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-835b0b465b37e0a7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/current_version",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-76df589e394de1e5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/icon",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-18a340eeb2d1d253",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/{agent_id}/icon",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-94cc91ed7af53d11",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/knowledge-capabilities",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-b1adfdfea031369f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/{agent_id}/publish",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-97b57d670ece76aa",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/versions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-88b99ea4f312d9ba",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/{agent_id}/versions/compare",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-7bba3f587c6feca1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/{agent_id}/versions/{version_no}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-0a64e9ace7829f25",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/versions/{version_no}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-9b9049a7c692203c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/agent/{agent_id}/versions/{version_no}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-5e805d4699424ff8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/{agent_id}/versions/{version_no}/detail",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-ff3cc1aba46007a2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/{agent_id}/versions/{version_no}/rollback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-f0a702139f69adaa",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/{agent_id}/versions/{version_no}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent.py",
+      "route_id": "route-a23f3de4ce3af175",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/aidp-mgmt/aidp-permissions/{kds_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-3d760384161a9272",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-82cecb1dbc12b6bb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-430a775f138f4d27",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/count",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-a213653d8bd32240",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/graph-template",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-dcb33bb82eac5775",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-0caa9711d6f9adba",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-201079ff1882b30f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-411c55df0c64d225",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/bound_agents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-deb998fe08a3565f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-54bec071ec5eaa36",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents/download",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-d47313465ad35f00",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents/remove",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-0bf57cfab92f75d9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/documents/{file_uuid}/preview",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-806c50f4e9ed9d68",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/files",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-c8f2bd0d34378032",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/upload-tasks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-d97d213f7ba165c5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/aidp-mgmt/knowledge-bases/{kds_id}/upload-tasks/retry",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-cefa150bba18fa88",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/aidp-mgmt/models",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/ext_components/aidp/apps/aidp_mgmt_app.py",
+      "route_id": "route-67af919a3a6a5ce5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/api-keys",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/api_key.py",
+      "route_id": "route-882b507223be8868",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/api-keys",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/api_key.py",
+      "route_id": "route-8c38999bc28cb9ec",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/api-keys/refresh",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/api_key.py",
+      "route_id": "route-a8f491acb531cab2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/capacity/personal/default-quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-d9d3014768318405",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/capacity/personal/default-quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-c3ada1e8e122d142",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/capacity/personal/me",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-cf5253fcf6ea30d2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/capacity/personal/summary",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-754672d27ec25aae",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/capacity/personal/users",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-f84db5e3217a7994",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/capacity/personal/users/{user_id}/kbs",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-4d6c633d5667519f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/capacity/personal/users/{user_id}/quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-4ce9a9acdb20f0a8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/load_config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/configuration/config_sync.py",
+      "route_id": "route-e415a1e443c55bc9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/config/save_config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/configuration/config_sync.py",
+      "route_id": "route-c3a2a983a8549718",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/agent_groups",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-76a4de925dd02c72",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/agent_groups/{agent_id}/conversation_ids",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-10457a116eae49c7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/agent_groups/{group_key}/conversations",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-e3067c58fed16f62",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/batch-delete",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-3f881b0ecf68bf97",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/conversation/create",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-0e2fec25c52d0f9d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/generate_title",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-3d8ebe55e8062bad",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/list",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-b11b73192502db17",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/message/id",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-c007c02db837b96d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/message/update_opinion",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-044317de22af3b0b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/rename",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-dd9117b7730cdccd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversation/sources",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-ce783ca63662cdaf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/workbench_pins",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/workbench_pins.py",
+      "route_id": "route-370e0d99f5f330c2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/conversation/{conversation_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-9b581dff93db1b6b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/{conversation_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-5243b2d571d3c255",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversation/{conversation_id}/automation",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/automation/agent_automation.py",
+      "route_id": "route-ba15db0c1101e081",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/conversation/{conversation_id}/knowledge-scope",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-5fb5283f3e7ac19c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/conversation/{conversation_id}/workbench-config",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_management.py",
+      "route_id": "route-4bdf29af85e36ff2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/conversation/{conversation_id}/workbench_pin",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/workbench_pins.py",
+      "route_id": "route-0eea87a63bdc5bcf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/datamate/sync_datamate_knowledges",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/datamate.py",
+      "route_id": "route-e998ed05189f0d62",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/datamate/test_connection",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/datamate.py",
+      "route_id": "route-1f7055bbb3d64793",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/datamate/{knowledge_base_id}/files",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/datamate.py",
+      "route_id": "route-625e29aa4f94da46",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/dify/datasets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/dify.py",
+      "route_id": "route-b81a89877af842cb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-annotations/schemas",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-4d2c2590ba0e08f0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-annotations/schemas",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-aa1beb62f26e952a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluation-annotations/schemas/{schema_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-4f4fb1b8c629d884",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/evaluation-annotations/schemas/{schema_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-a71d30b7b0560954",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-annotations/{agent_evaluation_id}/annotation-stats",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-fc482ad197072b8f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluation-annotations/{agent_evaluation_id}/annotations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-585742239ad9e51e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-annotations/{agent_evaluation_id}/annotations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-f88d3cf73fdcbf0d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/evaluation-annotations/{agent_evaluation_id}/annotations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_annotation.py",
+      "route_id": "route-4cf446376f4422c7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-55d65a0c6d1dd9e3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-sets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-c354452deaae6e20",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets/config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-fbbd98d8c03f6863",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-sets/generate-cases-async",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-302242b667826b34",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets/template",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-06f6601557965e45",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-sets/upload",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-c1ab694f9c95fbc2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluation-sets/{evaluation_set_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-2579a30f38e59494",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets/{evaluation_set_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-f1e4872905601256",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/cases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-80b405807eff6ccf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/cases",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-ffc7e903ab8f297b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/cases/batch-delete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-5eea512da3c6baad",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/cases/{case_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-60f7c5895d53b058",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/cases/{case_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-810f30725d0b106b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluation-sets/{evaluation_set_id}/export",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluation_set.py",
+      "route_id": "route-173bea4536c2ea97",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluators",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-7584520e6bf86c9c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-febb13e2b08d9fd8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators/export",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-fff510d83be5b60b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators/generate",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-2c15a62e1399cb11",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators/import",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-353a31d3c773c862",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluators/{evaluator_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-6bf1f1d6ac4f1749",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluators/{evaluator_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-e6a9082ec3acfb94",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/evaluators/{evaluator_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-f62be7924b77229f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators/{evaluator_id}/publish",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-ff3e5cae0430d173",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/evaluators/{evaluator_id}/versions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-128217edca12eca5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/evaluators/{evaluator_id}/versions/{version_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-36304fc585a3e1a1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/evaluators/{evaluator_id}/versions/{version_id}/restore",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/evaluation/evaluator.py",
+      "route_id": "route-3b98a7b7d32e0e97",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/file/datamate/download",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-bb994c4a11197629",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/file/download/{object_name:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-8c60926473671c75",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/file/preview/{object_name:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-71a52a16d11a5d01",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file/process",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-02187ece9f566c89",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/file/storage",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-bc2d917a5666c52d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file/storage",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/runtime/api/file/upload.py",
+      "route_id": "route-23c3aa676d825f99",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file/storage/batch-urls",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-d08546dee399244e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/file/storage/{object_name:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-94aa91d230283d03",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file/upload",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/file_management.py",
+      "route_id": "route-3d9d57268083b374",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-4f7277327e324903",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-83108fa2f345d673",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/members/batch",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-cc04f5d93a1342e7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/tenants/{tenant_id}/default",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-850c62774b79e292",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/groups/tenants/{tenant_id}/default",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-e48f60a26b7e2998",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/groups/{group_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-f38d04360abf957f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{group_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-b7bbeeed4eb0665f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/groups/{group_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-f9bd7c6c748e40bb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/groups/{group_id}/members",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-e0fa30a0e9ace7c8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/{group_id}/members",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-6fbbec0de76ad558",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/groups/{group_id}/members",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-ba52927e00b73335",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/groups/{group_id}/members/{user_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/group.py",
+      "route_id": "route-b12c132bcb7c4d97",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/haotian/knowledge-sets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/haotian.py",
+      "route_id": "route-d0afcdec73903809",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/haotian/test-connection",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/haotian.py",
+      "route_id": "route-d8676906d5305362",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/idata/datasets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/idata.py",
+      "route_id": "route-fea6cca53de2d0b6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/idata/knowledge-space",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/idata.py",
+      "route_id": "route-1bb654b45f51bc4f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/image",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/file/image.py",
+      "route_id": "route-7faeb77d6a435b73",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ind-aidp/images/{image_ref}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/ind_aidp.py",
+      "route_id": "route-05130094ce205d48",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ind-aidp/knowledge-bases/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/ind_aidp.py",
+      "route_id": "route-ca774b735cff33af",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-41e3512e86903dda",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/check_exist",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-64da9c560efbbf04",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/health",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-75412550edcf5de3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/search/hybrid",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-666295b355173a34",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/summary_frequency_options",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-4c62a539632c59f3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/indices/{index_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-e0ed63bd3d0ddc35",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/indices/{index_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-ae1503b4468551dd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/{index_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-134f4eac1cd2325e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/{index_name}/bound_agents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-f2940097ac046069",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/{index_name}/chunk",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-5928e18694a00d8f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/indices/{index_name}/chunk/{chunk_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-884545f090e602d6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/indices/{index_name}/chunk/{chunk_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-848c49b80836f238",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/{index_name}/chunks",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-c22c5d12c37eef47",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/indices/{index_name}/documents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-5c6fc8d5384963e1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/indices/{index_name}/documents",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-7178d8f5d90c26de",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/{index_name}/documents/{path_or_url:path}/error-info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-f159fa233de4f39d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/indices/{index_name}/embedding-model",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-4b1ec2413aaf0013",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/{index_name}/embedding-model-status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-79dbfa3209d0df90",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/indices/{index_name}/files",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-7f2f747de0a77f56",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/indices/{index_name}/summary_frequency",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/vectordatabase.py",
+      "route_id": "route-37bb77686376b469",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-515113e54e5e4ba7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-4050218be419cf4e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/invitations/{invitation_code}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-dd33eee4054a06cd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/invitations/{invitation_code}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-ea5932e2b0ab9bd8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/invitations/{invitation_code}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-a60fcf8f593b86f2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/invitations/{invitation_code}/available",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-ba0e68c97d80244e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/invitations/{invitation_code}/check",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-3e50a64a9fed0bc5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/{invitation_code}/update-status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-bbea8efef4fa58f5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/invitations/{invitation_code}/use",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/invitation.py",
+      "route_id": "route-af157e082040e108",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-tools/community",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-658df08ad4d75ab3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp-tools/community/delete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-b064412b5f52e6db",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp-tools/community/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-ed5da9af998b6106",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp-tools/community/mine",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-5ab7d9e8ea03265b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-tools/community/publish",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-86bf6140c04f1f9e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-tools/community/review/approve",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-2f2f503d27101a4c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp-tools/community/review/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-86e61a26d8b5e517",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-tools/community/review/reject",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-f8fad53abae4298e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp-tools/community/tags/stats",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-fe36d3be129707cc",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp-tools/community/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-3dde514ba51f8f35",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp-tools/community/{market_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-c51671625b43aa25",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp-tools/community/{market_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-c11f33444d4fff03",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-tools/community/{market_id}/download",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-da15cd3fbdfbad21",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/mcp-tools/community/{market_id}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/mcp_management.py",
+      "route_id": "route-1517d17b66839603",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/add",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-b00b8fb92d37f6e5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/add-from-config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-f3b65ce9a253939d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/add-from-config/stream",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-398c58cd6a087baf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/container/{container_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-ba27e05b8728c6e1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/container/{container_id}/logs",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-50c1b62aee29c285",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/containers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-c34ce397c46f51fc",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/disable",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-5351d6c2aab1e8d4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/enable",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-61ee4ae8774580ea",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/healthcheck",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-4b9ebbc44ba31655",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-dcab248104a7aadf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/port/check",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-c6db7f95f8a7bbc2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/port/suggest",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-1981b9abc2da6fb0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/record/{mcp_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-9ba3ab3fd2c9093b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/refresh-tools",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-914df6835eb31ba3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/test-connection",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-a80c0949d4220e28",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/tools",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-5912d81fd769da7e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-67ef5cb6eb2199ca",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/upload-image",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-b5dd7af75c5809a4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/upload-image/stream",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-ec98f2f8adf9b231",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/{mcp_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/mcp/remote_mcp.py",
+      "route_id": "route-6c2e342db36f2669",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/config/disable_agent",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-adc28e8786ac5484",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/config/disable_agent/{agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-a43edbfafa8f3726",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/config/disable_useragent",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-1e3726f67e26adc2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/config/disable_useragent/{agent_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-72d468dccb950c7e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/config/dreaming",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-67fcbc95d394c4ee",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/config/embedding-status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-df43e85da0467a9d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/config/load",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-b45c4fd402e98306",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/config/set",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_config.py",
+      "route_id": "route-5559b3b5f7835069",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/context",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-5f6e88f26a669335",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/dreaming/audit",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_dreaming.py",
+      "route_id": "route-c24249117d485062",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/dreaming/parameters",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_dreaming.py",
+      "route_id": "route-27f30d27f6b275d6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/dreaming/run",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_dreaming.py",
+      "route_id": "route-3b9581243afb4756",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/dreaming/schedule",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_dreaming.py",
+      "route_id": "route-5e1e3defc369a2e2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/dreaming/schedule",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_dreaming.py",
+      "route_id": "route-c0e1f182a2af4fb3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/long-term/{scope}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_long_term.py",
+      "route_id": "route-2b7ec12438aa604a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/long-term/{scope}/versions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_long_term.py",
+      "route_id": "route-24650e0a8f30b1d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/long-term/{scope}/versions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_long_term.py",
+      "route_id": "route-188a46e08edc9e16",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/long-term/{scope}/versions/{version_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_long_term.py",
+      "route_id": "route-0cae6adfa0712b55",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/long-term/{scope}/versions/{version_id}/activate",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_long_term.py",
+      "route_id": "route-523b3de296cc49f3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/provider-plugins",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-384a165beb09bf36",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/providers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-e93d37890bd57ba7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/providers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-667a2f0186ff99bf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/providers/{provider_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-c2434821e6d4f32d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/providers/{provider_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-3c8d30bcdfa3c330",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/providers/{provider_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-6616f79c904254e5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/providers/{provider_id}/test-ingest",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-f52e99a3b4ddb07e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/providers/{provider_id}/test-search",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_provider.py",
+      "route_id": "route-e72fea4da6bd56c3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/records",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-2f0c6dec5c9fcef8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/records",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-9835f501b4020614",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/records/search",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-c2f14d35a006804d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/memory/records/{memory_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-a41f9dae807fba74",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/records/{memory_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-abf12fd0468063a1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/memory/records/{memory_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/memory/memory_record.py",
+      "route_id": "route-e12e774c2a7a16d7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/backfill_defaults",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-d43535ff5907ee70",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/batch_update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-595f61688b872afe",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/capacity-coverage",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-421efc784bd233a3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/catalog/all",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-003efaacfaa38b07",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/catalog/inference_field_specs",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-548d43863580b8a3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/catalog/providers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-a81d1f5c299e6ac9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/catalog/{provider}/models",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-63328f1e4bc23eb8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/catalog/{provider}/{model_name:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-afc340bfeb53d70e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-1f46e393eeaa32fd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/delete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-a3c682c0b6d49a52",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/healthcheck",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-5dd39b75c71ce3d1",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-b74104448e8f74c7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/llm_list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-3d54fb756c0e81fd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/batch_create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-aa796d7e3b9e9ad9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-f5997b48d3820c6a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/delete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-6dae79c6e68aa224",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/healthcheck",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-4817d8ce7b84738e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-3aa702a54d01c26e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/provider/create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-d9c12fc15c7b9913",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/provider/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-0891c5aa7d8e138a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/manage/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-73e69ae92d9c6f9f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/provider/batch_create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-874b9b81a3c1502a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/provider/create",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-1eb6b1cb2d95d99e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/provider/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-d8cbeb774e353aa4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/suggest-capacity",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-1fc9c5cf23c3dceb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/temporary_healthcheck",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-907896185216e885",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/model/model_managment.py",
+      "route_id": "route-7d1c4d07cb2b4753",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/monitoring/models",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/monitoring/monitoring.py",
+      "route_id": "route-5263388f2499cb1c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/monitoring/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/monitoring/monitoring.py",
+      "route_id": "route-46670753a1d7c22d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/a2a/{endpoint_id}/.well-known/agent-card.json",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-766a8f22de7bc7e0",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/a2a/{endpoint_id}/message:send",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-d518b1bb25155772",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/a2a/{endpoint_id}/message:stream",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-8ce9b7f404de6d99",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/a2a/{endpoint_id}/tasks/{task_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-a22946f7810a4abe",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/a2a/{endpoint_id}/v1",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-348b756ddefd2bf4",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/agents",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-5cd5f2e1822aeffc",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/agents/{agent_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-8d825461e1902474",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/agents/{agent_name}/knowledge-bases",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-04f35de29d140275",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/nb/v1/api-keys",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-b17ebde2d4860c9d",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/api-keys/refresh",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-580070d1b8fafaa3",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/api-users/batch",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-75dfea1214949e05",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/chat/attachments/upload",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-aceb79abdf9b2f89",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/chat/run",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-97400f6c2e7ed668",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/chat/stop/{conversation_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-a5ac95ac94272b85",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/conversations",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-59f5e6b2bc872240",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/conversations/{conversation_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-34577d71fb3004a8",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/nb/v1/conversations/{conversation_id}/title",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-206331d754369bc6",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/file/fetch",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-350731bc17230f9c",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/generate_title",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-51d9941c101c25e7",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/health",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-c8379045b327507c",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/knowledge/file/download/{object_name:path}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-20ed23dee113414b",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/knowledge/file/upload",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-b851e0c4e6c3fea9",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/knowledge/indices",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-2ae4373ac69bcb86",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/knowledge/indices/search/hybrid",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-e831fa0fefeb6dad",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/nb/v1/knowledge/indices/{index_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-58992a1638d1790c",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/knowledge/indices/{index_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-1ae563680e1f4cc3",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/nb/v1/knowledge/indices/{index_name}/chunks",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-9478912285b5ca30",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/nb/v1/knowledge/indices/{index_name}/documents",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-c3d5f5ef9936423e",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/knowledge/indices/{index_name}/files",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-86efefd44ecc92c4",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/nb/v1/models",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-db110c724295692e",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/notification/notification.py",
+      "route_id": "route-3d862b896118b577",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/read",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/notification/notification.py",
+      "route_id": "route-ca532ed1f2b39652",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/platform/quota/capacity",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-0d69ebb40fadc1c2",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/platform/quota/capacity",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-6440a047a4c8782a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/platform/quota/overview",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-5dbe1bbcd5810b98",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/platform/quota/tenants/{tenant_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-0647b4e0a4250dd8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/platform/quota/tenants/{tenant_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-3bd4ea12bfd1f788",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/prompt/optimize",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/prompt/prompt.py",
+      "route_id": "route-b6eccc4b0b44c6d3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/prompt/optimize/badcase",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/prompt/prompt.py",
+      "route_id": "route-bdea569c04c1b033",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/prompt/optimize/from_debug",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/prompt/prompt.py",
+      "route_id": "route-07e42006733bcd1f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ragflow/datasets",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/ragflow.py",
+      "route_id": "route-52c0113182c2d3bb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-85c39f50597228a9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/mine",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-90104afffca31ca0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/official/management",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-ade10a43cf42f6a5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/repository/agent/official/management/{agent_repository_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-7a4cace987326199",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/tags",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-1e8e1a0358765337",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/repository/agent/{agent_id}/versions/{version_no}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-9a8e691e552afdf5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/repository/agent/{agent_id}/versions/{version_no}/icon",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-801d5dc74e7d1fcb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/{agent_id}/versions/{version_no}/icon/{image_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-178b44965eea9355",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/{agent_repository_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-9b752f443ec07894",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/repository/agent/{agent_repository_id}/import",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-cb1f83b39dfb2f7c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/agent/{agent_repository_id}/import_precheck",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-ad426d3f92f78b6b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/repository/agent/{agent_repository_id}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/agent/agent_repository.py",
+      "route_id": "route-b6cfc482c9e8965f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/skill",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-ba8ed13e897b3f2e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/skill/mine",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-325f6dfd10bc20bf",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/skill/mine/counts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-5acb7ca014aa404c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/skill/tags",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-edafbdcd0cd3c78e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/repository/skill/{skill_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-8a5a551427e0287b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/repository/skill/{skill_repository_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-0c332d4bc69dd2ba",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/repository/skill/{skill_repository_id}/install",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-43df32f592348b3f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/repository/skill/{skill_repository_id}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill_repository.py",
+      "route_id": "route-5a9cd35639d9ccf0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/share/conversation/{conversation_id}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_share.py",
+      "route_id": "route-fdf735d68912dc91",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/share/{share_token}",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_share.py",
+      "route_id": "route-57074332384320f1",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/share/{share_token}/assets/{asset_id}/download",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_share.py",
+      "route_id": "route-bb4a100e19f70e70",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/share/{share_token}/assets/{asset_id}/preview",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/management/api/conversation/conversation_share.py",
+      "route_id": "route-eb28ffc79ffa4cb5",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-91f1f8798b05d16b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-b9f297d562e73b2b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/install",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-ff1fb8a1dc3b0bcd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/instance",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-7fbdffce322a119e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/instance/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-ef256b9a4de1c197",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/instance/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-96d8d8c1d0d59c23",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/nl2skill/run",
+      "transport": "http",
+      "target": "runtime",
+      "source": "backend/runtime/api/skill/creation.py",
+      "route_id": "route-769b40d11003b69f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/official",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-b2e24cbc0fa0b1c3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/scan_skill",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-13c1c9f4492d3580",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/upload",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-2ba7461bb77aff21",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/{skill_id:int}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-deb0327a1b53c8ff",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/{skill_id:int}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-ed288a482a6ff6a8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/skills/{skill_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-08c261deab89ef4f",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/{skill_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-9e6f407b43dacd97",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/{skill_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-a097eb826eef90c0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/{skill_name}/files",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-94383e45c35fe942",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/{skill_name}/files/{file_path:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-58d16a4c5b911115",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/{skill_name}/upload",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/skill/skill.py",
+      "route_id": "route-90303ddbbf8aec01",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/summary/{index_name}/auto_summary",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/knowledge_summary.py",
+      "route_id": "route-709222519f377fda",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/summary/{index_name}/summary",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/knowledge_summary.py",
+      "route_id": "route-14547f53c9663ad5",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/summary/{index_name}/summary",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/knowledge_summary.py",
+      "route_id": "route-d9a02a1a16f94fc6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-470776a9423e142c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/assignments/agent/batch_read",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-ae04499afce01554",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/assignments/knowledge_base/batch_read",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-cb342adcc9e87f52",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/assignments/skill/batch_read",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-f91635a5e1b642bb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/assignments/tool/batch_read",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-f890cd267465ae6e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tag-libraries/assignments/{resource_type}/bulk",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-462bb29066248123",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/assignments/{resource_type}/filter",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-a151e24fff19a1f6",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/assignments/{resource_type}/{resource_id:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-8bd8110d7c8055d9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tag-libraries/assignments/{resource_type}/{resource_id:path}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-e5a84d4bd37ef0eb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/assignments/{resource_type}/{resource_id:path}/compatibility/flat-tags",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-41be907d86b3517c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/assignments/{resource_type}/{resource_id:path}/projection-status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-e390a3f486aec837",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/documents/batch-status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-5236c6e53fa8cbb0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/{bucket_id}/definitions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-4fb33ebec41ea7a8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/{bucket_id}/definitions",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-fa04aafac0572d69",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-3f2af25809e83b59",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-f9d81962fcefae6b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/order",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-96b3f3c2cdac2c5e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-d43a679fbcd414fb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/top",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-e312cf9e9fe64665",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/usage",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-b4fccd36b627810e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-3758d55635eb076a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values/{value_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-14e7864cabd77318",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values/{value_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-4d7647c9bcbfa600",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values/{value_id}/order",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-a05720f1d8bbbef8",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values/{value_id}/status",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-40a20da90a8b23d4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tag-libraries/{bucket_id}/definitions/{definition_id}/values/{value_id}/usage",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tag/tag_management.py",
+      "route_id": "route-c114cce5a5cd461c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tenant_config/deployment_version",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/configuration/tenant_config.py",
+      "route_id": "route-14cd6642d00b5714",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tenants",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/tenant.py",
+      "route_id": "route-e57c834920f32fdb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tenants/tenant-list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/tenant.py",
+      "route_id": "route-c7bcae88fad9a143",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tenants/{tenant_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/tenant.py",
+      "route_id": "route-7799853398bdb574",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tenants/{tenant_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/tenant.py",
+      "route_id": "route-ac58fd2552a86c91",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tenants/{tenant_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/tenant.py",
+      "route_id": "route-255e2263e7a4ae4a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tenants/{tenant_id}/quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-99c4af3ac7512b21",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tenants/{tenant_id}/quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-3a1b7fea58c3b6f0",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tenants/{tenant_id}/quota",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-dea82225d497731d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tenants/{tenant_id}/quota/usage",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/knowledge_base/quota.py",
+      "route_id": "route-3318e82b6d19cee7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tool/labels",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-e48a72f88be87ee4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tool/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-5f230fed5912fd41",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tool/load_config/{tool_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-362c6042c348aabe",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tool/openapi_service",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-081a63f96314fd28",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/tool/openapi_service/{service_name}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-460669589f45aa01",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tool/openapi_services",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-47cd2548f0e9e2aa",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tool/scan_tool",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-34b78fdd5055de0b",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tool/search",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-84e9104545a572c3",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tool/update",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-fa4070348c9f8dc4",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tool/validate",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/tool/tool_config.py",
+      "route_id": "route-48ede9e0c5fc97db",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/cas/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-fa062df2f39c542a",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/cas/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-efab239c06a04302",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/cas/config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-90672f786ff0e5b6",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/cas/login",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-c7a70702c2ff93e3",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/cas/logout_callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-9e80e1d519d6a70d",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/cas/renew",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-1ca1899798a18e75",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/cas/renew_callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-e372ae9a73c480d3",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/current_user_id",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-c48f2a428529e153",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/current_user_info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-d0fbab58baa0df06",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/logout",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-a3f7a4f524c7dfee",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/accounts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-0cbabbec15a1a459",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/user/oauth/accounts/{provider}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-db11214e09ffe779",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/authorize",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-c8536a5498dd431a",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-b3bdb485afe8e0a9",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/oauth/complete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-1a0e646e810480e7",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-dcdb7ad209b90e63",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/link",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-098d7c7d4c35bf96",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/pending",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-f1e9ef12dad668e7",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/oauth/providers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-33cc603624ffb03b",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/user/password",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-7246c53caa330a50",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/refresh_token",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-7f9449f37d5f418e",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/revoke",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-f84f0db123b018cb",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/service_health",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-61d8e85802ab5caa",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/session",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-d18d3169d79c4074",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/signin",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-daf67825fef0497e",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/signup",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-45a2834b111a9fd1",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/user/tokens",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-19540092c9afe3cd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/user/tokens",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-db3f548bd0dada82",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/user/tokens/{token_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-af1f6a0e5f624077",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/list",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user.py",
+      "route_id": "route-3f45da5d002d869c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/{user_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user.py",
+      "route_id": "route-847d9367a0fb7671",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/users/{user_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user.py",
+      "route_id": "route-95b6b16cc3da4774",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/voice/connectivity",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/voice/voice.py",
+      "route_id": "route-45af8e77c2b4f9ac",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/stt/ws",
+      "transport": "websocket",
+      "target": "runtime",
+      "source": "backend/runtime/api/voice/streaming.py",
+      "route_id": "route-2ae8862438354e0a",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/voice/tts/ws",
+      "transport": "websocket",
+      "target": "runtime",
+      "source": "backend/runtime/api/voice/streaming.py",
+      "route_id": "route-766cca773d9f409e",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/a2a/{endpoint_id}/.well-known/agent-card.json",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-013b817ac295aafd",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/a2a/{endpoint_id}/message:send",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-9abf7557b97b4835",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/a2a/{endpoint_id}/message:stream",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-d1bc59a2e287e190",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/a2a/{endpoint_id}/tasks/{task_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-5288e33340114b76",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/a2a/{endpoint_id}/v1",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-7b0756239bad92b1",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/agents",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-1d077daaf0c07485",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/agents/{agent_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-762573a9cecbad96",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/agents/{agent_name}/knowledge-bases",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-9c09b5fa57f65cf9",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/nb/v1/api-keys",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-0b6d93ea50b45951",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/api-keys/refresh",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-b623a57e4ad12700",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/api-users/batch",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-aa195e4ca442dd22",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/chat/attachments/upload",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-bca1379452c721bb",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/chat/run",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-91db5b7130233914",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/chat/stop/{conversation_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-7ec828d9a246de8b",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/conversations",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-a7d58c75a3c59a53",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/conversations/{conversation_id}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-7f050fd88f3eddd6",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/nb/v1/conversations/{conversation_id}/title",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-304322fea3f63ac2",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/file/fetch",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-b2351fc0b57440f5",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/generate_title",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-3b4b8ffd65aa8cfe",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/health",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-43b25562966e8eed",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/knowledge/file/download/{object_name:path}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-05cefb8b3c6edc9c",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/knowledge/file/upload",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-e8b327a3ef5824d3",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/knowledge/indices",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-f77b6c73c8761f7e",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/knowledge/indices/search/hybrid",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-2f88b37790061e20",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/nb/v1/knowledge/indices/{index_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-8f3b643a96551740",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/knowledge/indices/{index_name}",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-a00401c45256ba60",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/nb/v1/knowledge/indices/{index_name}/chunks",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-1feecb874779208d",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/nb/v1/knowledge/indices/{index_name}/documents",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-cd6cadd00fa81a53",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/knowledge/indices/{index_name}/files",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-736f2102beaaaa92",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/nb/v1/models",
+      "transport": "http",
+      "target": "northbound",
+      "source": "backend/management/api/northbound.py",
+      "route_id": "route-8a04feb31fc1d67f",
+      "credential_kinds": [
+        "api_key"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/cas/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-e01eb7a61561c301",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/cas/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-caf7770f0b367272",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/cas/config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-2d404750526ea109",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/cas/login",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-20be098db9c696ff",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/cas/logout_callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-307234683288fa35",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/cas/renew",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-5c7410afe09859f2",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/cas/renew_callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/cas.py",
+      "route_id": "route-f70f5c54ac653cf7",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/current_user_id",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-32e76ac449b8f292",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/current_user_info",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-8008011eea07bd32",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/logout",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-30cff32f196256b6",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/accounts",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-befecb94ed91e9fd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/user/oauth/accounts/{provider}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-cff1beb63610a2dd",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/authorize",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-53ee05d82ab9eeb5",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/callback",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-69a9018cc3f5773a",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/oauth/complete",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-5a87c3a68bf55104",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/config",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-b15caaf41b4da18c",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/link",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-c7b23fc1f633552c",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/pending",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-0b7f3b54cba6d7df",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/oauth/providers",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/oauth.py",
+      "route_id": "route-c48c879474c4f81c",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/user/password",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-ede3695d5dab91b9",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/refresh_token",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-3cf32d3f4e5a02a1",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/revoke",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-1aac8a03a44eed13",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/service_health",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-f15cae43cf3110f3",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/session",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-98afa0a13ba2388d",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/signin",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-133be065b52fad3e",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/signup",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-01636bd9fae447bd",
+      "credential_kinds": [
+        "anonymous",
+        "session"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/tokens",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-04580c2c0ee055e7",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/user/tokens",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-df007518fce00b84",
+      "credential_kinds": [
+        "session"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/user/tokens/{token_id}",
+      "transport": "http",
+      "target": "management",
+      "source": "backend/management/api/identity/user_management.py",
+      "route_id": "route-2516a5a4d787eb18",
+      "credential_kinds": [
+        "session"
+      ]
+    }
+  ],
+  "revision": "2026-11-05.1"
+}

@@ -104,7 +104,7 @@ async def test_gateway_overwrites_spoofed_identity_and_resolves_current_state(au
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers={"Authorization": "bearer\t" + session(), IDENTITY_HEADER: "spoofed"})
+            response = await client.post("/api/users/list", headers={"Authorization": "bearer\t" + session(), IDENTITY_HEADER: "spoofed"})
             assert response.status_code == 200 and response.json()["user_id"] == "u1"
             response = await client.get("/nb/v1/agents", headers={"Authorization": "opaque-key"})
             assert response.status_code == 200 and response.json()["user_id"] == "key-user"
@@ -129,7 +129,7 @@ async def test_rejected_credentials_never_reach_lookup_or_business(auth_config, 
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers=headers)
+            response = await client.post("/api/users/list", headers=headers)
     assert response.status_code == 401
     assert calls == []
 
@@ -146,7 +146,7 @@ async def test_identity_rejection_or_unavailability_never_reaches_business(auth_
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
-            response = await client.get("/api/users/list", headers={"Authorization": "Bearer " + session()})
+            response = await client.post("/api/users/list", headers={"Authorization": "Bearer " + session()})
     assert response.status_code == expected
     assert "secret" not in response.text
     assert calls == ["/api/internal/identity/resolve"]
@@ -197,7 +197,7 @@ async def test_login_and_cors_preflight_require_no_existing_user(auth_config):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.post("/api/user/signin")
             assert response.status_code == 200
-            response = await client.options("/api/private", headers={"origin": "https://web.test", "access-control-request-method": "POST"})
+            response = await client.options("/api/user/signin", headers={"origin": "https://web.test", "access-control-request-method": "POST"})
             assert response.status_code == 200
     assert len(seen) == 1
 
