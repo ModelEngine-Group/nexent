@@ -16,8 +16,12 @@ import {
 } from "@/app/newchat/utils/conversation-artifacts";
 import {
   ConversationArtifactsButton,
+  ConversationArtifactsMessageEntry,
   ConversationArtifactsPanel,
 } from "@/app/newchat/ui/artifacts-panel";
+import {
+  ConversationArtifactsEntryProvider,
+} from "@/app/newchat/ui/conversation-artifacts-context";
 import {
   compositeAttachmentAdapter,
   markFileWithExistingUpload,
@@ -419,6 +423,38 @@ test("ConversationArtifactsButton opens the panel on click", () => {
   fireEvent.click(button);
 
   expect(onClick).toHaveBeenCalledTimes(1);
+});
+
+test("ConversationArtifactsMessageEntry renders nothing without a provider", () => {
+  const { container } = render(<ConversationArtifactsMessageEntry />);
+
+  expect(container.firstChild).toBeNull();
+});
+
+test("ConversationArtifactsMessageEntry hides while the conversation has no artifacts", () => {
+  const { container } = render(
+    <ConversationArtifactsEntryProvider count={0} open={() => {}}>
+      <ConversationArtifactsMessageEntry />
+    </ConversationArtifactsEntryProvider>
+  );
+
+  expect(container.firstChild).toBeNull();
+});
+
+test("ConversationArtifactsMessageEntry shows the conversation total and opens the panel", () => {
+  const open = vi.fn();
+  render(
+    <ConversationArtifactsEntryProvider count={2} open={open}>
+      <ConversationArtifactsMessageEntry />
+    </ConversationArtifactsEntryProvider>
+  );
+
+  const button = screen.getByRole("button", {
+    name: "chat.artifacts.viewAll:2",
+  });
+  fireEvent.click(button);
+
+  expect(open).toHaveBeenCalledTimes(1);
 });
 
 const renderArtifactsPanel = (

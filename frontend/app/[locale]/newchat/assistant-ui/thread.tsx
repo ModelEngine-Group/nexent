@@ -64,9 +64,12 @@ import {
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
 import {
-  ConversationArtifactsButton,
+  ConversationArtifactsMessageEntry,
   ConversationArtifactsPanel,
 } from "../ui/artifacts-panel";
+import {
+  ConversationArtifactsEntryProvider,
+} from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryButton } from "../ui/question-directory";
 import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
 import {
@@ -77,6 +80,7 @@ import {
 } from "../utils/conversation-artifacts";
 import { MessageAnnotationBubble } from "./message-annotation-bubble";
 import { MessageAnnotationCards } from "./message-annotation-cards";
+import { ViewportScrollRescue } from "./viewport-scroll-rescue";
 import {
   createMessageAnnotation,
   MESSAGE_ANNOTATION_COMMENT_MAX,
@@ -368,14 +372,16 @@ export const Thread: FC<ThreadProps> = ({
   };
 
   const messages = useAuiState((s) => s.thread.messages);
-  // Conversation-wide agent-generated files feed the artifacts entry above the
-  // composer and the side panel it opens. Computed here so both the button and
-  // the panel share one aggregation pass over the thread messages.
+  // Conversation-wide agent-generated files feed the trailing "view all
+  // artifacts" entry on each assistant message and the side panel it opens.
+  // Computed here so the entry and the panel share one aggregation pass over
+  // the thread messages.
   const conversationArtifacts = useConversationArtifacts(messages);
   // Conversation-wide user questions feed the question directory entry at the
   // top of the thread. Same single-pass pattern as the artifacts aggregation.
   const questionDirectory = useQuestionDirectory(messages);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const openArtifactsPanel = useCallback(() => setArtifactsOpen(true), []);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
       (item) => item.id === s.threads.mainThreadId
@@ -580,83 +586,88 @@ export const Thread: FC<ThreadProps> = ({
     >
       <ConversationBranchContext.Provider value={branchContextValue}>
         <SourcesPanelProvider value={panelContextValue}>
-          <ThreadView
-            agent={agent}
-            welcomeTitle={welcomeTitle}
-            welcomeSuggestions={welcomeSuggestions}
-            welcomeContent={welcomeContent}
-            onBack={onBack}
-            models={models}
-            selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
-            onModelChange={handleModelChange}
-            deepThinking={deepThinking ?? controls.deepThinking}
-            onDeepThinkingChange={
-              onDeepThinkingChange ?? controls.onDeepThinkingChange
-            }
-            thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
-            onThinkingEffortChange={
-              onThinkingEffortChange ?? controls.onThinkingEffortChange
-            }
-            reasoningBudgetTokens={
-              reasoningBudgetTokens ?? controls.reasoningBudgetTokens
-            }
-            onReasoningBudgetTokensChange={
-              onReasoningBudgetTokensChange ??
-              controls.onReasoningBudgetTokensChange
-            }
-            chatMode={chatMode}
-            onChatModeChange={onChatModeChange}
-            showModelSelector={showModelSelector}
-            modelParameterSettings={
-              modelParameterSettings ?? controls.modelParameterSettings
-            }
-            showConversationTitle={showConversationTitle}
-            composerTools={composerTools}
-            knowledgeScope={knowledgeScope}
-            knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
-            onKnowledgeScopeChange={onKnowledgeScopeChange}
-            variant={variant}
-            skillFiles={skillFiles}
-            onSkillFileSelect={onSkillFileSelect}
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={onRuntimeMetadataChange}
-            readOnly={readOnly || (showModelSelector && !modelIsValid)}
-            modelSelectionDisabled={readOnly}
-            readOnlyReason={readOnlyReason}
-            showComposer={showComposer}
-            configurationLayout={configurationLayout}
-            debugLayout={debugLayout}
-            emptyFooterContent={emptyFooterContent}
-            footerContent={footerContent}
-            interactionContent={interactionContent}
-            workbenchPresentation={workbenchPresentation}
-            workbenchResources={workbenchResources}
-            onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-            onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-            hasMessages={hasMessages}
-            displayName={displayName}
-            conversationTitle={conversationTitle}
-            conversationId={conversationId}
-            newChatDesign={newChatDesign}
-            isRunning={isRunning}
-            isShareMode={isShareMode}
-            selectedShareMessageIds={selectedShareMessageIds}
-            backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-            isCreatingShare={isCreatingShare}
-            onEnterShareMode={() => void enterShareMode()}
-            onLeaveShareMode={leaveShareMode}
-            onToggleShareAll={toggleShareAll}
-            onToggleShareMessage={toggleShareMessage}
-            onCreateShare={createShare}
-            selection={selection}
-            onPanelClose={close}
-            conversationArtifacts={conversationArtifacts}
-            artifactsOpen={artifactsOpen}
-            onArtifactsOpenChange={setArtifactsOpen}
-            questionDirectory={questionDirectory}
-            messageAnnotations={messageAnnotationsControl}
-          />
+          <ConversationArtifactsEntryProvider
+            count={conversationArtifacts.length}
+            open={openArtifactsPanel}
+          >
+            <ThreadView
+              agent={agent}
+              welcomeTitle={welcomeTitle}
+              welcomeSuggestions={welcomeSuggestions}
+              welcomeContent={welcomeContent}
+              onBack={onBack}
+              models={models}
+              selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
+              onModelChange={handleModelChange}
+              deepThinking={deepThinking ?? controls.deepThinking}
+              onDeepThinkingChange={
+                onDeepThinkingChange ?? controls.onDeepThinkingChange
+              }
+              thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
+              onThinkingEffortChange={
+                onThinkingEffortChange ?? controls.onThinkingEffortChange
+              }
+              reasoningBudgetTokens={
+                reasoningBudgetTokens ?? controls.reasoningBudgetTokens
+              }
+              onReasoningBudgetTokensChange={
+                onReasoningBudgetTokensChange ??
+                controls.onReasoningBudgetTokensChange
+              }
+              chatMode={chatMode}
+              onChatModeChange={onChatModeChange}
+              showModelSelector={showModelSelector}
+              modelParameterSettings={
+                modelParameterSettings ?? controls.modelParameterSettings
+              }
+              showConversationTitle={showConversationTitle}
+              composerTools={composerTools}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={onKnowledgeScopeChange}
+              variant={variant}
+              skillFiles={skillFiles}
+              onSkillFileSelect={onSkillFileSelect}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={onRuntimeMetadataChange}
+              readOnly={readOnly || (showModelSelector && !modelIsValid)}
+              modelSelectionDisabled={readOnly}
+              readOnlyReason={readOnlyReason}
+              showComposer={showComposer}
+              configurationLayout={configurationLayout}
+              debugLayout={debugLayout}
+              emptyFooterContent={emptyFooterContent}
+              footerContent={footerContent}
+              interactionContent={interactionContent}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+              hasMessages={hasMessages}
+              displayName={displayName}
+              conversationTitle={conversationTitle}
+              conversationId={conversationId}
+              newChatDesign={newChatDesign}
+              isRunning={isRunning}
+              isShareMode={isShareMode}
+              selectedShareMessageIds={selectedShareMessageIds}
+              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+              isCreatingShare={isCreatingShare}
+              onEnterShareMode={() => void enterShareMode()}
+              onLeaveShareMode={leaveShareMode}
+              onToggleShareAll={toggleShareAll}
+              onToggleShareMessage={toggleShareMessage}
+              onCreateShare={createShare}
+              selection={selection}
+              onPanelClose={close}
+              conversationArtifacts={conversationArtifacts}
+              artifactsOpen={artifactsOpen}
+              onArtifactsOpenChange={setArtifactsOpen}
+              questionDirectory={questionDirectory}
+              messageAnnotations={messageAnnotationsControl}
+            />
+          </ConversationArtifactsEntryProvider>
           <Dialog
             open={Boolean(manualShareUrl)}
             onOpenChange={(open) => !open && setManualShareUrl(null)}
@@ -1059,6 +1070,9 @@ const ThreadView: FC<ThreadViewProps> = ({
               "relative mt-[max(24px,calc(50cqh-220px))] flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
+          {/* Re-implements the auto-scroll triggers that the legacy runtime
+              fails to deliver (run start / history load / streaming follow). */}
+          <ViewportScrollRescue />
           {workbenchLanding && (
             <div
               aria-hidden
@@ -1131,12 +1145,6 @@ const ThreadView: FC<ThreadViewProps> = ({
           >
             {!newChatDesign && (!debugLayout || hasMessages) && (
               <ThreadScrollToBottom />
-            )}
-            {conversationArtifacts.length > 0 && (
-              <ConversationArtifactsButton
-                count={conversationArtifacts.length}
-                onClick={() => onArtifactsOpenChange(true)}
-              />
             )}
             {!hasMessages &&
               emptyFooterContent &&
@@ -1928,6 +1936,7 @@ const AssistantMessage: FC<{
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
+        <ConversationArtifactsMessageEntry />
         {typeof createdAgent?.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
