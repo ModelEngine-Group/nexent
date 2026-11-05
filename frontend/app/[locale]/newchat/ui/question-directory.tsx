@@ -80,6 +80,18 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
   // The hover timer must never outlive the component.
   useEffect(() => clearPreviewTimer, []);
 
+  // Safety net: the preview card portals outside the popover, so it must
+  // never outlive the popover, whatever code path closed it.
+  useEffect(() => {
+    if (open) return;
+    if (previewTimer.current !== null) {
+      window.clearTimeout(previewTimer.current);
+      previewTimer.current = null;
+    }
+    setSearch("");
+    setPreview(null);
+  }, [open]);
+
   // Match against the full text (not the truncated summary) so keywords from
   // any line of the question still find the entry; case-insensitive.
   const filteredQuestions = useMemo(() => {
@@ -122,6 +134,17 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
     setPreview(null);
   };
 
+  // Reset the transient popover session state (keyword filter and hover
+  // preview). Radix reports its own dismissals (outside click, Escape,
+  // trigger toggle) through onOpenChange, but programmatic closes such as
+  // the row-click jump are not reported, so they must reset the same state
+  // explicitly.
+  const resetPopoverSession = () => {
+    setSearch("");
+    clearPreviewTimer();
+    setPreview(null);
+  };
+
   return (
     <Popover
       open={open}
@@ -130,9 +153,7 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
         // Reset the filter and drop the preview between sessions so
         // reopening starts from the full directory.
         if (!nextOpen) {
-          setSearch("");
-          clearPreviewTimer();
-          setPreview(null);
+          resetPopoverSession();
         }
       }}
     >
@@ -183,6 +204,9 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
         <ul
           className="flex max-h-80 flex-col gap-0.5 overflow-y-auto pt-1"
           aria-label={t("chat.questions.title")}
+          // Wheel-scrolling moves rows under a stationary pointer without
+          // firing mouseleave, so drop the preview when its anchor moves.
+          onScroll={hidePreview}
         >
           {filteredQuestions.map((question) => {
             const isActive = question.messageId === activeMessageId;
@@ -196,6 +220,9 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
                   })}
                   onClick={() => {
                     setOpen(false);
+                    // The programmatic close bypasses onOpenChange, so the
+                    // portaled preview card is dropped here as well.
+                    resetPopoverSession();
                     onJump(question.messageId);
                   }}
                   onMouseEnter={(event) =>

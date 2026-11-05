@@ -394,3 +394,51 @@ test("QuestionDirectoryButton previews a question without a reply on hover", asy
   expect(card.textContent).toContain("data.csv");
   expect(card.textContent).toContain("chat.questions.noReply");
 });
+
+test("QuestionDirectoryButton clears the hover preview when a question is clicked", async () => {
+  const onJump = vi.fn();
+  renderDirectoryButton({ onJump });
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+  );
+  const row = await screen.findByRole("button", {
+    name: "chat.questions.jump:1",
+  });
+
+  fireEvent.mouseEnter(row);
+  await waitFor(() =>
+    expect(screen.getByTestId("question-directory-preview")).toBeTruthy(),
+  );
+
+  // Clicking a row closes the popover programmatically (not through
+  // onOpenChange); the portaled preview card must not survive that close.
+  fireEvent.click(row);
+
+  expect(onJump).toHaveBeenCalledWith("u1");
+  await waitFor(() =>
+    expect(screen.queryByTestId("question-directory-preview")).toBeNull(),
+  );
+});
+
+test("QuestionDirectoryButton hides the hover preview when the directory list scrolls", async () => {
+  renderDirectoryButton();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+  );
+  const row = await screen.findByRole("button", {
+    name: "chat.questions.jump:1",
+  });
+
+  fireEvent.mouseEnter(row);
+  await waitFor(() =>
+    expect(screen.getByTestId("question-directory-preview")).toBeTruthy(),
+  );
+
+  // Wheel-scrolling moves rows under a stationary pointer without firing
+  // mouseleave, so the preview must be dropped when the list scrolls.
+  fireEvent.scroll(row.closest("ul")!);
+
+  expect(screen.queryByTestId("question-directory-preview")).toBeNull();
+});
