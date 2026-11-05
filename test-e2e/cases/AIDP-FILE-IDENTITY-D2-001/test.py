@@ -68,9 +68,9 @@ def configured(
     permission_calls=None,
     upstream_calls=None,
 ):
-    def require_permission(kds_id, user_id, tenant_id, required):
+    def require_permission(kb_id, user_id, tenant_id, required):
         if permission_calls is not None:
-            permission_calls.append((kds_id, user_id, tenant_id, required))
+            permission_calls.append((kb_id, user_id, tenant_id, required))
         if permission_error is not None:
             raise permission_error
         return SimpleNamespace(permission="READ_ONLY")

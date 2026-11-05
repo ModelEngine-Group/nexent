@@ -603,7 +603,7 @@ async def download_knowledge_base_file(
     ctx: NorthboundContext = await _get_northbound_context(request)
     try:
         require_permission(
-            kds_id=kds_id,
+            kb_id=kds_id,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
             required="READ",

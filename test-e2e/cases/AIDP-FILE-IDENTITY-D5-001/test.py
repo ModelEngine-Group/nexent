@@ -78,12 +78,12 @@ def _app():
 
 @contextmanager
 def configured(*, upstream=None, permission_calls=None, upstream_calls=None):
-    def require_permission(kds_id, user_id, tenant_id, required):
+    def require_permission(kb_id, user_id, tenant_id, required):
         if permission_calls is not None:
-            permission_calls.append((kds_id, user_id, tenant_id, required))
-        if kds_id not in _READABLE.get(user_id, set()):
+            permission_calls.append((kb_id, user_id, tenant_id, required))
+        if kb_id not in _READABLE.get(user_id, set()):
             raise AidpKbPermissionDeniedError(
-                kb_id=kds_id, user_id=user_id, required=required
+                kb_id=kb_id, user_id=user_id, required=required
             )
         return SimpleNamespace(permission="READ_ONLY")
 
