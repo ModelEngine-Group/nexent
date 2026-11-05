@@ -97,3 +97,26 @@ def test_confirmation_unit_failure_rolls_back_the_readable_message(confirmation_
     with pytest.raises(IntegrityError):
         creation_mode.save_creation_response(1, response(), "Confirmed", "owner")
     assert confirmation_store.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 1
+
+
+@pytest.mark.parametrize("config", [None, "[]", '"ordinary text"'])
+def test_missing_or_non_object_workbench_config_cannot_write_confirmation(confirmation_store, config):
+    confirmation_store.execute(text("UPDATE nexent.conversation_record_t SET workbench_config=:config"),
+                               {"config": config})
+    confirmation_store.commit()
+
+    with pytest.raises(ConversationNotFoundError, match="Workbench conversation not found"):
+        creation_mode.save_creation_response(1, response(), "Confirmed", "owner")
+
+    assert confirmation_store.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 1
+
+
+def test_missing_latest_message_rejects_confirmation_without_inserting_one(confirmation_store):
+    confirmation_store.execute(text("DELETE FROM nexent.conversation_message_unit_t"))
+    confirmation_store.execute(text("DELETE FROM nexent.conversation_message_t"))
+    confirmation_store.commit()
+
+    with pytest.raises(AppException, match="Clarification is no longer available"):
+        creation_mode.save_creation_response(1, response(), "Confirmed", "owner")
+
+    assert confirmation_store.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 0

@@ -45,6 +45,9 @@ change:
       proof.
     test_selectors:
     - test/sdk/core/agents/test_creation_mode_form.py
+    - test/sdk/core/agents/test_creation_mode_validation.py
+    - test/backend/app/test_creation_mode_responses_app.py
+    - test/backend/services/test_creation_mode_service.py
     - test/backend/services/test_creation_mode_confirmation.py
     - frontend/tests/workbench/CreationModeAction.test.ts
     - frontend/tests/workbench/CreationModeConfirmation.test.tsx
@@ -60,3 +63,11 @@ change:
     adapter omitted it in favor of target. Strengthen the existing adapter UT and D4 AC-04; do not change backend contracts,
     migrate accounts/databases, or add duplicate D1/D2 Cases. The self-contained D4 owns mocked draft and creator APIs and
     releases them with its browser context.
+    UT coverage backfill keeps HTTP wire/validation proof in WB-CREATION-CONFIRM-D2-001 and adds
+    direct endpoint success, authenticated identity, rejection mapping and sanitized unexpected-error assertions under
+    test/backend/app. Service UT now proves intent allowlisting, owned user/tenant lookup, readable choice forwarding
+    and storage failure propagation. Existing real-transaction UT gains missing latest-message and non-object configuration
+    rejection; SDK UT gains isolated creation-context, single-question and exact-length boundaries. These close the
+    29 uncovered or partial changed lines reported by PR 4291 without modifying product behavior, formal Cases,
+    coverage thresholds or exclusions. The CI file-isolated runner measures only test/backend and test/sdk here;
+    a successful formal D2 run is not part of the uploaded UT coverage report.
