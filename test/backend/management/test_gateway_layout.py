@@ -35,7 +35,7 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
 def test_gateway_authentication_and_management_route_ownership():
     assert {p.name for p in (BACKEND / "gateway/security").glob("*.py")} == {
         "__init__.py", "credentials.py", "management_client.py", "identity.py", "policy.py",
-        "passwords.py", "signatures.py", "token_codec.py", "service_tokens.py", "delegation.py"
+        "passwords.py", "signatures.py", "token_codec.py", "service_tokens.py", "delegation.py", "database_provider.py"
     }
     assert not list((BACKEND / "management/security").glob("*.py"))
     assert not list((BACKEND / "infrastructure/security").glob("*.py"))

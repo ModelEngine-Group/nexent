@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 from contracts.constants import environment
 from gateway import application
-from gateway.application import create_gateway_app
+from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
 from infrastructure.service_identity.gateway import (
     IDENTITY_HEADER, IdentityError, identity_context, sign_identity, verify_identity, verify_lookup,

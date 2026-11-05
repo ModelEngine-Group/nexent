@@ -25,6 +25,7 @@ from websockets.exceptions import InvalidStatus
 
 from contracts.constants import environment
 from gateway.application import create_gateway_app
+from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
 from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
 from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
@@ -167,8 +168,12 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                            "iat": now, "exp": now + 60, **overrides}, secret, algorithm="HS256")
 
     with serve(management) as management_url, serve(runtime) as runtime_url:
+        # Explicit compatibility provider keeps this existing HTTP protocol Case;
+        # GW-AUTH-D3-003 proves the production database provider.
+        async def legacy_lookup(query):
+            return await lookup_identity(query, edge.state.client, management_url, key=secret)
         edge = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret=secret, jwt_issuer=environment.JWT_ISSUER, signing_secret=secret), upstreams={
-            "management": management_url, "northbound": management_url, "runtime": runtime_url})
+            "management": management_url, "northbound": management_url, "runtime": runtime_url}, identity_lookup=legacy_lookup)
         with serve(edge) as gateway_url:
             monkeypatch.setattr(environment, "GATEWAY_SERVICE_URL", gateway_url)
             mcp_reached = []

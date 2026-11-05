@@ -28,7 +28,8 @@ class _NoCookies(DefaultCookiePolicy):
         return False
 
 
-def create_gateway_app(*, settings=None, transport=None, upstreams=None, authentication=None, registry=None):
+def create_gateway_app(*, settings=None, transport=None, upstreams=None, authentication=None, registry=None,
+                       identity_lookup=None):
     settings = load_settings() if settings is None else settings
     targets = dict(upstreams or {"management": settings.management_url, "runtime": settings.runtime_url,
                                 "northbound": settings.northbound_url})
@@ -43,17 +44,34 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
 
     @asynccontextmanager
     async def lifespan(app):
+        repository = None
         if authenticate:
             settings.signing_key()
-        async with httpx.AsyncClient(
-            transport=transport, trust_env=False, follow_redirects=False,
-            cookies=CookieJar(policy=_NoCookies()),
-            timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10),
-        ) as client:
-            app.state.client = client
-            yield
+        if authenticate and identity_lookup is None:
+            from infrastructure.database.identity import IdentityRepository
+            from gateway.security.database_provider import DatabaseIdentityProvider
+
+            repository = await IdentityRepository.open(**settings.database_options())
+            app.state.identity_lookup = DatabaseIdentityProvider(repository)
+        try:
+            async with httpx.AsyncClient(
+                transport=transport, trust_env=False, follow_redirects=False,
+                cookies=CookieJar(policy=_NoCookies()),
+                timeout=httpx.Timeout(connect=10, read=None, write=30, pool=10),
+            ) as client:
+                app.state.client = client
+                yield
+        finally:
+            app.state.identity_lookup = unavailable_identity
+            if repository is not None:
+                await repository.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    async def unavailable_identity(query):
+        raise IdentityUnavailable("Identity provider is unavailable")
+
+    app.state.identity_lookup = identity_lookup or unavailable_identity
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"])
     # Last-added middleware runs first, including before CORS preflight handling.
@@ -75,7 +93,8 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
         headers = filtered_headers(connection.headers.items(), request=True)
         if authenticate:
             method = connection.scope.get("method", "GET")
-            principal = await resolve_identity(connection, connection.app.state.client, targets["management"], settings=settings)
+            principal = await resolve_identity(connection, settings=settings,
+                                               identity_lookup=connection.app.state.identity_lookup)
             selected = connection.scope["gateway.exposure"].target
             match = connection.scope["gateway.exposure"]
             if principal is not None and principal.get("kind") not in match.credential_kinds:
@@ -92,7 +111,8 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
     @app.post(DELEGATION_PATH)
     async def credential_delegation(request: Request):
         try:
-            result = await delegate_mcp(request, request.app.state.client, targets["management"], settings=settings)
+            result = await delegate_mcp(request, settings=settings,
+                                        identity_lookup=request.app.state.identity_lookup)
         except IdentityError:
             return JSONResponse({"message": "Invalid or missing credentials"}, status_code=401)
         except IdentityUnavailable:

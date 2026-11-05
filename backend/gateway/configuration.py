@@ -2,6 +2,7 @@
 """Gateway's sole environment reader, independent of backend business settings."""
 
 import os
+import math
 from dataclasses import dataclass, field
 
 
@@ -19,6 +20,13 @@ class GatewaySettings:
     deployment_version: str = "full"
     default_user_id: str = "user_id"
     default_tenant_id: str = "tenant_id"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "nexent"
+    db_user: str = "nexent_gateway"
+    db_password: str = field(default="", repr=False)
+    db_pool_size: int = 8
+    db_timeout: float = 5.0
 
     def __post_init__(self):
         if type(self.port) is not int or not 1 <= self.port <= 65535:
@@ -29,6 +37,19 @@ class GatewaySettings:
             raise ValueError("GATEWAY_AUTH_ENABLED must be true or false")
         if self.deployment_version not in {"full", "speed"}:
             raise ValueError("DEPLOYMENT_VERSION must be full or speed")
+        if type(self.db_port) is not int or not 1 <= self.db_port <= 65535:
+            raise ValueError("GATEWAY_DB_PORT must be between 1 and 65535")
+        if type(self.db_pool_size) is not int or not 1 <= self.db_pool_size <= 64:
+            raise ValueError("GATEWAY_DB_POOL_SIZE must be between 1 and 64")
+        if type(self.db_timeout) not in (int, float) or not math.isfinite(self.db_timeout) or not 0 < self.db_timeout <= 60:
+            raise ValueError("GATEWAY_DB_TIMEOUT must be finite and between 0 and 60 seconds")
+
+    def database_options(self):
+        if not all(isinstance(value, str) and value.strip() for value in
+                   (self.db_host, self.db_name, self.db_user, self.db_password)):
+            raise ValueError("Gateway database host, name, user and password are required")
+        return dict(host=self.db_host, port=self.db_port, database=self.db_name, user=self.db_user,
+                    password=self.db_password, max_size=self.db_pool_size, timeout=self.db_timeout)
 
     @property
     def is_speed_mode(self):
@@ -60,4 +81,11 @@ def load_settings(environ=None):
         jwt_issuer=values.get("JWT_ISSUER", "nexent"),
         signing_secret=values.get("GATEWAY_SIGNING_SECRET", ""),
         deployment_version=values.get("DEPLOYMENT_VERSION", "full"),
+        db_host=values.get("GATEWAY_DB_HOST", "localhost"),
+        db_port=int(values.get("GATEWAY_DB_PORT", "5432")),
+        db_name=values.get("GATEWAY_DB_NAME", "nexent"),
+        db_user=values.get("GATEWAY_DB_USER", "nexent_gateway"),
+        db_password=values.get("GATEWAY_DB_PASSWORD", ""),
+        db_pool_size=int(values.get("GATEWAY_DB_POOL_SIZE", "8")),
+        db_timeout=float(values.get("GATEWAY_DB_TIMEOUT", "5")),
     )

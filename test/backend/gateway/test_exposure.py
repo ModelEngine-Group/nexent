@@ -109,7 +109,7 @@ async def test_denial_happens_before_credentials_upstream_and_cors(monkeypatch):
 
     monkeypatch.setattr("gateway.application.resolve_identity", forbidden)
     app = create_gateway_app(authentication=True, transport=httpx.MockTransport(lambda request: calls.append(request)),
-                             settings=GatewaySettings(jwt_secret="fixture"))
+                             settings=GatewaySettings(jwt_secret="fixture"), identity_lookup=forbidden)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             for method, path in [("GET", "/api/not-registered"), ("GET", "/nb/v1/chat/run"),

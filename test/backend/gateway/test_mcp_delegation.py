@@ -9,7 +9,7 @@ import httpx
 import jwt
 import pytest
 
-from gateway.application import create_gateway_app
+from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
 from gateway.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
 from infrastructure.service_identity import mcp

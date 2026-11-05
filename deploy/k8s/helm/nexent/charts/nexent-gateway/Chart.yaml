@@ -1,6 +1,6 @@
 apiVersion: v2
-name: nexent-northbound
-description: Nexent Northbound Service - External API gateway
+name: nexent-gateway
+description: Nexent Gateway for ordinary backend and Northbound API requests
 type: application
 version: 0.1.0
 appVersion: "latest"

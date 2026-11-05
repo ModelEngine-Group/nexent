@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nexent-northbound
+  name: nexent-gateway
   namespace: {{ .Values.global.namespace }}
   labels:
-    app: nexent-northbound
+    app: nexent-gateway
   annotations:
     "helm.sh/hook-weight": "20"
 spec:
@@ -13,18 +13,19 @@ spec:
 {{ toYaml .Values.strategy | indent 4 }}
   selector:
     matchLabels:
-      app: nexent-northbound
+      app: nexent-gateway
   template:
     metadata:
       labels:
-        app: nexent-northbound
+        app: nexent-gateway
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-gateway-image: {{ dig "rolloutChecksums" "gatewayImage" "" .Values.global | quote }}
+        checksum/nexent-gateway-database: {{ dig "rolloutChecksums" "gatewayDatabase" "" .Values.global | quote }}
     spec:
       containers:
-        - name: nexent-northbound
+        - name: nexent-gateway
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
           ports:
@@ -38,6 +39,46 @@ spec:
               drop: ["ALL"]
           command: ["python", "backend/gateway_service.py"]
           env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: TZ
+            - name: GATEWAY_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_HOST
+            - name: GATEWAY_DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_PORT
+            - name: GATEWAY_DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_NAME
+            - name: GATEWAY_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_USER
+            - name: GATEWAY_DB_POOL_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_POOL_SIZE
+            - name: GATEWAY_DB_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_DB_TIMEOUT
+            - name: GATEWAY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: GATEWAY_DB_PASSWORD
             - name: GATEWAY_PORT
               value: "5013"
             - name: GATEWAY_AUTH_ENABLED

@@ -8,6 +8,12 @@ metadata:
     "helm.sh/hook-weight": "-3"
 data:
   GATEWAY_AUTH_ENABLED: "true"
+  GATEWAY_DB_USER: {{ .Values.config.gatewayIdentity.user | quote }}
+  GATEWAY_DB_HOST: {{ default .Values.config.postgres.host .Values.config.gatewayIdentity.host | quote }}
+  GATEWAY_DB_PORT: {{ default .Values.config.postgres.port .Values.config.gatewayIdentity.port | quote }}
+  GATEWAY_DB_NAME: {{ default .Values.config.postgres.db .Values.config.gatewayIdentity.db | quote }}
+  GATEWAY_DB_POOL_SIZE: {{ .Values.config.gatewayIdentity.poolSize | quote }}
+  GATEWAY_DB_TIMEOUT: {{ .Values.config.gatewayIdentity.timeout | quote }}
   GATEWAY_SERVICE_URL: {{ .Values.config.services.gatewayUrl | quote }}
   TZ: {{ .Values.config.timezone | quote }}
   # Deployment version

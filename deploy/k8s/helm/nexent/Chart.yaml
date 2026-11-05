@@ -34,10 +34,10 @@ dependencies:
     version: 0.1.0
     repository: "file://./charts/nexent-data-process"
     condition: nexent-data-process.enabled
-  - name: nexent-northbound
+  - name: nexent-gateway
     version: 0.1.0
-    repository: "file://./charts/nexent-northbound"
-    condition: nexent-northbound.enabled
+    repository: "file://./charts/nexent-gateway"
+    condition: nexent-gateway.enabled
   - name: nexent-web
     version: 0.1.0
     repository: "file://./charts/nexent-web"

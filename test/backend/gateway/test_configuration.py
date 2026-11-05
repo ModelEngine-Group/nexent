@@ -69,13 +69,15 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt"}
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt", "infrastructure"}
     for path in (BACKEND / "gateway").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             modules = [node.module] if isinstance(node, ast.ImportFrom) else [item.name for item in node.names] if isinstance(node, ast.Import) else []
             for module in modules:
                 assert module and module.split(".")[0] in allowed, (path, module)
+                if module.startswith("infrastructure"):
+                    assert module.startswith("infrastructure.database"), (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 

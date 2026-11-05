@@ -25,6 +25,14 @@ feature:
     description: Gateway explicitly allowlists public method/path/transport for ordinary
       Management5010 and Runtime5014 forwarding and Northbound5013 entry; unknown
       or reserved routes never reach authentication or business upstream.
+  - rule_id: GW-AUTH-RULE-05
+    description: Gateway resolves external session and API-key state directly through
+      an infrastructure read-only PostgreSQL repository without implicit Management
+      HTTP fallback; revocation and tenant/CAS ownership remain authoritative.
+  - rule_id: GW-AUTH-RULE-06
+    description: Deployment starts the unified nexent-gateway container; obsolete
+      northbound process resources are removed without deleting images or changing
+      durable task owners.
   required_test_stages:
   - D3
   source:

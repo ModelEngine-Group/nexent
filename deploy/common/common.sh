@@ -144,7 +144,7 @@ deployment_i18n_format() {
       tui.components.subtitle) printf '选择要安装的服务组。infrastructure 为必选项，不能禁用。' ;;
       tui.components.help) printf '使用 Up/Down 或 j/k 移动，空格切换，Enter 确认，q 退出。' ;;
       tui.component.infrastructure) printf '必需核心依赖：Elasticsearch、PostgreSQL、Redis、MinIO' ;;
-      tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、northbound API、web UI' ;;
+      tui.component.application) printf 'Nexent 应用服务：config、runtime、MCP、Gateway、web UI' ;;
       tui.component.data_process) printf '后台文件解析、索引和知识处理 Worker' ;;
       tui.component.terminal) printf '终端工具使用的 OpenSSH 容器' ;;
       tui.component.monitoring) printf 'OpenTelemetry Collector 和可选链路追踪看板' ;;
@@ -239,7 +239,7 @@ deployment_i18n_format() {
       tui.components.subtitle) printf 'Choose which service groups to install. infrastructure is required and cannot be disabled.' ;;
       tui.components.help) printf 'Use Up/Down or j/k to move, Space to toggle, Enter to confirm, q to quit.' ;;
       tui.component.infrastructure) printf 'required core dependencies: Elasticsearch, PostgreSQL, Redis, MinIO' ;;
-      tui.component.application) printf 'Nexent app services: config, runtime, MCP, northbound API, web UI' ;;
+      tui.component.application) printf 'Nexent app services: config, runtime, MCP, Gateway, web UI' ;;
       tui.component.data_process) printf 'background file parsing, indexing, and knowledge processing workers' ;;
       tui.component.terminal) printf 'OpenSSH container used by the terminal tool' ;;
       tui.component.monitoring) printf 'OpenTelemetry collector and optional tracing dashboard' ;;
@@ -2081,8 +2081,8 @@ deployment_compute_selection() {
     helm_charts+=(nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
-    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
+    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web)
+    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     docker_services+=(nexent-data-process)
@@ -2374,7 +2374,7 @@ deployment_render_image_values() {
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-mcp:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
-  printf 'nexent-northbound:\n'
+  printf 'nexent-gateway:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
@@ -2418,7 +2418,7 @@ deployment_render_k8s_port_values() {
     printf '  enabled: true\n'
     printf '  services:\n    nginx:\n      type: "NodePort"\n      entryPort: %s\n      nodePort: %s\n' "$https_node_port" "$https_node_port"
   fi
-  printf 'nexent-northbound:\n'
+  printf 'nexent-gateway:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
   printf 'nexent-config:\n'
   printf '  service:\n    type: "%s"\n    nodePort: 30010\n' "$internal_type"
@@ -2469,7 +2469,7 @@ deployment_render_helm_chart_values() {
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
-  printf 'nexent-northbound:\n'
+  printf 'nexent-gateway:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"

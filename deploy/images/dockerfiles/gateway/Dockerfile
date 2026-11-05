@@ -8,6 +8,8 @@ RUN if [ -n "$MIRROR" ]; then \
       pip install --no-cache-dir -r /tmp/gateway-requirements.txt; \
     fi
 COPY backend/gateway/ /opt/backend/gateway/
+COPY backend/infrastructure/__init__.py /opt/backend/infrastructure/__init__.py
+COPY backend/infrastructure/database/ /opt/backend/infrastructure/database/
 COPY backend/gateway_service.py /opt/backend/gateway_service.py
 ENV PYTHONPATH=/opt/backend
 USER 65532:65532

@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: GW-AUTH-D3-003
+  feature_id: GW-AUTH
+  requirement_ids:
+  - GW-AUTH
+  business_rule_ids:
+  - GW-AUTH-RULE-01
+  - GW-AUTH-RULE-02
+  - GW-AUTH-RULE-05
+  title: Gateway direct PostgreSQL identity and read-only service boundary
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify actual PostgreSQL role/column contracts and live Gateway protocol
+    with no Management lookup hop.
+  preconditions:
+  - Disposable PostgreSQL admin DSN supplied through NEXENT_GATEWAY_TEST_ADMIN_DSN;
+    only a local temporary server may be used.
+  test_data:
+    profile: mock
+    database: Creates an isolated random database using actual account/membership/token/CAS
+      model tables; queries use a separate SELECT-only login role. Business execution
+      is recorded, PostgreSQL and Gateway execute unchanged.
+  steps:
+  - order: 1
+    action: Create isolated database and read-only identity role; start actual Gateway,
+      Management and Runtime recording listeners. Exercise session, API key, SU/asset-owner,
+      signed MCP delegation and WS/SSE.
+    expected: Correct user/tenant/role crosses the target signed boundary; no identity
+      HTTP lookup is made.
+  - order: 2
+    action: Change account version, key/membership delete flag and CAS state/expiry/ownership;
+      submit invalid/forged credentials.
+    expected: Next request is denied before business execution without stale identity
+      caching.
+  - order: 3
+    action: Attempt a write and password_hash read with the Gateway database role;
+      interrupt database availability then restore it and close Gateway.
+    expected: Unauthorized SQL is denied, database failure is sanitized503 without
+      HTTP fallback, service recovers and pools/clients/threads close.
+  expected_results:
+  - Real database state supplies correct identities over actual Gateway HTTP and streaming
+    boundaries.
+  - Revoked, forged, expired or wrong-owner credentials never reach business execution.
+  - Read-only role protects identity writes and secret columns; outage produces503
+    with no fallback and resources are reclaimed.
+  forbidden_side_effects:
+  - Rejected credentials or unavailable identity storage must never invoke downstream
+    business handlers.
+  - Verification must not touch production credentials/storage or leak server threads.
+  integration_boundary:
+  - Actual Gateway -> actual infrastructure asyncpg repository -> real disposable
+    PostgreSQL; actual signed Management/Runtime recording HTTP/WS listeners. No production
+    store/model.
+  observations:
+  - HTTP/WS identity and status, call/lookup counts, database access errors, connection
+    cleanup.
+  cleanup:
+  - Close Gateway pool and all local servers; drop isolated database and temporary
+    role.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 180
+  acceptance:
+  - id: AC-01
+    description: Database identities traverse actual signed HTTP/streaming services.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects: []
+  - id: AC-02
+    description: Revocation and credential ownership are enforced before execution.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Role isolation,503 recovery and complete resource cleanup hold.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 2

@@ -152,7 +152,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       GATEWAY_AUTH_ENABLED: "true"
-      GATEWAY_SERVICE_URL: "http://nexent-northbound:5013"
+      GATEWAY_SERVICE_URL: "http://nexent-gateway:5013"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
@@ -175,13 +175,21 @@ services:
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/mcp_service.py"]
 
   # Keep the public service name and port for existing clients.
-  nexent-northbound:
+  nexent-gateway:
     image: ${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:latest}
-    container_name: nexent-northbound
+    container_name: nexent-gateway
     restart: always
     ports:
       - "5013:5013"
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      GATEWAY_DB_HOST: "${GATEWAY_DB_HOST:-nexent-postgresql}"
+      GATEWAY_DB_PORT: "${GATEWAY_DB_PORT:-5432}"
+      GATEWAY_DB_NAME: "${GATEWAY_DB_NAME:-nexent}"
+      GATEWAY_DB_USER: "${GATEWAY_DB_USER:-nexent_gateway}"
+      GATEWAY_DB_PASSWORD: "${GATEWAY_DB_PASSWORD:?Gateway requires a read-only database password}"
+      GATEWAY_DB_POOL_SIZE: "${GATEWAY_DB_POOL_SIZE:-8}"
+      GATEWAY_DB_TIMEOUT: "${GATEWAY_DB_TIMEOUT:-5}"
       GATEWAY_AUTH_ENABLED: "true"
       GATEWAY_PORT: "5013"
       JWT_ISSUER: "${JWT_ISSUER:-nexent}"
@@ -220,9 +228,9 @@ services:
       - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     environment:
       - TZ=${TZ:-Asia/Shanghai}
-      - HTTP_BACKEND=http://nexent-northbound:5013
-      - WS_BACKEND=ws://nexent-northbound:5013
-      - RUNTIME_HTTP_BACKEND=http://nexent-northbound:5013
+      - HTTP_BACKEND=http://nexent-gateway:5013
+      - WS_BACKEND=ws://nexent-gateway:5013
+      - RUNTIME_HTTP_BACKEND=http://nexent-gateway:5013
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}
@@ -262,7 +270,7 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
-      ELASTICSEARCH_SERVICE: "http://nexent-northbound:5013/api"
+      ELASTICSEARCH_SERVICE: "http://nexent-gateway:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"

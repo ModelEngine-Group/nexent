@@ -289,7 +289,7 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-config | Configuration service | 1 |
 | nexent-runtime | Runtime service | 1 |
 | nexent-mcp | MCP container service | 1 |
-| nexent-northbound | Northbound API service | 1 |
+| nexent-gateway | Northbound API service | 1 |
 | nexent-web | Web frontend | 1 |
 | nexent-data-process | Data processing service | 1 |
 

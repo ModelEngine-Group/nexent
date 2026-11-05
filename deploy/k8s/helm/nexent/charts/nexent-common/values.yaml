@@ -30,15 +30,22 @@ config:
   timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
-    gatewayUrl: "http://nexent-northbound:5013"
-    configUrl: "http://nexent-northbound:5013"
-    elasticsearchService: "http://nexent-northbound:5013/api"
+    gatewayUrl: "http://nexent-gateway:5013"
+    configUrl: "http://nexent-gateway:5013"
+    elasticsearchService: "http://nexent-gateway:5013/api"
     runtimeUrl: "http://nexent-runtime:5014"
     mcpServer: "http://nexent-mcp:5011"
     mcpManagementServer: "http://nexent-mcp:5015"
     dataProcessService: "http://nexent-data-process:5012/api"
-    northboundServer: "http://nexent-northbound:5013/api"
+    northboundServer: "http://nexent-gateway:5013/api"
     northboundExternalUrl: "" # Set this to the public-facing URL for external A2A clients. Example: https://api.yourdomain.com/api or http://your-public-ip:5013/api
+  gatewayIdentity:
+    host: ""
+    port: ""
+    db: ""
+    user: "nexent_gateway"
+    poolSize: "8"
+    timeout: "5"
   postgres:
     host: "nexent-postgresql"
     user: "root"
@@ -226,6 +233,7 @@ secrets:
     password: "nexent@2025"
   jwtSecret: ""
   gatewaySigningSecret: ""
+  gatewayDatabasePassword: ""
 
 # Storage configuration (can be referenced by other charts)
 storage:

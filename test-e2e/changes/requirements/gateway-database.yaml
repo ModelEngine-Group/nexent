@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: GW-DATABASE-20261105
+  change_type: requirement
+  requirement_id: GW-DATABASE
+  title: Gateway infrastructure database authentication and retire northbound container
+    startup
+  description: Implement second approved Gateway batch; default direct database identity
+    and renamed unified deployment resources. No image deletion or live business deployment.
+  affected_features:
+    existing:
+    - GW-AUTH
+    added: []
+    modified:
+    - GW-AUTH
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    - GW-AUTH-D3-002
+    added:
+    - GW-AUTH-D3-003
+    modified:
+    - GW-AUTH-D3-001
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Repository state/ownership/ambiguity and sanitized database errors.
+    - Finite pool lifecycle and explicit provider injection without HTTP fallback.
+    - Database configuration redaction and required keys.
+    - Compose Helm and startup scripts use unified Gateway and retire legacy process.
+    reason: Unit boundary tests complement actual PostgreSQL and real protocol evidence
+      in D3; no duplicate D1.
+    test_selectors:
+    - test/backend/gateway/test_database_identity.py
+    - test/backend/gateway/test_configuration.py
+    - test/backend/gateway/test_central_authentication.py
+    - test/backend/gateway/test_mcp_delegation.py
+    - test/backend/deploy/test_gateway_image.py
+    - test/backend/deploy/test_gateway_retirement.py
