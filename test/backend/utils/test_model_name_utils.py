@@ -108,6 +108,6 @@ class TestModelNameUtils:
         assert [m["id"] for m in sorted_same] == [
             "deepseek-r1",
             "qwen-1.5",
-            "qwen-7b",
             "qwen-72b",
+            "qwen-7b",
         ]
