@@ -80,7 +80,7 @@ def test_compose_gateway_has_no_business_dependencies(filename):
     assert gateway["entrypoint"] == ["python", "backend/gateway_service.py"]
     assert gateway["environment"]["GATEWAY_PORT"] == "5013"
     assert "nexent-northbound" not in compose["services"]
-    assert "GATEWAY_DB_PASSWORD" in gateway["environment"]
+    assert "NEXENT_POSTGRES_PASSWORD" in gateway["environment"]
     assert gateway["environment"]["GATEWAY_AUTH_ENABLED"] == "true"
     assert "JWT_ISSUER" in gateway["environment"]
     assert "JWT_SECRET" in gateway["environment"]
@@ -127,7 +127,7 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     env = {item["name"]: item for item in container["env"]}
     assert env["JWT_SECRET"]["valueFrom"]["secretKeyRef"]["key"] == "JWT_SECRET"
     assert env["GATEWAY_SIGNING_SECRET"]["valueFrom"]["secretKeyRef"]["optional"] is True
-    assert set(env) == {"TZ", "GATEWAY_DB_HOST", "GATEWAY_DB_PORT", "GATEWAY_DB_NAME", "GATEWAY_DB_USER", "GATEWAY_DB_PASSWORD", "GATEWAY_DB_POOL_SIZE", "GATEWAY_DB_TIMEOUT", "JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
+    assert set(env) == {"TZ", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
                         "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT"}
 
 

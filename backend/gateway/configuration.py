@@ -38,11 +38,11 @@ class GatewaySettings:
         if self.deployment_version not in {"full", "speed"}:
             raise ValueError("DEPLOYMENT_VERSION must be full or speed")
         if type(self.db_port) is not int or not 1 <= self.db_port <= 65535:
-            raise ValueError("GATEWAY_DB_PORT must be between 1 and 65535")
+            raise ValueError("POSTGRES_PORT must be between 1 and 65535")
         if type(self.db_pool_size) is not int or not 1 <= self.db_pool_size <= 64:
-            raise ValueError("GATEWAY_DB_POOL_SIZE must be between 1 and 64")
+            raise ValueError("Gateway database pool size must be between 1 and 64")
         if type(self.db_timeout) not in (int, float) or not math.isfinite(self.db_timeout) or not 0 < self.db_timeout <= 60:
-            raise ValueError("GATEWAY_DB_TIMEOUT must be finite and between 0 and 60 seconds")
+            raise ValueError("Gateway database timeout must be finite and between 0 and 60 seconds")
 
     def database_options(self):
         if not all(isinstance(value, str) and value.strip() for value in
@@ -71,9 +71,6 @@ def load_settings(environ=None):
         port = int(values.get("GATEWAY_PORT", "5013"))
     except (TypeError, ValueError) as exc:
         raise ValueError("GATEWAY_PORT must be an integer between 1 and 65535") from exc
-    def database_value(gateway_name, postgres_name, default):
-        return values.get(gateway_name) or values.get(postgres_name) or default
-
     management = values.get("GATEWAY_MANAGEMENT_URL", "http://localhost:5010").rstrip("/")
     return GatewaySettings(
         host=values.get("GATEWAY_HOST", "0.0.0.0"), port=port,
@@ -84,11 +81,9 @@ def load_settings(environ=None):
         jwt_issuer=values.get("JWT_ISSUER", "nexent"),
         signing_secret=values.get("GATEWAY_SIGNING_SECRET", ""),
         deployment_version=values.get("DEPLOYMENT_VERSION", "full"),
-        db_host=database_value("GATEWAY_DB_HOST", "POSTGRES_HOST", "localhost"),
-        db_port=int(database_value("GATEWAY_DB_PORT", "POSTGRES_PORT", "5432")),
-        db_name=database_value("GATEWAY_DB_NAME", "POSTGRES_DB", "nexent"),
-        db_user=database_value("GATEWAY_DB_USER", "POSTGRES_USER", "root"),
-        db_password=database_value("GATEWAY_DB_PASSWORD", "NEXENT_POSTGRES_PASSWORD", ""),
-        db_pool_size=int(values.get("GATEWAY_DB_POOL_SIZE", "8")),
-        db_timeout=float(values.get("GATEWAY_DB_TIMEOUT", "5")),
+        db_host=(values.get("POSTGRES_HOST") or "localhost"),
+        db_port=int((values.get("POSTGRES_PORT") or "5432")),
+        db_name=(values.get("POSTGRES_DB") or "nexent"),
+        db_user=(values.get("POSTGRES_USER") or "root"),
+        db_password=values.get("NEXENT_POSTGRES_PASSWORD", ""),
     )

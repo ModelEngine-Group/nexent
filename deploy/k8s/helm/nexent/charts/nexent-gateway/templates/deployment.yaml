@@ -22,7 +22,7 @@ spec:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-gateway-image: {{ dig "rolloutChecksums" "gatewayImage" "" .Values.global | quote }}
-        checksum/nexent-gateway-database: {{ dig "rolloutChecksums" "gatewayDatabase" "" .Values.global | quote }}
+        checksum/nexent-postgres: {{ dig "rolloutChecksums" "postgresSecret" "" .Values.global | quote }}
     spec:
       containers:
         - name: nexent-gateway
@@ -44,41 +44,31 @@ spec:
                 configMapKeyRef:
                   name: nexent-config
                   key: TZ
-            - name: GATEWAY_DB_HOST
+            - name: POSTGRES_HOST
               valueFrom:
                 configMapKeyRef:
                   name: nexent-config
-                  key: GATEWAY_DB_HOST
-            - name: GATEWAY_DB_PORT
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
               valueFrom:
                 configMapKeyRef:
                   name: nexent-config
-                  key: GATEWAY_DB_PORT
-            - name: GATEWAY_DB_NAME
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
                   name: nexent-config
-                  key: GATEWAY_DB_NAME
-            - name: GATEWAY_DB_USER
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
               valueFrom:
                 configMapKeyRef:
                   name: nexent-config
-                  key: GATEWAY_DB_USER
-            - name: GATEWAY_DB_POOL_SIZE
-              valueFrom:
-                configMapKeyRef:
-                  name: nexent-config
-                  key: GATEWAY_DB_POOL_SIZE
-            - name: GATEWAY_DB_TIMEOUT
-              valueFrom:
-                configMapKeyRef:
-                  name: nexent-config
-                  key: GATEWAY_DB_TIMEOUT
-            - name: GATEWAY_DB_PASSWORD
+                  key: POSTGRES_USER
+            - name: NEXENT_POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: nexent-secrets
-                  key: GATEWAY_DB_PASSWORD
+                  key: NEXENT_POSTGRES_PASSWORD
             - name: GATEWAY_PORT
               value: "5013"
             - name: GATEWAY_AUTH_ENABLED

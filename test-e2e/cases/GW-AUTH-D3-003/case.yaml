@@ -16,7 +16,7 @@ case:
   status: active
   automation: automated
   objective: Verify actual PostgreSQL role/column contracts and live Gateway protocol
-    with no Management lookup hop, using both inherited PostgreSQL settings and independent Gateway overrides.
+    with no Management lookup hop, using existing PostgreSQL settings directly.
   preconditions:
   - Disposable PostgreSQL admin DSN supplied through NEXENT_GATEWAY_TEST_ADMIN_DSN;
     only a local temporary server may be used.
@@ -28,7 +28,7 @@ case:
   steps:
   - order: 1
     action: Create isolated database and read-only identity role; start actual Gateway,
-      Management and Runtime recording listeners in inherited PostgreSQL and Gateway override configurations. Exercise session, API key, SU/asset-owner,
+      Management and Runtime recording listeners using shared PostgreSQL configuration. Exercise session, API key, SU/asset-owner,
       signed MCP delegation and WS/SSE.
     expected: Correct user/tenant/role crosses the target signed boundary; no identity
       HTTP lookup is made.

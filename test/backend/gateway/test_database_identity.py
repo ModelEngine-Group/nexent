@@ -198,16 +198,17 @@ async def test_lifespan_owns_default_repository_and_does_not_open_management_loo
     repo.close.assert_awaited_once()
 
 
-@pytest.mark.parametrize("name,value", [("GATEWAY_DB_PORT", "0"), ("GATEWAY_DB_POOL_SIZE", "0"),
-                                         ("GATEWAY_DB_POOL_SIZE", "65"), ("GATEWAY_DB_TIMEOUT", "nan"),
-                                         ("GATEWAY_DB_TIMEOUT", "inf"), ("GATEWAY_DB_TIMEOUT", "0")])
-def test_invalid_database_configuration_fails_without_secret_disclosure(name, value):
-    with pytest.raises(ValueError): load_settings({name: value})
+@pytest.mark.parametrize("field,value", [("db_port", 0), ("db_pool_size", 0),
+                                         ("db_pool_size", 65), ("db_timeout", float("nan")),
+                                         ("db_timeout", float("inf")), ("db_timeout", 0)])
+def test_invalid_database_configuration_fails_without_secret_disclosure(field, value):
+    with pytest.raises(ValueError):
+        GatewaySettings(**{field: value})
 
 
 def test_database_credentials_are_required_and_redacted():
     with pytest.raises(ValueError): GatewaySettings().database_options()
-    settings = load_settings({"GATEWAY_DB_PASSWORD": "database-secret"})
+    settings = load_settings({"NEXENT_POSTGRES_PASSWORD": "database-secret"})
     assert settings.database_options()["password"] == "database-secret"
     assert "database-secret" not in repr(settings)
 

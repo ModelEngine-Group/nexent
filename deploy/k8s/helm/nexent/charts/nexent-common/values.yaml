@@ -39,13 +39,6 @@ config:
     dataProcessService: "http://nexent-data-process:5012/api"
     northboundServer: "http://nexent-gateway:5013/api"
     northboundExternalUrl: "" # Set this to the public-facing URL for external A2A clients. Example: https://api.yourdomain.com/api or http://your-public-ip:5013/api
-  gatewayIdentity:
-    host: ""
-    port: ""
-    db: ""
-    user: "" # Empty connection overrides reuse config.postgres and secrets.postgresPassword.
-    poolSize: "8"
-    timeout: "5"
   postgres:
     host: "nexent-postgresql"
     user: "root"
@@ -233,7 +226,6 @@ secrets:
     password: "nexent@2025"
   jwtSecret: ""
   gatewaySigningSecret: ""
-  gatewayDatabasePassword: ""
 
 # Storage configuration (can be referenced by other charts)
 storage:

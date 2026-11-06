@@ -14,41 +14,21 @@ The image contains Gateway, its launcher, and only the side-effect-free infrastr
 
 ## Database configuration
 
-Configure these values through deployment secrets/environment, not inside the image.
+Gateway reads the existing PostgreSQL configuration directly. Compose passes only these connection values; Helm references the existing shared ConfigMap and Secret. No separate database account, password, override layer or bootstrap SQL is needed.
 
 | Variable | Default |
 | --- | --- |
-| GATEWAY_DB_HOST | POSTGRES_HOST; localhost for direct launches, nexent-postgresql in Compose |
-| GATEWAY_DB_PORT | POSTGRES_PORT, otherwise 5432 |
-| GATEWAY_DB_NAME | POSTGRES_DB, otherwise nexent |
-| GATEWAY_DB_USER | POSTGRES_USER, otherwise root |
-| GATEWAY_DB_PASSWORD | NEXENT_POSTGRES_PASSWORD; an effective password is required with authentication enabled and redacted from settings repr |
-| GATEWAY_DB_POOL_SIZE | 8, valid range1..64 per replica |
-| GATEWAY_DB_TIMEOUT | 5 seconds, finite range greater than0 through60 |
+| POSTGRES_HOST | localhost for direct launches; nexent-postgresql in deployment |
+| POSTGRES_PORT | 5432 |
+| POSTGRES_DB | nexent |
+| POSTGRES_USER | root |
+| NEXENT_POSTGRES_PASSWORD | Required when authentication is enabled; redacted from settings repr |
 
-Keep `TZ` identical to Management because the current CAS schema stores naive local expiration timestamps. Shipped Compose/Helm propagate the deployment timezone to Gateway. JWT_SECRET, JWT_ISSUER and optional GATEWAY_SIGNING_SECRET must match downstream services. GATEWAY_HOST defaults0.0.0.0 and GATEWAY_PORT defaults5013. Authentication defaults enabled; missing keys or database credentials fail startup. Explicitly disabled diagnostic mode creates no database pool. Health reports local process readiness, not continuous database/business/model availability.
+The connection pool defaults to8 connections per replica and a5-second timeout. Every identity lookup uses a read-only transaction. Effective database permissions belong to the existing PostgreSQL account. Gateway runs no migrations or create_all; Management retains schema ownership.
 
-Gateway reuses the existing PostgreSQL account and password by default. No extra role or password is required. Leave connection overrides empty in deploy/env/.env.example to inherit PostgreSQL settings; each nonempty GATEWAY_DB_HOST/PORT/NAME/USER/PASSWORD takes precedence independently. When upgrading from the previous dedicated-login defaults, clear an existing GATEWAY_DB_USER=nexent_gateway and its password override if you want to reuse PostgreSQL credentials; existing nonempty overrides remain intentional and are not overwritten. For a separate account, set both GATEWAY_DB_USER and GATEWAY_DB_PASSWORD to that account's credentials. Gateway still uses read-only transactions; its effective database permissions are those of the selected account.
+The Kubernetes deployment script updates global.rolloutChecksums.postgresSecret when the existing password changes, restarting Gateway to replace its pool credentials. For direct Helm installs configure nexent-common.config.postgres and nexent-common.secrets.postgresPassword. On direct Helm rotations, update the postgresSecret rollout digest or restart deployment/nexent-gateway.
 
-Optionally provision a dedicated login with only the required grants. Connect as a database administrator to the configured identity database and use a secure password prompt or the site's secret manager. The following is an optional operator example for the nexent database and a separate nexent_gateway role. It is not an automatic schema migration.
-
-```sql
-CREATE ROLE nexent_gateway LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
--- In psql, set the password through its secure prompt.
-\password nexent_gateway
-GRANT CONNECT ON DATABASE nexent TO nexent_gateway;
-GRANT USAGE ON SCHEMA nexent TO nexent_gateway;
-GRANT SELECT (user_id,user_email,user_role,token_version,delete_flag)
-  ON nexent.user_account_t TO nexent_gateway;
-GRANT SELECT (user_tenant_id,user_id,tenant_id,delete_flag)
-  ON nexent.user_tenant_t TO nexent_gateway;
-GRANT SELECT (user_id,token_id,access_key,delete_flag)
-  ON nexent.user_token_info_t TO nexent_gateway;
-GRANT SELECT (session_id,user_id,status,expires_at,delete_flag)
-  ON nexent.user_cas_session_t TO nexent_gateway;
-```
-
-For the optional restricted login, verify that it cannot write identities or read password_hash and does not inherit owner privileges. No SQL migration/create_all/bootstrap runs in Gateway. Main Management retains schema migration ownership. Compose maps the effective PostgreSQL connection settings into Gateway's explicit environment without loading the whole backend env file. Direct Helm defaults to `nexent-common.config.postgres` and `nexent-common.secrets.postgresPassword`; optional nonempty `config.gatewayIdentity` fields and `secrets.gatewayDatabasePassword` override them. The Kubernetes deployment script hashes the effective password in the Pod template, so password rotations roll Gateway to replace its connection pool. When applying Helm values directly, also change global.rolloutChecksums.gatewayDatabase to a digest of the effective password, or run kubectl rollout restart deployment/nexent-gateway after rotating credentials.
+Keep TZ identical to Management because CAS expiration uses naive local timestamps. JWT_SECRET, JWT_ISSUER and optional GATEWAY_SIGNING_SECRET must match downstream services. Authentication defaults enabled; missing keys or database credentials fail startup. Explicitly disabled diagnostic mode creates no database pool. Health reports local process readiness.
 
 ## Exposure and transports
 
@@ -58,7 +38,7 @@ Gateway owns a shared HTTP client without a user-cookie jar. SSE/WS responses cl
 
 ## Build, upgrade and rollback
 
-Build with `bash deploy/images/build.sh --gateway --version <release-tag> --load` and rebuild the backend from the same revision. Configure the existing PostgreSQL account/password before startup; a dedicated reader is optional. Compose/Helm now create `nexent-gateway:5013`; frontend and MCP references use that service. No independent northbound image exists, and no image is deleted by this change.
+Build with `bash deploy/images/build.sh --gateway --version <release-tag> --load` and rebuild the backend from the same revision. Configure the existing PostgreSQL account/password before startup. Compose/Helm now create `nexent-gateway:5013`; frontend and MCP references use that service. No independent northbound image exists, and no image is deleted by this change.
 
 Docker deployment checks the old `nexent-northbound` container's Compose project/service labels, disables its restart policy, stops it gracefully and removes only that container before starting the new Gateway. Images and volumes are preserved. A mismatched owner stops the upgrade for inspection. Do not keep running an older Compose file that recreates the old service. Helm upgrades within the same release remove the old chart resources and create the new Gateway deployment/service. Audit custom NetworkPolicies and external service references during rollout.
 

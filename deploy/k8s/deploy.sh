@@ -351,19 +351,6 @@ env_or_default() {
   fi
 }
 
-gateway_database_value() {
-  local override_name="$1"
-  local postgres_name="$2"
-  local fallback="$3"
-  if [ -n "${!override_name}" ]; then
-    printf '%s' "${!override_name}"
-  elif [ -n "${!postgres_name}" ]; then
-    printf '%s' "${!postgres_name}"
-  else
-    printf '%s' "$fallback"
-  fi
-}
-
 render_yaml_literal_file() {
   local key="$1"
   local file="$2"
@@ -443,13 +430,11 @@ render_k8s_runtime_config_values() {
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "  config:"
     printf '    timezone: %s\n' "$(yaml_quote "${TZ:-Asia/Shanghai}")"
-    echo "    gatewayIdentity:"
-    printf '      host: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_HOST POSTGRES_HOST "nexent-postgresql")")"
-    printf '      port: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_PORT POSTGRES_PORT "5432")")"
-    printf '      db: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_NAME POSTGRES_DB "nexent")")"
-    printf '      user: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_USER POSTGRES_USER "root")")"
-    printf '      poolSize: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_POOL_SIZE "8")")"
-    printf '      timeout: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_TIMEOUT "5")")"
+    echo "    postgres:"
+    printf '      host: %s\n' "$(yaml_quote "${POSTGRES_HOST:-nexent-postgresql}")"
+    printf '      port: %s\n' "$(yaml_quote "${POSTGRES_PORT:-5432}")"
+    printf '      db: %s\n' "$(yaml_quote "${POSTGRES_DB:-nexent}")"
+    printf '      user: %s\n' "$(yaml_quote "${POSTGRES_USER:-root}")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
     printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-gateway:5013/api")")"
@@ -1130,7 +1115,7 @@ render_runtime_secret_values() {
         printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
         printf '    authSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$JWT_SECRET")")"
-        printf '    gatewayDatabase: %s\n' "$(yaml_quote "$(deployment_sha256_string "$(gateway_database_value GATEWAY_DB_PASSWORD NEXENT_POSTGRES_PASSWORD "nexent@4321")")")"
+        printf '    postgresSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")")"
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  envFiles:"
@@ -1141,7 +1126,6 @@ render_runtime_secret_values() {
         echo "  secrets:"
         printf '    elasticsearchApiKey: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_API_KEY "")")"
         printf '    postgresPassword: %s\n' "$(yaml_quote "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")"
-        printf '    gatewayDatabasePassword: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_PASSWORD "")")"
         echo "    minio:"
         printf '      rootUser: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_USER "nexent")")"
         printf '      rootPassword: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")")"

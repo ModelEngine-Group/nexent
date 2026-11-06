@@ -72,7 +72,7 @@ def test_composition_defines_only_unified_gateway_entry(filename):
     assert "nexent-northbound" not in services
     assert services["nexent-gateway"]["container_name"] == "nexent-gateway"
     assert "NEXENT_GATEWAY_IMAGE" in services["nexent-gateway"]["image"]
-    assert "GATEWAY_DB_PASSWORD" in services["nexent-gateway"]["environment"]
+    assert "NEXENT_POSTGRES_PASSWORD" in services["nexent-gateway"]["environment"]
     assert all("northbound_service.py" not in str(service) for service in services.values())
 
 
