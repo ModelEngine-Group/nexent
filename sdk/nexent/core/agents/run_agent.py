@@ -462,14 +462,23 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 agent_run_info.stop_event
             )
 
-            with ManagedMCPToolCollection(
+            mcp_tool_collection = ManagedMCPToolCollection(
                 manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
                 server_parameters=mcp_client_list,
                 cancellation_scope=mcp_cancellation_scope,
                 tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
                 close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
                 connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
-            ) as tool_collection:
+            )
+            with mcp_tool_collection as tool_collection:
+                for connection_failure in mcp_tool_collection.connection_failures:
+                    agent_run_info.observer.add_message(
+                        "",
+                        ProcessType.WARNING,
+                        f"MCP server {connection_failure.url} "
+                        f"(transport={connection_failure.transport}) unavailable; "
+                        f"its tools are skipped for this run",
+                    )
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
