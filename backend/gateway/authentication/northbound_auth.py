@@ -20,7 +20,7 @@ from contracts.errors.exceptions import (
     UnauthorizedError,
 )
 from fastapi import HTTPException, Request
-from gateway.authentication.auth import extract_bearer_token
+from gateway.authentication.auth import extract_bearer_token, require_active_account
 from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
@@ -144,6 +144,7 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
     try:
         token_info = get_token_by_access_key(token)
         if token_info and token_info.get("delete_flag") != "Y":
+            require_active_account(token_info.get("user_id"))
             logger.debug(
                 f"Token validated successfully for user {token_info.get('user_id')}"
             )
@@ -182,6 +183,7 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
         raise TokenExpiredError("No user associated with this access key")
 
     # Query tenant from user_tenant_t
+    require_active_account(user_id)
     user_tenant_record = get_user_tenant_by_user_id(user_id)
     if not user_tenant_record or not user_tenant_record.get("tenant_id"):
         raise TokenExpiredError("No active tenant relationship for this access key")

@@ -17,20 +17,6 @@ dependencies:
     version: 0.1.0
     repository: "file://./charts/nexent-common"
 
-  # Supabase services (only deployed when global.deploymentVersion == "full")
-  - name: nexent-supabase-kong
-    version: 0.1.0
-    repository: "file://./charts/nexent-supabase-kong"
-    condition: nexent-supabase-kong.enabled
-  - name: nexent-supabase-auth
-    version: 0.1.0
-    repository: "file://./charts/nexent-supabase-auth"
-    condition: nexent-supabase-auth.enabled
-  - name: nexent-supabase-db
-    version: 0.1.0
-    repository: "file://./charts/nexent-supabase-db"
-    condition: nexent-supabase-db.enabled
-
   # Application services
   - name: nexent-ops
     version: 0.1.0

@@ -7,9 +7,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from contracts.annotations import MessageAnnotationItem
 from contracts.clarification import ClarificationResponse
@@ -77,6 +77,14 @@ class MessageRequest(BaseModel):
     annotations: Optional[List[MessageAnnotationItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
+
+
+class ConversationTarget(BaseModel):
+    """Resource edited by a creator conversation, distinct from its executor."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["agent", "skill"]
+    id: StrictInt = Field(gt=0)
 
 
 class ConversationRequest(BaseModel):
@@ -165,6 +173,8 @@ class ConversationHistory(TypedDict):
     conversation_id: int
     conversation_title: str
     agent_id: Optional[int]
+    target: Optional[Dict[str, Any]]
+    agent_system_key: Optional[str]
     knowledge_scope: Optional[Dict[str, Any]]
     runtime_metadata: Dict[str, Any]
     runtime_metadata_version: int
@@ -174,6 +184,17 @@ class ConversationHistory(TypedDict):
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
     image_records: List[ImageRecord]
+
+
+class ConversationModelPreferencePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+
+
+class ConversationModelSelectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selected_model_id: int = Field(gt=0, lt=2**31, strict=True)
 
 
 def _search_fingerprint(search: str) -> str:
@@ -263,3 +284,4 @@ def decode_agent_conversation_cursor(
         return activity.astimezone(timezone.utc), value[1]
     except (ValueError, TypeError, UnicodeError, OverflowError) as exc:
         raise ValueError("Invalid agent conversation cursor") from exc
+

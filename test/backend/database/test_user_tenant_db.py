@@ -114,6 +114,13 @@ class MockUserTenant:
             "update_time": "2024-01-01 00:00:00"
         }
 
+@pytest.fixture(autouse=True)
+def account_profile_writer(monkeypatch):
+    writer = MagicMock()
+    monkeypatch.setattr("management.db.identity.user_tenant.set_account_profile", writer)
+    return writer
+
+
 @pytest.fixture
 def mock_session():
     """Create mock database session"""
@@ -264,8 +271,6 @@ def test_insert_user_tenant_with_empty_user_id(monkeypatch, mock_session):
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="",
         tenant_id="test_tenant_id",
-        user_role="USER",
-        user_email=None,
         created_by="",
         updated_by=""
     )
@@ -294,8 +299,6 @@ def test_insert_user_tenant_with_empty_tenant_id(monkeypatch, mock_session):
     mock_user_tenant_constructor.assert_called_once_with(
         user_id="test_user_id",
         tenant_id="",
-        user_role="USER",
-        user_email=None,
         created_by="test_user_id",
         updated_by="test_user_id"
     )
@@ -779,7 +782,7 @@ def test_get_users_by_tenant_id_empty_result(monkeypatch, mock_session):
     assert result["users"] == []
 
 
-def test_update_user_tenant_role_success(monkeypatch, mock_session):
+def test_update_user_tenant_role_success(monkeypatch, mock_session, account_profile_writer):
     """Test successfully updating user tenant role"""
     session, query = mock_session
 
@@ -796,9 +799,9 @@ def test_update_user_tenant_role_success(monkeypatch, mock_session):
     result = update_user_tenant_role("user123", "ADMIN", "updater456")
 
     assert result is True
+    account_profile_writer.assert_called_once_with("user123", "ADMIN", None, "updater456", session)
     # Verify the update was called with correct parameters
     mock_update_query.update.assert_called_once_with({
-        "user_role": "ADMIN",
         "updated_by": "updater456",
         "update_time": "NOW()"
     })

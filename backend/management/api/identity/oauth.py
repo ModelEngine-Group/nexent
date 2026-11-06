@@ -15,9 +15,28 @@ from contracts.identity import OAuthCompleteRequest
 from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
 from management.utils.oauth_providers import get_all_provider_definitions
 from management.db.identity.oauth_account import get_oauth_account_by_provider
-from management.services.permission.identity.oauth import complete_pending_oauth_account, create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, generate_pending_oauth_token, get_authorize_url, get_enabled_providers, get_oauth_config, get_pending_oauth_info, get_provider_user_info, list_linked_accounts, unlink_account
+from management.services.permission.identity.oauth import (
+    complete_pending_oauth_account,
+    create_or_update_oauth_account,
+    ensure_user_tenant_exists,
+    exchange_code_for_provider_token,
+    find_account_user_id_by_email,
+    generate_pending_oauth_token,
+    get_authorize_url,
+    get_enabled_providers,
+    get_oauth_config,
+    get_pending_oauth_info,
+    get_provider_user_info,
+    list_linked_accounts,
+    unlink_account,
+)
+from gateway.authentication.auth import (
+    calculate_expires_at,
+    generate_session_jwt,
+    require_active_account,
+    get_current_user_id,
+)
 from gateway.authentication.auth import parse_state, parse_pending_oauth_token
-from gateway.authentication.auth import calculate_expires_at, generate_session_jwt, get_current_user_id, get_supabase_admin_client
 from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)
@@ -140,24 +159,18 @@ async def callback(
         username = user_info["username"]
 
         if link_user_id:
-            supabase_user_id = link_user_id
+            user_id = link_user_id
         else:
             # First check if this OAuth account is already bound to a user
             existing_binding = get_oauth_account_by_provider(provider, provider_user_id)
             if existing_binding:
-                supabase_user_id = existing_binding["user_id"]
+                user_id = existing_binding["user_id"]
             else:
-                supabase_user_id = None
+                user_id = None
                 if email:
-                    admin_client = get_supabase_admin_client()
-                    if not admin_client:
-                        raise RuntimeError("Supabase admin client not available")
-                    supabase_user_id = find_supabase_user_id_by_email(
-                        admin_client,
-                        email,
-                    )
+                    user_id = find_account_user_id_by_email(email)
 
-                if not supabase_user_id:
+                if not user_id:
                     pending_token = generate_pending_oauth_token(
                         provider=provider,
                         provider_user_id=provider_user_id,
@@ -179,34 +192,33 @@ async def callback(
                         },
                     )
 
-        ensure_user_tenant_exists(user_id=supabase_user_id, email=email)
+        require_active_account(user_id)
+        ensure_user_tenant_exists(user_id=user_id, email=email)
 
         create_or_update_oauth_account(
-            user_id=supabase_user_id,
+            user_id=user_id,
             provider=provider,
             provider_user_id=provider_user_id,
             email=email,
             username=username,
         )
 
-        jwt_token = generate_session_jwt(supabase_user_id, expires_in=JWT_EXPIRY_SECONDS)
+        jwt_token = generate_session_jwt(
+            user_id, expires_in=JWT_EXPIRY_SECONDS
+        )
         expiry_seconds = JWT_EXPIRY_SECONDS
         expires_at = calculate_expires_at(jwt_token)
 
-        record_security_event(
-            "oauth_login",
-            request=http_request,
-            user_id=supabase_user_id,
-            user_email=email,
-            details={"provider": provider, "linked": bool(link_user_id)},
-        )
+        record_security_event("oauth_login", request=http_request,
+                              user_id=user_id, user_email=email,
+                              details={"provider": provider, "linked": bool(link_user_id)})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
                 "message": "OAuth login successful",
                 "data": {
                     "user": {
-                        "id": str(supabase_user_id),
+                        "id": str(user_id),
                         "email": email,
                     },
                     "session": {

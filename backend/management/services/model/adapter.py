@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Backend bridge: turn DB model configs into gateway adapters.
 Service factory functions keep their signatures but delegate adapter
 construction to the gateway via :func:`get_adapter_from_config`.
@@ -22,6 +23,9 @@ from nexent.core.gateway import (
     get_gateway,
 )
 from nexent.core.gateway.registry import get_registry
+from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+from nexent.core.model_service.profiles.outlet_storage import ProfileStorageError, decode_resolved_model_profile
+from nexent.core.model_service.registry import model_service_references
 from management.services.configuration.tenant.settings import tenant_config_manager
 
 logger = logging.getLogger("model_gateway_service")
@@ -119,6 +123,22 @@ def _llm_construct_kwargs(
     }
 
 
+def restore_model_snapshot(cfg: dict, tenant_id: str):
+    """Restore one row with executable registrations; never reload TOML or credentials."""
+    if cfg.get("profile_schema_version") is None:
+        if cfg.get("resolved_profile") is not None or cfg.get("protocol_id") is not None:
+            raise ProfileStorageError()
+        if cfg.get("model_id") is not None and cfg.get("model_type") in {"llm", "chat"}:
+            from contracts.errors.exceptions import ModelOutletValidationError
+
+            raise ModelOutletValidationError("PROFILE_MIGRATION_REQUIRED")
+        return None
+    profile = decode_resolved_model_profile(cfg, registered_references=model_service_references())
+    if profile.identity.tenant_id != tenant_id:
+        raise ProfileStorageError()
+    return profile
+
+
 def _config_to_context(
     cfg: Optional[dict],
     modality: str,
@@ -134,6 +154,25 @@ def _config_to_context(
     keys are mapped to subclass fields directly.
     """
     cfg = cfg or {}
+    if modality in ("llm", "llm_long_context"):
+        snapshot = restore_model_snapshot(cfg, tenant_id)
+        if snapshot is not None:
+            # Explicit legacy business overrides remain validated, rather than overriding the wire body.
+            overrides = {key: construct_extras[key] for key in ("temperature", "top_p", "max_output_tokens")
+                         if construct_extras.get(key) is not None}
+            snapshot = LegacyInvocationOptions(overrides).resolve(snapshot)
+            requested_name = construct_extras.get("model_name", snapshot.identity.request_model_id)
+            if requested_name != snapshot.identity.request_model_id:
+                raise ProfileStorageError()
+            context_type = {"llm": LLMContext, "llm_long_context": LongContextLLMContext}[modality]
+            return context_type(
+                model_name=snapshot.identity.request_model_id, base_url=snapshot.connection.base_url,
+                api_key=cfg.get("api_key", ""), http_headers=cfg.get("http_headers") or {},
+                modality=modality, factory="openai",
+                tenant_id=tenant_id, slot=slot, observer=construct_extras.get("observer") or MessageObserver(),
+                resolved_profile=snapshot, cancellation_scope=construct_extras.get("cancellation_scope"),
+                **({"truncation_strategy": cfg.get("truncation_strategy")} if modality == "llm_long_context" else {}),
+            )
     factory = _normalize_factory(cfg.get("model_factory"), modality)
     needs_observer = modality in ("vlm", "llm", "llm_long_context")
     observer = construct_extras.pop("observer", None)

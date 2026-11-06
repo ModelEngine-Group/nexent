@@ -13,15 +13,15 @@ from typing import Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from starlette.responses import JSONResponse, Response
+
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
 from contracts.conversation import ConversationResponse
 from contracts.tag import TagAssignmentFilter
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
-from permissions.depends import require
-from permissions.models import CurrentUser
 from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
@@ -44,20 +44,11 @@ from management.services.agent.service import (
     check_skill_conflicts_impl,
 )
 from management.services.agent.prompt_generation import generate_guardrail_rules_impl
+from management.services.agent.policy import prepare_import_retrieval_params
 from management.services.knowledge_base.scope import get_agent_knowledge_capabilities
 from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
-)
-from management.services.agent.system import (
-    ensure_workbench_main_agent,
-)
-from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from contracts.errors.exceptions import RunModelControlsError
-from management.services.conversation.creation_history import (
-    prepare_creation_history,
-    persist_creation_stream,
 )
 from management.services.agent.versions import (
     publish_version_impl,
@@ -72,7 +63,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from gateway.authentication.auth import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from gateway.authentication.auth import get_current_user_info, get_current_user_id
 
 agent_config_router = APIRouter(prefix="/agent")
 
@@ -90,26 +81,11 @@ async def get_workbench_bootstrap_api(
     _, tenant_id = get_current_user_id(authorization)
     try:
         generic_agent = build_workbench_main_profile(tenant_id)
-    except Exception:
-        # The feature may be enabled after this tenant was created. Initialize
-        # lazily if the startup backfill has not reached it yet.
-        try:
-            await run_blocking(
-                "workbench-bootstrap",
-                ensure_workbench_main_agent,
-                tenant_id,
-                "system",
-            )
-            generic_agent = build_workbench_main_profile(tenant_id)
-        except Exception:
-            logger.exception(
-                "Failed to load workbench_main presentation profile for tenant %s",
-                tenant_id,
-            )
-            generic_agent = {
-                "display_name": "Nexent Workbench",
-                "default_skill_resources": [],
-            }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail={"code": "WORKBENCH_SYSTEM_AGENT_UNAVAILABLE"},
+        ) from exc
     return {
         "code": 0,
         "message": "success",
@@ -267,6 +243,9 @@ async def update_agent_info_api(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
         return result or {}
+    except ParameterValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail={"code": exc.category, "field": exc.path}) from None
     except AgentRelationValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except AgentNotFoundError as exc:
@@ -507,6 +486,7 @@ async def import_agent_api(
         "skills_count": len(request.skills) if request.skills else 0,
     }
     try:
+        prepare_import_retrieval_params(request.agent_info)
         if request.skills:
             agent_id_mapping = await import_agent_with_skills_impl(
                 request.agent_info,

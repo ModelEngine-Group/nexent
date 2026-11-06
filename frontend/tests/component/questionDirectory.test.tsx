@@ -17,6 +17,7 @@ import {
   type QuestionMessageLike,
 } from "@/app/newchat/utils/question-directory";
 import { QuestionDirectoryButton } from "@/app/newchat/ui/question-directory";
+import { QuestionDirectoryRail } from "@/app/newchat/ui/question-directory-rail";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("react-i18next", () => ({
@@ -36,7 +37,7 @@ vi.mock("@/lib/logger", () => ({
 const makeMessage = (
   id: string,
   role: string,
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> = {}
 ): QuestionMessageLike =>
   ({
     id,
@@ -49,6 +50,164 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   document.body.innerHTML = "";
+});
+
+test("QuestionDirectoryRail hides for an empty conversation", () => {
+  const { container } = render(
+    <QuestionDirectoryRail questions={[]} onJump={vi.fn()} />
+  );
+  expect(container.firstChild).toBeNull();
+});
+
+test("QuestionDirectoryRail renders question ticks, marks current and jumps", () => {
+  const onJump = vi.fn();
+  const questions = collectQuestionDirectory([
+    makeMessage("u1", "user"),
+    makeMessage("u2", "user"),
+  ]);
+  const { container } = render(
+    <QuestionDirectoryRail
+      questions={questions}
+      onJump={onJump}
+      activeMessageId="u2"
+    />
+  );
+  const first = screen.getByRole("button", { name: "chat.questions.jump:1" });
+  const second = screen.getByRole("button", { name: "chat.questions.jump:2" });
+  expect(first.getAttribute("aria-current")).toBeNull();
+  expect(second.getAttribute("aria-current")).toBe("location");
+  expect(
+    container.querySelectorAll('[data-slot="question-rail-current-dot"]')
+  ).toHaveLength(1);
+  fireEvent.click(first);
+  expect(onJump).toHaveBeenCalledWith("u1");
+});
+
+test("QuestionDirectoryRail previews question and reply on keyboard focus", async () => {
+  const questions = collectQuestionDirectory([
+    makeMessage("u1", "user"),
+    makeMessage("a1", "assistant"),
+  ]);
+  render(<QuestionDirectoryRail questions={questions} onJump={vi.fn()} />);
+  fireEvent.focus(
+    screen.getByRole("button", { name: "chat.questions.jump:1" })
+  );
+  const preview = await screen.findByRole("tooltip");
+  expect(preview.textContent).toContain("question u1");
+  expect(preview.textContent).toContain("question a1");
+});
+
+test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2", async () => {
+  const questions = collectQuestionDirectory([
+    makeMessage("u1", "user"),
+    makeMessage("u2", "user"),
+    makeMessage("u3", "user"),
+  ]);
+  render(
+    <QuestionDirectoryRail
+      questions={questions}
+      onJump={vi.fn()}
+      activeMessageId="u3"
+    />
+  );
+  const second = screen.getByRole("button", { name: "chat.questions.jump:2" });
+  const third = screen.getByRole("button", { name: "chat.questions.jump:3" });
+  const rect = (x: number, y: number, width: number, height: number) =>
+    ({
+      x,
+      y,
+      width,
+      height,
+      top: y,
+      left: x,
+      right: x + width,
+      bottom: y + height,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  const bounds = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      if (this === second) return rect(0, 15, 32, 15);
+      if (this === third) return rect(0, 30, 32, 15);
+      // A tall preview beside the ticks overlaps the diagonal hover corridor.
+      if (this.getAttribute("role") === "tooltip") return rect(40, 0, 288, 300);
+      return rect(0, 0, 0, 0);
+    });
+  try {
+    fireEvent.pointerMove(third, {
+      pointerType: "mouse",
+      clientX: 31,
+      clientY: 38,
+    });
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "question u3"
+    );
+    fireEvent.pointerLeave(third, {
+      pointerType: "mouse",
+      clientX: 31,
+      clientY: 30,
+    });
+    fireEvent.pointerMove(second, {
+      pointerType: "mouse",
+      clientX: 31,
+      clientY: 25,
+    });
+    await waitFor(() => {
+      const previews = screen.getAllByRole("tooltip");
+      expect(previews).toHaveLength(1);
+      expect(previews[0].textContent).toContain("question u2");
+      expect(previews[0].textContent).not.toContain("question u3");
+    });
+    fireEvent.pointerLeave(second, {
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 15,
+    });
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+  } finally {
+    bounds.mockRestore();
+  }
+});
+
+test("QuestionDirectoryRail retains the searchable full directory", async () => {
+  const questions = collectQuestionDirectory([
+    makeMessage("u1", "user"),
+    makeMessage("u2", "user"),
+  ]);
+  render(<QuestionDirectoryRail questions={questions} onJump={vi.fn()} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+  const search = await screen.findByRole("textbox", {
+    name: "chat.questions.search",
+  });
+  fireEvent.change(search, { target: { value: "u2" } });
+  expect(screen.queryByText("question u1")).toBeNull();
+  expect(screen.getByText("question u2")).toBeTruthy();
+});
+
+test("QuestionDirectoryRail keeps the active tick visible without scrolling chat", () => {
+  const questions = collectQuestionDirectory([
+    makeMessage("u1", "user"),
+    makeMessage("u2", "user"),
+  ]);
+  const props = { questions, onJump: vi.fn() };
+  const { container, rerender } = render(<QuestionDirectoryRail {...props} />);
+  const list = container.querySelector("nav > div") as HTMLDivElement;
+  const current = screen.getByRole("button", { name: "chat.questions.jump:2" });
+  Object.defineProperties(list, {
+    clientHeight: { value: 100 },
+    offsetTop: { value: 80 },
+  });
+  Object.defineProperties(current, {
+    offsetTop: { value: 300 },
+    offsetHeight: { value: 15 },
+  });
+  const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+  scrollIntoView.mockClear();
+  rerender(<QuestionDirectoryRail {...props} activeMessageId="u2" />);
+  expect(list.scrollTop).toBe(215);
+  expect(scrollIntoView).not.toHaveBeenCalled();
 });
 
 test("collectQuestionDirectory extracts user questions in order", () => {
@@ -213,7 +372,7 @@ test("useActiveQuestionId tracks the last question above the viewport midline", 
 });
 
 const renderDirectoryButton = (
-  props: Partial<Parameters<typeof QuestionDirectoryButton>[0]> = {},
+  props: Partial<Parameters<typeof QuestionDirectoryButton>[0]> = {}
 ) =>
   render(
     <TooltipProvider>
@@ -235,14 +394,14 @@ const renderDirectoryButton = (
         onJump={() => {}}
         {...props}
       />
-    </TooltipProvider>,
+    </TooltipProvider>
   );
 
 test("QuestionDirectoryButton hides without questions", () => {
   const { container } = render(
     <TooltipProvider>
       <QuestionDirectoryButton questions={[]} onJump={() => {}} />
-    </TooltipProvider>,
+    </TooltipProvider>
   );
 
   expect(container.firstChild).toBeNull();
@@ -263,7 +422,7 @@ test("QuestionDirectoryButton lists questions and jumps on click", async () => {
   expect(screen.getByText("data.csv")).toBeTruthy();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.jump:1" }),
+    screen.getByRole("button", { name: "chat.questions.jump:1" })
   );
 
   expect(onJump).toHaveBeenCalledWith("u1");
@@ -275,7 +434,7 @@ test("QuestionDirectoryButton filters questions by keyword", async () => {
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const searchBox = await screen.findByRole("textbox", {
     name: "chat.questions.search",
@@ -295,7 +454,7 @@ test("QuestionDirectoryButton shows an empty state for unmatched keywords", asyn
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const searchBox = await screen.findByRole("textbox", {
     name: "chat.questions.search",
@@ -304,7 +463,7 @@ test("QuestionDirectoryButton shows an empty state for unmatched keywords", asyn
   fireEvent.change(searchBox, { target: { value: "不存在的关键词" } });
 
   await waitFor(() =>
-    expect(screen.getByTestId("question-directory-no-matches")).toBeTruthy(),
+    expect(screen.getByTestId("question-directory-no-matches")).toBeTruthy()
   );
   expect(screen.queryByText("第一问是什么")).toBeNull();
   expect(screen.queryByText("data.csv")).toBeNull();
@@ -314,7 +473,7 @@ test("QuestionDirectoryButton resets the keyword when the popover closes", async
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const searchBox = await screen.findByRole("textbox", {
     name: "chat.questions.search",
@@ -324,11 +483,11 @@ test("QuestionDirectoryButton resets the keyword when the popover closes", async
 
   // Close via the trigger; reopening must show the unfiltered directory again.
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
 
   await waitFor(() => expect(screen.getByText("第一问是什么")).toBeTruthy());
@@ -339,7 +498,7 @@ test("QuestionDirectoryButton marks the current question row", async () => {
   renderDirectoryButton({ activeMessageId: "u1" });
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
 
   const activeRow = await screen.findByRole("button", {
@@ -347,7 +506,7 @@ test("QuestionDirectoryButton marks the current question row", async () => {
   });
   expect(activeRow.getAttribute("aria-current")).toBe("location");
   expect(screen.getByTestId("question-directory-active").textContent).toBe(
-    "chat.questions.current",
+    "chat.questions.current"
   );
 
   const otherRow = screen.getByRole("button", {
@@ -360,7 +519,7 @@ test("QuestionDirectoryButton previews the question and reply on hover", async (
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const row = await screen.findByRole("button", {
     name: "chat.questions.jump:1",
@@ -374,7 +533,7 @@ test("QuestionDirectoryButton previews the question and reply on hover", async (
 
   fireEvent.mouseLeave(row);
   await waitFor(() =>
-    expect(screen.queryByTestId("question-directory-preview")).toBeNull(),
+    expect(screen.queryByTestId("question-directory-preview")).toBeNull()
   );
 });
 
@@ -382,7 +541,7 @@ test("QuestionDirectoryButton previews a question without a reply on hover", asy
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const row = await screen.findByRole("button", {
     name: "chat.questions.jump:2",
@@ -400,7 +559,7 @@ test("QuestionDirectoryButton clears the hover preview when a question is clicke
   renderDirectoryButton({ onJump });
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const row = await screen.findByRole("button", {
     name: "chat.questions.jump:1",
@@ -408,7 +567,7 @@ test("QuestionDirectoryButton clears the hover preview when a question is clicke
 
   fireEvent.mouseEnter(row);
   await waitFor(() =>
-    expect(screen.getByTestId("question-directory-preview")).toBeTruthy(),
+    expect(screen.getByTestId("question-directory-preview")).toBeTruthy()
   );
 
   // Clicking a row closes the popover programmatically (not through
@@ -417,7 +576,7 @@ test("QuestionDirectoryButton clears the hover preview when a question is clicke
 
   expect(onJump).toHaveBeenCalledWith("u1");
   await waitFor(() =>
-    expect(screen.queryByTestId("question-directory-preview")).toBeNull(),
+    expect(screen.queryByTestId("question-directory-preview")).toBeNull()
   );
 });
 
@@ -425,7 +584,7 @@ test("QuestionDirectoryButton hides the hover preview when the directory list sc
   renderDirectoryButton();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" }),
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
   );
   const row = await screen.findByRole("button", {
     name: "chat.questions.jump:1",
@@ -433,7 +592,7 @@ test("QuestionDirectoryButton hides the hover preview when the directory list sc
 
   fireEvent.mouseEnter(row);
   await waitFor(() =>
-    expect(screen.getByTestId("question-directory-preview")).toBeTruthy(),
+    expect(screen.getByTestId("question-directory-preview")).toBeTruthy()
   );
 
   // Wheel-scrolling moves rows under a stationary pointer without firing

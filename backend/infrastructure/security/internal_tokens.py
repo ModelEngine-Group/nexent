@@ -2,7 +2,7 @@
 
 
 from typing import Optional
-from contracts.constants.environment import SUPABASE_JWT_SECRET
+from contracts.constants.environment import JWT_SECRET
 from contracts.errors.exceptions import TokenExpiredError
 import jwt
 import time
@@ -25,7 +25,7 @@ def generate_internal_runtime_jwt(
     expires_in: int = INTERNAL_RUNTIME_JWT_TTL_SECONDS,
 ) -> str:
     """Generate a short-lived token for northbound-to-runtime requests."""
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         raise ValueError("JWT verification is not configured")
     if not user_id or not tenant_id:
         raise ValueError("user_id and tenant_id are required")
@@ -40,4 +40,4 @@ def generate_internal_runtime_jwt(
         "iat": now,
         "exp": now + expires_in,
     }
-    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")

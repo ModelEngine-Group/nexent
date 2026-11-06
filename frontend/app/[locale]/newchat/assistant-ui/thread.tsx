@@ -7,8 +7,6 @@ import { useMessageSources } from "../ui/message-sources";
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { SourceAttributes } from "@/types/source";
 
@@ -64,13 +62,11 @@ import {
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
 import {
-  ConversationArtifactsMessageEntry,
+  ConversationArtifactsToolbarEntry,
   ConversationArtifactsPanel,
 } from "../ui/artifacts-panel";
-import {
-  ConversationArtifactsEntryProvider,
-} from "../ui/conversation-artifacts-context";
-import { QuestionDirectoryButton } from "../ui/question-directory";
+import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
+import { QuestionDirectoryRail } from "../ui/question-directory-rail";
 import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
 import {
   fetchArtifactFile,
@@ -98,6 +94,7 @@ import {
 import {
   SourcesPanelProvider,
   useSourcesPanel,
+  useSourcesPanelState,
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
@@ -146,6 +143,7 @@ import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
+import { findRequirementSubmission } from "../ui/requirement-clarification-history";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
 import {
@@ -239,18 +237,12 @@ export interface ThreadProps {
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
+  showAgentCreationResult?: boolean;
   composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -269,6 +261,8 @@ export interface ThreadProps {
   showComposer?: boolean;
   configurationLayout?: boolean;
   debugLayout?: boolean;
+  onSourcesPanelOpen?: () => void;
+  sourcesPanelCloseEpoch?: number;
   emptyFooterContent?: ReactNode;
   footerContent?: ReactNode;
   interactionContent?: ReactNode;
@@ -305,18 +299,12 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
+  showAgentCreationResult = true,
   composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -332,6 +320,8 @@ export const Thread: FC<ThreadProps> = ({
   showComposer = true,
   configurationLayout = false,
   debugLayout = false,
+  onSourcesPanelOpen,
+  sourcesPanelCloseEpoch,
   emptyFooterContent,
   footerContent,
   interactionContent,
@@ -358,7 +348,8 @@ export const Thread: FC<ThreadProps> = ({
     models,
     `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${modelThreadKey}`,
     selectedModelId,
-    onModelChange ? (selectedModelId ?? "") : undefined
+    onModelChange ? (selectedModelId ?? "") : undefined,
+    conversationId
   );
   const effectiveSelectedModelId = onModelChange
     ? (selectedModelId ?? "")
@@ -550,35 +541,11 @@ export const Thread: FC<ThreadProps> = ({
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
-    null
+  const panelContextValue = useSourcesPanelState(
+    onSourcesPanelOpen,
+    sourcesPanelCloseEpoch
   );
-
-  const open = useCallback((payload: SourcesPanelSelection) => {
-    setSelection(payload);
-  }, []);
-
-  const toggle = useCallback((payload: SourcesPanelSelection) => {
-    setSelection((current) => {
-      if (
-        current &&
-        current.messageId === payload.messageId &&
-        current.groupId === payload.groupId
-      ) {
-        return null;
-      }
-      return payload;
-    });
-  }, []);
-
-  const close = useCallback(() => {
-    setSelection(null);
-  }, []);
-
-  const panelContextValue = useMemo(
-    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close]
-  );
+  const { selection, close } = panelContextValue;
 
   return (
     <ConversationShareContext.Provider
@@ -599,28 +566,11 @@ export const Thread: FC<ThreadProps> = ({
               models={models}
               selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
               onModelChange={handleModelChange}
-              deepThinking={deepThinking ?? controls.deepThinking}
-              onDeepThinkingChange={
-                onDeepThinkingChange ?? controls.onDeepThinkingChange
-              }
-              thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
-              onThinkingEffortChange={
-                onThinkingEffortChange ?? controls.onThinkingEffortChange
-              }
-              reasoningBudgetTokens={
-                reasoningBudgetTokens ?? controls.reasoningBudgetTokens
-              }
-              onReasoningBudgetTokensChange={
-                onReasoningBudgetTokensChange ??
-                controls.onReasoningBudgetTokensChange
-              }
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
-              modelParameterSettings={
-                modelParameterSettings ?? controls.modelParameterSettings
-              }
               showConversationTitle={showConversationTitle}
+              showAgentCreationResult={showAgentCreationResult}
               composerTools={composerTools}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
@@ -633,7 +583,10 @@ export const Thread: FC<ThreadProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               readOnly={readOnly || (showModelSelector && !modelIsValid)}
               modelSelectionDisabled={readOnly}
-              readOnlyReason={readOnlyReason}
+              readOnlyReason={
+                readOnlyReason ??
+                (showModelSelector ? controls.error : undefined)
+              }
               showComposer={showComposer}
               configurationLayout={configurationLayout}
               debugLayout={debugLayout}
@@ -738,17 +691,11 @@ interface ThreadViewProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
+  showAgentCreationResult: boolean;
   composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
@@ -808,17 +755,11 @@ const ThreadView: FC<ThreadViewProps> = ({
   models,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
-  modelParameterSettings,
   showConversationTitle,
+  showAgentCreationResult,
   composerTools,
   knowledgeScope,
   knowledgePreview,
@@ -943,11 +884,6 @@ const ThreadView: FC<ThreadViewProps> = ({
   // directory row so long conversations show "where am I" at a glance.
   const activeQuestionId = useActiveQuestionId(questionDirectory);
 
-  const threadHeaderVisible = Boolean(
-    showConversationTitle &&
-    (isShareMode || (!newChatDesign && workbenchPresentation))
-  );
-
   return (
     <ThreadPrimitive.Root
       className={cn(
@@ -955,13 +891,15 @@ const ThreadView: FC<ThreadViewProps> = ({
         newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
+        debugLayout && selection !== null && "gap-6",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
     >
       <div
         className={cn(
-          "flex h-full min-w-0 flex-1 flex-col",
+          "relative flex h-full min-w-0 flex-1 flex-col",
+          questionDirectory.length > 0 && "pl-8",
           newChatDesign && "relative [container-type:size]",
           workbenchLanding && "overflow-y-auto pb-[10vh] [container-type:size]"
         )}
@@ -975,12 +913,6 @@ const ThreadView: FC<ThreadViewProps> = ({
                   <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
                     {conversationTitle}
                   </div>
-                  <QuestionDirectoryButton
-                    questions={questionDirectory}
-                    onJump={handleJumpToQuestion}
-                    activeMessageId={activeQuestionId}
-                    variant="header"
-                  />
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1031,26 +963,17 @@ const ThreadView: FC<ThreadViewProps> = ({
                       <Share2Icon className="size-4" />
                     </Button>
                   )}
-                  <QuestionDirectoryButton
-                    questions={questionDirectory}
-                    onJump={handleJumpToQuestion}
-                    activeMessageId={activeQuestionId}
-                    variant="header"
-                  />
                 </>
               )}
             </header>
           )}
 
-        {newChatDesign && !threadHeaderVisible && (
-          <QuestionDirectoryButton
-            questions={questionDirectory}
-            onJump={handleJumpToQuestion}
-            activeMessageId={activeQuestionId}
-            variant="floating"
-            className="absolute right-4 top-3 z-10"
-          />
-        )}
+        <ConversationArtifactsToolbarEntry />
+        <QuestionDirectoryRail
+          questions={questionDirectory}
+          onJump={handleJumpToQuestion}
+          activeMessageId={activeQuestionId}
+        />
 
         <ThreadPrimitive.Viewport
           className={cn(
@@ -1059,6 +982,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
             !hasMessages &&
+              variant !== "embedded" &&
               !workbenchLanding &&
               !debugLayout &&
               "!overflow-y-hidden",
@@ -1087,6 +1011,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              showAgentCreationResult={showAgentCreationResult}
               readOnly={readOnly || isShareMode}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
@@ -1156,20 +1081,14 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
+              conversationId={conversationId}
               hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
-              deepThinking={deepThinking}
-              onDeepThinkingChange={onDeepThinkingChange}
-              thinkingEffort={thinkingEffort}
-              onThinkingEffortChange={onThinkingEffortChange}
-              reasoningBudgetTokens={reasoningBudgetTokens}
-              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
-              modelParameterSettings={modelParameterSettings}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
@@ -1274,7 +1193,12 @@ export const ReadOnlyConversation: FC<{
           newChatStyles.font
         )}
       >
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main
+          className={cn(
+            "relative flex min-w-0 flex-1 flex-col",
+            questionDirectory.length > 0 && "pl-8"
+          )}
+        >
           <header className="mx-auto flex w-full max-w-[922px] items-start justify-between gap-2 border-b px-4 py-4">
             <div className="min-w-0">
               <h1 className="text-lg font-semibold text-foreground">{title}</h1>
@@ -1282,14 +1206,12 @@ export const ReadOnlyConversation: FC<{
                 {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
               </p>
             </div>
-            <QuestionDirectoryButton
-              questions={questionDirectory}
-              onJump={handleJumpToQuestion}
-              activeMessageId={activeQuestionId}
-              variant="header"
-              className="shrink-0"
-            />
           </header>
+          <QuestionDirectoryRail
+            questions={questionDirectory}
+            onJump={handleJumpToQuestion}
+            activeMessageId={activeQuestionId}
+          />
           <ThreadPrimitive.Viewport className="mx-auto flex min-h-0 w-full max-w-[922px] flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6">
             <ThreadMessages agent={agent} readOnly />
           </ThreadPrimitive.Viewport>
@@ -1311,6 +1233,7 @@ export const ReadOnlyConversation: FC<{
 
 export const ThreadMessages: FC<{
   agent: Agent | PublishedAgent;
+  showAgentCreationResult?: boolean;
   readOnly?: boolean;
   modelSelectionDisabled?: boolean;
   shareMode?: boolean;
@@ -1322,6 +1245,7 @@ export const ThreadMessages: FC<{
   onSkillFileSelect?: (path: string) => void;
 }> = ({
   agent,
+  showAgentCreationResult = true,
   readOnly = false,
   shareMode = false,
   shareSelectionDisabled = false,
@@ -1367,6 +1291,7 @@ export const ThreadMessages: FC<{
   );
   const renderState = {
     agent,
+    showAgentCreationResult,
     readOnly,
     enableSkillDirectives,
     onSkillFileSelect,
@@ -1567,9 +1492,15 @@ const MessageDateSeparator: FC = () => {
 
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
+  showAgentCreationResult?: boolean;
   readOnly?: boolean;
   onSkillFileSelect?: (path: string) => void;
-}> = ({ agent, readOnly = false, onSkillFileSelect }) => {
+}> = ({
+  agent,
+  readOnly = false,
+  onSkillFileSelect,
+  showAgentCreationResult = true,
+}) => {
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -1586,6 +1517,23 @@ const AssistantMessage: FC<{
     (s) => s.thread.messages.at(-1)?.id === s.message.id
   );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const requirementMessages = useAuiState((s) =>
+    nl2a?.content.subtype === "requirement_clarification"
+      ? s.thread.messages
+      : undefined
+  );
+  const requirementSubmission = useMemo(
+    () =>
+      requirementMessages &&
+      nl2a?.content.subtype === "requirement_clarification"
+        ? findRequirementSubmission(
+            requirementMessages,
+            messageId,
+            nl2a.content
+          )
+        : undefined,
+    [requirementMessages, messageId, nl2a]
+  );
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
     name?: string;
@@ -1916,6 +1864,8 @@ const AssistantMessage: FC<{
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
+            sourceMessageId={messageId}
+            submission={requirementSubmission}
             disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
@@ -1936,8 +1886,8 @@ const AssistantMessage: FC<{
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
-        <ConversationArtifactsMessageEntry />
-        {typeof createdAgent?.agentId === "number" &&
+        {showAgentCreationResult &&
+        typeof createdAgent?.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
             agentId={createdAgent.agentId}

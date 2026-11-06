@@ -16,12 +16,10 @@ import {
 } from "@/app/newchat/utils/conversation-artifacts";
 import {
   ConversationArtifactsButton,
-  ConversationArtifactsMessageEntry,
+  ConversationArtifactsToolbarEntry,
   ConversationArtifactsPanel,
 } from "@/app/newchat/ui/artifacts-panel";
-import {
-  ConversationArtifactsEntryProvider,
-} from "@/app/newchat/ui/conversation-artifacts-context";
+import { ConversationArtifactsEntryProvider } from "@/app/newchat/ui/conversation-artifacts-context";
 import {
   compositeAttachmentAdapter,
   markFileWithExistingUpload,
@@ -425,27 +423,27 @@ test("ConversationArtifactsButton opens the panel on click", () => {
   expect(onClick).toHaveBeenCalledTimes(1);
 });
 
-test("ConversationArtifactsMessageEntry renders nothing without a provider", () => {
-  const { container } = render(<ConversationArtifactsMessageEntry />);
+test("ConversationArtifactsToolbarEntry renders nothing without a provider", () => {
+  const { container } = render(<ConversationArtifactsToolbarEntry />);
 
   expect(container.firstChild).toBeNull();
 });
 
-test("ConversationArtifactsMessageEntry hides while the conversation has no artifacts", () => {
+test("ConversationArtifactsToolbarEntry hides while the conversation has no artifacts", () => {
   const { container } = render(
     <ConversationArtifactsEntryProvider count={0} open={() => {}}>
-      <ConversationArtifactsMessageEntry />
+      <ConversationArtifactsToolbarEntry />
     </ConversationArtifactsEntryProvider>
   );
 
   expect(container.firstChild).toBeNull();
 });
 
-test("ConversationArtifactsMessageEntry shows the conversation total and opens the panel", () => {
+test("ConversationArtifactsToolbarEntry shows the conversation total and opens the panel", () => {
   const open = vi.fn();
   render(
     <ConversationArtifactsEntryProvider count={2} open={open}>
-      <ConversationArtifactsMessageEntry />
+      <ConversationArtifactsToolbarEntry />
     </ConversationArtifactsEntryProvider>
   );
 
@@ -455,6 +453,72 @@ test("ConversationArtifactsMessageEntry shows the conversation total and opens t
   fireEvent.click(button);
 
   expect(open).toHaveBeenCalledTimes(1);
+});
+
+test("ConversationArtifactsToolbarEntry persists after generation and resets for an empty conversation", () => {
+  const open = vi.fn();
+  const Toolbar = ({ messages }: { messages: ArtifactMessageLike[] }) => (
+    <ConversationArtifactsEntryProvider
+      count={collectConversationArtifacts(messages).length}
+      open={open}
+    >
+      <ConversationArtifactsToolbarEntry />
+    </ConversationArtifactsEntryProvider>
+  );
+  const generated: ArtifactMessageLike = {
+    id: "generated-1",
+    role: "assistant",
+    content: [
+      {
+        type: "text",
+        skillFileAttachments: [makeAttachment("file-1", "report.docx")],
+      },
+    ],
+  };
+  const laterTurns: ArtifactMessageLike[] = [
+    generated,
+    { id: "follow-up", role: "user", content: [{ type: "text" }] },
+    { id: "text-answer", role: "assistant", content: [{ type: "text" }] },
+  ];
+  const { container, rerender } = render(<Toolbar messages={[]} />);
+  expect(
+    container.querySelector('[data-slot="conversation-artifacts-toolbar"]')
+  ).toBeNull();
+  rerender(<Toolbar messages={[generated]} />);
+  expect(
+    screen.getAllByRole("button", { name: "chat.artifacts.viewAll:1" })
+  ).toHaveLength(1);
+  expect(
+    container.querySelector('[data-slot="conversation-artifacts-toolbar"]')
+      ?.className
+  ).toContain("justify-end");
+  rerender(<Toolbar messages={laterTurns} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.artifacts.viewAll:1" })
+  );
+  expect(open).toHaveBeenCalledTimes(1);
+  rerender(
+    <Toolbar
+      messages={[
+        ...laterTurns,
+        {
+          id: "generated-2",
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              skillFileAttachments: [makeAttachment("file-2", "more.csv")],
+            },
+          ],
+        },
+      ]}
+    />
+  );
+  expect(
+    screen.getAllByRole("button", { name: "chat.artifacts.viewAll:2" })
+  ).toHaveLength(1);
+  rerender(<Toolbar messages={[]} />);
+  expect(container.firstChild).toBeNull();
 });
 
 const renderArtifactsPanel = (

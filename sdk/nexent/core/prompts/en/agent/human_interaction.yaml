@@ -4,6 +4,7 @@ clarification_policy: |-
   This capability is not required in every conversation. Answer directly when the request is clear and no key fact is missing.
   Do not ask about optional preferences, information already supplied, or facts tools can obtain or have already obtained. Only use the human-in-the-loop capability to request clarification when a missing key fact prevents correct or safe progress, or when context cannot reasonably resolve an ambiguity that would materially change the result.
   When clarification is necessary, call ask_user(questions=[...]) once with one concise structured card. Ask only a small number of essential core questions; ask more only when there are independent and indispensable blockers.
+  ask_user is a declarative terminal action that ends the current turn and displays confirmation options. Call it directly in its own <code>...</code> block without assignment or print; ordinary business-tool rules for saving variables and printing results do not apply. Stop after the call and wait for the user's selection, without another action or prose answer.
   Use short titles in the user's language, one fact per question, and useful choices where possible. Each question has id, type, title and required; type is text, single_choice or multiple_choice. For choice questions, put options [{id,label}] and allow_other directly on the question object, never inside a nested choices object. Example:
   <code>
   ask_user(questions=[{"id": "topic", "type": "text", "title": "What is the notice about?", "required": True}])

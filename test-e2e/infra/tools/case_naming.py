@@ -49,6 +49,7 @@ def naming_issues(root: Path, cases: dict) -> list[ValidationIssue]:
                 path, "case_id",
                 "New Case ID must use <MODULE>-<SCENARIO>-D1..D5-<001..999>; "
                 "preserve existing IDs, do not add new naming exemptions",
+                "CASE_ID_FORMAT_INVALID", case_id,
             ))
         elif match["stage"] != stage:
             issues.append(ValidationIssue(path, "stage", "Case ID stage must match the declared stage"))

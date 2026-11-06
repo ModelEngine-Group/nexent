@@ -91,7 +91,6 @@ services:
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
-      - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
       TZ: "${TZ:-Asia/Shanghai}"

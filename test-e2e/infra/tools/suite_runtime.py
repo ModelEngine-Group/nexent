@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -54,6 +56,28 @@ class BatchLock:
     def __exit__(self, *args):
         if self.handle:
             self.handle.close()
+
+
+_DEPLOYMENT_LEASE = ContextVar("suite_deployment_lease", default=None)
+
+
+def deployment_lock_owned(repo):
+    return _DEPLOYMENT_LEASE.get() == (str((repo / ".git/nexent-e2e-deployment.lock").resolve()), os.getpid())
+
+
+@contextmanager
+def deployment_lock(repo):
+    """Hold one checkout lease across synchronization and nested campaign execution."""
+    if deployment_lock_owned(repo):
+        yield
+        return
+    path = repo / ".git/nexent-e2e-deployment.lock"
+    with BatchLock(path):
+        token = _DEPLOYMENT_LEASE.set((str(path.resolve()), os.getpid()))
+        try:
+            yield
+        finally:
+            _DEPLOYMENT_LEASE.reset(token)
 
 
 def terminate_tree(process, group=True):

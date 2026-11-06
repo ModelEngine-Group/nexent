@@ -1,0 +1,40 @@
+schema_version: '1.0'
+stage: D3
+module: MODEL-SERVICE
+case:
+  case_id: MODEL-LEGACY-TOOLS-D3-001
+  feature_id: F-036
+  business_rule_ids: [F-036-RULE-01]
+  title: Legacy compatibility retains native tool associations across real HTTP invocations
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise LegacyChatModel, ModelService, OpenAIChatAdapter and HttpSender against an owned SSE provider, then replay returned calls with separately associated results.
+  preconditions: [Product SDK dependencies installed, Loopback TCP available]
+  test_data:
+    configuration: Synthetic key, two function calls, dictionary or returned ChatMessage histories, native tool or tool-response roles, ordinary or streamed second invocation.
+  steps:
+  - order: 1
+    action: Invoke the compatibility model with a declared native function and receive two calls from the owned provider.
+    expected: Returned ChatMessage preserves both original call IDs, function names and exact argument strings.
+  - order: 2
+    action: Append that assistant message and two corresponding results, then invoke again through the actual adapter and HTTP sender.
+    expected: Provider receives four ordered messages with original calls and two distinct tool messages linked by their IDs; final output is exactly DONE and input history is unchanged.
+  - order: 3
+    action: Close the provider and inspect owned resources and the function execution spy.
+    expected: Server and thread terminate, and the compatibility layer has not executed the supplied function.
+  expected_results:
+  - All eight history-role-representation and continuation variants complete exactly two HTTP requests.
+  - IDs, function arguments, tool result content and ordering survive with no input mutation.
+  - Only the test owns tool execution; provider resources are released on success and failure.
+  forbidden_side_effects: [No external provider or database use, No tool execution inside the compatibility layer, No orphan server thread]
+  integration_boundary: [Legacy interface through real ModelService and HTTP sender to an owned loopback SSE provider]
+  observations: [Captured HTTP request bodies, Returned tool calls and final output, Input equality and cleanup assertions]
+  cleanup: [Shut down and close provider, Join provider thread]
+  acceptance:
+  - id: AC-TOOL-CONTINUATION
+    description: Returned native calls and their results remain associated over the second real HTTP request without mutating history or executing tools.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1, 2, 3]

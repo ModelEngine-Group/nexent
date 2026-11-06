@@ -1,0 +1,44 @@
+schema_version: "1.0"
+change:
+  change_id: CHAT-ARTIFACTS-TOP-ENTRY-20261106
+  change_type: requirement
+  requirement_id: CHAT-ARTIFACTS-TOP-ENTRY-20261106
+  title: Keep the conversation artifacts entry at the top right
+  description: >-
+    Move the repeated assistant-message artifacts entry into a single top-right
+    toolbar outside the message scroll viewport. Hide the entire toolbar while
+    the current conversation has no generated artifacts. Once artifacts exist,
+    retain the entry through later questions and answers, update its accumulated
+    count, and open the existing shared artifacts panel. Derive visibility from
+    the current conversation, so a new empty conversation hides it again.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/conversationArtifacts.test.tsx
+    behaviors:
+      - Hide the toolbar without artifacts/provider and open the existing panel on click.
+      - Show exactly one top toolbar entry when the first file arrives.
+      - Retain visibility through later text-only turns and update accumulated counts.
+      - Hide when switching to a conversation with no generated files.
+      - Retain artifact preview, download and add-to-chat behavior.
+    reason: >-
+      Frontend placement and visibility reuse existing conversation aggregation
+      and side-panel state. Strengthen the owning component suite; no Python
+      behavior, backend contract or new formal proof boundary is introduced.
+      Preserve all formal Cases without adding a duplicate D1.
+  notes: >-
+    Baseline CHAT-ARTIFACTS-PANEL-20261031 and the existing message-entry
+    implementation. User explicitly requests the screenshot's top-right
+    position and persistent visibility after generation. Preserve uncommitted
+    question-rail changes. Sibling nexent-doc and ../docs/前端ui.md are unavailable;
+    external SPEC synchronization remains pending. No deployment is performed.

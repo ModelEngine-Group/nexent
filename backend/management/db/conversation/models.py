@@ -38,6 +38,8 @@ class ConversationRecord(TableBase):
         comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
     )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
+    target = Column(JSONB, nullable=True,
+                    comment="Creator operation target: type agent or skill and positive resource id; NULL before creation")
     chat_mode = Column(
         String(16),
         nullable=False,
@@ -76,6 +78,10 @@ class ConversationRecord(TableBase):
         server_default=text("0"),
         doc="Monotonic version of the canonical Workbench declaration",
     )
+
+    selected_model_id = Column(Integer, nullable=True, comment="Root model selected for this Agent conversation; NULL inherits the Agent default.")
+    model_parameter_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        comment="Explicit parameter preferences keyed by outlet ID; no credentials or default-value copies.")
 
 
 class ConversationMessage(TableBase):

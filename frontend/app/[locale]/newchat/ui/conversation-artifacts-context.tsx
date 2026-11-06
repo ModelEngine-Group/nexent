@@ -11,12 +11,11 @@ import {
 } from "react";
 
 /**
- * Conversation-wide artifacts state exposed to assistant messages.
+ * Conversation-wide artifacts state exposed to the thread toolbar.
  *
  * The thread root aggregates every agent-generated file and owns the side
- * panel's open state, while the "view all artifacts" entry is rendered at the
- * end of each assistant message. This context bridges the two without prop
- * drilling through the assistant-ui message renderers.
+ * panel's open state. The toolbar reads this context to render one persistent
+ * entry outside the message viewport without duplicating panel state.
  */
 export interface ConversationArtifactsEntryValue {
   /** Total agent-generated files collected across the conversation. */
@@ -25,12 +24,10 @@ export interface ConversationArtifactsEntryValue {
   open: () => void;
 }
 
-const ConversationArtifactsEntryContext = createContext<
-  ConversationArtifactsEntryValue | null
->(null);
+const ConversationArtifactsEntryContext =
+  createContext<ConversationArtifactsEntryValue | null>(null);
 
-export interface ConversationArtifactsEntryProviderProps
-  extends ConversationArtifactsEntryValue {
+export interface ConversationArtifactsEntryProviderProps extends ConversationArtifactsEntryValue {
   children: ReactNode;
 }
 
@@ -38,7 +35,7 @@ export const ConversationArtifactsEntryProvider: FC<
   ConversationArtifactsEntryProviderProps
 > = ({ count, open, children }) => {
   // The thread root re-renders on every streamed token; a memoized value
-  // keeps message-level consumers from re-rendering unless the count changed.
+  // keeps toolbar consumers from re-rendering unless the count changed.
   const value = useMemo(() => ({ count, open }), [count, open]);
   return (
     <ConversationArtifactsEntryContext.Provider value={value}>

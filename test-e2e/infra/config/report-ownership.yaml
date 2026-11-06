@@ -73,10 +73,22 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  BE-MODEL-OUTLET-SCHEMA: model
+  BE-MODEL-OUTLET-PERSISTENCE: model
+  SDK-MODEL-OUTLET-RESOLUTION: model
+  SDK-MODEL-OUTLET-STORAGE: model
+  SDK-MODEL-PROFILE-CATALOG: model
+  SDK-MODEL-PROFILE-COMPOSITION: model
+  SDK-MODEL-PROFILE-CONTRACTS: model
+  SDK-MODEL-PROFILE-NORMALIZATION: model
+  SDK-MODEL-PROFILE-PARAMETERS: model
+  SDK-MODEL-TRANSPORT: model
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config
   AGENT-REPO-SORT-MAIN-TAG: agent_repository
+  AIDP-RETRIEVAL: knowledge
+  AUTH-LOCAL: system
   CAS-USER-DISPLAY: system
   CHAT-AGENT-DISCOVERY: runtime
   CHAT-CLARIFICATION-HISTORY: runtime
@@ -92,9 +104,11 @@ feature_overrides:
   SAI-001: runtime
   SDK-SQL-ROWS: runtime
   SEARCH-DEEPSEEK: runtime
+  SYS-AGENT-LIFECYCLE: system
   TFP-001: sandbox
   TPC-001: runtime
   WB-CONTROLS: runtime
+  F-003: system
   F-046: context
   F-047: context
   F-048: context
@@ -179,6 +193,7 @@ feature_overrides:
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  MODEL-LEGACY-TOOLS-D3-001: model
   CHAT-MODEL-CONTROLS-D2-001: runtime
   CHAT-MODEL-CONTROLS-D3-001: runtime
   CHAT-MODEL-CONTROLS-D3-002: runtime

@@ -47,10 +47,12 @@ from runtime.adapters.nexent.runner import (
 )
 from nexent.core.concurrency import (
     ManagedExecution,
+    run_blocking,
 )
 from nexent.monitor import (
     agent_monitoring_context,
 )
+from management.services.conversation.model_preferences import read_model_preferences as _read_model_preferences
 from management.services.conversation.service import (
     get_current_run_user_message_id,
     load_historical_context,
@@ -117,9 +119,6 @@ def apply_workbench_runtime_plan(
         "display_name": root_identity.display_name,
         "origin": root_identity.origin,
     }
-    agent_request.__dict__["_runtime_generation_config"] = (
-        canonical_workbench.generation_config.model_dump(mode="json")
-    )
 
 
 async def prepare_agent_run(
@@ -156,8 +155,6 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
-        "reasoning_effort": agent_request.reasoning_effort,
-        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
@@ -175,18 +172,6 @@ async def prepare_agent_run(
         create_run_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_skill_snapshot is not None:
         create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
-    runtime_generation_config = getattr(
-        agent_request, "_runtime_generation_config", None
-    )
-    if (
-        runtime_generation_config is None
-        and agent_request.generation_config is not None
-    ):
-        runtime_generation_config = agent_request.generation_config.model_dump(
-            mode="json", exclude_unset=True
-        )
-    if runtime_generation_config is not None:
-        create_run_kwargs["runtime_generation_config"] = runtime_generation_config
     runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
     if runtime_mount_plan is not None:
         create_run_kwargs["runtime_sub_agent_mounts"] = [
@@ -201,6 +186,14 @@ async def prepare_agent_run(
         ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
+    preferences = getattr(agent_request, "_runtime_model_parameter_preferences", None)
+    if preferences is None:
+        preferences = agent_request.model_parameter_preferences
+        if agent_request.conversation_id is not None and not agent_request.is_debug:
+            saved = await run_blocking("run-model-preferences", _read_model_preferences, agent_request.conversation_id, user_id)
+            preferences = saved["model_parameter_preferences"]
+    if preferences:
+        create_run_kwargs["model_parameter_preferences"] = preferences
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
@@ -298,6 +291,7 @@ async def generate_stream(
     reservation_token: Optional[str] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    final_answer_mode: str = "delta",
     execution_state: Optional[BackgroundExecutionState] = None,
 ):
     """Unified streaming entry point.
@@ -379,6 +373,7 @@ async def generate_stream(
             channel=channel,
             execution=execution,
             deferred_run=deferred_run,
+            final_answer_mode=final_answer_mode,
             **background_kwargs,
         )) as chunks:
             async for data_chunk in chunks:
@@ -425,6 +420,7 @@ async def generate_stream(
                 reservation_token=reservation_token,
                 execution=execution,
                 deferred_run=deferred_run,
+                final_answer_mode=final_answer_mode,
                 **fallback_kwargs,
             )) as chunks:
                 async for data_chunk in chunks:

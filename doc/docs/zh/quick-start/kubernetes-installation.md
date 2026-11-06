@@ -59,7 +59,6 @@ bash deploy.sh k8s --release-scope nexent
 - **infrastructure（必选）**: Elasticsearch、PostgreSQL、Redis、MinIO
 - **application（默认选中，可取消）**: config、runtime、mcp、northbound、web
 - **data-process（默认选中，可选）**: 数据处理服务
-- **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
@@ -84,25 +83,7 @@ Kubernetes 使用与 Docker 相同的 `deploy/env/.env`。每次部署前，脚�
 
 1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时，部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
 
-2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
-
-```bash
-# Step 1: 在 Supabase 数据库中删除 su 账号记录
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "SELECT id, email FROM auth.users WHERE email='suadmin@nexent.com';"
-# 获取 user_id 后执行删除
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "DELETE FROM auth.identities WHERE user_id='your_user_id';"
-kubectl exec -it -n nexent deploy/nexent-supabase-db -- psql -U postgres -c \
-  "DELETE FROM auth.users WHERE id='your_user_id';"
-
-# Step 2: 在 nexent 数据库中删除 su 账号记录
-kubectl exec -it -n nexent deploy/nexent-postgresql -- psql -U root -d nexent -c \
-  "DELETE FROM nexent.user_tenant_t WHERE user_id='your_user_id';"
-
-# Step 3: 重新部署；非交互模式将使用配置值或默认密码
-bash deploy.sh k8s
-```
+2️⃣ 历史账号迁移、管理员账号异常和数据恢复请查阅[统一迁移与排障手册](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md)。保留原账号 ID 和租户归属，按手册恢复一致的数据。
 
 ### 离线部署
 
@@ -187,13 +168,6 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 | nexent-redis | 缓存、分布式锁和任务消息代理 |
 | nexent-minio | S3 兼容对象存储 |
 
-**Supabase 服务（选择 `supabase` 组件时）:**
-| 服务 | 描述 |
-|---------|-------------|
-| nexent-supabase-kong | API 网关 |
-| nexent-supabase-auth | 认证服务 |
-| nexent-supabase-db | 数据库服务 |
-
 **可选服务:**
 | 服务 | 描述 |
 |---------|-------------|
@@ -222,7 +196,6 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 | PostgreSQL | nexent-postgresql-pv | `/var/lib/nexent-data/nexent-postgresql` |
 | Redis | nexent-redis-pv | `/var/lib/nexent-data/nexent-redis` |
 | MinIO | nexent-minio-pv | `/var/lib/nexent-data/nexent-minio` |
-| Supabase DB（选择 supabase 时）| nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 | 共享工作区 | nexent-workspace-pv | `/var/lib/nexent` |
 | 共享技能目录 | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
@@ -270,10 +243,10 @@ bash deploy.sh k8s --release-scope infrastructure
 bash deploy.sh k8s --release-scope nexent
 
 # 非交互式部署默认组件
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+bash deploy.sh k8s --components infrastructure,application,data-process --port-policy development --image-source general
 
 # 启用用户/租户能力、数据处理和终端工具
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh k8s --components infrastructure,application,data-process,terminal
 
 # 使用中国大陆镜像源部署
 bash deploy.sh k8s --image-source mainland
@@ -362,21 +335,18 @@ kubectl get svc -n nexent | grep -E 'otel|phoenix|grafana|zipkin|langfuse'
 
 ### OAuth 登录配置
 
-OAuth 登录依赖 `supabase` 组件。启用第三方登录时，请同时部署 `supabase`，并将 `config.oauth.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址。
+OAuth 登录使用 application 中的本地账号。启用第三方登录时，请将 `nexent-common.config.oauth.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址。
 
 ```bash
-bash deploy.sh k8s --components infrastructure,application,supabase
+bash deploy.sh k8s --components infrastructure,application
 ```
 
 Kubernetes 部署通过 `nexent-common` 的 `config.oauth.*` values 写入后端环境变量：
 
 ```bash
-helm upgrade --install nexent nexent \
+helm upgrade --install nexent deploy/k8s/helm/nexent \
   --namespace nexent --create-namespace \
-  --set global.deploymentComponents.supabase=true \
-  --set nexent-supabase-kong.enabled=true \
-  --set nexent-supabase-auth.enabled=true \
-  --set nexent-supabase-db.enabled=true \
+  -f /path/to/private-application-values.yaml \
   --set nexent-common.config.oauth.callbackBaseUrl=https://nexent.example.com \
   --set nexent-common.config.oauth.githubClientId=your_github_client_id \
   --set nexent-common.config.oauth.githubClientSecret=your_github_client_secret \
@@ -414,7 +384,7 @@ Provider 回调地址：
 
 ### CAS 登录配置
 
-CAS SSO 不依赖 `supabase`。启用 CAS 时，请将 `nexent-common.config.cas.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`nexent-common.config.cas.serverUrl` 是 CAS Server 根地址，也不要带结尾 `/`。
+CAS SSO 使用本地账号。启用 CAS 时，请将 `nexent-common.config.cas.callbackBaseUrl` 设置为浏览器可访问的 Nexent Web 地址，且不要带结尾 `/`。`nexent-common.config.cas.serverUrl` 是 CAS Server 根地址，也不要带结尾 `/`。
 
 Kubernetes 部署通过 `nexent-common` 的 `config.cas.*` values 写入后端环境变量：
 

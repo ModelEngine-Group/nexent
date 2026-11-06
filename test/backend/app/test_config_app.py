@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for config_app module.
 
@@ -222,6 +223,14 @@ class TestConfigAppRouterConfiguration:
         concurrency_module = types.ModuleType("nexent.core.concurrency")
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
+
+        async def invoke_blocking(_name, operation, *args, **kwargs):
+            return operation(*args, **kwargs)
+
+        concurrency_module.run_blocking = AsyncMock(side_effect=invoke_blocking)
+        migration = types.ModuleType("management.services.model.outlet_migration")
+        migration.migrate_legacy_outlets = MagicMock(return_value={"migrated": 2, "failed": 1})
+        monkeypatch.setitem(sys.modules, migration.__name__, migration)
         concurrency_module.set_default_thread_manager = MagicMock()
         concurrency_module.clear_default_thread_manager = MagicMock()
         monkeypatch.setitem(
@@ -315,16 +324,20 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "validate_external_service_configuration",
             new=validate_external,
-        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
+        ):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
+        migration.migrate_legacy_outlets.assert_called_once_with()
+        concurrency_module.run_blocking.assert_awaited_once_with(
+            "model-outlet-upgrade", migration.migrate_legacy_outlets
+        )
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with(
             config_app.config_thread_manager
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
-        schedule_workbench_main_backfill.assert_called_once_with()
+        schedule_workbench_main_backfill.assert_not_called()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()

@@ -276,15 +276,15 @@ def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     # ensure not in speed mode and no DEBUG_JWT_EXPIRE_SECONDS was set for this test
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     seconds = au.get_jwt_expiry_seconds(token)
     assert seconds == 1234
 
 
 def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_ISSUER", "http://localhost:54321")
 
     token = au.generate_session_jwt("user-1")
     claims = au.jwt.decode(
@@ -298,7 +298,7 @@ def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
 
 
 def test_internal_runtime_jwt_round_trip(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     token = au.generate_internal_runtime_jwt("user-1", "tenant-1")
 
@@ -309,7 +309,7 @@ def test_internal_runtime_jwt_round_trip(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_internal_runtime_jwt(
         "user-1",
         "tenant-1",
@@ -321,7 +321,7 @@ def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_wrong_scope(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     token = au.jwt.encode(
         {
@@ -353,7 +353,7 @@ def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
     claim_name,
     claim_value,
 ):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     claims = {
         "sub": "user-1",
@@ -376,7 +376,7 @@ def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
 
 
 def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     token = au.jwt.encode(
         {
@@ -397,8 +397,8 @@ def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_ISSUER", "http://localhost:54321")
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 3600)
     token = au.generate_session_jwt("user-1")
 
@@ -407,7 +407,7 @@ def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
 
 
 def test_internal_runtime_jwt_requires_configured_secret(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", "")
 
     with pytest.raises(ValueError, match="not configured"):
         au.generate_internal_runtime_jwt("user-1", "tenant-1")
@@ -427,7 +427,7 @@ def test_internal_runtime_jwt_requires_user_and_tenant(
     user_id,
     tenant_id,
 ):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(ValueError, match="user_id and tenant_id are required"):
         au.generate_internal_runtime_jwt(user_id, tenant_id)
@@ -438,7 +438,7 @@ def test_verify_internal_runtime_jwt_requires_authorization(
     monkeypatch,
     authorization,
 ):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(UnauthorizedError, match="No authorization header provided"):
         au.verify_internal_runtime_jwt(authorization)
@@ -459,7 +459,7 @@ def test_verify_internal_runtime_jwt_requires_string_identities(
     claim_value,
     expected_message,
 ):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     claims = {
         "sub": "user-1",
@@ -493,7 +493,7 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
 
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
 
     seconds = au.get_jwt_expiry_seconds(forged_token)
@@ -523,14 +523,14 @@ def test_get_jwt_expiry_seconds_rejects_non_positive_lifetime(monkeypatch):
 
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
 
     assert au.get_jwt_expiry_seconds(token) == 5432
 
 
 def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", "")
 
     with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
         au._decode_jwt_token_for_expiry("any-token")
@@ -540,7 +540,7 @@ def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
     token = au.generate_test_jwt("user-1", expires_in=120)
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     expires_at = au.calculate_expires_at(token)
 
@@ -556,16 +556,16 @@ def test_calculate_expires_at_speed_mode(monkeypatch):
 
 def test_extract_user_id_from_jwt_token(monkeypatch):
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
     uid = au._extract_user_id_from_jwt_token("Bearer " + token)
     assert uid == "user-xyz"
 
 
 def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
-    """Test that missing SUPABASE_JWT_SECRET raises UnauthorizedError"""
+    """Test that missing JWT_SECRET raises UnauthorizedError"""
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", "")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
     with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
@@ -575,7 +575,7 @@ def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
 def test_extract_user_id_invalid_signature_raises(monkeypatch):
     """Test that token signed with wrong secret raises UnauthorizedError"""
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "wrong-secret")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", "wrong-secret")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired"):
@@ -585,7 +585,7 @@ def test_extract_user_id_invalid_signature_raises(monkeypatch):
 def test_extract_user_id_expired_token_raises(monkeypatch):
     """Test that expired token raises UnauthorizedError (ExpiredSignatureError path)"""
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     # Token expired 1 hour ago
     token = au.generate_test_jwt("user-xyz", expires_in=-3600)
 
@@ -596,7 +596,7 @@ def test_extract_user_id_expired_token_raises(monkeypatch):
 def test_extract_user_id_malformed_token_raises(monkeypatch):
     """Test that malformed JWT raises UnauthorizedError (InvalidTokenError path)"""
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired"):
         au._extract_user_id_from_jwt_token("Bearer invalid.jwt.here")
@@ -604,7 +604,7 @@ def test_extract_user_id_malformed_token_raises(monkeypatch):
 
 def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
     """Test that UnauthorizedError from inner code is re-raised without wrapping"""
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "any-secret")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", "any-secret")
 
     def mock_decode_raises_unauthorized(*args, **kwargs):
         raise UnauthorizedError("Inner auth error")
@@ -618,7 +618,7 @@ def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
 
 def test_extract_user_id_generic_exception_raises(monkeypatch):
     """Test that generic Exception during decode raises UnauthorizedError"""
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     def mock_decode_raises_value_error(*args, **kwargs):
         raise ValueError("Unexpected decode error")
@@ -638,7 +638,7 @@ def test_get_current_user_id_speed_mode(monkeypatch):
 
 def test_get_current_user_id_with_mapping(monkeypatch):
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
     # user->tenant mapping
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
@@ -649,8 +649,8 @@ def test_get_current_user_id_with_mapping(monkeypatch):
 
 def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_ISSUER", "http://localhost:54321")
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
                         lambda u: {"tenant_id": "tenant-a"})
     sys.modules["management.db.identity.cas_session"] = MagicMock(
@@ -671,78 +671,20 @@ def test_get_user_language_from_cookie():
     assert au.get_user_language(None) == "zh"
 
 
-def test_get_supabase_client_success(monkeypatch):
-    """Test successful Supabase client creation"""
-    mock_client = MagicMock()
-    set_import_attribute(monkeypatch, au, "create_client", lambda url, key, options=None: mock_client)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
-    set_import_attribute(monkeypatch, au, "SUPABASE_KEY", "test_key")
-
-    result = au.get_supabase_client()
-    assert result == mock_client
 
 
-def test_get_supabase_client_failure(monkeypatch):
-    """Test Supabase client creation failure"""
-    def mock_create_client(url, key, options=None):
-        raise Exception("Connection failed")
-
-    set_import_attribute(monkeypatch, au, "create_client", mock_create_client)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
-    set_import_attribute(monkeypatch, au, "SUPABASE_KEY", "test_key")
-
-    result = au.get_supabase_client()
-    assert result is None
 
 
-def test_get_supabase_admin_client_success(monkeypatch):
-    """Test successful Supabase admin client creation using SERVICE_ROLE_KEY"""
-    mock_client = MagicMock()
-    set_import_attribute(monkeypatch, au, "create_client", lambda url, key, options=None: mock_client)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
-    set_import_attribute(monkeypatch, au, "SERVICE_ROLE_KEY", "svc_key")
-
-    result = au.get_supabase_admin_client()
-    assert result == mock_client
 
 
-def test_get_supabase_admin_client_failure(monkeypatch):
-    """Test Supabase admin client creation failure"""
-    def mock_create_client(url, key, options=None):
-        raise Exception("Connection failed")
-
-    set_import_attribute(monkeypatch, au, "create_client", mock_create_client)
-    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
-    set_import_attribute(monkeypatch, au, "SERVICE_ROLE_KEY", "svc_key")
-
-    result = au.get_supabase_admin_client()
-    assert result is None
 
 
-def test_delete_supabase_user_returns_false_for_empty_id():
-    assert au.delete_supabase_user("") is False
 
 
-def test_delete_supabase_user_returns_false_without_admin_client(monkeypatch):
-    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: None)
-
-    assert au.delete_supabase_user("user-1") is False
 
 
-def test_delete_supabase_user_deletes_user(monkeypatch):
-    admin_client = MagicMock()
-    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: admin_client)
-
-    assert au.delete_supabase_user("user-1") is True
-    admin_client.auth.admin.delete_user.assert_called_once_with("user-1")
 
 
-def test_delete_supabase_user_returns_false_when_delete_fails(monkeypatch):
-    admin_client = MagicMock()
-    admin_client.auth.admin.delete_user.side_effect = RuntimeError("delete failed")
-    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: admin_client)
-
-    assert au.delete_supabase_user("user-1") is False
 
 
 def test_validate_aksk_authentication_unexpected_error(monkeypatch):
@@ -779,14 +721,14 @@ def test_get_jwt_expiry_seconds_exception(monkeypatch):
 def test_get_current_user_id_no_tenant_mapping(monkeypatch):
     """Test get_current_user_id when no tenant mapping found"""
     set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
-    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
 
     # Mock get_user_tenant_by_user_id to return None
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda u: None)
 
-    uid, tid = au.get_current_user_id(token)
-    assert uid == "user-a" and tid == au.DEFAULT_TENANT_ID
+    with pytest.raises(UnauthorizedError, match="No active tenant relationship"):
+        au.get_current_user_id(token)
 
 
 def test_get_current_user_id_exception(monkeypatch):
@@ -1133,3 +1075,12 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",
         }, "body")
+
+
+@pytest.fixture(autouse=True)
+def active_local_account(monkeypatch):
+    # Credential/account-state integration is proved separately by native auth tests.
+    monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
+    from gateway.authentication import northbound_auth
+    monkeypatch.setattr(northbound_auth, "require_active_account", lambda uid: {})
+    monkeypatch.setattr(au, "require_active_account", lambda user_id: {"user_id": user_id, "token_version": 0})

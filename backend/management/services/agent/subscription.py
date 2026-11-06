@@ -83,6 +83,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
+    prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -194,6 +195,7 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    final_answer_mode: str = "delta",
 ):
     """
     Start an agent run and stream responses.
@@ -210,12 +212,6 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if not resume:
-        from management.services.model import run_controls
-
-        run_controls.validate_agent_model_selection(
-            agent_request, resolved_tenant_id, search_agent_info_by_agent_id
-        )
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -252,6 +248,16 @@ async def run_agent_stream(
                 raise ForbiddenError(
                     "Conversation belongs to a different chat entrypoint"
                 )
+
+    if not resume:
+        from management.services.model import run_controls
+        if conversation is not None:
+            from management.services.conversation.model_preferences import read_model_preferences
+            saved = await run_blocking("conversation-model-settings", read_model_preferences, agent_request.conversation_id, resolved_user_id)
+            if agent_request.model_id is None:
+                agent_request.model_id = saved.get("selected_model_id")
+            agent_request.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+        run_controls.validate_agent_model_selection(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
 
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
@@ -293,14 +299,36 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        apply_workbench_runtime_plan(
-            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
-        )
         if conversation is not None:
             assert_workbench_version(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
+    else:
+        request_scope = None
+    if not resume:
+        if canonical_workbench is not None:
+            apply_workbench_runtime_plan(
+                agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
+            )
+            request_scope = canonical_workbench.knowledge_scope
+        prepare_tool_retrieval_overrides(
+            resolved_tenant_id, tool_params=agent_request.tool_params,
+            agent_id=agent_request.agent_id, version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+        )
+    if not resume and conversation is not None and agent_request.model_parameter_preferences:
+        raise ValidationError("Save existing conversation parameters through the preference endpoint")
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -334,17 +362,6 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
-    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
-        request_scope = raw_request_scope
-    elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(
-            raw_request_scope
-        )
-    else:
-        request_scope = None
     stored_scope = (
         conversation.get("knowledge_scope")
         if conversation and canonical_workbench is None
@@ -430,6 +447,10 @@ async def run_agent_stream(
             "agent_id": agent_request.agent_id,
             "chat_mode": "planning" if agent_request.enable_plan else "execution",
         }
+        if agent_request.model_id is not None:
+            conversation_kwargs["selected_model_id"] = agent_request.model_id
+        if agent_request.model_parameter_preferences:
+            conversation_kwargs["model_parameter_preferences"] = agent_request.model_parameter_preferences
         if canonical_workbench is not None:
             conversation_kwargs["workbench_config"] = canonical_workbench.model_dump(
                 mode="json"
@@ -441,6 +462,7 @@ async def run_agent_stream(
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
+        agent_request.__dict__["_runtime_model_parameter_preferences"] = agent_request.model_parameter_preferences
         logger.info(
             "Auto-created conversation_id=%s for user=%s (new conversation)",
             agent_request.conversation_id,
@@ -771,9 +793,15 @@ async def run_agent_stream(
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
     agent_capacity_token = None
+    # Workbench shares its definition across tenants, but not its admission budget.
+    capacity_key = (
+        f"{resolved_tenant_id}:workbench_main"
+        if agent_request.entrypoint == "workbench"
+        else agent_request.agent_id
+    )
     try:
         agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            agent_request.agent_id,
+            capacity_key,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
         execution = runtime_thread_manager.submit(
@@ -915,6 +943,8 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
     }
+    if final_answer_mode != "delta":
+        stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
     stream_gen = generate_stream(agent_request, **stream_kwargs)
@@ -950,7 +980,7 @@ async def run_agent_stream(
                                 "config_version": getattr(
                                     agent_request, "_workbench_config_version", 0
                                 ),
-                                "schema_version": 3,
+                                "schema_version": canonical_workbench.schema_version,
                                 "mode": canonical_workbench.mode,
                                 "agent_mounts": [
                                     mount.model_dump(mode="json")

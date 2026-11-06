@@ -11,6 +11,7 @@ feature:
   - rule_id: V5-SEC-04-RULE-01
     description: Token/API key/secret泄露
   required_test_stages:
+  - D2
   - D5
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

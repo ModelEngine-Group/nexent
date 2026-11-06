@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
@@ -207,6 +208,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "user",
         "assistant",
+        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -214,9 +216,9 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
-    action_history = _message_text(final.messages[3])
-    assert '<completed_action_history read_only="true">' in action_history
-    assert "recorded_result:\nwork trace" in action_history
+    action_history = _message_text(final.messages[4])
+    assert '<CODE_EXEC_RESULT>' in action_history
+    assert "<RETURN_VALUE>work trace</RETURN_VALUE>" in action_history
     assert "Calling tools:" not in action_history
     assert "Observation:" not in action_history
     assert final.evidence.purpose == "final_answer"
@@ -290,12 +292,12 @@ def test_completed_skill_read_is_available_to_the_next_model_step():
     action_history = next(
         _message_text(message)
         for message in final.messages
-        if '<completed_action_history read_only="true">' in _message_text(message)
+        if '<CODE_EXEC_RESULT>' in _message_text(message)
     )
-    assert "read_skill_md" in action_history
-    assert 'read_skill_md("demo-skill")' in action_history
+    assert "read_skill_md" in str(final.messages)
+    assert 'read_skill_md("demo-skill")' in '\n'.join(_message_text(m) for m in final.messages)
     assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
-    assert "Do not copy this record's format as your next response." in action_history
+    assert "Do not copy this record's format as your next response." not in action_history
 
 
 def test_context_manager_attributes_tool_schema_change():

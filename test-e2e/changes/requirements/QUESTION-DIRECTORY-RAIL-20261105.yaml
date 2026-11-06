@@ -1,0 +1,44 @@
+schema_version: "1.0"
+change:
+  change_id: QUESTION-DIRECTORY-RAIL-20261105
+  change_type: requirement
+  requirement_id: QUESTION-DIRECTORY-RAIL-20261105
+  title: Replace question-directory entry with a left-side question rail
+  description: >-
+    Use the user-provided screenshot as the visual reference. Render one muted
+    horizontal tick per question in a persistent left gutter outside the message
+    scroll area. The current question has a darker tick and a dot. Hover/focus
+    previews question/reply; click or keyboard activation jumps to the message.
+    Keep the searchable directory available through a compact secondary entry.
+    Hide the rail for empty conversations, bound long lists to available height,
+    and use the same rail in editable and read-only conversation surfaces.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/questionDirectory.test.tsx
+    behaviors:
+      - Hide the rail with no questions and render one accessible tick per question.
+      - Mark only the active question and jump using the original message identity.
+      - Preview question and reply through hover and keyboard focus.
+      - Retain the searchable directory, existing collection and scrolling contracts.
+    reason: >-
+      This frontend-only navigation presentation reuses existing directory data
+      and jump behavior. Strengthen component UT without duplicating it in a new
+      D1 Case. No API, storage or model behavior changes; Python UT is unrelated.
+      Formal browser/layout acceptance remains separate from component checks.
+  notes: >-
+    Baseline QUESTION-DIRECTORY-JUMP-20261102. Initial working tree is clean at
+    51c227cbe. The sibling nexent-doc and ../docs/前端ui.md are unavailable;
+    external SPEC synchronization remains pending. The screenshot and explicit
+    user request define the visual change. No remote reconciliation or deployment
+    is authorized or claimed.

@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from contracts.errors.exceptions import ValidationError, WorkbenchError
-from contracts.agent import WorkbenchSessionConfig
+from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
 
 
@@ -22,7 +23,7 @@ def _resolve_dependencies(monkeypatch, snapshot=None):
     monkeypatch.setattr(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        lambda _tenant: SimpleNamespace(agent_id=99, version_no=4),
+        lambda _tenant: SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     monkeypatch.setattr(
         workbench_service,
@@ -197,15 +198,10 @@ def test_resolve_workbench_rejects_disabled_system_root(monkeypatch):
         workbench_service.resolve_workbench_config(_config(), tenant_id="tenant-a")
 
 
-def test_resolve_workbench_rejects_unavailable_model(monkeypatch):
-    _resolve_dependencies(monkeypatch)
-    monkeypatch.setattr(workbench_service, "get_model_by_model_id", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(workbench_service, "is_model_available", lambda _model: False)
-
-    with pytest.raises(WorkbenchError, match="WORKBENCH_MODEL_NOT_ALLOWED"):
-        workbench_service.resolve_workbench_config(
-            _config(model_id=8), tenant_id="tenant-a"
-        )
+def test_su_ac_07_resource_plan_rejects_a_parallel_model_selection():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _config(model_id=8)
 
 
 def test_capability_preview_rejects_missing_published_version(monkeypatch):

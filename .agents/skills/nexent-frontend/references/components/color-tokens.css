@@ -1,0 +1,306 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+/* Import once from the global stylesheet. Components consume semantic roles. */
+:root {
+
+  /* Raw company palette */
+  --palette-rose-05: #FEE5F2;
+  --palette-red-05: #FEE7E8;
+  --palette-orange-05: #FEF5E8;
+  --palette-yellow-05: #FEFCE0;
+  --palette-green-05: #F2FBE9;
+  --palette-mint-05: #E7FBF2;
+  --palette-cyan-05: #E8FCFD;
+  --palette-blue-05: #EEF3FE;
+  --palette-indigo-05: #EEEEFE;
+  --palette-purple-05: #F7EDFE;
+  --palette-pink-05: #FDE6FC;
+  --palette-brand-05: #E6F2FD;
+  --palette-rose-10: #FCC3E0;
+  --palette-red-10: #FABDC1;
+  --palette-orange-10: #FDE2BD;
+  --palette-yellow-10: #FEF8B8;
+  --palette-green-10: #DFF4CC;
+  --palette-mint-10: #BCF2DB;
+  --palette-cyan-10: #C9F6F9;
+  --palette-blue-10: #D0D8FD;
+  --palette-indigo-10: #D5D3FD;
+  --palette-purple-10: #E8CFFE;
+  --palette-pink-10: #F9C5F6;
+  --palette-brand-10: #B8D9F9;
+  --palette-rose-20: #F99AC7;
+  --palette-red-20: #F59297;
+  --palette-orange-20: #FCCE92;
+  --palette-yellow-20: #FEF08A;
+  --palette-green-20: #C6E9A8;
+  --palette-mint-20: #8FE5C2;
+  --palette-cyan-20: #A4ECF1;
+  --palette-blue-20: #B0BFFD;
+  --palette-indigo-20: #BFB9FA;
+  --palette-purple-20: #D9B1FD;
+  --palette-pink-20: #F39DEC;
+  --palette-brand-20: #8ABEF3;
+  --palette-rose-30: #F470AB;
+  --palette-red-30: #EE696F;
+  --palette-orange-30: #F9B766;
+  --palette-yellow-30: #FDE55C;
+  --palette-green-30: #A8DB81;
+  --palette-mint-30: #63D5A8;
+  --palette-cyan-30: #7DDFE7;
+  --palette-blue-30: #8CA3FA;
+  --palette-indigo-30: #A89FF9;
+  --palette-purple-30: #CB8EFB;
+  --palette-pink-30: #EB74DF;
+  --palette-brand-30: #5CA2E9;
+  --palette-rose-40: #ED448A;
+  --palette-red-40: #E7434A;
+  --palette-orange-40: #F69E39;
+  --palette-yellow-40: #FCD72E;
+  --palette-green-40: #87C859;
+  --palette-mint-40: #36C18D;
+  --palette-cyan-40: #55CCD9;
+  --palette-blue-40: #668CF7;
+  --palette-indigo-40: #8E81F4;
+  --palette-purple-40: #BF68FA;
+  --palette-pink-40: #E049CE;
+  --palette-brand-40: #2E86DE;
+  --palette-rose-50: #E61866;
+  --palette-red-50: #E02128;
+  --palette-orange-50: #F4840C;
+  --palette-yellow-50: #FCC800;
+  --palette-green-50: #62B42E;
+  --palette-mint-50: #09AA71;
+  --palette-cyan-50: #2CB8C9;
+  --palette-blue-50: #2070F3;
+  --palette-indigo-50: #715AFB;
+  --palette-purple-50: #B62BF7;
+  --palette-pink-50: #D41DBC;
+  --palette-brand-50: #0067D1;
+  --palette-rose-60: #C40054;
+  --palette-red-60: #C7000B;
+  --palette-orange-60: #C76207;
+  --palette-yellow-60: #D19F00;
+  --palette-green-60: #488E20;
+  --palette-mint-60: #058358;
+  --palette-cyan-60: #1C94A4;
+  --palette-blue-60: #1F55B5;
+  --palette-indigo-60: #5531EB;
+  --palette-purple-60: #8A21BC;
+  --palette-pink-60: #9F1C8D;
+  --palette-brand-60: #004EA8;
+  --palette-rose-70: #811439;
+  --palette-red-70: #850F12;
+  --palette-orange-70: #954304;
+  --palette-yellow-70: #9E7400;
+  --palette-green-70: #316614;
+  --palette-mint-70: #036142;
+  --palette-cyan-70: #127180;
+  --palette-blue-70: #1B3F86;
+  --palette-indigo-70: #3F21B5;
+  --palette-purple-70: #651B8B;
+  --palette-pink-70: #751868;
+  --palette-brand-70: #003D83;
+  --palette-rose-80: #540D24;
+  --palette-red-80: #59080A;
+  --palette-orange-80: #642802;
+  --palette-yellow-80: #614500;
+  --palette-green-80: #1B3E0A;
+  --palette-mint-80: #02422E;
+  --palette-cyan-80: #094C57;
+  --palette-blue-80: #112857;
+  --palette-indigo-80: #281675;
+  --palette-purple-80: #41125A;
+  --palette-pink-80: #4C0F43;
+  --palette-brand-80: #002E6A;
+  --palette-rose-90: #330614;
+  --palette-red-90: #350305;
+  --palette-orange-90: #3D1601;
+  --palette-yellow-90: #2E1F00;
+  --palette-green-90: #0C2004;
+  --palette-mint-90: #00291D;
+  --palette-cyan-90: #04282F;
+  --palette-blue-90: #081635;
+  --palette-indigo-90: #160B48;
+  --palette-purple-90: #260937;
+  --palette-pink-90: #2E0728;
+  --palette-brand-90: #00214B;
+  --palette-gray-90: #191919;
+  --palette-gray-50: #777777;
+  --palette-gray-30: #AEAEAE;
+  --palette-gray-20: #C9C9C9;
+  --palette-gray-0: #FFFFFF;
+  --palette-gray-40: #939393;
+  --palette-gray-10: #DFDFDF;
+  --palette-gray-05: #F3F3F3;
+  --palette-gray-70: #393939;
+  --palette-gray-80: #2A2A2A;
+  --palette-gray-60: #595959;
+  --palette-gray-100: #000000;
+
+  /* Company auxiliary colors */
+  --aux-black: #000000;
+  --aux-dark-gray: #393939;
+  --aux-gray: #777777;
+  --aux-light-gray: #C9C9C9;
+  --aux-white: #FFFFFF;
+  --aux-rose: #E61866;
+  --aux-orange: #F36900;
+  --aux-yellow: #FDC000;
+  --aux-green: #4FA700;
+  --aux-cyan: #54BCCE;
+  --aux-pink: #D41DBC;
+  --aux-purple: #B62BF7;
+  --aux-indigo: #5531EB;
+  --aux-blue: #2070F3;
+  --aux-mint: #00A874;
+
+  /* Semantic roles and chart capacity */
+  --color-brand: var(--palette-brand-50);
+  --color-brand-hover: var(--palette-brand-40);
+  --color-brand-focus: var(--palette-brand-50);
+  --color-brand-active: var(--palette-brand-60);
+  --color-brand-disabled: var(--palette-brand-20);
+  --color-text-primary: var(--palette-gray-90);
+  --color-text-secondary: var(--palette-gray-50);
+  --color-text-placeholder: var(--palette-gray-30);
+  --color-text-disabled: var(--palette-gray-20);
+  --color-text-inverse: var(--palette-gray-0);
+  --color-icon-primary: var(--palette-gray-90);
+  --color-icon-secondary: var(--palette-gray-50);
+  --color-icon-tertiary: var(--palette-gray-40);
+  --color-icon-placeholder: var(--palette-gray-30);
+  --color-icon-disabled: var(--palette-gray-20);
+  --color-icon-inverse: var(--palette-gray-0);
+  --color-icon-hover: var(--palette-brand-40);
+  --color-icon-focus: var(--palette-brand-50);
+  --color-icon-active: var(--palette-brand-60);
+  --color-border: var(--palette-gray-20);
+  --color-border-hover: var(--palette-gray-90);
+  --color-border-focus: var(--palette-brand-50);
+  --color-border-disabled: var(--palette-gray-20);
+  --color-border-separator: var(--palette-gray-10);
+  --color-border-separator-subtle: var(--palette-gray-05);
+  --color-bg-1: var(--palette-gray-05);
+  --color-bg-2: var(--palette-gray-0);
+  --color-bg-3: var(--palette-gray-0);
+  --color-bg-4: var(--palette-gray-0);
+  --color-bg-5: var(--palette-gray-0);
+  --color-bg-6: rgb(201 201 201 / 20%);
+  --color-bg-mask: rgb(25 25 25 / 30%);
+  --color-hover: rgb(25 25 25 / 5%);
+  --color-select: var(--palette-brand-05);
+  --color-table-header: rgb(25 25 25 / 5%);
+  --color-table-zebra: rgb(147 147 147 / 5%);
+  --color-fill: rgb(25 25 25 / 5%);
+  --color-fill-subtle: var(--palette-gray-0);
+  --color-fill-disabled: var(--palette-gray-10);
+  --color-fill-disabled-subtle: rgb(25 25 25 / 5%);
+  --color-error: var(--palette-red-50);
+  --color-error-hover: var(--palette-red-40);
+  --color-error-active: var(--palette-red-60);
+  --color-error-disabled: var(--palette-red-10);
+  --color-error-subtle: var(--palette-red-20);
+  --color-error-subtler: var(--palette-red-05);
+  --color-alert: var(--palette-orange-50);
+  --color-alert-hover: var(--palette-orange-40);
+  --color-alert-active: var(--palette-orange-60);
+  --color-alert-disabled: var(--palette-orange-05);
+  --color-alert-subtle: var(--palette-orange-20);
+  --color-alert-subtler: var(--palette-orange-05);
+  --color-warning: var(--palette-yellow-50);
+  --color-warning-hover: var(--palette-yellow-40);
+  --color-warning-active: var(--palette-yellow-60);
+  --color-warning-disabled: var(--palette-yellow-10);
+  --color-warning-bold: var(--palette-yellow-80);
+  --color-warning-subtle: var(--palette-yellow-20);
+  --color-warning-subtler: var(--palette-yellow-05);
+  /* Explicit user-confirmed value; the documented mint-40 label is an exception. */
+  --color-success: #09AA71;
+  --color-success-hover: var(--palette-mint-40);
+  --color-success-active: var(--palette-mint-60);
+  --color-success-disabled: var(--palette-mint-10);
+  --color-success-subtle: var(--palette-mint-20);
+  --color-success-subtler: var(--palette-mint-05);
+  --color-info: var(--palette-blue-50);
+  --color-info-subtle: var(--palette-blue-20);
+  --color-info-subtler: var(--palette-blue-05);
+  --color-info-primary: var(--palette-blue-50);
+  --color-info-primary-subtle: var(--palette-blue-30);
+  --color-info-primary-subtler: var(--palette-blue-05);
+  --color-info-secondary: var(--palette-blue-30);
+  --color-info-secondary-hover: var(--palette-blue-20);
+  --color-info-secondary-active: var(--palette-blue-40);
+  --color-info-secondary-disabled: var(--palette-blue-10);
+  --color-info-secondary-subtle: var(--palette-blue-05);
+  --color-none: var(--palette-gray-30);
+  --color-none-subtle: var(--palette-gray-05);
+  --color-none-hover: var(--palette-gray-20);
+  --color-none-active: var(--palette-gray-40);
+  --color-none-disabled: var(--palette-gray-10);
+  --color-chart-1: var(--palette-blue-50);
+  --color-chart-2: var(--palette-green-50);
+  --color-chart-3: var(--palette-indigo-50);
+  --color-chart-4: var(--palette-cyan-50);
+  --color-chart-5: var(--palette-orange-40);
+  --color-chart-6: var(--palette-brand-30);
+  --color-chart-tail: var(--palette-blue-70);
+  --chart-series-count: 6;
+}
+
+/* Local palette; render only the first --chart-series-count series roles. */
+[data-chart-palette="default"] {
+  --chart-series-count: 6;
+  --color-chart-1: var(--palette-blue-50);
+  --color-chart-2: var(--palette-green-50);
+  --color-chart-3: var(--palette-indigo-50);
+  --color-chart-4: var(--palette-cyan-50);
+  --color-chart-5: var(--palette-orange-40);
+  --color-chart-6: var(--palette-brand-30);
+}
+
+/* Local palette; render only the first --chart-series-count series roles. */
+[data-chart-palette="accessible"] {
+  --chart-series-count: 6;
+  --color-chart-1: var(--palette-blue-60);
+  --color-chart-2: var(--palette-green-60);
+  --color-chart-3: var(--palette-indigo-60);
+  --color-chart-4: var(--palette-cyan-60);
+  --color-chart-5: var(--palette-orange-60);
+  --color-chart-6: var(--palette-brand-40);
+}
+
+/* Local palette; render only the first --chart-series-count series roles. */
+[data-chart-palette="extended-1"] {
+  --chart-series-count: 4;
+  --color-chart-1: var(--palette-mint-50);
+  --color-chart-2: var(--palette-indigo-40);
+  --color-chart-3: var(--palette-cyan-50);
+  --color-chart-4: var(--palette-purple-40);
+  /* Unavailable roles are invalidated rather than inherited from a six-color palette. */
+  --color-chart-5: initial;
+  --color-chart-6: initial;
+}
+
+/* Local palette; render only the first --chart-series-count series roles. */
+[data-chart-palette="extended-2"] {
+  --chart-series-count: 4;
+  --color-chart-1: var(--palette-indigo-50);
+  --color-chart-2: var(--palette-yellow-40);
+  --color-chart-3: var(--palette-blue-50);
+  --color-chart-4: var(--palette-green-40);
+  /* Unavailable roles are invalidated rather than inherited from a six-color palette. */
+  --color-chart-5: initial;
+  --color-chart-6: initial;
+}
+
+/* Local palette; render only the first --chart-series-count series roles. */
+[data-chart-palette="extended-3"] {
+  --chart-series-count: 4;
+  --color-chart-1: var(--palette-purple-50);
+  --color-chart-2: var(--palette-green-40);
+  --color-chart-3: var(--palette-cyan-50);
+  --color-chart-4: var(--palette-orange-40);
+  /* Unavailable roles are invalidated rather than inherited from a six-color palette. */
+  --color-chart-5: initial;
+  --color-chart-6: initial;
+}

@@ -1,9 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { t as translate } from "i18next";
-import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
 import type { ClarificationResponse } from "@/types/clarification";
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
@@ -14,6 +13,8 @@ import type {
   AgentConversationGroupPage,
   AgentGroupConversationPage,
   ApiConversationDetail,
+  ConversationTarget,
+  CreatorHistoryPage,
   ApiConversationResponse,
   WorkbenchPins,
 } from "@/types/conversation";
@@ -41,6 +42,35 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getCreatorHistories(
+    kind: ConversationTarget["type"],
+    targetId: number,
+    offset = 0
+  ): Promise<CreatorHistoryPage> {
+    const query = new URLSearchParams({
+      kind,
+      target_id: String(targetId),
+      offset: String(offset),
+      limit: "20",
+    });
+    const response = await fetchWithErrorHandling(
+      `${API_ENDPOINTS.conversation.creatorHistories}?${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    const payload = await response.json();
+    if (payload.code !== 0) throw new ApiError(payload.code, payload.message);
+    return payload.data;
+  },
+  async bindTarget(id: number, target: ConversationTarget): Promise<void> {
+    const response = await fetch(API_ENDPOINTS.conversation.target(id), {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(target),
+    });
+    if (!response.ok) throw new Error("Failed to bind conversation target");
+  },
   async getAgentGroups(
     params: {
       limit?: number;
@@ -1192,18 +1222,9 @@ export const conversationService = {
         description?: string;
       }>;
       agent_id?: number; // Add agent_id parameter
+      target?: ConversationTarget;
       model_id?: number; // Optional model override
-      generation_config?: RuntimeGenerationOverrides;
-      reasoning_effort?:
-        | "auto"
-        | "none"
-        | "minimal"
-        | "low"
-        | "medium"
-        | "high"
-        | "xhigh"
-        | "max";
-      reasoning_budget_tokens?: number;
+      model_parameter_preferences?: Record<string, Record<string, unknown>>;
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1258,7 +1279,7 @@ export const conversationService = {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.language = params.language;
       }
-      if (params.persist_history && params.runtime_mode) {
+      if (params.runtime_mode) {
         requestParams.persist_history = true;
         requestParams.workbench_config = params.workbench_config;
         if (params.retry_message_index !== undefined) {
@@ -1277,6 +1298,8 @@ export const conversationService = {
         requestParams.conversation_id = params.conversation_id;
       }
 
+      if (params.target) requestParams.target = params.target;
+
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {
         requestParams.agent_id = params.agent_id;
@@ -1284,27 +1307,9 @@ export const conversationService = {
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
       }
-      if (params.generation_config !== undefined) {
-        requestParams.generation_config = params.generation_config;
-      }
-      const budgetTokens = params.reasoning_budget_tokens;
-      const hasBudgetSelection =
-        typeof budgetTokens === "number" &&
-        Number.isInteger(budgetTokens) &&
-        budgetTokens >= 0;
-      if (
-        !hasBudgetSelection &&
-        params.reasoning_effort !== undefined &&
-        params.reasoning_effort !== "auto"
-      ) {
-        requestParams.reasoning_effort = params.reasoning_effort;
-      }
-      if (
-        hasBudgetSelection &&
-        budgetTokens !== undefined &&
-        budgetTokens > 0
-      ) {
-        requestParams.reasoning_budget_tokens = budgetTokens;
+      if (params.model_parameter_preferences !== undefined) {
+        requestParams.model_parameter_preferences =
+          params.model_parameter_preferences;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Closed output protocol for Nexent CodeAgent runtimes."""
 
 from __future__ import annotations
@@ -425,6 +427,34 @@ def classify_model_output(
     return _classify_code_action(text, protocol=protocol, logger=logger)
 
 
+def _terminal_clarification_call(tree: ast.Module, tool_name: str) -> ast.Call:
+    """Unwrap only a terminal call or its inert assignment/print presentation."""
+    if not 1 <= len(tree.body) <= 2:
+        raise ValueError("Expected one terminal clarification")
+    statement = tree.body[0]
+    if isinstance(statement, ast.Expr) and len(tree.body) == 1:
+        call = statement.value
+    elif (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and statement.targets[0].id not in {tool_name, "print"}):
+        call = statement.value
+        if len(tree.body) == 2:
+            output = tree.body[1]
+            if not (isinstance(output, ast.Expr) and isinstance(output.value, ast.Call)
+                    and isinstance(output.value.func, ast.Name) and output.value.func.id == "print"
+                    and len(output.value.args) == 1 and not output.value.keywords
+                    and isinstance(output.value.args[0], ast.Name)
+                    and output.value.args[0].id == statement.targets[0].id):
+                raise ValueError("Only printing the clarification result is allowed")
+    else:
+        raise ValueError("Expected a simple clarification call or assignment")
+    if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
+            or call.func.id != tool_name or call.args or len(call.keywords) != 1
+            or call.keywords[0].arg != "questions"):
+        raise ValueError("Expected only the questions keyword")
+    return call
+
+
 def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm | None:
     """Recognize a terminal form before any part of the Python action can execute."""
     try:
@@ -439,13 +469,9 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         )
         if not references:
             return None
-        if len(code) > 131072 or len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
-            raise ValueError("Expected a standalone clarification call")
-        call = tree.body[0].value
-        if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
-                or call.func.id != tool_name or call.args or len(call.keywords) != 1
-                or call.keywords[0].arg != "questions"):
-            raise ValueError("Expected only the questions keyword")
+        if len(code) > 131072:
+            raise ValueError("Clarification action exceeds its size limit")
+        call = _terminal_clarification_call(tree, tool_name)
         literal = call.keywords[0].value
         nodes = list(ast.walk(literal))
         if len(nodes) > 4096 or any(
@@ -460,7 +486,7 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         return ClarificationForm.model_validate({"questions": ast.literal_eval(literal)})
     except ValidationError as exc:
         # Report schema locations and error types without echoing rejected values.
-        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder"}
+        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder", "creation_request"}
         issues = []
         for error in exc.errors(include_url=False, include_input=False)[:5]:
             location = ".".join(
@@ -471,7 +497,16 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         raise ModelOutputProtocolError(
             ProtocolErrorReason.INVALID_CLARIFICATION_FORM,
             "code_action",
-            repair_hint="Invalid fields: " + "; ".join(issues) + ".",
+            repair_hint=f"Use <code>{tool_name}(questions=[...])</code>. Invalid fields: " + "; ".join(issues) + ".",
         ) from exc
     except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError) as exc:
-        raise ModelOutputProtocolError(ProtocolErrorReason.MALFORMED_ACTION, "code_action") from exc
+        raise ModelOutputProtocolError(
+            ProtocolErrorReason.MALFORMED_ACTION,
+            "code_action",
+            repair_hint=(
+                f"The clarification was not executed. Return <code>{tool_name}(questions=[...])</code> "
+                "as a terminal action with literal question data only. Do not mix it with business tools, "
+                "imports, dynamic expressions, or other statements. Assignment is optional; only a single "
+                "print of that same result is accepted after it. " + CLARIFICATION_SCHEMA_GUIDANCE
+            ),
+        ) from exc

@@ -37,7 +37,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Import exception classes
 from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
 from contracts.errors.codes import ErrorCode
-from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
+from contracts.errors.exceptions import AccountConflictError
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -319,7 +319,7 @@ class TestUserSignup:
     def test_signup_email_already_exists(self):
         """Test registration fails due to email already existing"""
         with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
-            mock_signup.side_effect = AuthApiError("Email already exists", 400, "email_exists")
+            mock_signup.side_effect = AccountConflictError("Email already exists")
 
             response = client.post(
                 "/user/signup",
@@ -337,7 +337,7 @@ class TestUserSignup:
     def test_signup_weak_password(self):
         """Test registration fails due to weak password"""
         with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
-            mock_signup.side_effect = AuthWeakPasswordError("Password too weak", 400, ["Password is too weak"])
+            mock_signup.side_effect = AppException(ErrorCode.PROFILE_PASSWORD_WEAK)
 
             response = client.post(
                 "/user/signup",
@@ -418,7 +418,7 @@ class TestUserSignin:
     def test_signin_invalid_credentials(self):
         """Test login with invalid credentials"""
         with patch('management.api.identity.user_management.signin_user') as mock_signin:
-            mock_signin.side_effect = AuthApiError("Invalid credentials", 400, "invalid_credentials")
+            mock_signin.side_effect = UnauthorizedError("Invalid credentials")
 
             response = client.post(
                 "/user/signin",
@@ -510,127 +510,20 @@ class TestRefreshToken:
 
 
 class TestLogout:
-    """Test logout endpoint"""
+    def test_logout_is_idempotent_without_auth(self):
+        assert client.post("/user/logout").status_code == 200
 
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_logout_success(self, mock_get_client):
-        """Test successful logout"""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
+    def test_invalid_jwt_cannot_revoke_arbitrary_cas_sid(self):
+        with patch("management.api.identity.user_management.get_current_user_id", side_effect=UnauthorizedError("invalid")), patch("management.db.identity.cas_session.revoke_cas_session_by_session_id") as revoke:
+            assert client.post("/user/logout", headers={"Authorization":"Bearer forged"}).status_code == 200
+            revoke.assert_not_called()
 
-        response = client.post(
-            "/user/logout",
-            headers={"Authorization": "Bearer token"}
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["message"] == "Logout successful"
-        mock_get_client.assert_called_once_with("Bearer token")
-        mock_client.auth.sign_out.assert_called_once()
-
-    def test_logout_no_authorization(self):
-        """Test logout without authorization header"""
-        response = client.post("/user/logout")
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["message"] == "Logout successful"
-
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_logout_signout_error_ignored(self, mock_get_client):
-        """Test logout ignores sign_out errors and still succeeds"""
-        mock_client = MagicMock()
-        mock_client.auth.sign_out.side_effect = Exception("network")
-        mock_get_client.return_value = mock_client
-
-        response = client.post(
-            "/user/logout",
-            headers={"Authorization": "Bearer token"}
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["message"] == "Logout successful"
-        mock_get_client.assert_called_once_with("Bearer token")
-        mock_client.auth.sign_out.assert_called_once()
-
-    @patch('management.db.identity.cas_session.revoke_cas_session_by_session_id')
-    @patch('management.api.identity.user_management.build_logout_url')
-    @patch('management.api.identity.user_management.extract_session_id_from_authorization')
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_logout_returns_cas_logout_url_for_cas_session(
-        self,
-        mock_get_client,
-        mock_extract_session_id,
-        mock_build_logout_url,
-        mock_revoke_cas_session,
-    ):
-        """Test logout returns CAS logout URL when the JWT carries a CAS session id."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        mock_extract_session_id.return_value = "sid-1"
-        mock_build_logout_url.return_value = (
-            "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
-        )
-
-        response = client.post(
-            "/user/logout",
-            headers={"Authorization": "Bearer token"}
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert (
-            data["data"]["cas_logout_url"]
-            == "https://cas.example.com/cas/logout?service=https%3A%2F%2Fcas.example.com%2Fcas%2Flogin"
-        )
-        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
-        mock_build_logout_url.assert_called_once_with()
-        mock_client.auth.sign_out.assert_called_once()
-
-    @patch('management.db.identity.cas_session.revoke_cas_session_by_session_id')
-    @patch('management.api.identity.user_management.build_logout_url')
-    @patch('management.api.identity.user_management.extract_session_id_from_authorization')
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_logout_does_not_return_cas_logout_url_when_not_configured(
-        self,
-        mock_get_client,
-        mock_extract_session_id,
-        mock_build_logout_url,
-        mock_revoke_cas_session,
-    ):
-        """Test logout skips CAS server logout redirect when CAS_LOGOUT_URL is empty."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        mock_extract_session_id.return_value = "sid-1"
-        mock_build_logout_url.return_value = ""
-
-        response = client.post(
-            "/user/logout",
-            headers={"Authorization": "Bearer token"}
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["data"]["cas_logout_url"] == ""
-        mock_revoke_cas_session.assert_called_once_with("sid-1", actor="user")
-        mock_build_logout_url.assert_called_once_with()
-        mock_client.auth.sign_out.assert_called_once()
-
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_logout_error(self, mock_get_client):
-        """Test logout with error"""
-        mock_get_client.side_effect = Exception("Logout error")
-
-        response = client.post(
-            "/user/logout",
-            headers={"Authorization": "Bearer token"}
-        )
-
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        data = response.json()
-        assert data["detail"] == "Logout failed!"
+    def test_valid_cas_logout_revokes_session_and_returns_url(self):
+        with patch("management.api.identity.user_management.get_current_user_id",return_value=("u","t")), patch("management.api.identity.user_management.extract_session_id_from_authorization",return_value="sid"), patch("management.api.identity.user_management.build_logout_url",return_value="https://cas.example.com/logout"), patch("management.db.identity.cas_session.revoke_cas_session_by_session_id") as revoke:
+            response=client.post("/user/logout",headers={"Authorization":"Bearer valid"})
+            assert response.status_code==200
+            assert response.json()["data"]["cas_logout_url"]=="https://cas.example.com/logout"
+            revoke.assert_called_once_with("sid",actor="user")
 
 
 class TestGetSession:
@@ -976,8 +869,7 @@ class TestIntegration:
     @patch('management.api.identity.user_management.signup_user_with_invitation')
     @patch('management.api.identity.user_management.signin_user')
     @patch('management.api.identity.user_management.get_session_by_authorization')
-    @patch('management.api.identity.user_management.get_authorized_client')
-    def test_complete_user_flow(self, mock_get_client, mock_get_session, mock_signin, mock_signup):
+    def test_complete_user_flow(self, mock_get_session, mock_signin, mock_signup):
         """Test complete user registration and authentication flow"""
         # 1. Register user
         mock_signup.return_value = {"user_id": "123", "email": "test@example.com"}
@@ -1018,8 +910,6 @@ class TestIntegration:
         assert session_response.status_code == HTTPStatus.OK
 
         # 4. Logout
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
         logout_response = client.post(
             "/user/logout",
             headers={"Authorization": "Bearer token123"}

@@ -1,5 +1,8 @@
 # Default values for nexent helm chart.
 global:
+  # Deployment scripts keep business Pods stopped until the bootstrap Job succeeds.
+  businessPaused: false
+  systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   sharedStorage:
@@ -32,7 +35,6 @@ global:
     infrastructure: false
     application: true
     data-process: true
-    supabase: true
     terminal: false
     monitoring: false
   portPolicy: "development"
@@ -117,12 +119,6 @@ nexent-web:
   config:
     fileUploadSizeLimit: "10"
 nexent-data-process:
-  enabled: true
-nexent-supabase-kong:
-  enabled: true
-nexent-supabase-auth:
-  enabled: true
-nexent-supabase-db:
   enabled: true
 nexent-openssh:
   enabled: false

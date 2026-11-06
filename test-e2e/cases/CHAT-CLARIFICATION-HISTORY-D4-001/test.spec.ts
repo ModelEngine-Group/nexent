@@ -23,6 +23,11 @@ journey("CHAT-CLARIFICATION-HISTORY-D4-001", async ({page,contract}) => {
   let saved = [...original];
   const json = (body:unknown) => ({status:200,contentType:"application/json",body:JSON.stringify(body)});
   await prepareWorkbench(page,1,{histories:rows});
+  // Ordinary chat also loads the grouped sidebar; preserve its paginated contract.
+  await page.route("**/api/conversation/agent_groups**", route => {
+    const grouped = new URL(route.request().url()).pathname.endsWith("/conversations");
+    return route.fulfill(json({code:0,data:{items:grouped ? rows : [],pinned_items:[],included_items:[],next_cursor:null}}));
+  });
   await page.route(/\/api\/conversation\/(123|124)$/, route => {
     const index = route.request().url().endsWith("123") ? 0 : 1;
     return route.fulfill(json({code:0,data:[{...rows[index],message:index === 0 ? saved : original}]}));

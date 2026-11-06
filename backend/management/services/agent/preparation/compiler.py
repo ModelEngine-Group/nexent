@@ -11,7 +11,7 @@ from contracts.constants.environment import (
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
 from contracts.constants.constants import LANGUAGE
-from contracts.errors.exceptions import WorkbenchError
+from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
     query_sub_agent_relations,
@@ -43,9 +43,9 @@ from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
+from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
     _TOKEN_THRESHOLD_LEGACY_FALLBACK,
-    _agent_capacity_overrides,
     _resolve_context_budget,
     _resolve_input_budget,
 )
@@ -91,6 +91,7 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -144,6 +145,7 @@ async def create_agent_config(
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
+            runtime_model_records=runtime_model_records,
         )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
@@ -178,6 +180,7 @@ async def create_agent_config(
             runtime_knowledge_context=child_knowledge_context,
             runtime_file_context=runtime_file_context,
             runtime_skill_snapshot=None,
+            runtime_model_records=runtime_model_records,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
         )
@@ -250,6 +253,10 @@ async def create_agent_config(
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
+    if agent_info.get("agent_origin") == "SYSTEM":
+        from management.services.agent.system import localized_system_prompt
+
+        prompt = localized_system_prompt(agent_info, language)
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
@@ -595,21 +602,15 @@ async def create_agent_config(
     )
     model_info = None
     if model_id_to_use is not None:
-        model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
-        model_name = (
-            model_info["display_name"] if model_info is not None else "main_model"
-        )
-        # W1 step 6: derive input budget via ModelCapacityResolver instead of
-        # treating model_info["max_tokens"] (a deprecated output cap) as a
-        # context threshold. Falls back to a safe constant when capacity is
-        # unknown during the migration window. Per-agent capacity overrides
-        # (model_params_override) win over the model-level columns.
+        model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
+                      else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
+        if model_info is None:
+            raise RunModelControlsError("model_not_available")
+        model_name = model_info["display_name"] if model_info is not None else "main_model"
+        # Capacity and output reserve come exclusively from the saved outlet.
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
             _resolve_input_budget(
                 model_info,
-                capacity_overrides=_agent_capacity_overrides(
-                    agent_info, model_id_to_use
-                ),
             )
         )
     else:
@@ -618,12 +619,12 @@ async def create_agent_config(
         capacity_snapshot = None
         resolved_capacity_snapshot = None
 
-    requested_output_tokens = agent_info.get("requested_output_tokens")
+    requested_output_tokens = None
     context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=requested_output_tokens,
-        request_requested_output_tokens=request_requested_output_tokens,
+        request_requested_output_tokens=None,
     )
     if context_budget_snapshot is not None:
         effective_input_limit_tokens = (
@@ -762,10 +763,8 @@ def _select_agent_model_id(
     """Select the request override or the first configured available model."""
     if override_model_id is not None:
         return override_model_id
-    for model_id in agent_model_ids:
-        if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
-            return model_id
-    return agent_model_ids[0] if agent_model_ids else None
+    return select_configured_model_id(agent_model_ids,
+        lambda model_id: is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)))
 
 
 def _resolve_prompt_runtime_flags(

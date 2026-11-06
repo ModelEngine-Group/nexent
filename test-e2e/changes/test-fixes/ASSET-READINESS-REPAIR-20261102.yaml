@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: ASSET-READINESS-REPAIR-20261102
+  change_type: test-fix
+  title: Complete current responsibility coverage and protocol preparation
+  description: >-
+    Resolve the remaining 17 asset findings with four explicit Feature routes,
+    removal of one obsolete UT selector and a self-contained protocol preparation
+    declaration. Preserve Case contracts, assertions, status and existing contacts.
+  affected_features:
+    existing: [AIDP-RETRIEVAL, AUTH-LOCAL, F-003, SYS-AGENT-LIFECYCLE, F-173]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AIDP-RET-CONFIG-API-D2-001, AIDP-RET-JOURNEY-D4-001,
+      AIDP-RET-MIGRATION-D5-001, AIDP-RET-REAL-D3-001, AIDP-RET-RUNTIME-D3-001,
+      API-005, API-006, AUTH-LOCAL-D2-001, AUTH-LOCAL-D5-001, SYS-AGENT-D5-001]
+    added: []
+    modified: [AIDP-RET-PROTOCOL-D2-001]
+    retired: []
+  no_case_change_reason: >-
+    No written business contract or assertion changes. Only central attribution,
+    active UT reference metadata and protocol preparation binding are repaired.
+    No blocked/manual Case is promoted to PASS or made active.
+  notes: >-
+    AIDP retrieval policy, transport and migration prove knowledge functionality,
+    so AIDP-RETRIEVAL inherits knowledge. Local accounts/JWT identity belong to
+    system, as do shared platform Agent identity initialization, release governance
+    and atomic consolidation. AUTH-LOCAL, F-003 and SYS-AGENT-LIFECYCLE inherit
+    system. Keep people in the existing domain map, with no Case-level guesses.
+    CPU-DEFAULT-UV-20261026 retained a deleted env-injection UT selector; the removal
+    decision is already recorded in K8S-ENV-INJECTION. Remove that obsolete active
+    selector, not the underlying historical evidence or any current assertion.
+    The protocol script already creates and releases its loopback HTTP server and
+    thread. Declare no shared factories, anchors or provider services and verify the
+    real Windows worker's preparation-test-cleanup path. Framework routing/selector
+    regressions remain separate from formal Case execution evidence. Verification
+    stays local to Windows, with no full Daily, deployment, dependency installation,
+    notification or Ubuntu modification.

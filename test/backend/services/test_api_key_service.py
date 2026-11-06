@@ -111,6 +111,7 @@ def test_create_api_users_batch_allows_superuser_and_uses_default_group(mock_def
     with patch("management.services.permission.api_keys.get_db_session") as mock_session, \
             patch("management.services.permission.api_keys.uuid.uuid4", side_effect=["user-1", "user-2"]), \
             patch("management.services.permission.api_keys.insert_user_tenant") as mock_insert, \
+            patch("management.services.permission.api_keys.create_account") as mock_account, \
             patch("management.services.permission.api_keys.add_user_to_group") as mock_add_group, \
             patch("management.services.permission.api_keys.generate_access_key", side_effect=["key-1", "key-2"]), \
             patch("management.services.permission.api_keys.create_token", side_effect=[
@@ -129,6 +130,10 @@ def test_create_api_users_batch_allows_superuser_and_uses_default_group(mock_def
     assert all(item["role"] == "DEV" for item in result)
     assert mock_insert.call_count == 2
     assert mock_add_group.call_count == 2
+    for user_id, account_call, member_call, group_call in zip(["user-1", "user-2"], mock_account.call_args_list, mock_insert.call_args_list, mock_add_group.call_args_list):
+        assert account_call.args == (None,)
+        assert account_call.kwargs == {"user_id": user_id, "api_only": True, "created_by": "su-1", "db_session": session}
+        assert member_call.kwargs["db_session"] is group_call.kwargs["db_session"] is session
 
 
 @patch("management.services.permission.api_keys.get_user_tenant_in_tenant")

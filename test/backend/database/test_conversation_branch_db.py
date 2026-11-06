@@ -13,7 +13,7 @@ from management.db.conversation import repository as db
 
 NEW_CONVERSATION_ROW = SimpleNamespace(
     conversation_id=42,
-    conversation_title="Trip planning（分支）",
+    conversation_title="Trip planning (2)",
     agent_id=5,
     chat_mode="execution",
     knowledge_scope={"kb": True},
@@ -213,13 +213,14 @@ def session(monkeypatch):
 _UNSET = object()
 
 
-def _wire(session, rows, *, conversation=_UNSET, units=None, searches=None, images=None):
+def _wire(session, rows, *, conversation=_UNSET, units=None, searches=None, images=None, existing_titles=None):
     """Queue the scalars results in the order branch_conversation reads them."""
     if conversation is _UNSET:
         conversation = _conversation_row()
     session.scalars.side_effect = [
         _scalars_result(first=conversation),
         _scalars_result(all_rows=rows),
+        _scalars_result(all_rows=existing_titles or []),
         _scalars_result(all_rows=units or []),
         _scalars_result(all_rows=searches or []),
         _scalars_result(all_rows=images or []),
@@ -245,15 +246,15 @@ def test_branch_copies_turn_range_and_remaps_children(session):
     result = db.branch_conversation(7, 2, user_id="owner")
 
     assert result["conversation_id"] == 42
-    assert result["conversation_title"] == "Trip planning（分支）"
+    assert result["conversation_title"] == "Trip planning (2)"
     assert result["branched_message_count"] == 4
 
     # Child queries only fetch rows of the copied messages.
-    units_filter = sql(session.scalars.call_args_list[2].args[0])
+    units_filter = sql(session.scalars.call_args_list[3].args[0])
     assert "message_id IN (11, 12, 13, 15)" in units_filter
-    searches_filter = sql(session.scalars.call_args_list[3].args[0])
+    searches_filter = sql(session.scalars.call_args_list[4].args[0])
     assert "message_id IN (11, 12, 13, 15)" in searches_filter
-    images_filter = sql(session.scalars.call_args_list[4].args[0])
+    images_filter = sql(session.scalars.call_args_list[5].args[0])
     assert "message_id IN (11, 12, 13, 15)" in images_filter
 
     inserted = {}
@@ -277,7 +278,7 @@ def test_branch_copies_turn_range_and_remaps_children(session):
 
     # Conversation configuration is cloned with fresh versions.
     conversation_row = inserted["conversation_record_t"][0]
-    assert conversation_row["conversation_title"] == "Trip planning（分支）"
+    assert conversation_row["conversation_title"] == "Trip planning (2)"
     assert conversation_row["agent_id"] == 5
     assert conversation_row["chat_mode"] == "execution"
     assert conversation_row["knowledge_scope"] == {"kb": True}
@@ -350,7 +351,7 @@ def test_branch_copies_workbench_declaration_when_present(session):
     }
     new_row = SimpleNamespace(
         conversation_id=42,
-        conversation_title="Trip planning（分支）",
+        conversation_title="Trip planning (2)",
         agent_id=5,
         chat_mode="execution",
         knowledge_scope={"kb": True},
@@ -446,13 +447,33 @@ def test_branch_rejects_turn_index_beyond_available_turns(session):
 
 
 def test_branch_title_never_stacks_suffixes_and_respects_length(session):
-    # Branching a branch keeps a single suffix.
-    assert db._build_branch_title("Trip planning（分支）") == "Trip planning（分支）"
+    # Branching a numbered branch increments rather than stacking suffixes.
+    assert db._build_branch_title("Trip planning (2)") == "Trip planning (3)"
+    assert db._build_branch_title("Trip planning（分支）") == "Trip planning (2)"
     # Over-long titles are truncated so the result fits the 100-char column.
     long_title = "x" * 120
     assert len(db._build_branch_title(long_title)) == 100
-    assert db._build_branch_title(long_title).endswith("（分支）")
-    assert db._build_branch_title(None) == "（分支）"
+    assert db._build_branch_title(long_title).endswith(" (2)")
+    assert db._build_branch_title(None) == "(2)"
+
+
+def test_branch_numbers_titles_using_only_active_owner_conversations(session):
+    _wire(session, _three_turn_rows(), existing_titles=["Trip planning (2)", "Trip planning (3)"])
+    recorder = _ExecuteRecorder()
+    session.execute.side_effect = recorder
+
+    db.branch_conversation(7, 1, user_id="owner")
+
+    title_query = session.scalars.call_args_list[2].args[0].compile(dialect=postgresql.dialect())
+    assert "created_by" in str(title_query)
+    assert "delete_flag" in str(title_query)
+    assert "owner" in title_query.params.values()
+    assert "N" in title_query.params.values()
+    conversation_insert = params(next(
+        statement for statement in recorder.statements
+        if str(statement.compile()).startswith("INSERT INTO nexent.conversation_record_t")
+    ))
+    assert conversation_insert["conversation_title"] == "Trip planning (4)"
 
 
 def test_branch_without_answer_stops_at_user_row(session):

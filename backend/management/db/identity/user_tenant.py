@@ -13,6 +13,7 @@ from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.constants.environment import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
+from management.db.identity.account import set_account_profile
 from management.db.models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant
 from contracts.errors.exceptions import TenantResourceLimitError
 
@@ -202,11 +203,10 @@ def insert_user_tenant(
     with session_context as session:
         _validate_user_tenant_limit(session, tenant_id, user_role)
         actor = created_by or user_id
+        set_account_profile(user_id, user_role, user_email, actor, session)
         user_tenant = UserTenant(
             user_id=user_id,
             tenant_id=tenant_id,
-            user_role=user_role,
-            user_email=user_email,
             created_by=actor,
             updated_by=actor,
         )
@@ -268,22 +268,19 @@ def upsert_user_tenant(
             elif is_role_promotion and (user_role or "").upper() in {"ADMIN", "SU"}:
                 _validate_user_tenant_limit(session, tenant_id, user_role, include_user_count=False)
             result.tenant_id = tenant_id
-            result.user_role = user_role
-            if user_email is not None:
-                result.user_email = user_email
             result.updated_by = user_id
         else:
             result = UserTenant(
                 user_id=user_id,
                 tenant_id=tenant_id,
-                user_role=user_role,
-                user_email=user_email,
                 created_by=user_id,
                 updated_by=user_id,
             )
             session.add(result)
 
+        set_account_profile(user_id, user_role, user_email, user_id, session)
         session.flush()
+        session.expire(result)
         return as_dict(result)
 
 
@@ -406,12 +403,12 @@ def update_user_tenant_role(user_id: str, role: str, updated_by: str) -> bool:
         normalized_role = (role or "").upper()
         if current_role != normalized_role and normalized_role in {"ADMIN", "SU"}:
             _validate_user_tenant_limit(session, target.tenant_id, normalized_role, include_user_count=False)
+        set_account_profile(user_id, role, None, updated_by, session)
         result = (
             session.query(UserTenant)
             .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
             .update(
                 {
-                    "user_role": role,
                     "updated_by": updated_by,
                     "update_time": "NOW()",  # This will be handled by the database trigger
                 }

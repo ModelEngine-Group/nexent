@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: NL2SKILL-HISTORY-CONTROLS-20261030
+  change_type: requirement
+  requirement_id: NL2SKILL-HISTORY-CONTROLS-20261030
+  title: NL2Skill history and new conversation controls
+  description: Reuse creator toolbar, history query and restore adapter for the current Skill, including zero-history unsaved drafts.
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [SYS-AGENT-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/Nl2SkillPanelControls.test.tsx
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+      - frontend/tests/workbench/CreatorHistoryQuery.test.tsx
+      - frontend/tests/workbench/SkillCreationReasoning.test.ts
+      - frontend/tests/workbench/SkillCreationReasoningStream.test.ts
+    behaviors:
+      - NL2Skill shows current-target count, paginated histories and new conversation with localized Skill title.
+      - Unbound drafts show clickable History 0 without invalid API calls; learning a Skill ID enables normal history queries.
+      - History restore verifies public executor and Skill target, reuses the conversation ID, blocks switching during generation and ignores stale loads.
+      - New conversation clears local thread and parent conversation ID, retains Skill draft and persists only on the next send.
+      - Existing NL2Agent toolbar behavior and shared Skill replay/stream behavior remain intact.
+    reason: Reuse common UI and persistence, add isolated Skill panel behavior proof and strengthen shared query guards; real database scope is proved separately.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/proposal.md AC-023.
+    SYS-AGENT-D5-001 AC-08 now exercises both resource kinds against real PostgreSQL with Workbench and standalone records.
+    Existing Skill-save target binding and creator execution/history APIs are reused unchanged. No duplicate writer, new SQL or new D1.
+    Native browser/deployment acceptance is not inferred from component tests.

@@ -19,9 +19,7 @@ import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { useTranslation } from "react-i18next";
 import { getFileIcon, triggerUrlDownload } from "./attachment";
-import {
-  useConversationArtifactsEntry,
-} from "./conversation-artifacts-context";
+import { useConversationArtifactsEntry } from "./conversation-artifacts-context";
 import type {
   ConversationArtifact,
   ArtifactAttachmentLike,
@@ -280,8 +278,7 @@ export interface ConversationArtifactsButtonProps {
 
 /**
  * Compact pill entry that opens the {@link ConversationArtifactsPanel}.
- * Rendered at the end of each assistant message while the conversation has
- * agent-generated files.
+ * Rendered once in the thread toolbar while the conversation has generated files.
  */
 export const ConversationArtifactsButton: FC<
   ConversationArtifactsButtonProps
@@ -289,7 +286,7 @@ export const ConversationArtifactsButton: FC<
   const { t } = useTranslation();
   if (count <= 0) return null;
   return (
-    <div className={cn("flex w-full justify-start", className)}>
+    <div className={cn("flex justify-end", className)}>
       <button
         type="button"
         onClick={onClick}
@@ -303,27 +300,30 @@ export const ConversationArtifactsButton: FC<
   );
 };
 
-export interface ConversationArtifactsMessageEntryProps {
+export interface ConversationArtifactsToolbarEntryProps {
   className?: string;
 }
 
 /**
- * Trailing "view all artifacts" entry rendered at the end of each assistant
- * message once the conversation has agent-generated files. Reads the
- * thread-level artifacts context so every message can open the shared
- * {@link ConversationArtifactsPanel}; renders nothing when no provider is
- * mounted or the conversation has no artifacts yet.
+ * Persistent top-right entry outside the message viewport. Its toolbar only
+ * takes up space after the current conversation has generated files. Reads
+ * the conversation total rather than the latest message's attachments, so
+ * later text-only turns do not hide it.
  */
-export const ConversationArtifactsMessageEntry: FC<
-  ConversationArtifactsMessageEntryProps
+export const ConversationArtifactsToolbarEntry: FC<
+  ConversationArtifactsToolbarEntryProps
 > = ({ className }) => {
   const entry = useConversationArtifactsEntry();
   if (!entry || entry.count <= 0) return null;
   return (
-    <ConversationArtifactsButton
-      count={entry.count}
-      onClick={entry.open}
-      className={cn("mt-2", className)}
-    />
+    <div
+      data-slot="conversation-artifacts-toolbar"
+      className={cn(
+        "flex h-12 shrink-0 items-center justify-end px-4",
+        className
+      )}
+    >
+      <ConversationArtifactsButton count={entry.count} onClick={entry.open} />
+    </div>
   );
 };

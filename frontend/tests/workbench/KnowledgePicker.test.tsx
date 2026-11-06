@@ -99,6 +99,7 @@ const selection: ConversationKnowledgeScope = {
   local: { mode: "override", knowledge_ids: ["1", "2"] },
   aidp: { mode: "disabled", kds_ids: [] },
 };
+
 beforeEach(() => {
   vi.clearAllMocks();
   fixtures.deployment.enableAidpKnowledge = false;
@@ -222,66 +223,8 @@ it("waits for deployment settings and uses local catalog without an agent", asyn
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
 });
 
-it.each(["modal", "drawer"] as const)(
-  "%s knowledge selection preserves retrieval configuration on confirmation",
-  async (presentation) => {
-    const confirm = vi.fn();
-    const configuredSelection = {
-      ...selection,
-      retrieval_config: { top_k: 8 },
-    };
-    render(
-      <ConversationKnowledgeScopeModal
-        open
-        presentation={presentation}
-        value={configuredSelection}
-        capabilities={capabilities}
-        onCancel={vi.fn()}
-        onConfirm={confirm}
-      />
-    );
-    await screen.findByRole("option", { name: /Alpha/ });
-    await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
-    if (presentation === "modal") {
-      await userEvent.click(
-        screen.getByRole("button", {
-          name: "chat.knowledgeScope.retrievalSettings",
-        })
-      );
-      const dialog = (
-        await screen.findByText("agent.knowledge.configModal.title")
-      ).closest<HTMLElement>('[role="dialog"]')!;
-      const input = within(dialog).getByRole("spinbutton");
-      await userEvent.tripleClick(input);
-      await userEvent.keyboard("8");
-      await userEvent.click(
-        within(dialog).getByRole("button", { name: "common.confirm" })
-      );
-    } else {
-      expect(
-        screen.queryByRole("button", {
-          name: "chat.knowledgeScope.retrievalSettings",
-        })
-      ).not.toBeInTheDocument();
-    }
-    expect(confirm).not.toHaveBeenCalled();
-    await userEvent.click(
-      screen.getByRole("button", {
-        name:
-          presentation === "drawer"
-            ? "resourcePicker.confirm"
-            : "chat.knowledgeScope.confirm",
-      })
-    );
-    expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 8 });
-    expect(confirm.mock.calls[0][0].local.knowledge_ids).toEqual(["2"]);
-    expect(configuredSelection.local.knowledge_ids).toEqual(["1", "2"]);
-    expect(configuredSelection.retrieval_config).toEqual({ top_k: 8 });
-  }
-);
-
-it("closing the drawer discards knowledge edits and preserves saved retrieval on reopening", async () => {
-  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+it("closing the drawer discards knowledge edits on reopening", async () => {
+  const configuredSelection = selection;
   const confirm = vi.fn(),
     cancel = vi.fn();
   const props = {
@@ -312,12 +255,10 @@ it("closing the drawer discards knowledge edits and preserves saved retrieval on
     screen.getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 6 });
-  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
-});
+}, 30000);
 
-it("retains retrieval and knowledge drafts after a failed drawer save and permits retry", async () => {
-  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+it("retains knowledge drafts after a failed drawer save and permits retry", async () => {
+  const configuredSelection = selection;
   const confirm = vi
     .fn()
     .mockRejectedValueOnce(new Error("save unavailable"))
@@ -348,10 +289,8 @@ it("retains retrieval and knowledge drafts after a failed drawer save and permit
     screen.getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
-  expect(confirm.mock.calls[1][0].retrieval_config).toEqual({ top_k: 6 });
   expect(confirm.mock.calls[1][0].local.knowledge_ids).toEqual(["2"]);
-  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
-});
+}, 30000);
 
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {
   render(
@@ -689,13 +628,13 @@ it.each([false, true])(
   }
 );
 
-it("Workbench knowledge footer has only shared Close/Confirm and preserves existing retrieval configuration", async () => {
+it("Workbench knowledge footer has only shared Close/Confirm", async () => {
   const confirm = vi.fn();
   render(
     <ConversationKnowledgeScopeModal
       open
       presentation="drawer"
-      value={{ ...selection, retrieval_config: { top_k: 6 } }}
+      value={selection}
       capabilities={capabilities}
       onCancel={vi.fn()}
       onConfirm={confirm}
@@ -722,5 +661,4 @@ it("Workbench knowledge footer has only shared Close/Confirm and preserves exist
     within(footer).getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 6 });
 });

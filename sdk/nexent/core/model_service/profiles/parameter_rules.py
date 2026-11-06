@@ -245,13 +245,19 @@ def validate_saved_parameter_values(
 def overlay_profile_parameters(profile, submitted, *, scope):
     """Exclude inactive inherited thinking values, never contradictory explicit input."""
     inherited = dict(profile.parameter_values)
+    compiled = compile_parameter_rules(profile.parameter_rules)
     if submitted.get("enable_thinking") is False:
-        for rule in profile.parameter_rules:
-            if (rule.get("condition") == {"key": "enable_thinking", "op": "eq", "value": True}
-                    and rule["key"] not in submitted):
-                inherited.pop(rule["key"], None)
+        effective = {**inherited, **submitted}
+        enabled = {**effective, "enable_thinking": True}
+        declarations = {rule["key"]: rule for rule in compiled.declarations}
+        for key in compiled._order:
+            condition = declarations[key].get("condition")
+            if (key not in submitted and _condition_matches(condition, enabled)
+                    and not _condition_matches(condition, effective)):
+                inherited.pop(key, None)
+                effective.pop(key, None)
     values = overlay_saved_parameter_values(
-        compile_parameter_rules(profile.parameter_rules), submitted, scope=scope, saved_values=inherited,
+        compiled, submitted, scope=scope, saved_values=inherited,
     )
     data = profile.model_dump(mode="json")
     data["parameter_values"] = values
