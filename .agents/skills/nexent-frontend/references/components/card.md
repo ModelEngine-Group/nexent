@@ -5,7 +5,7 @@
 - Background: `#fff`.
 - No border by default.
 - Support configuring the border.
-- Border radius: `4px` by default.
+- Border radius: `8px` by default.
 - Support adjusting the border radius.
 - Support setting the width.
 - Support setting the height.
@@ -14,10 +14,10 @@
 Tailwind CSS:
 
 ```text
-bg-[#fff] border-0 rounded-[var(--radius-control)]
+bg-[#fff] border-0 rounded-lg
 ```
 
-Use `rounded-[var(--radius-control)]` as the default radius and allow a caller-provided class to adjust it. Use Ant Design `Card` for the card behavior.
+Use `rounded-lg` as the default radius and allow a caller-provided class to adjust it. Use Ant Design `Card` for the card behavior.
 
 Use the native component with the central theme:
 

@@ -95,7 +95,7 @@ export function StandardModal({
       }
       classNames={{
         container: cn(
-          "!rounded-[var(--radius-control)] !border !border-solid !border-[#c9c9c9] !p-6 !shadow-[0_0_15px_0_rgba(26,26,26,0.1)]",
+          "!rounded-lg !border !border-solid !border-[#c9c9c9] !p-6 !shadow-[0_0_15px_0_rgba(26,26,26,0.1)]",
           hasHeightConstraint && "!flex !flex-col !overflow-hidden"
         ),
         header: "!m-0 !h-6 !w-full !shrink-0 !border-0 !p-0",

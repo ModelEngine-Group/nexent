@@ -35,7 +35,14 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
   --color-sidebar-ring: hsl(var(--sidebar-ring));
-  --radius-lg: var(--radius-control);
+  --text-body-1: var(--font-body-1);
+  --text-body-2: var(--font-body-2);
+  --text-body-3: var(--font-body-3);
+  --radius-none: var(--brand-radius-none);
+  --radius-xs: var(--brand-radius-xs);
+  --radius-base: var(--brand-radius-base);
+  --radius-lg: var(--brand-radius-lg);
+  --radius-full: var(--brand-radius-full);
   --radius-md: var(--radius-control);
   --radius-sm: var(--radius-control);
   --animate-accordion-down: accordion-down 0.2s ease-out;
@@ -122,6 +129,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: var(--font-body-2, 14px);
   }
 }
 
@@ -296,7 +304,7 @@ button svg,
 
 ::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
-  border-radius: 5px;
+  border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
 }

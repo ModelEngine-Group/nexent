@@ -22,7 +22,13 @@ import { FullScreenLoading } from "@/components/ui/loading";
 import { useDeployment } from "./deploymentProvider";
 import { useSessionManager } from "@/hooks/auth/useSessionManager";
 import { AutoHideScrollbars } from "./AutoHideScrollbars";
-import { BRAND_CSS, NEXENT_THEME, NEXENT_BUTTON_DEFAULTS } from "@/const/brand";
+import {
+  BRAND_CSS,
+  NEXENT_THEME,
+  NEXENT_BUTTON_DEFAULTS,
+  NEXENT_SELECT_DEFAULTS,
+  NEXENT_BADGE_DEFAULTS,
+} from "@/const/brand";
 
 function AppReadyWrapper({ children }: { children?: ReactNode }) {
   const { isDeploymentReady, isSpeedMode } = useDeployment();
@@ -65,7 +71,12 @@ export function RootProvider({ children }: { children: ReactNode }) {
     // Legacy static portals do not inherit the normal provider tree.
     ConfigProvider.config({
       holderRender: (holder) => (
-        <ConfigProvider theme={NEXENT_THEME} button={NEXENT_BUTTON_DEFAULTS}>
+        <ConfigProvider
+          theme={NEXENT_THEME}
+          button={NEXENT_BUTTON_DEFAULTS}
+          select={NEXENT_SELECT_DEFAULTS}
+          badge={NEXENT_BADGE_DEFAULTS}
+        >
           {holder}
         </ConfigProvider>
       ),
@@ -76,6 +87,8 @@ export function RootProvider({ children }: { children: ReactNode }) {
     <ConfigProvider
       theme={NEXENT_THEME}
       button={NEXENT_BUTTON_DEFAULTS}
+      select={NEXENT_SELECT_DEFAULTS}
+      badge={NEXENT_BADGE_DEFAULTS}
       getPopupContainer={() => document.body}
       modal={{ mask: { closable: false } }}
       drawer={{ mask: { closable: false } }}

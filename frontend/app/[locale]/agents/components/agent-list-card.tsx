@@ -57,7 +57,7 @@ export default function AgentListCard({
   const agentId = Number(agent.id);
 
   return (
-    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[var(--color-brand)] focus-within:ring-[var(--color-brand)]">
+    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-lg bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[var(--color-brand)] focus-within:ring-[var(--color-brand)]">
       <button
         type="button"
         onClick={() => onOpen(agent)}
@@ -91,7 +91,7 @@ export default function AgentListCard({
           {category ? (
             <Tag
               title={category}
-              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-full !border-0 !bg-[var(--color-select)] !px-2.5 !text-[12px] font-normal !leading-5 !text-[var(--color-brand)]"
+              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-base !border-0 !bg-[var(--color-select)] !px-2.5 !text-[12px] font-normal !leading-5 !text-[var(--color-brand)]"
             >
               <span className="min-w-0 truncate">{category}</span>
             </Tag>

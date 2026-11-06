@@ -54,8 +54,17 @@ const config = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      fontSize: {
+        "body-1": "var(--font-body-1)",
+        "body-2": "var(--font-body-2)",
+        "body-3": "var(--font-body-3)",
+      },
       borderRadius: {
-        lg: "var(--radius-control)",
+        none: "var(--brand-radius-none)",
+        xs: "var(--brand-radius-xs)",
+        base: "var(--brand-radius-base)",
+        lg: "var(--brand-radius-lg)",
+        full: "var(--brand-radius-full)",
         md: "var(--radius-control)",
         sm: "var(--radius-control)",
       },

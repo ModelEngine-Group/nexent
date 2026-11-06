@@ -16,6 +16,20 @@ export const BRAND_PALETTE = {
   "90": "#00214B",
 } as const;
 
+export const BRAND_RADII = {
+  none: 0,
+  xs: 2,
+  base: 4,
+  lg: 8,
+  full: 9999,
+} as const;
+
+export const BRAND_BODY_FONT_SIZES = {
+  "body-1": 12,
+  "body-2": 14,
+  "body-3": 16,
+} as const;
+
 export const BRAND = {
   primary: BRAND_PALETTE["50"],
   hover: BRAND_PALETTE["40"],
@@ -24,7 +38,7 @@ export const BRAND = {
   selection: BRAND_PALETTE["05"],
   border: "#C9C9C9",
   text: "#191919",
-  radius: 4,
+  radius: BRAND_RADII.base,
 } as const;
 
 // Generate custom-control variables from the same source as the AntD tokens.
@@ -40,8 +54,17 @@ ${Object.entries(BRAND_PALETTE)
 --color-select: ${BRAND.selection};
 --color-brand-border: ${BRAND.border};
 --color-brand-text: ${BRAND.text};
---radius-control: ${BRAND.radius}px;
---radius: ${BRAND.radius}px;
+${Object.entries(BRAND_RADII)
+  .map(
+    ([role, radius]) =>
+      `--brand-radius-${role}: ${radius}px; --radius-${role}: var(--brand-radius-${role});`
+  )
+  .join("\n")}
+${Object.entries(BRAND_BODY_FONT_SIZES)
+  .map(([role, size]) => `--font-${role}: ${size}px;`)
+  .join("\n")}
+--radius-control: var(--radius-base);
+--radius: var(--radius-base);
 }`;
 
 export const NEXENT_THEME: ThemeConfig = {
@@ -64,22 +87,40 @@ export const NEXENT_THEME: ThemeConfig = {
     colorBorder: BRAND.border,
     colorText: BRAND.text,
     borderRadius: BRAND.radius,
-    borderRadiusLG: BRAND.radius,
+    borderRadiusLG: BRAND_RADII.lg,
     borderRadiusSM: BRAND.radius,
-    borderRadiusXS: BRAND.radius,
+    borderRadiusXS: BRAND_RADII.xs,
     controlHeight: 32,
-    fontSize: 14,
+    fontSizeSM: BRAND_BODY_FONT_SIZES["body-1"],
+    fontSize: BRAND_BODY_FONT_SIZES["body-2"],
+    fontSizeLG: BRAND_BODY_FONT_SIZES["body-3"],
     lineHeight: 22 / 14,
   },
   components: {
     Button: {
+      borderRadiusLG: BRAND_RADII.base,
       paddingInline: 16,
       primaryShadow: "none",
       defaultShadow: "none",
       dangerShadow: "none",
     },
-    Input: { controlHeight: 28 },
-    Card: { borderRadiusLG: BRAND.radius },
+    Input: { controlHeight: 28, borderRadiusLG: BRAND_RADII.base },
+    InputNumber: { borderRadiusLG: BRAND_RADII.base },
+    Card: { borderRadiusLG: BRAND_RADII.lg },
+    Modal: { borderRadiusLG: BRAND_RADII.lg },
+    Checkbox: { borderRadiusSM: BRAND_RADII.xs },
+    Select: {
+      borderRadiusLG: BRAND_RADII.base,
+      borderRadiusXS: BRAND_RADII.base,
+    },
+    Dropdown: {
+      borderRadiusLG: BRAND_RADII.base,
+      borderRadiusSM: BRAND_RADII.xs,
+    },
+    Popover: { borderRadiusLG: BRAND_RADII.base },
+    Alert: { borderRadius: BRAND_RADII.base },
+    Slider: { borderRadiusXS: BRAND_RADII.full },
+    Progress: { lineBorderRadius: BRAND_RADII.full },
     Table: {
       headerBorderRadius: BRAND.radius,
       headerSplitColor: "transparent",
@@ -89,7 +130,7 @@ export const NEXENT_THEME: ThemeConfig = {
       rowHoverBg: BRAND.selection,
       rowSelectedBg: BRAND.selection,
       rowSelectedHoverBg: BRAND_PALETTE["10"],
-      cellFontSizeSM: 14,
+      cellFontSizeSM: BRAND_BODY_FONT_SIZES["body-2"],
       cellPaddingBlockSM: 12,
       cellPaddingInlineSM: 16,
     },
@@ -114,5 +155,23 @@ export const NEXENT_BUTTON_DEFAULTS: ConfigProviderProps["button"] = {
         : {}),
     },
     content: { letterSpacing: 0 },
+  }),
+};
+
+/** Popup item geometry differs from the enclosing Select control and panel. */
+export const NEXENT_SELECT_DEFAULTS: ConfigProviderProps["select"] = {
+  styles: {
+    popup: {
+      root: { borderRadius: BRAND_RADII.base },
+      listItem: { borderRadius: BRAND_RADII.xs },
+    },
+    item: { borderRadius: BRAND_RADII.base },
+  },
+};
+
+export const NEXENT_BADGE_DEFAULTS: ConfigProviderProps["badge"] = {
+  styles: ({ props }) => ({
+    indicator:
+      props.dot || props.status ? {} : { borderRadius: BRAND_RADII.base },
   }),
 };

@@ -14,7 +14,7 @@ The reusable component uses Ant Design `Modal` with `mask={{ closable: false }}`
 
 ## Style
 
-- Border radius: `4px`.
+- Border radius: `8px`.
 - Default width: `480px`.
 - Height: auto.
 - Padding: `24px`.
@@ -23,7 +23,7 @@ The reusable component uses Ant Design `Modal` with `mask={{ closable: false }}`
 Tailwind CSS:
 
 ```text
-rounded-[var(--radius-control)] w-[480px] h-auto p-6 shadow-[0_0_15px_0_rgba(26,26,26,0.1)]
+rounded-lg w-[480px] h-auto p-6 shadow-[0_0_15px_0_rgba(26,26,26,0.1)]
 ```
 
 The reusable component exposes a `width` prop for an adjusted width.
