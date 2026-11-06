@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-LISTING-EVALUATION-20261106
+  change_type: requirement
+  requirement_id: AGENT-LIST-REQ-003
+  title: Move Agent listing and evaluation actions to the configuration list
+  description: Remove duplicate Configure from the card menu, place Listing and Evaluation after Publish, and remove application/evaluation entries from repository cards while retaining review operations.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AGENT-LIST-VIEWS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-LIST-D1-002, AGENT-LIST-D4-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/agentListingActions.test.tsx
+      - frontend/tests/component/agentListCard.test.tsx
+      - frontend/tests/component/myAgentMainBadge.test.tsx
+      - frontend/tests/component/mineApplyListingModal.test.tsx
+    behaviors:
+      - Card menu order and direct configuration navigation remain correct.
+      - Unpublished, readonly and already-listed versions cannot submit an application.
+      - Published readonly agents can navigate to evaluation with the selected ID.
+      - Application success, failure, cancellation and repository entry removal are covered.
+    reason: Frontend entry relocation reuses existing API and mutation contracts. Component UT proves callbacks, routing inputs and controlled request outcomes; preserve existing D1 and D4 regressions without creating duplicate cases. Python and deployment behavior do not change.
+  notes: Design and execution evidence maintained in ../nexent-doc/docs/Developing/dev-agent-listing-evaluation/task.md. D4 retains its existing synthetic routes and self-contained preparation with no real business assets.

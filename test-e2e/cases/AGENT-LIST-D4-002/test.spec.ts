@@ -452,9 +452,12 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     name: label("zh", "agentConfig.list.publish"),
     exact: true,
   });
-  await expect(configure).toBeVisible();
+  await expect(configure).toHaveCount(0);
   await expect(publish).toBeEnabled();
-  await configure.click();
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText(label("zh", "agentConfig.list.listing"));
+  await expect(page.getByRole("menuitem").nth(2)).toHaveText(label("zh", "agentRepository.mine.evaluate"));
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-card-body").first().click();
   await expect(page).toHaveURL(/\/zh\/agents\/1$/);
   noPresentationMutation(fixture);
   await page.goto(`${baseUrl}/zh/agents`);
@@ -481,7 +484,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("menuitem", {
-      name: label("zh", "agentConfig.list.configure"),
+      name: label("zh", "agentConfig.list.listing"),
       exact: true,
     }),
   ).toBeVisible();
@@ -636,13 +639,13 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await expect(narrowMore).toBeInViewport();
   await narrowMore.click();
   await expect(page.getByRole("menu")).toBeVisible();
-  const narrowConfigure = page.getByRole("menuitem", {
-    name: label("zh", "agentConfig.list.configure"),
+  const narrowListing = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.listing"),
     exact: true,
   });
-  await expect(narrowConfigure).toBeVisible();
-  await expect(narrowConfigure).toBeInViewport();
-  await narrowConfigure.click({ trial: true });
+  await expect(narrowListing).toBeVisible();
+  await expect(narrowListing).toBeInViewport();
+  await narrowListing.click({ trial: true });
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   const narrowLastBody = page
@@ -690,12 +693,12 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
       exact: true,
     })
     .click();
-  const narrowCardConfigure = page.getByRole("menuitem", {
-    name: label("zh", "agentConfig.list.configure"),
+  const narrowCardListing = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.listing"),
     exact: true,
   });
-  await expect(narrowCardConfigure).toBeVisible();
-  await expect(narrowCardConfigure).toBeInViewport();
+  await expect(narrowCardListing).toBeVisible();
+  await expect(narrowCardListing).toBeInViewport();
   await page.keyboard.press("Escape");
   noPresentationMutation(fixture);
   await narrowCreate.click();
@@ -775,10 +778,13 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
     name: label("en", "agentConfig.list.publish"),
     exact: true,
   });
-  await expect(configure).toBeVisible();
+  await expect(configure).toHaveCount(0);
   await expect(publish).toBeVisible();
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText(label("en", "agentConfig.list.listing"));
+  await expect(page.getByRole("menuitem").nth(2)).toHaveText(label("en", "agentRepository.mine.evaluate"));
   noPresentationMutation(fixture);
-  await configure.click();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-card-body").first().click();
   await expect(page).toHaveURL(/\/en\/agents\/1$/);
 });
 

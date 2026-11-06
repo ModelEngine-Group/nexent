@@ -386,7 +386,6 @@ export default function AgentsPage() {
                               key={agent.id}
                               agent={agent}
                               onOpen={handleOpenAgent}
-                              onConfigure={updateUrl}
                               onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}
                             />

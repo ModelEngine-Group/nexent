@@ -16,7 +16,8 @@ import {
   MoreHorizontal,
   Network,
   Send,
-  Settings2,
+  Share2,
+  LineChart,
   Trash2,
 } from "lucide-react";
 
@@ -31,26 +32,35 @@ import {
   deleteAgent,
   exportAgent,
   generateUniqueCopyName,
+  normalizeTags,
   searchAgentInfo,
   updateAgentInfo,
   updateToolConfig,
 } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
+import type { Agent } from "@/types/agentConfig";
+import type {
+  AgentRepositoryListingCreatePayload,
+  MyEditableAgentItem,
+} from "@/types/agentRepository";
+import { isCurrentVersionListed } from "@/lib/agentRepositoryMine";
+import { useCreateAgentRepositoryListing } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { AgentApplyListingModal } from "@/components/agent/AgentApplyListingModal";
 
 export default function AgentConfigActions({
+  agent,
   agentId: agentIdProp,
   agentName: agentNameProp,
   readOnly,
   variant = "buttons",
-  onConfigure,
   onPublish,
   onManageVersions,
 }: {
+  agent?: Agent;
   agentId?: number | null;
   agentName?: string;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
-  onConfigure?: (agentId: number) => void;
   onPublish?: (agentId: number) => void;
   onManageVersions?: (agentId: number) => void;
 }) {
@@ -60,7 +70,10 @@ export default function AgentConfigActions({
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
-  const { agentId: routeAgentId } = useParams<{ agentId?: string }>();
+  const { agentId: routeAgentId, locale } = useParams<{
+    agentId?: string;
+    locale?: string;
+  }>();
   const storeAgentId = useAgentStore((state) => state.agentId);
   const agentId = agentIdProp ?? storeAgentId;
   const editedAgent = useAgentStore((state) => state.editedAgent);
@@ -72,6 +85,45 @@ export default function AgentConfigActions({
   const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
+  const [listingTarget, setListingTarget] =
+    useState<MyEditableAgentItem | null>(null);
+  const createListing = useCreateAgentRepositoryListing();
+  const listingAgent: MyEditableAgentItem | null =
+    agent && agentId !== null
+      ? {
+          agent_id: agentId,
+          name: agent.display_name || agent.name,
+          description: agent.description,
+          current_version_no: agent.current_version_no,
+          version_label: agent.version_label,
+          icon_url: agent.icon_url,
+          tags: normalizeTags(agent.tags),
+          permission: isReadOnly ? "READ_ONLY" : "EDIT",
+          repository_info: agent.repository_info ?? [],
+        }
+      : null;
+  const canEvaluate = (listingAgent?.current_version_no ?? 0) > 0;
+  const canApplyListing =
+    canEvaluate &&
+    !isReadOnly &&
+    listingAgent !== null &&
+    !isCurrentVersionListed(listingAgent);
+  const submitListing = async (
+    payload: AgentRepositoryListingCreatePayload
+  ) => {
+    if (!listingTarget || createListing.isPending) return;
+    try {
+      await createListing.mutateAsync({
+        agentId: listingTarget.agent_id,
+        versionNo: listingTarget.current_version_no!,
+        payload,
+      });
+      message.success(t("repository.mine.applySuccess"));
+      setListingTarget(null);
+    } catch {
+      message.error(t("repository.mine.applyError"));
+    }
+  };
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
     queryKey: ["a2aServerSettings", agentId],
     queryFn: () => a2aClientService.getServerSettings(agentId!),
@@ -286,17 +338,6 @@ export default function AgentConfigActions({
 
   const disabled = agentId === null;
   const menuItems: NonNullable<MenuProps["items"]> = [];
-  if (onConfigure) {
-    menuItems.push({
-      key: "configure",
-      icon: <Settings2 className="size-3.5" />,
-      label: t("agentConfig.list.configure"),
-      disabled,
-      onClick: () => {
-        if (agentId !== null) onConfigure(agentId);
-      },
-    });
-  }
   if (onPublish) {
     menuItems.push({
       key: "publish",
@@ -308,7 +349,32 @@ export default function AgentConfigActions({
       },
     });
   }
-  if (onConfigure || onPublish) menuItems.push({ type: "divider" });
+  if (agent) {
+    menuItems.push(
+      {
+        key: "listing",
+        icon: <Share2 className="size-3.5" />,
+        label: t("agentConfig.list.listing"),
+        disabled: !canApplyListing || createListing.isPending,
+        onClick: () => {
+          if (canApplyListing) setListingTarget(listingAgent);
+        },
+      },
+      {
+        key: "evaluate",
+        icon: <LineChart className="size-3.5" />,
+        label: t("agentRepository.mine.evaluate"),
+        disabled: !canEvaluate,
+        onClick: () => {
+          if (canEvaluate && agentId !== null)
+            router.push(
+              `/${locale ?? pathname.split("/")[1]}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agentId]))}`
+            );
+        },
+      }
+    );
+  }
+  if (onPublish || agent) menuItems.push({ type: "divider" });
   menuItems.push(
     {
       key: "copy",
@@ -376,6 +442,17 @@ export default function AgentConfigActions({
 
   return (
     <>
+      {listingTarget && (
+        <AgentApplyListingModal
+          open
+          agent={listingTarget}
+          isSubmitting={createListing.isPending}
+          onClose={() => {
+            if (!createListing.isPending) setListingTarget(null);
+          }}
+          onSubmit={submitListing}
+        />
+      )}
       {variant === "table" ? (
         <>
           <button

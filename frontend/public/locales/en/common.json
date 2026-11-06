@@ -2180,6 +2180,7 @@
   "agentConfig.list.new": "New agent",
   "agentConfig.list.configure": "Configure",
   "agentConfig.list.publish": "Publish",
+  "agentConfig.list.listing": "List in repository",
   "agentConfig.list.updatedAt": "Updated {{date}}",
   "agentConfig.list.createdAt": "Created {{date}}",
   "agentConfig.list.online": "Online",

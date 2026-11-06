@@ -2073,6 +2073,7 @@
   "agentConfig.list.new": "新建智能体",
   "agentConfig.list.configure": "配置",
   "agentConfig.list.publish": "发布",
+  "agentConfig.list.listing": "上架",
   "agentConfig.list.updatedAt": "更新于{{date}}",
   "agentConfig.list.createdAt": "创建于{{date}}",
   "agentConfig.list.online": "已上线",

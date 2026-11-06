@@ -38,13 +38,11 @@ vi.mock("@/app/[locale]/agents/components/agent-config-actions", () => ({
   default: function MockAgentConfigActions({
     agentId,
     readOnly,
-    onConfigure,
     onPublish,
     onManageVersions,
   }: {
     agentId: number;
     readOnly: boolean;
-    onConfigure: (agentId: number) => void;
     onPublish: (agentId: number) => void;
     onManageVersions: (agentId: number) => void;
   }) {
@@ -60,9 +58,6 @@ vi.mock("@/app/[locale]/agents/components/agent-config-actions", () => ({
         </button>
         {open && (
           <>
-            <button type="button" onClick={() => onConfigure(agentId)}>
-              配置
-            </button>
             <button
               type="button"
               disabled={readOnly}
@@ -95,7 +90,6 @@ const publishedAgent = {
 function renderCard(agent: Agent) {
   const callbacks = {
     onOpen: vi.fn(),
-    onConfigure: vi.fn(),
     onPublish: vi.fn(),
     onManageVersions: vi.fn(),
   };
@@ -179,14 +173,12 @@ describe("[AGENT-LIST-D1-002] measured Agent card metadata and callbacks", () =>
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     expect(callbacks.onOpen).toHaveBeenCalledExactlyOnceWith(publishedAgent);
-    expect(callbacks.onConfigure).not.toHaveBeenCalled();
     expect(callbacks.onPublish).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    fireEvent.click(screen.getByRole("button", { name: "配置" }));
+    expect(screen.queryByRole("button", { name: "配置" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "发布" }));
     fireEvent.click(screen.getByRole("button", { name: "版本管理" }));
-    expect(callbacks.onConfigure).toHaveBeenCalledExactlyOnceWith(42);
     expect(callbacks.onPublish).toHaveBeenCalledExactlyOnceWith(42);
     expect(callbacks.onManageVersions).toHaveBeenCalledExactlyOnceWith(42);
   });
