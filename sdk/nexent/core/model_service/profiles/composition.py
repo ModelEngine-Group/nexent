@@ -28,12 +28,12 @@ from nexent.core.model_service.profiles.resolver import SourceCatalog, SourceCat
 from nexent.core.model_service.profiles.supplements import SupplementCatalog
 
 
-COMPOSER_REF = "profile_policy_composer_v6"
+COMPOSER_REF = "profile_policy_composer_v7"
 _CAPABILITY_PATHS = frozenset(
     f"/{group}/{field}"
     for group, fields in {
         "context": ("combined_window", "input_limit", "output_limit"),
-        "reasoning": ("status", "controls", "response_paths"),
+        "reasoning": ("status", "controls", "response_paths", "can_disable"),
         "tools": ("status", "schema_constraints", "result_format"),
         "sampling": ("temperature", "top_p"),
         "structured_output": ("status",),

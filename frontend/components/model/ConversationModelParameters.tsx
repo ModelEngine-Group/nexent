@@ -267,6 +267,7 @@ export function ConversationModelParameters({
           checked={enabled}
           disabled={
             state.alwaysOn ||
+            (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
             advancedOpen ||
             (!conversationId && !draftScope) ||
@@ -448,7 +449,10 @@ function PreferenceEditor({
                 rule.key === key &&
                 rule.visible &&
                 rule.allowed_scopes.includes("conversation") &&
-                parameterIsActive(rule.condition, { ...saved.defaults, ...values })
+                parameterIsActive(rule.condition, {
+                  ...saved.defaults,
+                  ...values,
+                })
             )
         )
         .map((key) => (

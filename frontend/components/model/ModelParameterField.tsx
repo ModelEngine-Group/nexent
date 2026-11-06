@@ -40,6 +40,10 @@ export function ModelParameterField({
   const value = Object.hasOwn(values, rule.key)
     ? values[rule.key]
     : fallbackValues[rule.key];
+  const optionalSampling =
+    scope === "outlet" &&
+    ["temperature", "top_p"].includes(rule.key) &&
+    !rule.required;
   const disabled =
     !rule.editable || !rule.allowed_scopes.includes(scope) || pending;
   const options = rule.schema.enum;
@@ -95,6 +99,11 @@ export function ModelParameterField({
         className="!w-full"
         aria-label={label ?? rule.key}
         value={typeof value === "number" ? value : null}
+        placeholder={
+          optionalSampling
+            ? t("modelProfile.serviceSamplingDefault")
+            : undefined
+        }
         disabled={disabled}
         min={
           typeof rule.schema.minimum === "number"
@@ -110,7 +119,8 @@ export function ModelParameterField({
           types.includes("integer") && !types.includes("number") ? 0 : undefined
         }
         onChange={(next) => {
-          if (next !== null || types.includes("null")) onChange(rule.key, next);
+          if (next !== null || types.includes("null") || optionalSampling)
+            onChange(rule.key, next);
           else onReset(rule.key);
         }}
       />

@@ -1,0 +1,13 @@
+schema_version = 1
+rule_id = "zhipuai_glm_5_3_shutdown_preference_v1"
+version = 1
+target_kind = "model"
+target_key = "zhipuai/glm-5.3"
+reason = "Retain the confirmed always-thinking restriction on custom providers"
+evidence = "https://docs.bigmodel.cn/cn/guide/capabilities/thinking; reviewed 2026-11-05"
+
+[[capability_overrides]]
+path = "/reasoning/can_disable"
+value = false
+reason = "This exact model does not support disabling reasoning"
+evidence = "https://docs.bigmodel.cn/cn/guide/capabilities/thinking; reviewed 2026-11-05"

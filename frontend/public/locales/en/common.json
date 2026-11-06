@@ -6581,6 +6581,7 @@
     "manualThinkingHint": "Manually specified reasoning parameters. Verify that the model service supports this format.",
     "otherProfile": "Other",
     "sharedCredential": "Uses the shared batch API key",
+    "serviceSamplingDefault": "Leave empty to use the model service default",
     "samplingGroup": "Sampling",
     "requestGroup": "Request settings",
     "modelParameters": "Model parameters",

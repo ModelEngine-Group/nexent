@@ -6579,6 +6579,7 @@
     "manualThinkingHint": "手动指定的思考参数，请确认模型服务支持此格式。",
     "otherProfile": "其他",
     "sharedCredential": "使用批量添加的 API Key",
+    "serviceSamplingDefault": "留空使用模型服务默认值",
     "samplingGroup": "采样配置",
     "requestGroup": "请求配置",
     "modelParameters": "模型参数",

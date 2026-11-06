@@ -63,7 +63,7 @@ export function ModelCheckSummary({
       <PopoverContent
         side="top"
         align="end"
-        className="max-h-64 w-80 max-w-[calc(100vw-2rem)] overflow-auto p-3 text-xs"
+        className="z-[1100] max-h-64 w-80 max-w-[calc(100vw-2rem)] overflow-auto p-3 text-xs"
         aria-label={t("modelProfile.checkIssueDetails")}
       >
         <div

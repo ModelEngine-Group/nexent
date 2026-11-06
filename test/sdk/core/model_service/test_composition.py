@@ -100,7 +100,7 @@ def test_top_p_override_has_explicit_support_and_versioned_revision(
         current.models["family/model"].capabilities["sampling"]["top_p"]["status"]
         == "unknown"
     )
-    assert composition.COMPOSER_REF == "profile_policy_composer_v6"
+    assert composition.COMPOSER_REF == "profile_policy_composer_v7"
     monkeypatch.setattr(composition, "COMPOSER_REF", "profile_policy_composer_v1")
     previous = catalog(sources, combo={"capability_overrides": [override]})
     assert current.revision != previous.revision
