@@ -211,7 +211,7 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
           {t("sidebar.agentConfig")}

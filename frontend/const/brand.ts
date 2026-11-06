@@ -36,6 +36,7 @@ export const BRAND = {
   active: BRAND_PALETTE["60"],
   disabled: BRAND_PALETTE["20"],
   selection: BRAND_PALETTE["05"],
+  surfaceHover: "rgb(25 25 25 / 5%)",
   border: "#C9C9C9",
   text: "#191919",
   radius: BRAND_RADII.base,
@@ -52,6 +53,7 @@ ${Object.entries(BRAND_PALETTE)
 --color-brand-active: ${BRAND.active};
 --color-brand-disabled: ${BRAND.disabled};
 --color-select: ${BRAND.selection};
+--color-hover: ${BRAND.surfaceHover};
 --color-brand-border: ${BRAND.border};
 --color-brand-text: ${BRAND.text};
 ${Object.entries(BRAND_RADII)
@@ -127,7 +129,7 @@ export const NEXENT_THEME: ThemeConfig = {
       headerBg: "#F7F9FC",
       headerColor: "#475569",
       borderColor: "#EEF1F5",
-      rowHoverBg: BRAND.selection,
+      rowHoverBg: BRAND.surfaceHover,
       rowSelectedBg: BRAND.selection,
       rowSelectedHoverBg: BRAND_PALETTE["10"],
       cellFontSizeSM: BRAND_BODY_FONT_SIZES["body-2"],

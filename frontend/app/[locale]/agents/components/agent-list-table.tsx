@@ -136,7 +136,7 @@ export default function AgentListTable({
           ? getAgentRepositoryTagLabel(rawCategory, t)
           : undefined;
         return category ? (
-          <Tag className="agent-table-category" title={category}>
+          <Tag className="max-w-full truncate" title={category}>
             {category}
           </Tag>
         ) : (
