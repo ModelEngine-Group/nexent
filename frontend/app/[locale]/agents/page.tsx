@@ -14,6 +14,7 @@ import {
   Button,
   Input,
   Pagination,
+  Space,
 } from "antd";
 import {
   ChevronDown,
@@ -312,34 +313,24 @@ export default function AgentsPage() {
                   <Button type="primary" onClick={() => setIsCreateOpen(true)}>
                     {t("agentConfig.list.new")}
                   </Button>
-                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "list"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
+                  <Space.Compact>
+                    <Button
+                      type={view === "list" ? "primary" : "default"}
+                      icon={<List className="size-4" aria-hidden="true" />}
                       aria-label={t("agentConfig.list.listView")}
                       aria-pressed={view === "list"}
                       onClick={() => setView("list")}
-                    >
-                      <List className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "grid"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
+                    />
+                    <Button
+                      type={view === "grid" ? "primary" : "default"}
+                      icon={
+                        <LayoutGrid className="size-4" aria-hidden="true" />
+                      }
                       aria-label={t("agentConfig.list.gridView")}
                       aria-pressed={view === "grid"}
                       onClick={() => setView("grid")}
-                    >
-                      <LayoutGrid className="size-4" aria-hidden="true" />
-                    </button>
-                  </div>
+                    />
+                  </Space.Compact>
                 </div>
               </div>
 
