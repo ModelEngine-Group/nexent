@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway's sole environment reader, independent of backend business settings."""
 
-import os
 import math
+import os
 from dataclasses import dataclass, field
 
 
@@ -23,7 +23,7 @@ class GatewaySettings:
     db_host: str = "localhost"
     db_port: int = 5432
     db_name: str = "nexent"
-    db_user: str = "nexent_gateway"
+    db_user: str = "root"
     db_password: str = field(default="", repr=False)
     db_pool_size: int = 8
     db_timeout: float = 5.0
@@ -71,6 +71,9 @@ def load_settings(environ=None):
         port = int(values.get("GATEWAY_PORT", "5013"))
     except (TypeError, ValueError) as exc:
         raise ValueError("GATEWAY_PORT must be an integer between 1 and 65535") from exc
+    def database_value(gateway_name, postgres_name, default):
+        return values.get(gateway_name) or values.get(postgres_name) or default
+
     management = values.get("GATEWAY_MANAGEMENT_URL", "http://localhost:5010").rstrip("/")
     return GatewaySettings(
         host=values.get("GATEWAY_HOST", "0.0.0.0"), port=port,
@@ -81,11 +84,11 @@ def load_settings(environ=None):
         jwt_issuer=values.get("JWT_ISSUER", "nexent"),
         signing_secret=values.get("GATEWAY_SIGNING_SECRET", ""),
         deployment_version=values.get("DEPLOYMENT_VERSION", "full"),
-        db_host=values.get("GATEWAY_DB_HOST", "localhost"),
-        db_port=int(values.get("GATEWAY_DB_PORT", "5432")),
-        db_name=values.get("GATEWAY_DB_NAME", "nexent"),
-        db_user=values.get("GATEWAY_DB_USER", "nexent_gateway"),
-        db_password=values.get("GATEWAY_DB_PASSWORD", ""),
+        db_host=database_value("GATEWAY_DB_HOST", "POSTGRES_HOST", "localhost"),
+        db_port=int(database_value("GATEWAY_DB_PORT", "POSTGRES_PORT", "5432")),
+        db_name=database_value("GATEWAY_DB_NAME", "POSTGRES_DB", "nexent"),
+        db_user=database_value("GATEWAY_DB_USER", "POSTGRES_USER", "root"),
+        db_password=database_value("GATEWAY_DB_PASSWORD", "NEXENT_POSTGRES_PASSWORD", ""),
         db_pool_size=int(values.get("GATEWAY_DB_POOL_SIZE", "8")),
         db_timeout=float(values.get("GATEWAY_DB_TIMEOUT", "5")),
     )

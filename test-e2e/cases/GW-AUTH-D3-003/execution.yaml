@@ -19,4 +19,4 @@ preparation:
   special_assets: false
   d4_groups: []
 notes: Requires an explicitly supplied local disposable PostgreSQL admin DSN, creates/drops
-  a random database and read-only role; production/model execution excluded.
+  a random database and read-only role; inherited PostgreSQL and independent Gateway override configurations execute separately; production/model execution excluded.

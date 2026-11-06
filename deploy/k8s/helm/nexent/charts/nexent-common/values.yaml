@@ -43,7 +43,7 @@ config:
     host: ""
     port: ""
     db: ""
-    user: "nexent_gateway"
+    user: "" # Empty connection overrides reuse config.postgres and secrets.postgresPassword.
     poolSize: "8"
     timeout: "5"
   postgres:

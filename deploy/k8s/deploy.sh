@@ -351,6 +351,19 @@ env_or_default() {
   fi
 }
 
+gateway_database_value() {
+  local override_name="$1"
+  local postgres_name="$2"
+  local fallback="$3"
+  if [ -n "${!override_name}" ]; then
+    printf '%s' "${!override_name}"
+  elif [ -n "${!postgres_name}" ]; then
+    printf '%s' "${!postgres_name}"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
 render_yaml_literal_file() {
   local key="$1"
   local file="$2"
@@ -431,10 +444,10 @@ render_k8s_runtime_config_values() {
     echo "  config:"
     printf '    timezone: %s\n' "$(yaml_quote "${TZ:-Asia/Shanghai}")"
     echo "    gatewayIdentity:"
-    printf '      host: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_HOST "$(env_or_default POSTGRES_HOST "nexent-postgresql")")")"
-    printf '      port: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_PORT "$(env_or_default POSTGRES_PORT "5432")")")"
-    printf '      db: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_NAME "$(env_or_default POSTGRES_DB "nexent")")")"
-    printf '      user: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_USER "nexent_gateway")")"
+    printf '      host: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_HOST POSTGRES_HOST "nexent-postgresql")")"
+    printf '      port: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_PORT POSTGRES_PORT "5432")")"
+    printf '      db: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_NAME POSTGRES_DB "nexent")")"
+    printf '      user: %s\n' "$(yaml_quote "$(gateway_database_value GATEWAY_DB_USER POSTGRES_USER "root")")"
     printf '      poolSize: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_POOL_SIZE "8")")"
     printf '      timeout: %s\n' "$(yaml_quote "$(env_or_default GATEWAY_DB_TIMEOUT "5")")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
@@ -1117,7 +1130,7 @@ render_runtime_secret_values() {
         printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
         printf '    authSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$JWT_SECRET")")"
-        printf '    gatewayDatabase: %s\n' "$(yaml_quote "$(deployment_sha256_string "$(env_or_default GATEWAY_DB_PASSWORD "")")")"
+        printf '    gatewayDatabase: %s\n' "$(yaml_quote "$(deployment_sha256_string "$(gateway_database_value GATEWAY_DB_PASSWORD NEXENT_POSTGRES_PASSWORD "nexent@4321")")")"
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  envFiles:"

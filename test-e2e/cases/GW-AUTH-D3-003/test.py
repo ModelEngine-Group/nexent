@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 from gateway_database import isolated_identity_database
 from contracts.constants import environment
 from gateway.application import create_gateway_app
-from gateway.configuration import GatewaySettings
+from gateway.configuration import load_settings
 from gateway.security.identity import sign_delegation, verify_identity
 from infrastructure.service_identity.gateway import identity_context
 from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
@@ -58,7 +58,8 @@ def serve(app):
 @pytest.mark.stage("D3")
 @pytest.mark.case_id("GW-AUTH-D3-003")
 @pytest.mark.asyncio
-async def test_gateway_database_identity_protocol(monkeypatch):
+@pytest.mark.parametrize("independent_override", [False, True])
+async def test_gateway_database_identity_protocol(monkeypatch, independent_override):
     admin_dsn = os.environ.get("NEXENT_GATEWAY_TEST_ADMIN_DSN")
     if not admin_dsn:
         raise RuntimeError("Disposable local PostgreSQL admin DSN is required")
@@ -115,9 +116,19 @@ async def test_gateway_database_identity_protocol(monkeypatch):
         finally:
             await connection.close()
         with serve(management) as management_url, serve(runtime) as runtime_url:
-            edge = create_gateway_app(settings=GatewaySettings(jwt_secret=secret, signing_secret=secret,
-                jwt_issuer=environment.JWT_ISSUER, db_host=db["host"], db_port=db["port"], db_name=db["database"],
-                db_user=db["user"], db_password=db["password"], db_timeout=1), upstreams={
+            settings_env = {"JWT_SECRET": secret, "GATEWAY_SIGNING_SECRET": secret,
+                "JWT_ISSUER": environment.JWT_ISSUER, "POSTGRES_HOST": db["host"], "POSTGRES_PORT": str(db["port"]),
+                "POSTGRES_DB": db["database"], "POSTGRES_USER": db["user"], "NEXENT_POSTGRES_PASSWORD": db["password"],
+                "GATEWAY_DB_TIMEOUT": "1"}
+            if independent_override:
+                settings_env.update({"GATEWAY_DB_HOST": db["host"], "GATEWAY_DB_PORT": str(db["port"]),
+                    "GATEWAY_DB_NAME": db["database"], "GATEWAY_DB_USER": db["user"], "GATEWAY_DB_PASSWORD": db["password"],
+                    "POSTGRES_HOST": "invalid-base-database", "POSTGRES_USER": "invalid-base-user",
+                    "NEXENT_POSTGRES_PASSWORD": "invalid-base-password"})
+            else:
+                settings_env.update(dict.fromkeys(("GATEWAY_DB_HOST", "GATEWAY_DB_PORT", "GATEWAY_DB_NAME",
+                                                   "GATEWAY_DB_USER", "GATEWAY_DB_PASSWORD"), ""))
+            edge = create_gateway_app(settings=load_settings(settings_env), upstreams={
                 "management": management_url, "runtime": runtime_url, "northbound": management_url})
             with serve(edge) as gateway_url:
                 async with httpx.AsyncClient(trust_env=False, timeout=10) as client:

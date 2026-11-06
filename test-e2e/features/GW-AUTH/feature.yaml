@@ -28,7 +28,10 @@ feature:
   - rule_id: GW-AUTH-RULE-05
     description: Gateway resolves external session and API-key state directly through
       an infrastructure read-only PostgreSQL repository without implicit Management
-      HTTP fallback; revocation and tenant/CAS ownership remain authoritative.
+      HTTP fallback; revocation and tenant/CAS ownership remain authoritative. Deployment
+      reuses existing PostgreSQL credentials by default; nonempty Gateway connection
+      overrides optionally select an independent account. Read-only transactions remain
+      enforced with either account.
   - rule_id: GW-AUTH-RULE-06
     description: Deployment starts the unified nexent-gateway container; obsolete
       northbound process resources are removed without deleting images or changing
