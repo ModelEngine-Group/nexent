@@ -146,7 +146,7 @@ change:
     - test/backend/database/test_group_db.py
     - test/backend/database/test_invitation_db.py
     - test/backend/database/test_knowledge_db.py
-    - test/backend/database/test_model_managment_db.py
+    - test/backend/database/test_model_management_db.py
     - test/backend/database/test_nl2agent_agent_db.py
     - test/backend/database/test_remote_mcp_db.py
     - test/backend/database/test_role_permission_db.py

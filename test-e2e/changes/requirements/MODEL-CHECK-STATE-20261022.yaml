@@ -15,7 +15,7 @@ change:
     test_selectors:
     - test/backend/database/test_model_connectivity_changes.py
     - test/backend/database/test_model_outlet_connectivity_db.py
-    - test/backend/database/test_model_managment_db.py
+    - test/backend/database/test_model_management_db.py
     - test/backend/services/test_model_outlet_validation_service.py
     - test/backend/app/test_model_profile_app.py
     - frontend/tests/component/modelLibraryChecks.test.tsx

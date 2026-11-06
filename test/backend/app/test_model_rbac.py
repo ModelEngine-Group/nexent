@@ -26,7 +26,7 @@ if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
 # Patch storage factory and MinIO config validation to avoid errors during
-# initialization, mirroring test_model_managment_app.py.
+# initialization, mirroring test_model_management_app.py.
 storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
@@ -50,7 +50,7 @@ def _make_client(mocker, role: str, granted_permissions: set) -> TestClient:
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
         _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
 
-    from management.api.model.model_managment import router
+    from management.api.model.model_management import router
     from gateway.authentication.auth import authenticate
     from permissions.models import CurrentUser
 
@@ -93,7 +93,7 @@ auth_header = {"Authorization": "Bearer rbac_token"}
 @pytest.mark.asyncio
 async def test_dev_cannot_create_model(dev_client, mocker):
     mocker.patch(
-        'management.api.model.model_managment.create_model_for_tenant',
+        'management.api.model.model_management.create_model_for_tenant',
         return_value={"auto_configured_defaults": []},
     )
     response = dev_client.post(
@@ -145,7 +145,7 @@ async def test_dev_cannot_healthcheck_model(dev_client):
 @pytest.mark.asyncio
 async def test_dev_can_read_model_list(dev_client, mocker):
     mocker.patch(
-        'management.api.model.model_managment.list_models_for_tenant',
+        'management.api.model.model_management.list_models_for_tenant',
         return_value=[],
     )
     response = dev_client.get("/model/list", headers=auth_header)
@@ -155,7 +155,7 @@ async def test_dev_can_read_model_list(dev_client, mocker):
 @pytest.mark.asyncio
 async def test_dev_can_read_llm_list(dev_client, mocker):
     mocker.patch(
-        'management.api.model.model_managment.list_llm_models_for_tenant',
+        'management.api.model.model_management.list_llm_models_for_tenant',
         return_value=[],
     )
     response = dev_client.get("/model/llm_list", headers=auth_header)
@@ -165,11 +165,11 @@ async def test_dev_can_read_llm_list(dev_client, mocker):
 @pytest.mark.asyncio
 async def test_admin_can_create_model(admin_client, mocker):
     mocker.patch(
-        'management.api.model.model_managment.create_model_for_tenant',
+        'management.api.model.model_management.create_model_for_tenant',
         return_value={"auto_configured_defaults": []},
     )
     mocker.patch(
-        'management.api.model.model_managment.pop_capacity_accept_signal',
+        'management.api.model.model_management.pop_capacity_accept_signal',
         return_value=None,
     )
     response = admin_client.post(
@@ -192,7 +192,7 @@ async def test_admin_cannot_access_foreign_tenant_manage_endpoints(admin_client,
     """ADMIN shares the SU model seeds, so cross-tenant manage/* calls must be
     rejected by the role+tenant scope check rather than by permission strings."""
     mocker.patch(
-        'management.api.model.model_managment.list_models_for_admin',
+        'management.api.model.model_management.list_models_for_admin',
         return_value={"models": [], "total": 0},
     )
     response = admin_client.post(
@@ -207,7 +207,7 @@ async def test_admin_cannot_access_foreign_tenant_manage_endpoints(admin_client,
 async def test_admin_cannot_mutate_foreign_tenant_models(admin_client, mocker):
     """The own-tenant allowance must not extend to mutating endpoints either."""
     mock_update = mocker.patch(
-        'management.api.model.model_managment.update_single_model_for_tenant',
+        'management.api.model.model_management.update_single_model_for_tenant',
         return_value=None,
     )
     response = admin_client.post(
@@ -229,7 +229,7 @@ async def test_admin_can_list_own_tenant_models(admin_client, mocker):
     passes the caller's own tenant_id. Regression: manage/list used to be
     SU-only, so the Models tab rendered an empty table for ADMIN."""
     mock_list = mocker.patch(
-        'management.api.model.model_managment.list_models_for_admin',
+        'management.api.model.model_management.list_models_for_admin',
         return_value={"models": [], "total": 0},
     )
     response = admin_client.post(
@@ -247,7 +247,7 @@ async def test_admin_can_list_own_tenant_models(admin_client, mocker):
 async def test_admin_can_mutate_own_tenant_models(admin_client, mocker):
     """Create/update/delete of the ADMIN's own tenant models stay available."""
     mock_update = mocker.patch(
-        'management.api.model.model_managment.update_single_model_for_tenant',
+        'management.api.model.model_management.update_single_model_for_tenant',
         return_value=None,
     )
     response = admin_client.post(
@@ -268,7 +268,7 @@ async def test_dev_cannot_access_own_tenant_manage_endpoints(dev_client, mocker)
     """DEV holds model:read and passes require(), so the scope check is the only
     thing keeping it off the manage surface -- even for its own tenant."""
     mock_list = mocker.patch(
-        'management.api.model.model_managment.list_models_for_admin',
+        'management.api.model.model_management.list_models_for_admin',
         return_value={"models": [], "total": 0},
     )
     response = dev_client.post(
@@ -284,7 +284,7 @@ async def test_dev_cannot_access_own_tenant_manage_endpoints(dev_client, mocker)
 async def test_su_can_access_manage_endpoints(su_client, mocker):
     """SU may target any tenant, including one that is not its own."""
     mocker.patch(
-        'management.api.model.model_managment.list_models_for_admin',
+        'management.api.model.model_management.list_models_for_admin',
         return_value={"models": [], "total": 0},
     )
     response = su_client.post(
@@ -302,7 +302,7 @@ async def test_speed_role_bypasses_permission_checks(mocker):
 
     client = _make_client(mocker, "SPEED", set())
     mocker.patch(
-        'management.api.model.model_managment.list_models_for_tenant',
+        'management.api.model.model_management.list_models_for_tenant',
         return_value=[],
     )
     response = client.get("/model/list", headers=auth_header)

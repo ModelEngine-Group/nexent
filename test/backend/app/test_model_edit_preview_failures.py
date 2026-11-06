@@ -5,13 +5,13 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from test.backend.app.test_model_managment_app import client  # noqa: F401
+from test.backend.app.test_model_management_app import client  # noqa: F401
 
 
 @pytest.mark.parametrize("kind,status", [("missing", 404), ("stale", 409), ("invalid", 400)])
 def test_edit_preview_preserves_domain_error_and_hides_private_values(client, mocker, kind, status):
     from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError
-    from management.api.model import model_managment as module
+    from management.api.model import model_management as module
     errors = {"missing": LookupError("controlled-private"), "stale": ModelOutletConflictError(),
               "invalid": ModelOutletValidationError("PARAMETER_VALUE_INVALID", "/temperature")}
     run = mocker.patch.object(module, "run_blocking", new=AsyncMock(side_effect=errors[kind]))

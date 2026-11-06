@@ -141,7 +141,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.file.image": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
             "management.api.identity.mock_user_management": {"router": APIRouter()},
-            "management.api.model.model_managment": {"router": APIRouter()},
+            "management.api.model.model_management": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
             "management.api.prompt.prompt": {"router": APIRouter()},
             "management.api.mcp.mcp_management": {"router": APIRouter()},
