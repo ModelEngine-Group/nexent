@@ -399,7 +399,7 @@ export default function AgentsPage() {
                       <Empty className="py-12" />
                     )}
                     <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
-                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
+                      <span className="text-body-2 ![letter-spacing:0px] text-[#191919]">
                         {t("agentConfig.list.total", {
                           count: pagination?.total ?? 0,
                         })}
