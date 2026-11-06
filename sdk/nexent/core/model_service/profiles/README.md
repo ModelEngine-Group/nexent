@@ -171,6 +171,19 @@ unmentioned keys inherit. Capability changes retain their evidence and previous
 values. Permitted user values are applied last; fixed values, schema constraints,
 conditions, registered references and protected request paths remain validated.
 
-Composer `profile_policy_composer_v6` participates in catalog revisions. Saving
+Composer `profile_policy_composer_v7` participates in catalog revisions. Saving
 revalidates the same draft before freezing the outlet; connection checks run after
 saving. Existing outlets continue using their stored snapshot without recomposition.
+
+
+## Custom-provider thinking policy
+
+A custom OpenAI Chat provider with declared reasoning support receives a compatible
+`enable_thinking` toggle when neither a toggle nor an effort-off declaration is
+saved. This is configuration freedom, not a claim that a remote service honors it.
+Explicit provider bindings and operator-selected formats retain their paths.
+Nexent supplements use `/reasoning/can_disable` for confirmed shutdown capability;
+`false` prevents the fallback, while absence is distinct from an always-on claim.
+Older outlets receive only this bounded control completion and explicit shutdown
+restriction; credentials, identity, context and other saved facts are preserved.
+The source TOML files remain unchanged.

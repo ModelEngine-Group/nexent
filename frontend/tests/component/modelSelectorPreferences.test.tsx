@@ -372,3 +372,14 @@ it("TD-03 shows declared reasoning without controls as always on", async () => {
   fireEvent.click(screen.getByRole("switch"));
   expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
 });
+
+it("AC-010 keeps a confirmed shutdown restriction in the conversation quick control", async () => {
+  saved.reasoning_status = "supported";
+  saved.reasoning_can_disable = false;
+  saved.defaults.enable_thinking = true;
+  setup(11);
+  await waitFor(() => expect(screen.getByRole("switch")).toBeChecked());
+  expect(screen.getByRole("switch")).toBeDisabled();
+  fireEvent.click(screen.getByRole("switch"));
+  expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+});

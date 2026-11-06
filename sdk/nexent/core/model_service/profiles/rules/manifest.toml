@@ -38,7 +38,7 @@ content_sha256 = "058ec2c46307217c3c64e9160af6f9ad34c73589691f795105b739db4d94bb
 
 [[rules]]
 path = "rules/providers/alibaba-cn/models/kimi-k3.toml"
-content_sha256 = "531223214346f6b6266c8358b10ba25002e05691b5079553a250e65acdccca85"
+content_sha256 = "556ffafaba7cbba7cc8c1dd0eb80907a6d8d7ac65f1cafae894592c20b56b4f5"
 
 [[rules]]
 path = "rules/providers/alibaba-cn/models/qwen3.5-397b-a17b.toml"
@@ -134,4 +134,24 @@ content_sha256 = "4b9924594b13541b7db9df89904531e6ca5e32e1eaaf6667a0453a6fde2c11
 
 [[rules]]
 path = "rules/models/moonshotai/kimi-k3.toml"
-content_sha256 = "9ef8a931736137e010790fb11798c05c2609f2944182d3949c6702d7750af664"
+content_sha256 = "1cba5690a9d94ec684d3c6bd3792c4e5ac9686938b75a57c1e2bfbf42384cbe0"
+
+[[rules]]
+path = "rules/models/zhipuai/glm-5.3.toml"
+content_sha256 = "e5ff2887095fcb4d7ee7b12933b55ba0dda8e4afd5575df3eb78cc81bae14fee"
+
+[[rules]]
+path = "rules/models/zhipuai/glm-5.3-flash.toml"
+content_sha256 = "aacc28fd3dda67d4fe78172ab41857dc18d2536feb73684301001cf7d77a0e25"
+
+[[rules]]
+path = "rules/models/alibaba/qwen3.8-2.4t-a95b.toml"
+content_sha256 = "e595d3f081e00711e45f9d7b3e7e675a014009ad43092877461374e6fcc1aaf3"
+
+[[rules]]
+path = "rules/models/minimax/MiniMax-M2.7.toml"
+content_sha256 = "6bbefd4c5be5eb570a8feda1d224620c3efd15a2ed0dfa5778dbfa4b84ea66b8"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/glm-5.2.toml"
+content_sha256 = "1cfe60cd53580395d1b308198fc5950482b7278d2aef617406e9050e7c72c597"
