@@ -18,14 +18,12 @@ change:
   traditional_ut:
     decision: strengthen
     test_selectors:
-      - frontend/tests/component/agentListingActions.test.tsx
       - frontend/tests/component/agentListCard.test.tsx
       - frontend/tests/component/myAgentMainBadge.test.tsx
       - frontend/tests/component/mineApplyListingModal.test.tsx
     behaviors:
-      - Card and table omit publication shortcuts; menu order and direct configuration navigation remain correct.
-      - Unpublished, readonly and already-listed versions cannot submit an application.
-      - Published readonly agents can navigate to evaluation with the selected ID.
-      - Application success, failure, cancellation and repository entry removal are covered.
-    reason: Frontend entry relocation reuses existing API and mutation contracts. Component UT proves callbacks, routing inputs and controlled request outcomes; preserve existing D1 and D4 regressions without creating duplicate cases. Python and deployment behavior do not change.
+      - Card configuration and version-menu callbacks remain connected without publication shortcuts.
+      - Repository cards omit listing and evaluation entries while retaining review and usage-guide actions.
+      - The existing application dialog retains tag validation, icon upload and prefill coverage.
+    reason: Frontend entry relocation reuses existing API and mutation contracts. At the user's request, the dedicated listing-action test file was removed; its eligibility, evaluation-navigation and submission-outcome assertions are no longer retained as component UT. Existing component suites and formal regressions remain. Python and deployment behavior do not change.
   notes: Design and execution evidence maintained in ../nexent-doc/docs/Developing/dev-agent-listing-evaluation/task.md. D4 retains its existing synthetic routes and self-contained preparation with no real business assets.
