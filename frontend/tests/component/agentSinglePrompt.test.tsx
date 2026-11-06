@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   configLoaded: true,
   defaultModelId: 2 as number | undefined,
   readOnly: false,
+  promptsHidden: false,
   agentId: 157,
   focus: null as null | Record<string, unknown>,
   models: [] as unknown[],
@@ -39,6 +40,7 @@ vi.mock("@/stores/agentStore", () => ({
   useAgentStore: (selector: (state: unknown) => unknown) =>
     selector({
       agentId: mocks.agentId,
+      promptsHidden: mocks.promptsHidden,
       editedAgent: mocks.agent,
       updateDraft: mocks.updateDraft,
       updateAgentConfig: mocks.updateAgent,
@@ -100,6 +102,7 @@ beforeEach(() => {
   mocks.configLoaded = true;
   mocks.defaultModelId = 2;
   mocks.readOnly = false;
+  mocks.promptsHidden = false;
   mocks.agentId = 157;
   mocks.updateAgent.mockReset();
   mocks.updateDraft.mockReset();
@@ -385,4 +388,27 @@ test("the actual Agent page reopens saved canonical parameters and confirms with
   dialog = await screen.findByRole("dialog");
   await waitFor(() => expect(within(dialog).getByRole("spinbutton")).toHaveValue("0.2"));
   expect(mocks.agent.model_params_override).toEqual({ "2": saved });
+});
+
+
+test.each([true, false])("renders a confidential prompt without empty validation or editing controls (highFidelity=%s)", (highFidelity) => {
+  mocks.readOnly = true;
+  mocks.promptsHidden = true;
+  mocks.agent.prompt = "";
+  render(<Form><AgentPrompt highFidelity={highFidelity} onOptimizePrompt={vi.fn()} /></Form>);
+  expect(screen.getByText("agent.promptVisibility.hidden")).toBeVisible();
+  expect(screen.getByText("agent.promptVisibility.explanation")).toBeVisible();
+  expect(document.querySelector("#agent-primary-prompt")).toBeNull();
+  expect(screen.queryByText("agent.validation.promptRequired")).toBeNull();
+  expect(screen.queryByRole("button", { name: "agent.highFidelity.optimizePrompt" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "systemPrompt.button.expand" })).toBeNull();
+  expect(mocks.updateDraft).not.toHaveBeenCalled();
+});
+
+test.each(["", "   "])("keeps required validation for editable blank prompts (%j)", (prompt) => {
+  mocks.agent.prompt = prompt;
+  renderEditor();
+  expect(screen.getByText("agent.validation.promptRequired")).toBeVisible();
+  expect(document.querySelector("#agent-primary-prompt")).toHaveAttribute("aria-invalid", "true");
+  expect(screen.queryByText("agent.promptVisibility.explanation")).toBeNull();
 });

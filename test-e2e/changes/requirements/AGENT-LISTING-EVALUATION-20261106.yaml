@@ -21,9 +21,13 @@ change:
       - frontend/tests/component/agentListCard.test.tsx
       - frontend/tests/component/myAgentMainBadge.test.tsx
       - frontend/tests/component/mineApplyListingModal.test.tsx
+      - frontend/tests/component/agentSinglePrompt.test.tsx
+      - frontend/tests/component/agentEditorDraft.test.tsx
     behaviors:
       - Card configuration and version-menu callbacks remain connected without publication shortcuts.
       - Repository cards omit listing and evaluation entries while retaining review and usage-guide actions.
       - The existing application dialog retains tag validation, icon upload and prefill coverage.
+      - Hidden prompts render a confidential notice without required errors or edit controls; editable empty and whitespace prompts remain required.
+      - Server prompt visibility metadata survives initialization and readback, resets between Agents, and stays outside editable drafts and save payloads.
     reason: Frontend entry relocation reuses existing API and mutation contracts. At the user's request, the dedicated listing-action test file was removed; its eligibility, evaluation-navigation and submission-outcome assertions are no longer retained as component UT. Existing component suites and formal regressions remain. Python and deployment behavior do not change.
   notes: Design and execution evidence maintained in ../nexent-doc/docs/Developing/dev-agent-listing-evaluation/task.md. D4 retains its existing synthetic routes and self-contained preparation with no real business assets.
