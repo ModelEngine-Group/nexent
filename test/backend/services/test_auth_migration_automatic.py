@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Table existence is the only completion marker; migration has one transaction."""
+"""Account coverage selects migration; schema and credentials share one transaction."""
 import argparse
 import json
 from types import SimpleNamespace
@@ -24,7 +24,7 @@ def upgrade(tmp_path, mocker):
     return args, source, sql, cleanup
 
 
-def test_completed_table_skips_source_access_and_all_writes(upgrade):
+def test_complete_account_data_skips_source_access_and_all_writes(upgrade):
     args, source, sql, cleanup = upgrade
     sql.side_effect = ['{"complete":true,"legacy":true}']
     assert migration.automatic_upgrade(args)["skipped"]
@@ -48,7 +48,7 @@ def test_upgrade_runs_one_atomic_sql_command_before_cleanup(upgrade):
     assert migration.automatic_upgrade(args) == {"source": 0, "dry_run": False}
     command = sql.call_args.args[2]
     assert command.startswith("BEGIN;") and command.rstrip().endswith("COMMIT;")
-    assert command.index("CREATE TABLE IF NOT EXISTS nexent.user_account_t") < command.index("CREATE TEMP TABLE")
+    assert command.index("CREATE TABLE IF NOT EXISTS nexent.user_account_t") < command.index("CREATE TEMP TABLE account_import")
     assert "ADD COLUMN account_status" not in command
     assert "account_status VARCHAR(30)" not in command
     assert "account_schema_replay" not in command
@@ -121,7 +121,7 @@ def test_completed_manual_migration_skips_source_credentials_and_discovery(mocke
     mocker.patch.object(migration, "load_settings", return_value={"NEXENT_POSTGRES_PASSWORD": "target-only"})
     connection = mocker.patch("psycopg2.connect").return_value
     connection.__enter__.return_value = connection
-    connection.cursor.return_value.__enter__.return_value.fetchone.return_value = (True,)
+    connection.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": True, "legacy": True},)
     source = mocker.patch.object(migration, "connections")
     discovery = mocker.patch.object(migration, "prepare_source")
     assert migration.main() == 0
@@ -164,6 +164,31 @@ def test_duplicate_source_uuid_reports_its_id():
         migration._account_import_sql([{"id":uid,"email":"a@example.com"},{"id":uid,"email":"b@example.com"}])
 
 
+def test_existing_empty_account_table_stops_without_source_access_or_repair(upgrade):
+    args, source, sql, cleanup = upgrade
+    sql.side_effect = [
+        '{"complete":false,"legacy":true,"account_table":true,"accounts":0,"members":1,"unresolved_ids":["original-user"]}',
+    ]
+    with pytest.raises(migration.MigrationSetupError, match="original-user") as error:
+        migration.automatic_upgrade(args)
+    assert "no automatic repair" in str(error.value)
+    source.assert_not_called()
+    cleanup.assert_not_called()
+    assert sql.call_count == 1
+
+
+@pytest.mark.parametrize("prefix", ["", "ERROR: "])
+def test_incomplete_coverage_error_keeps_ids_and_recovery_guidance_only(prefix):
+    error = migration._migration_conflict(prefix + 'NEXENT_ACCOUNT_INCOMPLETE=["missing-user"]\nprivate-source-password raw SQL')
+    assert "missing-user" in str(error) and "backup" in str(error)
+    assert "private-source-password" not in str(error) and "raw SQL" not in str(error)
+
+
+@pytest.mark.parametrize("ids", ['[]', '[123]', '["bad\\nidentifier"]', '"not-a-list"'])
+def test_malformed_incomplete_error_is_not_exposed(ids):
+    assert migration._migration_conflict('NEXENT_ACCOUNT_INCOMPLETE=' + ids) is None
+
+
 def test_conflict_marker_inside_unrelated_sql_context_is_not_exposed():
     message='CONTEXT: SQL statement contains NEXENT_ACCOUNT_CONFLICT=["private-value"]'
     assert migration._migration_conflict(message) is None
@@ -180,7 +205,7 @@ def test_import_conflict_preserves_ids_before_savepoint_rollback(mocker):
     failure.diag=SimpleNamespace(message_primary='NEXENT_ACCOUNT_CONFLICT='+json.dumps([uid]))
     target=MagicMock()
     cursor=target.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value=(False,)
+    cursor.fetchone.return_value=({"complete": False, "legacy": True},)
     cursor.execute.side_effect=[None,None,None,failure,None,None]
     mocker.patch.object(migration,"_account_import_sql",return_value="import-body")
     with pytest.raises(migration.MigrationConflict,match=uid) as error:
