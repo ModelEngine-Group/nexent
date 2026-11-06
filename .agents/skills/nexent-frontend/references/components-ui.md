@@ -18,8 +18,8 @@
 - For visual component work, use `../docs/前端ui.md` relative to the repository root as the source of truth when it is available. Do not add visual rules that are not stated there.
 - Translate every documented visual value into Tailwind CSS in the English component references. Keep user-facing text localized and use Ant Design first for component behavior.
 - For color selection and interaction states, read the single [UI specification](components/style.md). It contains highlight, text, icon, border, background, fill, and functional colors, plus default/accessible/extended chart palettes, tail colors, gradient rules, complete company color scales, software-product primary color, and auxiliary colors with usage priority, including alpha values and source discrepancies.
-- Use the reusable components documented by [button.md](components/button.md) and [drawer.md](components/drawer.md) instead of recreating their contracts in feature code.
-- Use the reusable components documented by [modal.md](components/modal.md), [card.md](components/card.md), [icon.md](components/icon.md), [paginator.md](components/paginator.md), and [input.md](components/input.md) instead of recreating their contracts in feature code.
+- Before introducing common components, follow [theme and common ownership](architecture.md#theme-and-common-ownership). Use native controls with the central theme when they cover the requirement.
+- Use native AntD Modal, Drawer and Tour APIs, including semantic styles, footer, closable and controlled open state. Title/footer layout, body scrolling, close icons and native tour positioning alone do not justify a common wrapper. Refer to the component documents for the central defaults.
 
 ## Visual conventions
 

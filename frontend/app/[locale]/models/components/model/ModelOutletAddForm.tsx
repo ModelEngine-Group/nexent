@@ -23,8 +23,6 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { ModelCheckSummary } from "@/components/model/ModelCheckSummary";
 import { modelCheckFailure } from "@/lib/modelCheckIssues";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
 import {
   outletSamplingRules,
   outletSamplingValues,
@@ -734,7 +732,7 @@ export function ModelOutletAddForm({
               </Form.Item>
             </div>
             <Form.Item required label={t("modelConfig.addDialog.baseUrl")}>
-              <StandardInput
+              <Input
                 aria-label={t("modelProfile.endpoint")}
                 value={baseUrl}
                 disabled={!!configuration || save.isPending}
@@ -797,7 +795,7 @@ export function ModelOutletAddForm({
                 </span>
               }
             >
-              <StandardInput
+              <Input
                 aria-label={t("modelProfile.requestModel")}
                 value={name}
                 disabled={!!configuration || save.isPending}
@@ -873,7 +871,7 @@ export function ModelOutletAddForm({
               />
             </Form.Item>
             <Form.Item label={t("modelConfig.addDialog.displayName")}>
-              <StandardInput
+              <Input
                 aria-label={t("modelProfile.displayName")}
                 value={displayName}
                 placeholder={name}
@@ -910,12 +908,12 @@ export function ModelOutletAddForm({
                   description={previewDiagnostic}
                   action={
                     parsedExtras !== null ? (
-                      <StandardButton
+                      <Button
                         loading={preview.isFetching}
                         onClick={() => preview.refetch()}
                       >
                         {t("modelProfile.retryPreview")}
-                      </StandardButton>
+                      </Button>
                     ) : undefined
                   }
                   title={t(
@@ -1067,14 +1065,14 @@ export function ModelOutletAddForm({
         <div className="flex flex-wrap items-center gap-3">
           {!configuration && (
             <>
-              <StandardButton
+              <Button
                 icon={<ShieldCheck className="h-4 w-4" />}
                 loading={checking}
                 disabled={!ready || save.isPending}
                 onClick={() => void checkDraft()}
               >
                 {t("modelConfig.editDialog.checkConnectivity")}
-              </StandardButton>
+              </Button>
               {currentCheckResult?.ok && (
                 <span role="status" className="text-xs text-emerald-600">
                   {t("model.status.available")}
@@ -1098,11 +1096,11 @@ export function ModelOutletAddForm({
           )}
         </div>
         <div className="flex gap-2">
-          <StandardButton disabled={save.isPending} onClick={onDone}>
+          <Button disabled={save.isPending} onClick={onDone}>
             {t("common.cancel")}
-          </StandardButton>
-          <StandardButton
-            variant="primary"
+          </Button>
+          <Button
+            type="primary"
             disabled={!ready && !reviewOnly}
             className="disabled:opacity-50"
             loading={save.isPending}
@@ -1117,7 +1115,7 @@ export function ModelOutletAddForm({
                     : "common.save"
                   : "modelConfig.addDialog.submit"
             )}
-          </StandardButton>
+          </Button>
         </div>
       </div>
     </div>

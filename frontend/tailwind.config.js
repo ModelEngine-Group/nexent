@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 const config = {
   darkMode: ["class"],
   content: [
@@ -20,11 +22,11 @@ const config = {
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
+        ring: "var(--color-brand)",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "hsl(var(--primary))",
+          DEFAULT: "var(--color-brand)",
           foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {
@@ -52,10 +54,19 @@ const config = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      fontSize: {
+        "body-1": "var(--font-body-1)",
+        "body-2": "var(--font-body-2)",
+        "body-3": "var(--font-body-3)",
+      },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        none: "var(--brand-radius-none)",
+        xs: "var(--brand-radius-xs)",
+        base: "var(--brand-radius-base)",
+        lg: "var(--brand-radius-lg)",
+        full: "var(--brand-radius-full)",
+        md: "var(--radius-control)",
+        sm: "var(--radius-control)",
       },
       keyframes: {
         "accordion-down": {
@@ -73,6 +84,6 @@ const config = {
       },
     },
   },
-}
+};
 
-export default config
+export default config;
