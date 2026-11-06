@@ -190,7 +190,7 @@ class OpenAIModel(OpenAIServerModel):
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+    def __init__(self, observer: Optional[MessageObserver] = None, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
                  reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
@@ -256,7 +256,7 @@ class OpenAIModel(OpenAIServerModel):
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
-        self.observer = observer
+        self.observer = MessageObserver() if observer is None or observer is MessageObserver else observer
         sampling = resolve_sampling(temperature, top_p)
         self.temperature = sampling["temperature"]
         self.top_p = sampling["top_p"]

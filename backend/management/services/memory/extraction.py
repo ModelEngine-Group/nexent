@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 
 from nexent.core.agents.prompt.memory import compose_memory_prompt, load_memory_template
+from nexent.core.concurrency import ManagedTaskSpec
 from nexent.memory.models import MemoryLayer, MemoryType
+from nexent.monitor import set_monitoring_operation
+
+from management.services.memory.extraction_scope import parse_grounded_items
 
 logger = logging.getLogger("fa_memory_extractor")
 
@@ -16,6 +19,25 @@ logger = logging.getLogger("fa_memory_extractor")
 class ExtractionResult:
     items: list[dict] = field(default_factory=list)
     reason: str = ""
+
+
+class MemoryExtractionModelClient:
+    """Use the monitored model wrapper through the runtime's managed lane."""
+
+    def __init__(self, model, thread_manager):
+        self.model = model
+        self.thread_manager = thread_manager
+
+    async def chat(self, messages):
+        set_monitoring_operation("memory_extraction")
+        result = await self.thread_manager.run(
+            "model-tool-io",
+            ManagedTaskSpec(task_name="memory-extractor-model-generate", owner="memory.extraction"),
+            self.model,
+            messages,
+        )
+        content = getattr(result, "content", result)
+        return content if isinstance(content, str) else str(content)
 
 
 class FaMemoryExtractor:
@@ -54,11 +76,8 @@ class FaMemoryExtractor:
         ]
 
     @staticmethod
-    def _parse_items(raw: str) -> list[str]:
-        if "<no-memory/>" in raw:
-            return []
-        matches = re.findall(r"<memory-item>(.*?)</memory-item>", raw, re.DOTALL)
-        return [m.strip() for m in matches if m.strip()]
+    def _parse_items(raw: str, user_query: str = "", final_answer: str = "") -> list[str]:
+        return parse_grounded_items(raw, user_query, final_answer)
 
     async def _store_items(self, items: list[str]) -> list[dict]:
         results: list[dict] = []
@@ -102,7 +121,7 @@ class FaMemoryExtractor:
             logger.error("LLM call failed during memory extraction", exc_info=True)
             return ExtractionResult(items=[], reason="llm_error")
 
-        parsed = self._parse_items(raw)
+        parsed = self._parse_items(raw, user_query, truncated)
         if not parsed:
             return ExtractionResult(items=[], reason="no_items")
 

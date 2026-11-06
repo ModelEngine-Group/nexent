@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Store memory tool for the new Memory system.
 
 This tool is invoked by the agent to persist important information to its
@@ -64,12 +66,14 @@ class StoreMemoryTool(Tool):
         "themselves, project context, or instructions that should persist "
         "across the current conversation. Do NOT store transient information "
         "like temporary calculations, information already in the knowledge "
-        "base, or data the user explicitly says to forget."
+        "base, request-local length/style/format requirements, or data the user explicitly says to forget. "
+        "Do not infer lasting user preferences from your own recommendations or answer structure."
     )
     description_zh = (
         "将重要信息保存为短期记忆素材，以便未来回忆并由 Dreaming 自主整合。"
         "当用户分享个人偏好、关于自己的事实、项目上下文或应在本对话中保留的指令时使用此工具。"
-        "不要存储临时信息，如临时计算结果、知识库中已有的信息或用户明确要求遗忘的数据。"
+        "不要存储本轮字数、风格、格式要求等临时信息、临时计算结果、知识库中已有的信息或用户明确要求遗忘的数据。"
+        "长期用户偏好必须来自用户明确表达，不得从助手建议或回答结构推断。"
     )
 
     inputs = {
