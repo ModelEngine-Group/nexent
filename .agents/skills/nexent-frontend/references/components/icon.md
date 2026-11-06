@@ -15,13 +15,7 @@ flex h-[14px] w-[14px] items-center justify-center
 cursor-pointer border-0 bg-transparent p-0
 ```
 
-Use the reusable component:
-
-```tsx
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
-```
-
-The close button requires an accessible label and an `onClick` callback.
+Prefer the native Modal/Drawer close control and its `closable`/`closeIcon` APIs. In an existing custom header, use a native AntD `Button` with `type="text"`, an X icon, an accessible label and an `onClick` callback. Keep keyboard focus visible. An icon and label alone do not justify a shared close-button wrapper.
 
 ## Question icon
 

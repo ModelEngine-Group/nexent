@@ -3,11 +3,10 @@
 "use client";
 
 import { Fragment, useId, useMemo, useRef, type ReactNode } from "react";
-import { Drawer, Input, Select } from "antd";
-import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
+import { Button, Drawer, Input, Select } from "antd";
+import { Check, ChevronDown, RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
 import { cn } from "@/lib/utils";
 import type {
   ResourcePickerTab,
@@ -623,8 +622,12 @@ export function ResourceDrawer({
         >
           {title}
         </span>
-        <StandardCloseButton
-          ariaLabel={t("resourcePicker.close", "关闭")}
+        <Button
+          type="text"
+          size="small"
+          aria-label={t("resourcePicker.close", "关闭")}
+          icon={<X size={14} />}
+          disabled={confirmLoading}
           onClick={handleClose}
         />
       </div>

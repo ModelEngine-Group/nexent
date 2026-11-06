@@ -7,10 +7,10 @@
 - Do not allow other page operations while the modal is open.
 - Center the modal by default.
 - The close icon, cancel button, and confirm button support callbacks.
-- A callback returning `false` prevents the modal from closing.
+- The feature controls `open`. Close only after successful validation or submission; keeping `open` true prevents dismissal.
 - Button labels support custom localized text.
 
-The reusable component uses Ant Design `Modal` with `mask={{ closable: false }}` and `keyboard={false}` so the modal is closed only through the configured actions.
+Use native Ant Design `Modal` with the central brand theme. The root provider sets `mask={{ closable: false }}`; keep the native Escape dismissal unless a specific interaction requires otherwise. Use `onCancel`, `onOk`, `confirmLoading` and controlled `open` state instead of a separate callback-return convention.
 
 ## Style
 
@@ -26,7 +26,7 @@ Tailwind CSS:
 rounded-lg w-[480px] h-auto p-6 shadow-[0_0_15px_0_rgba(26,26,26,0.1)]
 ```
 
-The reusable component exposes a `width` prop for an adjusted width.
+Use the native `width`, `styles`, `classNames` and `footer` props for the required layout; use theme tokens for shared visual defaults.
 
 ## Layout
 
@@ -94,8 +94,10 @@ h-8 w-full flex flex-nowrap items-center justify-end gap-4
 
 Use the [primary button](button.md#primary-button) style for the confirm button.
 
-Use the reusable component:
+Use the native component directly:
 
 ```tsx
-import { StandardModal } from "@/components/common/StandardModal";
+import { Modal } from "antd";
 ```
+
+For a constrained-height dialog, configure a flex column through `styles.container` and `minHeight: 0`, scrolling or overflow through `styles.body`. Do not introduce a generic modal wrapper solely for these native capabilities.

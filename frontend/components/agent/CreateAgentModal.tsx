@@ -3,13 +3,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { App, Empty, Form, Input, Spin, Button } from "antd";
+import { App, Empty, Form, Input, Spin, Button, Modal } from "antd";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
-import { StandardModal } from "@/components/common/StandardModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import {
@@ -122,20 +121,23 @@ export default function CreateAgentModal({
   const locale = params.locale || "zh";
 
   return (
-    <StandardModal
+    <Modal
       open={open}
       width={560}
-      maxHeight={CREATE_AGENT_MODAL_MAX_HEIGHT}
-      title={t("chat.agentLanding.createAgent")}
-      closeLabel={t("agentConfig.createModal.close")}
-      cancelText={t("common.cancel")}
-      confirmText={t("common.confirm")}
-      footer={null}
-      bodyClassName="!overflow-hidden !pb-0"
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) resetModalState();
+      centered
+      styles={{
+        container: {
+          maxHeight: CREATE_AGENT_MODAL_MAX_HEIGHT,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        },
+        body: { minHeight: 0, overflow: "hidden" },
       }}
-      onClose={handleCancel}
+      title={t("chat.agentLanding.createAgent")}
+      closable={{ "aria-label": t("agentConfig.createModal.close") }}
+      footer={null}
+      onCancel={handleCancel}
     >
       <Form
         form={form}
@@ -277,6 +279,6 @@ export default function CreateAgentModal({
           </div>
         )}
       </div>
-    </StandardModal>
+    </Modal>
   );
 }
