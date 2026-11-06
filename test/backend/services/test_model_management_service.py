@@ -1,3 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import importlib
 import logging
@@ -13,7 +17,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 
-# Stub external modules required by consts.model before importing services
+# Stub external modules required by contracts.agent before importing services
 if "nexent" not in sys.modules:
     sys.modules["nexent"] = mock.MagicMock()
 if "nexent.core" not in sys.modules:
@@ -29,13 +33,13 @@ if "nexent.core.agents.agent_model" not in sys.modules:
     agent_model_mod.ToolConfig = ToolConfig
     sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Stub boto3 used by backend.database.client
+# Stub boto3 used by management.db.client
 if "boto3" not in sys.modules:
     sys.modules["boto3"] = mock.MagicMock()
 
-# Provide stub modules for backend.database.client and database.client so that
+# Provide stub modules for management.db.client and management.db.client so that
 # patching MinioClient does not import the real client module (which pulls SQLAlchemy).
-backend_db_client_mod = types.ModuleType("backend.database.client")
+backend_db_client_mod = types.ModuleType("management.db.client")
 
 
 class _MinioClient:  # minimal stub
@@ -43,28 +47,34 @@ class _MinioClient:  # minimal stub
 
 
 backend_db_client_mod.MinioClient = _MinioClient
-sys.modules["backend.database.client"] = backend_db_client_mod
+sys.modules["management.db.client"] = backend_db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Ensure parent package exposes the submodule attribute for import machinery
 try:
-    backend_database_pkg = importlib.import_module("backend.database")
+    backend_database_pkg = importlib.import_module("management.db")
     setattr(backend_database_pkg, "client", backend_db_client_mod)
 except Exception:
-    # If backend.database is not importable yet, defer to sys.modules injection
-    if "backend.database" in sys.modules:
-        setattr(sys.modules["backend.database"],
+    # If the package is already stubbed, attach the client to that package.
+    if "management.db" in sys.modules:
+        setattr(sys.modules["management.db"],
                 "client", backend_db_client_mod)
 
-# Also stub database.client.MinioClient in case modules import without the 'backend.' prefix
-database_client_mod = types.ModuleType("database.client")
+# Also stub management.db.client.MinioClient in case modules import without the 'backend.' prefix
+database_client_mod = types.ModuleType("management.db.client")
 database_client_mod.MinioClient = _MinioClient
-sys.modules["database.client"] = database_client_mod
+sys.modules["management.db.client"] = database_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
 
-# Stub consts.model to avoid deep dependencies
-consts_model_mod = types.ModuleType("consts.model")
+# Stub contracts.agent to avoid deep dependencies
+consts_model_mod = types.ModuleType("contracts.agent")
 
 
 class _EnumItem:
@@ -98,7 +108,7 @@ class _ProcessParams:
 
 
 def _infer_model_type_from_name(model_name: str) -> str:
-    """Mock implementation mirroring the real consts.model._infer_model_type_from_name."""
+    """Mock implementation mirroring the real contracts.model._infer_model_type_from_name."""
     if not model_name:
         return "llm"
     name = model_name.lower()
@@ -143,12 +153,12 @@ consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model_mod.ToolValidateRequest = _ToolValidateRequest
 consts_model_mod.ProcessParams = _ProcessParams
 consts_model_mod._infer_model_type_from_name = _infer_model_type_from_name
-sys.modules["consts.model"] = consts_model_mod
+install_business_contract_stubs(consts_model_mod)
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
 
-# Stub consts.const required by service
-consts_const_mod = types.ModuleType("consts.const")
+# Stub contracts.constants.environment required by service
+consts_const_mod = types.ModuleType("contracts.constants.environment")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
@@ -182,9 +192,10 @@ consts_const_mod.ES_HOST = "http://localhost:9200"
 consts_const_mod.ES_API_KEY = ""
 consts_const_mod.ES_USERNAME = ""
 consts_const_mod.ES_PASSWORD = ""
-sys.modules["consts.const"] = consts_const_mod
+sys.modules["contracts.constants.environment"] = consts_const_mod
+install_business_constant_stubs(consts_const_mod)
 
-# Stub sqlalchemy.sql.func used by utils.config_utils
+# Stub sqlalchemy.sql.func used by management.services.configuration.tenant.settings
 sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
 
 
@@ -195,8 +206,8 @@ class _Func:
 sqlalchemy_sql_mod.func = _Func()
 sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
 
-# Stub consts.provider used by service
-consts_provider_mod = types.ModuleType("consts.provider")
+# Stub contracts.constants.constants used by service
+consts_provider_mod = types.ModuleType("contracts.constants.constants")
 
 
 class _ProviderEnum:
@@ -213,7 +224,7 @@ consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
-sys.modules["consts.provider"] = consts_provider_mod
+install_shared_contract_stub(consts_provider_mod, 'provider')
 
 # Stub management.services.model.provider used by service
 services_provider_mod = types.ModuleType("management.services.model.provider")
@@ -321,9 +332,9 @@ utils_name_mod.split_repo_name = _split_repo_name
 utils_name_mod.sort_models_by_id = _sort_models_by_id
 sys.modules["management.services.model.names"] = utils_name_mod
 
-# Stub utils.file_management_utils so file_management_service can be imported
+# Stub management.services.file.upload so file_management_service can be imported
 # by other tests in the same pytest process without pulling auth/database deps.
-utils_file_mgmt_mod = types.ModuleType("utils.file_management_utils")
+utils_file_mgmt_mod = types.ModuleType("management.services.file.upload")
 
 
 async def _save_upload_file(*args, **kwargs):
@@ -331,13 +342,13 @@ async def _save_upload_file(*args, **kwargs):
 
 
 utils_file_mgmt_mod.save_upload_file = _save_upload_file
-sys.modules["utils.file_management_utils"] = utils_file_mgmt_mod
+sys.modules["management.services.file.upload"] = utils_file_mgmt_mod
 
-# Stub database.model_management_db to avoid importing heavy DB client
+# Stub management.db.model.repository to avoid importing heavy DB client
 database_mod = types.ModuleType("database")
 database_mod.__path__ = []
-db_mm_mod = types.ModuleType("database.model_management_db")
-db_attachment_mod = types.ModuleType("database.attachment_db")
+db_mm_mod = types.ModuleType("management.db.model.repository")
+db_attachment_mod = types.ModuleType("management.db.file.attachment")
 
 
 def _noop(*args, **kwargs):
@@ -386,7 +397,7 @@ def _get_model_by_model_id(model_id: int, tenant_id: str):
 db_mm_mod.get_model_by_model_id = _get_model_by_model_id
 db_mm_mod.update_model_record = _noop
 sys.modules["database"] = database_mod
-sys.modules["database.model_management_db"] = db_mm_mod
+sys.modules["management.db.model.repository"] = db_mm_mod
 for _attachment_func in [
     "copy_file",
     "delete_file",
@@ -401,11 +412,11 @@ for _attachment_func in [
     "upload_fileobj",
 ]:
     setattr(db_attachment_mod, _attachment_func, _noop)
-sys.modules["database.attachment_db"] = db_attachment_mod
+sys.modules["management.db.file.attachment"] = db_attachment_mod
 setattr(database_mod, "attachment_db", db_attachment_mod)
 
-# Stub database.tenant_config_db required by utils.config_utils
-db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
+# Stub management.db.configuration.tenant required by management.services.configuration.tenant.settings
+db_tenant_cfg_mod = types.ModuleType("management.db.configuration.tenant")
 
 
 def _delete_config_by_tenant_config_id(*args, **kwargs):
@@ -438,7 +449,7 @@ db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
 db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
 db_tenant_cfg_mod.update_config_by_tenant_config_id_and_data = _update_config_by_tenant_config_id_and_data
-sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
+sys.modules["management.db.configuration.tenant"] = db_tenant_cfg_mod
 
 # Stub management.services.knowledge_base.service to avoid heavy imports
 services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
@@ -465,8 +476,8 @@ async def _clear_model_memories(**kwargs):
 nexent_memory_mod.clear_model_memories = _clear_model_memories
 sys.modules["nexent.memory.memory_service"] = nexent_memory_mod
 
-# Stub services.tenant_service required by list_models_for_admin BEFORE any imports
-services_tenant_mod = types.ModuleType("services.tenant_service")
+# Stub management.services.permission.identity.tenants required by list_models_for_admin BEFORE any imports
+services_tenant_mod = types.ModuleType("management.services.permission.identity.tenants")
 
 
 def _get_tenant_info(tenant_id):
@@ -478,7 +489,7 @@ def _get_tenant_info(tenant_id):
 
 
 services_tenant_mod.get_tenant_info = _get_tenant_info
-sys.modules["services.tenant_service"] = services_tenant_mod
+sys.modules["management.services.permission.identity.tenants"] = services_tenant_mod
 
 
 def _add_repo_to_name(model_repo, model_name):
@@ -496,16 +507,34 @@ def isolate_embedding_probe():
         yield
 
 
-def import_svc(module="management"):
+def import_svc(module="management", *, isolate_storage=True):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
-    sys.modules["database.model_management_db"] = db_mm_mod
+    sys.modules["management.db.model.repository"] = db_mm_mod
     setattr(database_mod, "model_management_db", db_mm_mod)
     sys.modules.pop("management.services.model.management", None)
     sys.modules.pop("management.services.model.management", None)
-    with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
+    # Keep the new pure SDK default resolver real inside the isolated SDK shell.
+    sampling_spec = importlib.util.spec_from_file_location(
+        "nexent.core.models.sampling",
+        os.path.abspath(os.path.join(current_dir, "../../../sdk/nexent/core/models/sampling.py")),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["nexent.core.models.sampling"] = sampling_module
+    with mock.patch("management.db.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
+    if not isolate_storage:
+        return svc
+    # These tests own legacy preprocessing/orchestration. The resolved storage
+    # translator has its own unit and database suites and is a collaborator here.
+    svc._create_model_configuration = lambda data, user, tenant: svc.create_model_record(data, user, tenant)
+    def update_configuration(record, changes, user, tenant, *, scope_update=False):
+        if scope_update:
+            return svc.update_model_record(record["model_id"], changes, user, tenant)
+        return svc.update_model_record(record["model_id"], changes, user)
+    svc._update_model_configuration = update_configuration
     return svc
 
 
@@ -3150,3 +3179,21 @@ def test_backfill_swap_pool_never_resurrects_old_models():
     # does not beat the fresh occupant (256K): nothing changes.
     assert result == []
     assert updated == []
+
+
+def test_saved_outlet_enrichment_uses_projection_without_legacy_normalization(monkeypatch):
+    svc = import_svc("reasoning")
+    projection_module = types.ModuleType("management.services.model.outlet_projection")
+    projection_module.project_saved_outlet = mock.Mock(return_value={
+        "extra_params": {"enable_thinking": False}, "migration_status": "migrated",
+        "migration_review_required": True})
+    monkeypatch.setitem(sys.modules, "management.services.model.outlet_projection", projection_module)
+    model = {"model_type": "llm", "profile_schema_version": 1,
+             "extra_params": {"parameter_values": {}, "api_parameters": []}}
+    with mock.patch.object(svc, "resolve_reasoning_capability") as old_lookup, \
+            mock.patch.object(svc, "normalize_reasoning_params") as old_normalize:
+        svc._enrich_model_reasoning_capability(model)
+    old_lookup.assert_not_called()
+    old_normalize.assert_not_called()
+    assert model["extra_params"] == {"enable_thinking": False}
+    assert model["migration_review_required"] is True

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for request-scoped Workbench root resolution."""
 
 from copy import deepcopy
@@ -5,9 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from consts.exceptions import ValidationError, WorkbenchConfigVersionConflict
-from consts.model import WorkbenchSessionConfig
-from services import workbench_service
+from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict
+from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from management.services.agent import workbench as workbench_service
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.agent_model import ToolConfig
 from threading import local
@@ -34,7 +36,7 @@ def published_instances(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     mocker.patch.object(
         workbench_service,
@@ -131,7 +133,7 @@ def test_workbench_main_profile_exposes_published_default_skills(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     skill_service = mocker.patch.object(
         workbench_service.SkillService,
@@ -161,7 +163,7 @@ def test_workbench_main_profile_exposes_published_default_skills(mocker):
     }
     skill_service.assert_called_once_with(
         agent_id=99,
-        tenant_id="tenant",
+        tenant_id=ASSET_OWNER_TENANT_ID,
         version_no=4,
     )
 
@@ -354,7 +356,7 @@ def test_skill_config_rejects_missing_invalid_and_undeclared_values(runtime):
 
 def test_ut_be_wb_004_locked_version_does_not_query_latest(mocker):
     """UT-BE-WB-004: a pinned conversation never queries the latest version."""
-    latest = mocker.patch("services.knowledge_scope_service.query_current_version_no", return_value=4)
+    latest = mocker.patch("management.services.knowledge_base.scope.query_current_version_no", return_value=4)
     lookup = mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
     canonical, _ = workbench_service.resolve_workbench_config(_config(3), tenant_id="tenant")
     latest.assert_not_called()
@@ -365,7 +367,7 @@ def test_ut_be_wb_004_locked_version_does_not_query_latest(mocker):
 
 def test_ut_be_wb_005_missing_pinned_version_has_no_fallback(mocker):
     """UT-BE-WB-005: an unavailable pinned version has no fallback."""
-    latest = mocker.patch("services.knowledge_scope_service.query_current_version_no", return_value=4)
+    latest = mocker.patch("management.services.knowledge_base.scope.query_current_version_no", return_value=4)
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", side_effect=ValueError("private details"))
     skills = mocker.patch.object(workbench_service.skill_db, "get_skill_by_id")
     with pytest.raises(workbench_service.WorkbenchError) as error:
@@ -418,7 +420,7 @@ def test_generic_chat_resolves_tenant_system_agent_as_root(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     lookup = mocker.patch.object(
         workbench_service,
@@ -442,7 +444,7 @@ def test_multi_agent_chat_mounts_locked_agents_under_system_root(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     mocker.patch.object(
         workbench_service,
@@ -491,22 +493,21 @@ def test_single_agent_uses_tenant_model_on_workbench_root(mocker):
         },
     )
 
-    get_model = mocker.patch.object(workbench_service, "get_model_by_model_id", return_value={"model_id": 13})
-    mocker.patch.object(workbench_service, "is_model_available", return_value=True)
+    get_model = mocker.patch("management.db.model.repository.get_model_by_model_id", return_value={"model_id": 13})
+    mocker.patch("management.services.model.resolver.is_model_available", return_value=True)
     canonical, plan = workbench_service.resolve_workbench_config(
         WorkbenchSessionConfig(
             mode="single_agent_chat",
-            model_id=13,
             agent_mounts=[{"agent_id": 7, "version_no": 3}],
         ),
         tenant_id="tenant",
     )
 
-    assert canonical.model_id == 13
+    assert "model_id" not in canonical.model_dump()
     assert plan.root.identity.agent_id == 99
     assert [child.agent_id for child in plan.child_mounts] == [7]
-    assert plan.overlay.model_id == 13
-    get_model.assert_called_once_with(13, tenant_id="tenant")
+    assert plan.overlay.model_id is None
+    get_model.assert_not_called()
 
 
 @pytest.mark.parametrize("definitions", [[], [{"tool_id": 4, "author": "tenant", "is_available": False}], [{"tool_id": 4, "author": "other", "is_available": True}]])

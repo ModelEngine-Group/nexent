@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
 import sys
@@ -6,10 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from consts.exceptions import TagManagementNotFoundError, ValidationError
-import services.tag_management_service as service_module
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import (
+from contracts.errors.exceptions import TagManagementNotFoundError, ValidationError
+from management.services.tag import library as service_module
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import (
     AuthenticatedCaller,
     ResolvedTagResource,
     ResourceCapabilities,
@@ -37,12 +38,12 @@ def _install_batch_dependencies(monkeypatch, states=None):
     )
     db = MagicMock()
     monkeypatch.setattr(service_module, "TagManagementDB", db)
-    projection_db = types.ModuleType("database.document_tag_projection_db")
+    projection_db = types.ModuleType("management.db.tag.projection")
     projection_db.list_projection_states_for_knowledge_base = MagicMock(
         return_value=states or {}
     )
     monkeypatch.setitem(
-        sys.modules, "database.document_tag_projection_db", projection_db
+        sys.modules, "management.db.tag.projection", projection_db
     )
     if "database" in sys.modules:
         monkeypatch.setattr(sys.modules["database"], "document_tag_projection_db", projection_db, raising=False)
@@ -71,14 +72,14 @@ def test_document_batch_status_is_read_scoped_and_applies_predicates(monkeypatch
             "update_time": None,
         }
     }
-    sys.modules["database.document_tag_projection_db"].list_projection_states_for_knowledge_base.return_value = states
-    fake_projection_module = types.ModuleType("services.tag_document_projection")
+    sys.modules["management.db.tag.projection"].list_projection_states_for_knowledge_base.return_value = states
+    fake_projection_module = types.ModuleType("management.services.knowledge_base.tag_projection")
     fake_projection_module.document_projection_status_dict = lambda state: {
         "status": state["status"],
         "version": state["version"],
         "tag_count": 1,
     }
-    monkeypatch.setitem(sys.modules, "services.tag_document_projection", fake_projection_module)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.tag_projection", fake_projection_module)
 
     results = asyncio.run(
         TagManagementService.get_document_tag_batch_status(

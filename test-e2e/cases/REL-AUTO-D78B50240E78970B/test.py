@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -17,16 +18,11 @@ except Exception:
 for _key, _value in _secret_env.items():
     os.environ.setdefault(_key, _value)
 
-from consts.task_recovery import CONFIG_SERVICE_NAME
-from database.client import get_db_session, minio_client
-from database.db_models import KnowledgeFileLifecycle
-from database.knowledge_file_lifecycle_db import (
-    create_file_record,
-    delete_file_record,
-    get_file_record,
-    list_uploading_files_created_before,
-)
-from services import startup_recovery_service
+from contracts.constants.constants import CONFIG_SERVICE_NAME
+from management.db.client import get_db_session, minio_client
+from management.db.models import KnowledgeFileLifecycle
+from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record, get_file_record, list_uploading_files_created_before
+from management import recovery as startup_recovery_service
 
 GRACE_SECONDS = startup_recovery_service.UPLOAD_RECOVERY_GRACE_SECONDS
 OTHER_SERVICE_NAME = 'nexent-other-service'
@@ -178,7 +174,7 @@ async def test_interrupted_upload_startup_recovery(monkeypatch):
         file_ids.append(file_d)
         object_names[file_d] = object_d
 
-        import database.attachment_db as attachment_db
+        from management.db.file import attachment as attachment_db
 
         def _fail_delete(object_name, bucket=None):
             return {'success': False, 'object_name': object_name, 'error': 'simulated delete failure'}

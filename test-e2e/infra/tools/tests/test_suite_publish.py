@@ -16,6 +16,21 @@ import suite_publish
 from suite_runtime import save
 
 
+def test_deployment_publication_keeps_mode_evidence_but_not_private_configuration(tmp_path):
+    batch = tmp_path / "batch"
+    save(batch / "deployment-plan.json", {"local": ["CASE-1"], "aidp": ["CASE-2"]})
+    save(batch / "restoration.json", {"status": "RESTORED"})
+    save(batch / "aidp/mode-verification.json", {"aidp_enabled": True})
+    for relative in ("aidp/logs/deploy-1.log", "restore-local/logs/preflight-1.log", "aidp/config/private.log"):
+        path = batch / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("private fixture")
+    files, _ = suite_publish.selected_files(batch, [])
+    names = {p.relative_to(batch).as_posix() for p in files}
+    assert names == {"deployment-plan.json", "restoration.json", "aidp/mode-verification.json",
+                     "aidp/logs/deploy-1.log", "restore-local/logs/preflight-1.log"}
+
+
 def make_batch(home, name="complete-batch", results=("PASS", "FAIL", "TIMEOUT")):
     batch = home / "runs/repository-daily" / name
     plan = [{"case_id": f"CASE-{index}", "stage": "D4"} for index in range(len(results))]
@@ -270,6 +285,7 @@ def test_runner_publish_precedes_notification_without_changing_failure_results(
     settings = {"hooks": {name: [["synthetic-command"]] for name in ("build", "deploy", "preflight")},
                 "case_timeout_seconds": 20, "command_timeout_seconds": 20, "notify": True}
     with patch.object(suite, "machine_environment", return_value={}), \
+            patch("validation_policy.evaluate", return_value=({"ready": True, "status": "VALID", "issues": [], "blocked_cases": []}, [record])), \
             patch.object(suite, "fingerprint", return_value={"head": "a" * 40}), \
             patch.object(suite, "enrich_ownership", return_value=([record], [])), \
             patch.object(suite, "static_inventory", return_value=[]), \

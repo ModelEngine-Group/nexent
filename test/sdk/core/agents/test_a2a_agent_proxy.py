@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.a2a_agent_proxy module.
 
@@ -20,6 +22,7 @@ from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nexent.core.agent_names import allocate_external_agent_names
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +253,17 @@ def _load_a2a_agent_proxy_module():
 
 a2a_agent_proxy = _load_a2a_agent_proxy_module()
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+async def test_proxy_configures_certificate_verification(preference):
+    info = a2a_agent_proxy.A2AAgentInfo("id", "Peer", "https://peer", **preference)
+    client = MagicMock()
+    client.aclose = AsyncMock()
+    with patch.object(a2a_agent_proxy.httpx, "AsyncClient", return_value=client) as constructor:
+        async with a2a_agent_proxy.ExternalA2AAgentProxy(info):
+            assert constructor.call_args.kwargs["verify"] is preference.get("ssl_verify", True)
+
 # ---------------------------------------------------------------------------
 # Import symbols for convenience
 # ---------------------------------------------------------------------------
@@ -284,7 +298,7 @@ class TestA2AAgentInfo:
         assert info.transport_type == "http-streaming"
         assert info.protocol_version == "1.0"
         assert info.protocol_type == PROTOCOL_JSONRPC
-        assert info.timeout == 300.0
+        assert info.timeout == 900.0
         assert info.raw_card is None
 
     def test_custom_values(self):
@@ -1776,6 +1790,12 @@ class TestExternalA2AAgentWrapper:
         assert wrapper.description == "External A2A agent: WrapperAgent"
         assert wrapper._proxy is None
         assert wrapper.get_runtime_metadata() == {}
+
+    def test_invalid_display_name_uses_shared_alias_without_changing_card(self):
+        info = self._make_info(agent_id="7", name="agent-one")
+        wrapper = ExternalA2AAgentWrapper(info)
+        assert wrapper.name == allocate_external_agent_names([("7", "agent-one")])["7"]
+        assert wrapper.display_name == info.name == "agent-one"
 
     def test_call_forwards_runtime_metadata_to_message_context(self):
         """The parent run snapshot is forwarded without model-supplied arguments."""

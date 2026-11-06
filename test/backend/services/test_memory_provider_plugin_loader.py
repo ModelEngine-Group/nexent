@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import shutil
 import sys
 import types
@@ -8,9 +10,10 @@ import pytest
 
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.MEMORY_PROVIDER_PLUGINS_DIR = ""
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
+install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 
 providers_base = types.ModuleType("nexent.memory.providers.base")
@@ -42,8 +45,8 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
-from backend.services import memory_provider_plugin_loader as plugin_loader_module
-from backend.services.memory_provider_plugin_loader import PluginLoader
+from management.services.memory.providers import plugins as plugin_loader_module
+from management.services.memory.providers.plugins import PluginLoader
 
 
 @pytest.fixture

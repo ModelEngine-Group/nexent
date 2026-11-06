@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/mcp_service.py
 Tests MCP service for OpenAPI service registration and management.
@@ -149,14 +150,14 @@ logging.config = logging_config_mod  # patch the actual logging module too
 # Stub utils
 stub_utils = types.ModuleType("utils")
 stub_utils.__path__ = [os.path.abspath(os.path.join(current_dir, "../../../backend/utils"))]
-stub_utils.logging_utils = types.ModuleType("utils.logging_utils")
+stub_utils.logging_utils = types.ModuleType("infrastructure.logging")
 stub_utils.logging_utils.configure_logging = MagicMock()
 stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
 stub_utils.logging_utils.get_uvicorn_logging_config = MagicMock(
     return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
 )
 sys.modules['utils'] = stub_utils
-sys.modules['utils.logging_utils'] = stub_utils.logging_utils
+sys.modules['infrastructure.logging'] = stub_utils.logging_utils
 
 # Stub database
 stub_database = types.ModuleType("database")
@@ -168,11 +169,11 @@ stub_backend.database = types.ModuleType("backend.database")
 sys.modules['backend'] = stub_backend
 sys.modules['backend.database'] = stub_backend.database
 
-# Stub database.outer_api_tool_db
-stub_outer_api_tool_db = types.ModuleType("database.outer_api_tool_db")
+# Stub management.db.tool.outer_api
+stub_outer_api_tool_db = types.ModuleType("management.db.tool.outer_api")
 stub_outer_api_tool_db.query_available_openapi_services = MagicMock()
-sys.modules['database.outer_api_tool_db'] = stub_outer_api_tool_db
-sys.modules['backend.database.outer_api_tool_db'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
 
 # Stub the managed concurrency boundary used by the MCP entrypoint.
 stub_nexent = types.ModuleType("nexent")
@@ -194,9 +195,9 @@ sys.modules["nexent"] = stub_nexent
 sys.modules["nexent.core"] = stub_nexent_core
 sys.modules["nexent.core.concurrency"] = stub_concurrency
 
-stub_thread_lifecycle = types.ModuleType("services.thread_lifecycle_service")
+stub_thread_lifecycle = types.ModuleType("infrastructure.concurrency")
 stub_thread_lifecycle.mcp_thread_manager = MagicMock()
-sys.modules["services.thread_lifecycle_service"] = stub_thread_lifecycle
+sys.modules["infrastructure.concurrency"] = stub_thread_lifecycle
 
 # Stub http
 stub_http = types.ModuleType("http")
@@ -1398,9 +1399,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_path_tenant_must_match_authenticated_tenant(self, monkeypatch):
-        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant2")
-        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1438,9 +1439,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_invalid_authorization_returns_forbidden(self, monkeypatch):
-        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = MagicMock(side_effect=ValueError("invalid token"))
-        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1460,9 +1461,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_delegates_to_tenant_app(self, monkeypatch):
-        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         delegated = []
 
         async def tenant_app(scope, receive, send):
@@ -1495,9 +1496,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_failure_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1522,9 +1523,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_without_app_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):

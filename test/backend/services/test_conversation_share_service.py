@@ -1,16 +1,17 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from datetime import datetime
 from unittest.mock import call
 
 import pytest
 
-from services import conversation_share_service as service
+from management.services.conversation import sharing as service
 
 
 @pytest.fixture(autouse=True)
 def stable_ids(mocker):
-    mocker.patch("services.conversation_share_service._new_token", return_value="share_token")
+    mocker.patch("management.services.conversation.sharing._new_token", return_value="share_token")
     ids = iter(["asset_1", "asset_2", "asset_3", "asset_4"])
-    mocker.patch("services.conversation_share_service._new_asset_id", side_effect=lambda: next(ids))
+    mocker.patch("management.services.conversation.sharing._new_asset_id", side_effect=lambda: next(ids))
 
 
 def test_extract_object_name_from_supported_references():
@@ -52,8 +53,8 @@ def test_select_message_pairs_without_selection_returns_all_messages():
 
 
 def test_rewrite_message_assets_registers_and_reuses_assets(mocker):
-    mocker.patch("services.conversation_share_service.get_content_type", return_value="application/pdf")
-    mocker.patch("services.conversation_share_service.get_file_size_from_minio", return_value=123)
+    mocker.patch("management.services.conversation.sharing.get_content_type", return_value="application/pdf")
+    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", return_value=123)
     snapshot = {
         "message": [
             {
@@ -103,8 +104,8 @@ def test_rewrite_message_assets_registers_and_reuses_assets(mocker):
 
 
 def test_register_asset_falls_back_when_metadata_lookup_fails(mocker):
-    mocker.patch("services.conversation_share_service.get_content_type", side_effect=RuntimeError("minio error"))
-    mocker.patch("services.conversation_share_service.get_file_size_from_minio", side_effect=RuntimeError("minio error"))
+    mocker.patch("management.services.conversation.sharing.get_content_type", side_effect=RuntimeError("minio error"))
+    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", side_effect=RuntimeError("minio error"))
 
     asset_map = {}
     asset = service._register_asset(
@@ -124,11 +125,11 @@ def test_register_asset_falls_back_when_metadata_lookup_fails(mocker):
 def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
     expire_time = datetime(2030, 1, 1)
     mocker.patch(
-        "services.conversation_share_service.get_conversation",
+        "management.services.conversation.sharing.get_conversation",
         return_value={"conversation_id": 7, "conversation_title": "Conversation title"},
     )
     mocker.patch(
-        "services.conversation_share_service.get_conversation_history_service",
+        "management.services.conversation.sharing.get_conversation_history_service",
         return_value=[
             {
                 "conversation_id": 7,
@@ -148,14 +149,14 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
             }
         ],
     )
-    mocker.patch("services.conversation_share_service.get_content_type", return_value="application/pdf")
-    mocker.patch("services.conversation_share_service.get_file_size_from_minio", return_value=10)
+    mocker.patch("management.services.conversation.sharing.get_content_type", return_value="application/pdf")
+    mocker.patch("management.services.conversation.sharing.get_file_size_from_minio", return_value=10)
     mock_create_share = mocker.patch(
-        "services.conversation_share_service.create_conversation_share",
+        "management.services.conversation.sharing.create_conversation_share",
         return_value={"title": "Conversation title"},
     )
     mock_create_assets = mocker.patch(
-        "services.conversation_share_service.create_conversation_share_assets",
+        "management.services.conversation.sharing.create_conversation_share_assets",
         return_value=[{"asset_id": "asset_1"}],
     )
 
@@ -214,11 +215,11 @@ def test_create_share_snapshot_service_selected_messages_and_assets(mocker):
 
 def test_create_share_snapshot_service_all_messages_without_assets(mocker):
     mocker.patch(
-        "services.conversation_share_service.get_conversation",
+        "management.services.conversation.sharing.get_conversation",
         return_value={"conversation_id": 8, "conversation_title": "All messages"},
     )
     mocker.patch(
-        "services.conversation_share_service.get_conversation_history_service",
+        "management.services.conversation.sharing.get_conversation_history_service",
         return_value=[
             {
                 "conversation_id": 8,
@@ -231,11 +232,11 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
         ],
     )
     mock_create_share = mocker.patch(
-        "services.conversation_share_service.create_conversation_share",
+        "management.services.conversation.sharing.create_conversation_share",
         return_value={"title": "All messages"},
     )
     mock_create_assets = mocker.patch(
-        "services.conversation_share_service.create_conversation_share_assets",
+        "management.services.conversation.sharing.create_conversation_share_assets",
         return_value=[],
     )
 
@@ -257,19 +258,19 @@ def test_create_share_snapshot_service_all_messages_without_assets(mocker):
 
 def test_create_share_snapshot_service_marks_newchat_renderer(mocker):
     mocker.patch(
-        "services.conversation_share_service.get_conversation",
+        "management.services.conversation.sharing.get_conversation",
         return_value={"conversation_id": 8, "conversation_title": "New chat"},
     )
     mocker.patch(
-        "services.conversation_share_service.get_conversation_history_service",
+        "management.services.conversation.sharing.get_conversation_history_service",
         return_value=[{"conversation_id": 8, "message": []}],
     )
     mock_create_share = mocker.patch(
-        "services.conversation_share_service.create_conversation_share",
+        "management.services.conversation.sharing.create_conversation_share",
         return_value={"title": "New chat"},
     )
     mocker.patch(
-        "services.conversation_share_service.create_conversation_share_assets",
+        "management.services.conversation.sharing.create_conversation_share_assets",
         return_value=[],
     )
 
@@ -285,7 +286,7 @@ def test_create_share_snapshot_service_marks_newchat_renderer(mocker):
 
 
 def test_create_share_snapshot_service_rejects_missing_conversation(mocker):
-    mocker.patch("services.conversation_share_service.get_conversation", return_value=None)
+    mocker.patch("management.services.conversation.sharing.get_conversation", return_value=None)
 
     with pytest.raises(ValueError, match="does not exist or is not accessible"):
         service.create_share_snapshot_service(
@@ -297,11 +298,11 @@ def test_create_share_snapshot_service_rejects_missing_conversation(mocker):
 
 def test_create_share_snapshot_service_rejects_empty_history(mocker):
     mocker.patch(
-        "services.conversation_share_service.get_conversation",
+        "management.services.conversation.sharing.get_conversation",
         return_value={"conversation_id": 7, "conversation_title": "Conversation title"},
     )
     mocker.patch(
-        "services.conversation_share_service.get_conversation_history_service",
+        "management.services.conversation.sharing.get_conversation_history_service",
         return_value=[],
     )
 
@@ -316,7 +317,7 @@ def test_create_share_snapshot_service_rejects_empty_history(mocker):
 def test_get_share_snapshot_service_success(mocker):
     create_time = datetime(2026, 1, 1)
     mocker.patch(
-        "services.conversation_share_service.get_active_conversation_share",
+        "management.services.conversation.sharing.get_active_conversation_share",
         return_value={
             "title": "Shared",
             "conversation_id": 7,
@@ -339,7 +340,7 @@ def test_get_share_snapshot_service_success(mocker):
 
 def test_get_share_snapshot_service_not_found(mocker):
     mocker.patch(
-        "services.conversation_share_service.get_active_conversation_share",
+        "management.services.conversation.sharing.get_active_conversation_share",
         return_value=None,
     )
 
@@ -349,11 +350,11 @@ def test_get_share_snapshot_service_not_found(mocker):
 
 def test_get_share_asset_service_success(mocker):
     mock_get_share = mocker.patch(
-        "services.conversation_share_service.get_active_conversation_share",
+        "management.services.conversation.sharing.get_active_conversation_share",
         return_value={"share_token": "share_token"},
     )
     mock_get_asset = mocker.patch(
-        "services.conversation_share_service.get_share_asset",
+        "management.services.conversation.sharing.get_share_asset",
         return_value={"asset_id": "asset_1", "object_name": "attachments/u/report.pdf"},
     )
 
@@ -366,10 +367,10 @@ def test_get_share_asset_service_success(mocker):
 
 def test_get_share_asset_service_rejects_missing_share_or_asset(mocker):
     mock_get_share = mocker.patch(
-        "services.conversation_share_service.get_active_conversation_share",
+        "management.services.conversation.sharing.get_active_conversation_share",
         return_value=None,
     )
-    mock_get_asset = mocker.patch("services.conversation_share_service.get_share_asset")
+    mock_get_asset = mocker.patch("management.services.conversation.sharing.get_share_asset")
 
     with pytest.raises(ValueError, match="Share not found or expired"):
         service.get_share_asset_service("missing", "asset_1")

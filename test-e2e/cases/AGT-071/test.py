@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Nexent API + real Agent/LLM against a controlled external memory Provider."""
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from shared.factories.tenant import isolated_accounts
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.memory_mock import memory_mock
 from shared.sse import assert_terminal_event
+from shared.final_answers import final_answer_text
 
 
 CASE_ID = 'AGT-071'
@@ -23,10 +26,9 @@ CASE_ID = 'AGT-071'
 def final_text(events):
     payloads = [event.get('data') for event in events if isinstance(event.get('data'), dict)]
     assert not any(item.get('type') == 'error' for item in payloads), 'Agent emitted a runtime error'
-    text = ''.join(item.get('content', '') for item in payloads
-                   if item.get('type') == 'final_answer' and isinstance(item.get('content'), str))
-    assert text.strip(), 'Missing actual final answer; tool/query echo is not an answer'
-    return text
+    # A completion can reclassify already-streamed body text instead of
+    # repeating it. Preserve invocation, step and rollback attribution.
+    return final_answer_text(events)
 
 
 def external_context_has_marker(events, marker):
@@ -88,7 +90,7 @@ async def exercise_external_memory(identity, mock, api):
     async with owned_configured_model(identity, CASE_ID) as model_id:
         async with _draft_agent(identity, model_ids=[model_id], owner_case_id=CASE_ID) as (agent_id, payload):
             configured = await api.post('/agent/update', json={**payload,
-                'duty_prompt': 'Answer using provided memory context. Return only the requested marker. '
+                'prompt': 'Answer using provided memory context. Return only the requested marker. '
                                'If no matching memory exists, return NOT_FOUND. Never invent or store markers.'})
             assert_status(configured, 200)
             published = await api.post(f'/agent/{agent_id}/publish', json={

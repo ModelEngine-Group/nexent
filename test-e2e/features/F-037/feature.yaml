@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-037-RULE-01
     description: 不同模型类型字段动态显隐、必填、URL/维度/容量校验、debounce
+  - rule_id: F-037-RULE-02
+    description: LLM-family model advanced configuration shares the Agent sampling slider and numeric stepper. Temperature uses 0-2 and Top P uses 0-1 with step 0.1. Untouched or cleared values remain unset, explicit zero is preserved, and rendering never writes defaults.
   required_test_stages:
   - D1
   source:

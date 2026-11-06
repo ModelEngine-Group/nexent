@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for StreamingChannel event-driven implementation.
 """
@@ -5,7 +6,7 @@ Unit tests for StreamingChannel event-driven implementation.
 import asyncio
 import pytest
 
-from backend.services.streaming_channel import (
+from infrastructure.streaming.channels import (
     StreamingChannel,
     StreamingChannelManager,
     DEFAULT_HISTORY_SIZE,
@@ -23,11 +24,11 @@ def disable_external_runtime_stream_writes(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "backend.services.streaming_channel.runtime_state_service.append_stream_event_async",
+        "infrastructure.streaming.channels.runtime_state_service.append_stream_event_async",
         _append,
     )
     monkeypatch.setattr(
-        "backend.services.streaming_channel.runtime_state_service.mark_stream_completed_async",
+        "infrastructure.streaming.channels.runtime_state_service.mark_stream_completed_async",
         _complete,
     )
 
@@ -44,26 +45,26 @@ class TestStreamingChannel:
     async def test_publish_and_subscribe(self, channel):
         """Test basic publish and subscribe flow."""
         results = []
-        
+
         async def consumer():
             async for chunk in channel.subscribe():
                 results.append(chunk)
-        
+
         # Start consumer
         consumer_task = asyncio.create_task(consumer())
         await asyncio.sleep(0.05)  # Give consumer time to start
-        
+
         # Publish chunks
         await channel.publish("chunk1")
         await channel.publish("chunk2")
         await channel.publish("chunk3")
-        
+
         # Complete the stream
         channel.complete()
-        
+
         # Wait for consumer to finish
         await asyncio.wait_for(consumer_task, timeout=2.0)
-        
+
         assert results == ["chunk1", "chunk2", "chunk3"]
 
     @pytest.mark.asyncio
@@ -72,25 +73,25 @@ class TestStreamingChannel:
         # Publish some chunks before subscribing
         await channel.publish("hist1")
         await channel.publish("hist2")
-        
+
         results = []
-        
+
         async def consumer():
             async for chunk in channel.subscribe_with_history():
                 results.append(chunk)
-        
+
         # Subscribe after some history exists
         consumer_task = asyncio.create_task(consumer())
         await asyncio.sleep(0.05)
-        
+
         # Publish more chunks
         await channel.publish("new1")
         await channel.publish("new2")
-        
+
         # Complete
         channel.complete()
         await asyncio.wait_for(consumer_task, timeout=2.0)
-        
+
         # Should have all chunks: history + new
         assert results == ["hist1", "hist2", "new1", "new2"]
 
@@ -125,25 +126,25 @@ class TestStreamingChannel:
         """Test that subscribers are notified via events (not polling)."""
         results = []
         wakeup_count = 0
-        
+
         async def consumer():
             nonlocal wakeup_count
             async for chunk in channel.subscribe():
                 results.append(chunk)
-        
+
         consumer_task = asyncio.create_task(consumer())
         await asyncio.sleep(0.05)
-        
+
         # Publish with small delays to test event notification
         await channel.publish("a")
         await asyncio.sleep(0.01)
         await channel.publish("b")
         await asyncio.sleep(0.01)
         await channel.publish("c")
-        
+
         channel.complete()
         await asyncio.wait_for(consumer_task, timeout=2.0)
-        
+
         assert results == ["a", "b", "c"]
 
     @pytest.mark.asyncio
@@ -167,7 +168,7 @@ class TestStreamingChannel:
     async def test_ac_001_history_buffer_obeys_byte_limit(self, monkeypatch):
         """AC-001: local replay evicts whole events to honor the byte policy."""
         monkeypatch.setattr(
-            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
+            "infrastructure.streaming.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 
@@ -196,7 +197,7 @@ class TestStreamingChannel:
     async def test_ac_001_single_oversized_event_does_not_accumulate(self, monkeypatch):
         """AC-001: one live event may exceed the cap, but oversized events do not stack."""
         monkeypatch.setattr(
-            "backend.services.streaming_channel.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
+            "infrastructure.streaming.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 
@@ -211,17 +212,17 @@ class TestStreamingChannel:
     async def test_complete_wakes_up_subscribers(self, channel):
         """Test that complete() wakes up waiting subscribers."""
         results = []
-        
+
         async def consumer():
             async for chunk in channel.subscribe():
                 results.append(chunk)
-        
+
         consumer_task = asyncio.create_task(consumer())
         await asyncio.sleep(0.05)
-        
+
         # Don't publish anything, just complete
         channel.complete()
-        
+
         # Consumer should exit (no chunks since nothing was published)
         await asyncio.wait_for(consumer_task, timeout=2.0)
         assert results == []
@@ -230,7 +231,7 @@ class TestStreamingChannel:
     async def test_error_sets_completed(self, channel):
         """Test that set_error marks channel as completed."""
         channel.set_error("Test error")
-        
+
         assert channel.is_completed is True
         assert channel.error == "Test error"
         assert channel.completion_status is None
@@ -239,16 +240,16 @@ class TestStreamingChannel:
     async def test_subscriber_counting(self, channel):
         """Test subscriber count management."""
         assert channel.has_subscribers is False
-        
+
         channel.add_subscriber()
         assert channel.has_subscribers is True
-        
+
         channel.add_subscriber()
         assert channel._subscribers == 2
-        
+
         channel.remove_subscriber()
         assert channel._subscribers == 1
-        
+
         channel.remove_subscriber()
         channel.remove_subscriber()  # Should not go negative
         assert channel._subscribers == 0
@@ -258,27 +259,27 @@ class TestStreamingChannel:
         """Test multiple concurrent subscribers."""
         results1 = []
         results2 = []
-        
+
         async def consumer1():
             async for chunk in channel.subscribe():
                 results1.append(chunk)
-        
+
         async def consumer2():
             async for chunk in channel.subscribe():
                 results2.append(chunk)
-        
+
         t1 = asyncio.create_task(consumer1())
         t2 = asyncio.create_task(consumer2())
         await asyncio.sleep(0.05)
-        
+
         await channel.publish("shared1")
         await channel.publish("shared2")
-        
+
         channel.complete()
-        
+
         await asyncio.wait_for(t1, timeout=2.0)
         await asyncio.wait_for(t2, timeout=2.0)
-        
+
         # Both subscribers should receive all chunks
         assert results1 == ["shared1", "shared2"]
         assert results2 == ["shared1", "shared2"]
@@ -306,7 +307,7 @@ class TestStreamingChannelManager:
             conversation_id=123,
             user_id="user1"
         )
-        
+
         # Should return same channel
         assert channel1 is channel2
 
@@ -344,7 +345,7 @@ class TestStreamingChannelManager:
             conversation_id=123,
             user_id="user2"
         )
-        
+
         assert channel1 is not channel2
 
     @pytest.mark.asyncio
@@ -354,10 +355,10 @@ class TestStreamingChannelManager:
             conversation_id=456,
             user_id="user1"
         )
-        
+
         retrieved = manager.get_channel(conversation_id=456, user_id="user1")
         assert retrieved is channel
-        
+
         # Non-existent should return None
         assert manager.get_channel(conversation_id=999, user_id="nobody") is None
 
@@ -368,9 +369,9 @@ class TestStreamingChannelManager:
             conversation_id=789,
             user_id="user1"
         )
-        
+
         await manager.remove_channel(conversation_id=789, user_id="user1")
-        
+
         # Should be removed
         assert manager.get_channel(conversation_id=789, user_id="user1") is None
 
@@ -394,13 +395,13 @@ class TestStreamingChannelManager:
             conversation_id=222,
             user_id="user1"
         )
-        
+
         await manager.complete_channel(
             conversation_id=222,
             user_id="user1",
             status="completed"
         )
-        
+
         assert channel.is_completed is True
         assert channel.completion_status == "completed"
 
@@ -421,16 +422,16 @@ class TestEventDrivenBehavior:
         async def consumer():
             async for chunk in channel.subscribe():
                 delivery_times.append(asyncio.get_event_loop().time())
-        
+
         consumer_task = asyncio.create_task(consumer())
         await asyncio.sleep(0.02)
-        
+
         publish_time = asyncio.get_event_loop().time()
         await channel.publish("immediate")
-        
+
         channel.complete()
         await asyncio.wait_for(consumer_task, timeout=2.0)
-        
+
         # Delivery should be very close to publish time (within 100ms)
         delivery_latency = delivery_times[0] - publish_time
         assert delivery_latency < 0.1, f"Delivery took {delivery_latency}s, expected < 0.1s"

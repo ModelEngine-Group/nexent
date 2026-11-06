@@ -3,7 +3,7 @@
 """iData route set (root-mounted, real path shape).
 
 Contract mirrored from:
-  - backend/services/idata_service.py — knowledgeSpaces/query and
+  - backend/management/services/knowledge_base/providers/idata.py — knowledgeSpaces/query and
     knowledgeBases/query: POST + Bearer, response envelope
     ``{"code": "1", "msg": ..., "data": [...], "msgParams": null}``;
     a code other than the string "1" is an error.

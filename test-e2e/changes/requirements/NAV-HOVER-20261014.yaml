@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: NAV-HOVER-20261014
+  change_type: requirement
+  requirement_id: NAV-MENU-REQ-004
+  title: Deploy approved hover-expanded sidebar
+  description: Icon-only collapsed rail expands over content on hover while preserving routes and popup behavior.
+  affected_features:
+    existing: []
+    added: []
+    modified: [NAV-MENU-VISIBILITY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NAV-MENU-D1-001, NAV-MENU-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors: [hover expansion and delayed collapse, focus access, popup hold, preserved routes]
+    reason: Frontend local state gains unit assertions; existing D4 proves real layout/pointer/portal behavior. Python code is unchanged.
+    test_selectors:
+    - frontend/tests/component/sidebarHover.test.tsx
+    - frontend/tests/component/accountMenu.test.tsx
+    - frontend/tests/component/sharedShellLayout.test.tsx
+    - frontend/tests/component/shareAuthenticationLayout.test.tsx

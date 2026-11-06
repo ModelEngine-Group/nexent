@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: USER-MODEL-READ-D5-001
+  feature_id: CHAT-MODEL-CONTROLS
+  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-001, CHAT-MODEL-CONTROLS-RULE-005]
+  title: Ordinary user model read migration is selective and repeatable
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute the production permission repair in isolated PostgreSQL and prove restored read-only access without unrelated changes.
+  preconditions:
+  - Docker is available and postgres:15-alpine is locally installed; only a uniquely named no-network container is created.
+  test_data:
+    source: Synthetic USER navigation and Agent grants, other-role model grants, arbitrary occupied IDs, existing model-read grants and an empty table.
+  steps:
+  - order: 1
+    action: Create a disposable PostgreSQL container and seed each historical permission variant.
+    expected: No existing databases or containers are accessed or changed.
+  - order: 2
+    action: Inject a failure before commit, compare all rows, then run the unchanged production repair SQL.
+    expected: Failure rolls back the repair; normal execution adds the missing USER RESOURCE MODEL READ row with fixed ID 143 or preserves an existing semantic grant. If 143 belongs to another grant, execution fails without changing any row.
+  - order: 3
+    action: Compare complete permission snapshots and rerun the repair.
+    expected: Existing rows and IDs remain unchanged, repeated execution adds no duplicate, and no USER model writes or model menu are granted.
+  - order: 4
+    action: Remove the run-owned container in a finally block.
+    expected: Cleanup succeeds after passing or failing assertions without removing any other resource.
+  expected_results:
+  - Successful repair adds USER model-read with fixed ID 143 on missing/empty installations and preserves existing semantic grants; an unrelated grant occupying 143 causes a failure with no row changes.
+  - Existing grants and IDs are preserved; USER gains no model write or model management menu access.
+  - Failure rolls back all row changes and repeated execution preserves the complete snapshot.
+  - Only disposable synthetic resources are used and cleaned.
+  forbidden_side_effects:
+  - Do not mutate existing databases or containers, publish ports, broaden permissions, overwrite grants by numeric ID or add duplicate read grants.
+  risk_type: DEPLOYMENT
+  risk: Permission repair can silently fail on occupied IDs or accidentally broaden ordinary user authority.
+  condition:
+  - Run real repair SQL for missing, existing and empty grant variants with injected rollback and repeated execution.
+  metrics:
+  - Exact permission row snapshots, USER model-read count, forbidden-grant count and cleanup exit status.
+  thresholds:
+  - One USER model-read grant after successful repair, zero forbidden grants, zero unrelated row changes and exact rollback/repeat equality; fixed-ID collisions fail with the original snapshot intact.
+  recovery_expectations:
+  - A failed transaction preserves every pre-migration row; cleanup removes only the newly created container.
+  acceptance:
+  - id: AC-01
+    description: Repair restores only model-read access across historical variants without changing existing grants or IDs.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Rollback and rerun preserve expected state and isolated resources are cleaned.
+    steps: [1, 2, 3, 4]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1]

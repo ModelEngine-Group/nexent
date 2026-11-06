@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """The delete-chain fixture configures aliases and later Celery imports alike."""
 from pathlib import Path
 import importlib.util
@@ -24,8 +25,8 @@ class RedisConfigurationTests(unittest.TestCase):
         modules = {
             'data_process': package,
             'data_process.app': SimpleNamespace(app=Mock()),
-            'services.redis_service': SimpleNamespace(get_redis_service=supplier),
-            'database.knowledge_file_lifecycle_db': SimpleNamespace(get_file_record=lookup),
+            'management.services.knowledge_base.task_state': SimpleNamespace(get_redis_service=supplier),
+            'management.db.knowledge_base.file_lifecycle': SimpleNamespace(get_file_record=lookup),
         }
         spec = importlib.util.spec_from_file_location(
             'data_process.delete_fence_fixture_utils', repo / 'backend/data_process/utils.py')
@@ -53,8 +54,23 @@ class RedisConfigurationTests(unittest.TestCase):
         request = SimpleNamespace(node=SimpleNamespace(
             iter_markers=lambda name: [SimpleNamespace(args=['API-AUTO-2B3A078E3CD1B151'])]))
         general, backend = 'redis://example.test/0', 'redis://example.test/1'
-        with patch.dict(sys.modules, {'services': SimpleNamespace(redis_service=service),
-                                     'consts': SimpleNamespace(const=canonical)}), \
+        management = ModuleType('management')
+        services = ModuleType('management.services')
+        knowledge = ModuleType('management.services.knowledge_base')
+        management.services = services
+        services.knowledge_base = knowledge
+        knowledge.task_state = service
+        contracts = ModuleType('contracts')
+        constants = ModuleType('contracts.constants')
+        contracts.constants = constants
+        constants.environment = canonical
+        with patch.dict(sys.modules, {'management': management,
+                                     'management.services': services,
+                                     'management.services.knowledge_base': knowledge,
+                                     'management.services.knowledge_base.task_state': service,
+                                     'contracts': contracts,
+                                     'contracts.constants': constants,
+                                     'contracts.constants.environment': canonical}), \
                 patch.object(redis_target, 'deployed_redis_urls', return_value=(general, backend)):
             with pytest.MonkeyPatch.context() as monkeypatch:
                 generator = fixtures.isolated_migration_database.__wrapped__(request, monkeypatch)

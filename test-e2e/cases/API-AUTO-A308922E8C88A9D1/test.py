@@ -1,16 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
 
 import pytest
 
-from database.knowledge_db import get_knowledge_record
-from database.knowledge_file_lifecycle_db import (
-    create_file_record,
-    delete_file_record,
-    get_file_record,
-)
-from database.model_management_db import get_model_records
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record, get_file_record
+from management.db.model.repository import get_model_records
 from shared.http import MODEL_TIMEOUT, assert_status, client, response_message
 from shared.factories.ownership import register_owned_http
 

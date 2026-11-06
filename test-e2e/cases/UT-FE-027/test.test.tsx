@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -55,7 +57,8 @@ import { shouldContinueConversationPageLoading } from "@/lib/conversationLoadPol
 import { extractMarkdownHeadings } from "@/components/common/markdownRenderer";
 import { extractSkillInfoFromContent, isSkillMdFile, normalizeSkillFiles } from "@/lib/skillFileUtils";
 import { getQuotaConflictTranslationKey, getQuotaExceededMessage, isQuotaExceededError } from "@/types/quota";
-import { validateAidpFiles, validateFileType } from "@/services/uploadService";
+import { validateFileType } from "@/services/uploadService";
+import { validateAidpFiles } from "@/ext_components/aidp/features/file-import/uploadValidation";
 import { getLocalFileDownloadUrl, getLocalFilePreviewUrl } from "@/services/storageService";
 import { toApiError } from "@/services/api";
 import { formatNotificationMessage } from "@/lib/notificationMessage";

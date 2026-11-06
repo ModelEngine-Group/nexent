@@ -29,6 +29,7 @@ from report_ownership import enrich as enrich_ownership
 from ext_attach import ExtKnowledgeAttach
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
+from node_preflight import node_toolchain_problems
 from static_assets import entries as static_entries, inventory as static_inventory
 from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, render_report, save
 from suite_resume import prepare_resume
@@ -74,11 +75,14 @@ def config(repo, home):
     return payload
 
 
-def selection(repo, args):
+def selection(repo, args, *, daily=False, worker=False):
     issues, registry = inspect(repo)
-    if issues:
+    if issues and not (daily or worker):
         raise ValueError(f"Invalid test assets: {len(issues)} binding issues")
     records = registry["cases"]
+    if issues:
+        from validation_policy import apply_blocks, report
+        records = apply_blocks(records, report(repo, issues, records))
     selected_ids = set(args.case or [])
     if args.change:
         found = []
@@ -105,7 +109,7 @@ def selection(repo, args):
 
 
 def doctor(repo, home, records, *, live=False):
-    problems = static_config_problems(home, records)
+    problems = static_config_problems(home, records, repo=repo)
     expected_runtime = (home / "runtime/test-venv").resolve()
     if Path(sys.prefix).resolve() != expected_runtime or not test_python(home).is_file():
         problems.append("Run this suite with the dedicated <test-home>/runtime/test-venv Python")
@@ -139,6 +143,7 @@ def doctor(repo, home, records, *, live=False):
     ):
         if framework in frameworks and not (repo / "test-e2e/infra/automation" / relative).is_file():
             problems.append(f"missing locked {framework} toolchain")
+    problems.extend(node_toolchain_problems(repo, home, frameworks))
     if live and not problems:
         problems.extend(live_service_problems(home))
     return sorted(set(problems))
@@ -223,23 +228,27 @@ def worker(repo, home, record, directory, settings):
         preparation_log = log
         outcome = "TIMEOUT" if code == 124 else "BLOCKED"
         raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
-    services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
+    required_mock_services = record["execution"].get("required_mock_services") or []
+    services = controlled_services(
+        repo, directory, env, bool((review or {}).get("anchors")),
+        required_mock_services,
+    )
     services_started = False
-    # ext-knowledge mock attach runs BEFORE any preparation (including the
-    # controlled test-assets services): it only validates, locks and resets a
-    # pre-deployed batch-owned instance; the suite never starts or stops the
-    # mock's Compose stack.
+    # The ext-knowledge mock is a suite-owned controlled service. Starting it
+    # here (and stopping it in the finally block) means cases no longer need a
+    # machine-local attach YAML, identity or cross-batch lock. ExtKnowledgeAttach
+    # still performs the per-case health check and reset over HTTP.
     ext = ExtKnowledgeAttach(
         repo, home, directory, env,
-        (record["execution"].get("required_mock_services") or []),
+        required_mock_services,
         record["case_id"], record,
     )
     ext_attached = False
     try:
-        ext.attach()
-        ext_attached = True
         services.__enter__()
         services_started = True
+        ext.attach()
+        ext_attached = True
         if (review or {}).get("anchors"):
             code = run_logged([sys.executable, str(automation / "prepare_anchor_assets.py")], repo, env,
                           directory / "logs/prepare-anchors.log", settings["command_timeout_seconds"])
@@ -320,7 +329,43 @@ def worker(repo, home, record, directory, settings):
 
 
 def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
-    directory = home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
+    from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
+    assert_recovered(home, allow_retry=daily)
+    if daily:
+        from daily_recovery import current_retry
+        retry = current_retry(home)
+    else:
+        retry = None
+    validation = None
+    if daily:
+        from validation_policy import evaluate
+        validation, all_records = evaluate(repo)
+        by_id = {record["case_id"]: record for record in all_records}
+        if len(records) != len(by_id) or {record["case_id"] for record in records} != set(by_id):
+            raise ValueError("Daily must account for the full validated registry")
+        records = [by_id[record["case_id"]] for record in records]
+    rules = catalog(repo)
+    if any(profile != "local" for profile in groups(records, rules)):
+        if resume:
+            raise RuntimeError("Resume deployment campaigns only after recovery; select unresolved Cases for a new run")
+        if not daily:
+            issues, registry = inspect(repo)
+            if issues:
+                raise ValueError("Invalid execution assets")
+            all_records = registry["cases"]
+        return execute_campaign(repo, home, records, settings, daily=daily, publish_latest=publish_latest,
+                                execute_one=partial(_execute, validation_report=validation) if daily else _execute,
+                                all_records=all_records, hook=execute_hooks,
+                                machine_env=machine_environment, validation_report=validation)
+    if retry is not None:
+        raise RuntimeError("Pending Daily recovery requires an enabled deployment campaign")
+    return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest,
+                    validation_report=validation)
+
+
+def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None,
+             on_result=None, validation_report=None):
+    directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
         directory.chmod(0o700)
@@ -342,6 +387,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
     save(directory / "provenance.json", provenance)
     save(directory / "plan.json", {"cases": records})
     save(directory / "pipeline.json", settings)
+    if validation_report is not None:
+        save(directory / "asset-validation.json", validation_report)
     reused_rows = {row["case_id"]: row for row in resume["rows"]} if resume else {}
     rows, error = [], None
     previous_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -350,12 +397,15 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
     print(f"Local batch: {directory}", flush=True)
     try:
         env = machine_environment(home, repo)
+        if validation_report is not None and not validation_report.get("ready"):
+            raise RuntimeError("Global or unclassified asset validation failure")
         if (home / "state/deployment-guard/pending.json").exists():
             raise RuntimeError("Pending deployment recovery exists; recover the owned environment before running")
         state["stages"]["D0"] = "RUNNING"
         save(directory / "status.json", state)
-        validation = logged([sys.executable, str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
-                             "--phase", "implementation"], repo, env, directory / "logs/validate.log", 180)
+        validation = 0 if validation_report is not None else logged(
+            [sys.executable, str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
+             "--phase", "implementation"], repo, env, directory / "logs/validate.log", 180)
         if validation:
             raise RuntimeError("Formal asset validation failed")
         static_rows = static_inventory(home, selected=required_static)
@@ -385,7 +435,12 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
                 case_started_at = now()
                 case_started_clock = time.monotonic()
                 reused = reused_rows.get(case_id)
-                if reused:
+                if record.get("asset_blocked"):
+                    row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
+                           "reason": "Case execution asset is missing or invalid; inspect asset-validation.json",
+                           "acceptance_status": "INCOMPLETE", "evidence": ["asset-validation.json"]}
+                    save(directory / "cases" / case_id / "receipt.json", row)
+                elif reused:
                     row = reused
                     if record["status"] == "active" and record.get("execution"):
                         save(directory / "cases" / case_id / "receipt.json", {
@@ -424,6 +479,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
                     output.write(json.dumps(row, ensure_ascii=False) + "\n")
                 print(f"{len(rows)}/{len(records)} {case_id}: {row['result']}" +
                       (" (reused)" if reused else ""), flush=True)
+                if on_result is not None:
+                    on_result(dict(row))
                 if (home / "state/deployment-guard/pending.json").exists() or (
                     stage == "D5" and row["result"] in {"TIMEOUT", "CLEANUP_FAILED"}
                 ):
@@ -509,7 +566,7 @@ def main(argv=None):
                     print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
                     return 2
                 return execute(repo, home, records, settings, resume=resume)
-        records = selection(repo, args)
+        records = selection(repo, args, daily=args.mode == "daily", worker=args.mode == "worker")
         if args.mode == "worker":
             if not args.batch_dir or len(records) != 1:
                 parser.error("Worker requires one Case and a batch directory")
@@ -523,7 +580,10 @@ def main(argv=None):
             print(json.dumps({"ready": not problems, "problems": problems}, ensure_ascii=False, indent=2))
             return 2 if problems else 0
         if args.mode == "plan" or not args.execute:
+            from deployment_exceptions import catalog, groups
             print(json.dumps({"mode": args.mode, "execution_requested": False, "cases": len(records),
+                              "deployment_groups": {key: [r["case_id"] for r in group]
+                                                    for key, group in groups(records, catalog(repo)).items()},
                               "stages": dict(Counter(record["stage"] for record in records)),
                               "statuses": dict(Counter(record["status"] for record in records)),
                               "online_cases_without_preparation_declaration": sum(

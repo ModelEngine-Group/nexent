@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from consts.const import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
+from contracts.constants.constants import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
 from nexent.memory.models import MemoryIngestResult, MemoryIngestUnit
-from services.memory_ingestion_event_service import MemoryIngestionEventService
+from management.services.memory.ingestion import MemoryIngestionEventService
 
 
 ALLOWED_TYPE = next(iter(EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES))
@@ -29,11 +30,11 @@ async def test_external_memory_ingestion_orchestration(monkeypatch):
     params = {"plugin.name": "fake_plugin", "plugin.api_key": "super-secret-value"}
 
     monkeypatch.setattr(
-        "services.memory_ingestion_event_service.memory_provider_config_param_db.get_params",
+        "management.services.memory.ingestion.memory_provider_config_param_db.get_params",
         lambda provider_config_id: params,
     )
     monkeypatch.setattr(
-        "services.memory_ingestion_event_service.memory_external_ingest_event_log_db.insert_event_log",
+        "management.services.memory.ingestion.memory_external_ingest_event_log_db.insert_event_log",
         lambda data: log_calls.append(data) or 101,
     )
 

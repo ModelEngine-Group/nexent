@@ -7,7 +7,7 @@ DIFY_AUTH = {"Authorization": "Bearer mock-dify-key"}
 
 
 def test_datasets_listing_maps_seed_to_datamate_format(mock_base_url, require_real_nexent):
-    from services.dify_service import fetch_dify_datasets_impl
+    from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
 
     result = fetch_dify_datasets_impl(mock_base_url, "mock-dify-key")
 
@@ -27,9 +27,9 @@ def test_datasets_listing_maps_seed_to_datamate_format(mock_base_url, require_re
 
 
 def test_datasets_401_maps_to_dify_auth_error(mock_base_url, http_client, require_real_nexent):
-    from consts.error_code import ErrorCode
-    from consts.exceptions import AppException
-    from services.dify_service import fetch_dify_datasets_impl
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
+    from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
 
     plan = http_client.post("/_mock/fail-next", json={"service": "dify", "count": 1, "status": 401})
     assert plan.status_code == 200

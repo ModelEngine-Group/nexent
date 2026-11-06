@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -17,6 +19,10 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
+  knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
+  agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
+  toolTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/tool/batch_read`,
   user: {
     signup: `${API_BASE_URL}/user/signup`,
     signin: `${API_BASE_URL}/user/signin`,
@@ -48,11 +54,25 @@ export const API_ENDPOINTS = {
     renew: `${API_BASE_URL}/user/cas/renew`,
   },
   conversation: {
+    creatorHistories: `${API_BASE_URL}/conversation/creator_histories`,
+    modelSelection: (conversationId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/model_preferences`,
+    modelPreferences: (conversationId: number, modelId: number) =>
+      `${API_BASE_URL}/conversation/${conversationId}/model_preferences/${modelId}`,
     list: `${API_BASE_URL}/conversation/list`,
+    agentGroups: `${API_BASE_URL}/conversation/agent_groups`,
+    agentGroupConversations: (groupKey: string) =>
+      `${API_BASE_URL}/conversation/agent_groups/${encodeURIComponent(groupKey)}/conversations`,
+    agentGroupConversationIds: (agentId: number) =>
+      `${API_BASE_URL}/conversation/agent_groups/${agentId}/conversation_ids`,
+    workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
+    workbenchPin: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    target: (id: number) => `${API_BASE_URL}/conversation/${id}/target`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     workbenchConfig: (id: number) =>
@@ -170,25 +190,19 @@ export const API_ENDPOINTS = {
     updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
-    generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
     optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
-  },
-  promptTemplates: {
-    list: `${API_BASE_URL}/prompt_templates`,
-    detail: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    create: `${API_BASE_URL}/prompt_templates`,
-    update: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    delete: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
     config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    case: (id: number, caseId: number) =>
+      `${API_BASE_URL}/evaluation-sets/${id}/cases/${caseId}`,
+    casesBatchDelete: (id: number) =>
+      `${API_BASE_URL}/evaluation-sets/${id}/cases/batch-delete`,
+    generateCases: `${API_BASE_URL}/evaluation-sets/generate-cases-async`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
     export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
@@ -203,14 +217,36 @@ export const API_ENDPOINTS = {
     export: `${API_BASE_URL}/evaluators/export`,
     import: `${API_BASE_URL}/evaluators/import`,
     generate: `${API_BASE_URL}/evaluators/generate`,
+    versions: (id: number) => `${API_BASE_URL}/evaluators/${id}/versions`,
+    version: (id: number, versionId: number) =>
+      `${API_BASE_URL}/evaluators/${id}/versions/${versionId}`,
+    restoreVersion: (id: number, versionId: number) =>
+      `${API_BASE_URL}/evaluators/${id}/versions/${versionId}/restore`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
     list: `${API_BASE_URL}/agent-evaluations`,
+    trialRun: `${API_BASE_URL}/agent-evaluations/trial-run`,
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
-    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    cases: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    stats: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/stats`,
+    analyze: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/analyze`,
+    annotationSchemas: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/annotation-schemas`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
     delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+  },
+  evaluationAnnotations: {
+    schemas: `${API_BASE_URL}/evaluation-annotations/schemas`,
+    schema: (schemaId: number) =>
+      `${API_BASE_URL}/evaluation-annotations/schemas/${schemaId}`,
+    annotations: (id: string | number) =>
+      `${API_BASE_URL}/evaluation-annotations/${id}/annotations`,
+    annotationStats: (id: string | number) =>
+      `${API_BASE_URL}/evaluation-annotations/${id}/annotation-stats`,
   },
   stt: {
     ws: `${API_BASE_URL}/voice/stt/ws`,
@@ -301,6 +337,36 @@ export const API_ENDPOINTS = {
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
     // Preset Model Catalog (预置模型目录)
     catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    modelProfiles: (
+      params: {
+        query?: string;
+        family?: string;
+        page?: number;
+        page_size?: number;
+      } = {}
+    ) => {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) search.set(key, String(value));
+      });
+      return `${API_BASE_URL}/model/model_profiles?${search.toString()}`;
+    },
+    providerProfiles: (
+      params: { query?: string; page?: number; page_size?: number } = {}
+    ) => {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) search.set(key, String(value));
+      });
+      return `${API_BASE_URL}/model/provider_profiles?${search.toString()}`;
+    },
+    profileProtocols: `${API_BASE_URL}/model/profile_protocols`,
+    profilePreviews: `${API_BASE_URL}/model/profile_previews`,
+    outlets: `${API_BASE_URL}/model/outlets`,
+    outletMigrationReviews: (modelId: number) =>
+      `${API_BASE_URL}/model/outlets/${modelId}/migration_reviews`,
+    outletValidations: `${API_BASE_URL}/model/outlet_validations`,
+    outlet: (modelId: number) => `${API_BASE_URL}/model/outlets/${modelId}`,
     catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
     catalogProviderModels: (provider: string, modelType?: string) => {
       const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
@@ -319,6 +385,8 @@ export const API_ENDPOINTS = {
     summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
+    boundAgents: (indexName: string) =>
+      `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/bound_agents`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
@@ -381,15 +449,28 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
   },
   aidpMgmt: {
+    boundAgents: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    kbFiles: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    kbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
+    retryKbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks/retry`,
     removeKbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
+    /** GET endpoint that streams one AIDP document for preview. AIDP serves
+     *  the original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for
+     *  every other format, and reports the served name in `X-File-Name`. */
+    previewKbDocument: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/preview`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
     graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
@@ -588,6 +669,9 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },

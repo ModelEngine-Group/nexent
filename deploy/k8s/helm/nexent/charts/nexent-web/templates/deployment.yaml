@@ -11,7 +11,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "20"
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
   strategy:
 {{ toYaml .Values.strategy | indent 4 }}
   selector:
@@ -36,6 +36,11 @@ spec:
             - configMapRef:
                 name: nexent-config
           env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: TZ
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: HTTP_BACKEND

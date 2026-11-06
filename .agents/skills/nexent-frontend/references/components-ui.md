@@ -9,7 +9,7 @@
 - Put cross-feature UI in `frontend/components/`. Put feature-only UI in `frontend/app/[locale]/{feature}/components/`; do not import another feature's private components. Promote genuinely reusable UI into the shared component area.
 - Keep reusable components focused on presentation and interaction. Put API calls in `frontend/services/`, reusable state/effects in `frontend/hooks/`, and shared types in `frontend/types/` instead of coupling a shared component to a feature page.
 - Detailed component constraints and component-specific Markdown references live under `references/components/`. Read this file first, then read the relevant document in that directory before creating, changing, or reviewing a component.
-- Create one English Markdown document for each first-level heading in the authoritative UI source. Keep nested sections and their constraints in that same document; do not split child headings into separate component documents.
+- Keep all UI color specification categories together in [UI specification](components/style.md). For other authoritative UI source material, create one English Markdown document for each first-level heading and keep nested sections and their constraints in that same document.
 - When a component has non-obvious public API, state ownership, interaction, accessibility, or styling constraints, add or update its corresponding Markdown reference under `references/components/`.
 - Use [component-contracts.md](components/component-contracts.md) as the baseline for new component documentation and review decisions. Keep component-specific documents focused on constraints that are not already covered by this file.
 
@@ -17,6 +17,7 @@
 
 - For visual component work, use `../docs/前端ui.md` relative to the repository root as the source of truth when it is available. Do not add visual rules that are not stated there.
 - Translate every documented visual value into Tailwind CSS in the English component references. Keep user-facing text localized and use Ant Design first for component behavior.
+- For color selection and interaction states, read the single [UI specification](components/style.md). It contains highlight, text, icon, border, background, fill, and functional colors, plus default/accessible/extended chart palettes, tail colors, gradient rules, complete company color scales, software-product primary color, and auxiliary colors with usage priority, including alpha values and source discrepancies.
 - Use the reusable components documented by [button.md](components/button.md) and [drawer.md](components/drawer.md) instead of recreating their contracts in feature code.
 - Use the reusable components documented by [modal.md](components/modal.md), [card.md](components/card.md), [icon.md](components/icon.md), [paginator.md](components/paginator.md), and [input.md](components/input.md) instead of recreating their contracts in feature code.
 

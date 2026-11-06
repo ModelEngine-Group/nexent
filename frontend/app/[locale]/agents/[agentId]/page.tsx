@@ -1,6 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
+  createElement,
   useCallback,
   useEffect,
   useRef,
@@ -11,10 +14,19 @@ import {
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, Modal, Spin, Tag } from "antd";
-import { GitBranch, History, RefreshCw, Sparkles, X } from "lucide-react";
+import {
+  GitBranch,
+  History,
+  RefreshCw,
+  Sparkles,
+  ArrowLeft,
+  X,
+} from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
+import AgentAvatar from "../components/agent-avatar";
+import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { AgentCreationGuide } from "./components/agent-creation-guide";
 import {
   agentCreationGuideKey,
@@ -34,11 +46,12 @@ import {
 import { useAgentStore } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAgentEditorDraft } from "@/hooks/agent/useAgentEditorDraft";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
-import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
+import { canReturnToAgentEditorReferrer } from "@/lib/agentEditorNavigation";
 import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
@@ -53,14 +66,8 @@ function resolveDraftFocusTarget(
   ) {
     return { section: "conversation_guide" };
   }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
-  }
-  if (updatedFields.includes("duty_prompt")) {
-    return { section: "role_model", promptTab: "duty" };
+  if (updatedFields.includes("prompt")) {
+    return { section: "role_model" };
   }
   if (updatedFields.includes("name") || updatedFields.includes("description")) {
     return { section: "display_info" };
@@ -98,19 +105,29 @@ function PanelCard({
   return (
     <section
       ref={panelRef}
-      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[#f3f3f3]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[var(--navigation-surface)]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
     >
       {showHeader && (
         <div
           data-testid={headerTestId}
           className={`flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4 ${headerClassName}`}
         >
-          <div className="flex items-center gap-2">
+          <div
+            className={
+              headerTestId === "agent-config-page-tabs"
+                ? "flex h-10 min-w-[140px] max-w-full items-center gap-2 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                : "flex min-w-0 items-center gap-2"
+            }
+          >
+            {headerTestId === "agent-config-page-tabs" && leftAction}
             {icon}
-            <h3 className="max-w-[280px] truncate text-sm font-normal leading-[22px] text-[#191919]">
+            <h3
+              title={title}
+              className="min-w-0 truncate text-sm font-normal leading-[22px] text-[#191919]"
+            >
               {title}
             </h3>
-            {leftAction}
+            {headerTestId !== "agent-config-page-tabs" && leftAction}
           </div>
           {rightAction}
         </div>
@@ -128,21 +145,16 @@ function AgentSetupContent({
   onManageVersions: () => void;
 }) {
   const { t } = useTranslation("common");
-  const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const [creationGuideActive, setCreationGuideActive] = useState(false);
-  const { agentId, locale: routeLocale } = useParams<{
-    agentId: string;
-    locale: string;
-  }>();
-  const locale = routeLocale || "en";
+  const { agentId } = useParams<{ agentId: string }>();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
   const actionAreaRef = useRef<HTMLDivElement>(null);
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [isPublicationVisible, setIsPublicationVisible] = useState(false);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
@@ -164,6 +176,10 @@ function AgentSetupContent({
     setIsDebugVisible(false);
   };
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const draftIconUrl = useAgentStore((state) => state.editedAgent?.icon_url);
+  const draftDescription = useAgentStore(
+    (state) => state.editedAgent?.description
+  );
   const resetAgentStore = useAgentStore((state) => state.reset);
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
@@ -211,7 +227,6 @@ function AgentSetupContent({
     ready:
       !isRequestedAgentLoading &&
       currentAgentId === requestedAgentId &&
-      Boolean(agentInfo) &&
       isGenerationVisible &&
       !isDebugVisible,
     readOnly: permissionReadOnly,
@@ -327,7 +342,7 @@ function AgentSetupContent({
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
 
-  const handleAgentPublished = useCallback(() => {
+  const handleAgentPublished = () => {
     if (currentAgentId === null) return;
 
     void Promise.all([
@@ -341,20 +356,21 @@ function AgentSetupContent({
         error,
       });
     });
-    router.push(buildAgentUsageGuidePath(locale, currentAgentId));
-  }, [currentAgentId, locale, queryClient, refetchAgentInfo, router]);
+    closeDebug();
+    setIsGenerationVisible(false);
+    setIsPublicationVisible(true);
+  };
 
   return (
     <div
       ref={workspaceRef}
-      className="flex h-full w-full min-h-0 flex-col bg-[#f3f3f3]"
+      className="flex h-full w-full min-h-0 flex-col bg-[var(--navigation-surface)]"
     >
       {showCreationGuide && user?.id && tenantId && (
         <AgentCreationGuide
           key={`${agentCreationGuideKey(tenantId, user.id)}/${requestedAgentId}`}
           preferenceKey={agentCreationGuideKey(tenantId, user.id)}
           workspaceRef={workspaceRef}
-          onOpenChange={setCreationGuideActive}
         />
       )}
       <main
@@ -370,7 +386,7 @@ function AgentSetupContent({
             showHeader={false}
             title={t("agent.page.panel.nl2agent")}
             className={
-              isGenerationVisible
+              isGenerationVisible && !isPublicationVisible
                 ? isDebugVisible
                   ? "w-[28%] shrink-0 2xl:w-[561px]"
                   : "w-[32%] shrink-0 2xl:w-[561px]"
@@ -416,8 +432,8 @@ function AgentSetupContent({
                 ref={nl2AgentChatPanelRef}
                 key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
+                agentDescription={draftDescription ?? agentInfo?.description}
                 showOptimizationSuggestions={showOptimizationSuggestions}
-                configurationLayout
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||
@@ -427,6 +443,7 @@ function AgentSetupContent({
                 onStopped={handleGenerationStopped}
                 onRunStart={markRunStarted}
                 onRunEnd={markRunFinished}
+                onConversationChange={handleGenerationStopped}
               />
             </div>
           </PanelCard>
@@ -434,6 +451,22 @@ function AgentSetupContent({
           <PanelCard
             frameless
             headerTestId="agent-config-page-tabs"
+            icon={
+              agentInfo ? (
+                <AgentAvatar
+                  agent={{
+                    ...agentInfo,
+                    icon_url: draftIconUrl ?? agentInfo.icon_url,
+                  }}
+                  size={16}
+                  iconSize={12}
+                />
+              ) : (
+                createElement(getAgentIcon({ agent_id: currentAgentId ?? 0 }), {
+                  size: 16,
+                })
+              )
+            }
             title={t("agent.highFidelity.pageTab", {
               name:
                 agentInfo?.display_name ||
@@ -441,38 +474,45 @@ function AgentSetupContent({
                 t("agent.page.panel.config"),
             })}
             className={"flex-1"}
-            headerClassName="h-16 min-h-16 border-[#dfdfdf] pl-4 pr-[18px] py-3"
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-6 py-3"
             leftAction={
               <Button
                 type="text"
                 aria-label={t("common.back")}
-                icon={<X size={14} />}
+                icon={<ArrowLeft size={14} />}
                 onClick={onBack}
-                className="!size-6 !p-0"
+                className="!size-[14px] !p-0 !text-[#191919]"
               />
             }
             rightAction={
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 max-w-full grow items-center gap-2">
                 <Button
                   type="text"
                   icon={<GitBranch size={16} />}
                   aria-label={t("agent.version.manage")}
+                  className="shrink-0"
                   onClick={onManageVersions}
                 />
                 {agentInfo?.current_version_no && total > 0 ? (
-                  <div className="flex items-center gap-1">
-                    <History size={16} />
-                    {t("agent.version.current")}:
+                  <div className="flex min-w-0 items-center gap-1">
+                    <History size={16} className="shrink-0" />
+                    <span className="shrink-0 whitespace-nowrap">
+                      {t("agent.version.current")}:
+                    </span>
                     <Tag
                       color="cyan"
                       variant="outlined"
-                      className="cursor-pointer rounded-md font-mono text-sm"
+                      title={
+                        agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`
+                      }
+                      className="!m-0 min-w-0 cursor-pointer truncate rounded-md font-mono text-sm"
                       onClick={() => setIsShowVersionManagePanel(true)}
                     >
                       {agentVersionDetail?.version.version_name ||
                         `V${agentInfo.current_version_no}`}
                     </Tag>
-                    <span className="text-xs text-gray-500">
+                    <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
                       / {t("agent.version.totalVersions", { count: total })}
                     </span>
                   </div>
@@ -482,20 +522,31 @@ function AgentSetupContent({
                   onClick={() => setIsGenerationVisible((visible) => !visible)}
                   type="text"
                   aria-label={t("agent.page.panel.nl2agent")}
+                  className="ml-auto shrink-0"
                 ></Button>
               </div>
             }
           >
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentConfig
-                creationGuideActive={showCreationGuide && creationGuideActive}
+                publicationVisible={isPublicationVisible}
+                onPublication={() => {
+                  closeDebug();
+                  setIsPublicationVisible(true);
+                }}
                 published={Boolean(agentInfo?.current_version_no)}
                 actionAreaRef={actionAreaRef}
                 canManualUnlock={canManualUnlock}
                 onManualUnlock={handleManualUnlock}
-                onToggleDebug={() =>
-                  isDebugVisible ? closeDebug() : setIsDebugVisible(true)
-                }
+                onToggleDebug={() => {
+                  setIsPublicationVisible(false);
+                  if (isDebugVisible) {
+                    closeDebug();
+                  } else {
+                    setIsDebugVisible(true);
+                    setIsGenerationVisible(false);
+                  }
+                }}
                 debugVisible={isDebugVisible}
                 debugExpanded={isDebugFullscreen || isCompareMode}
                 debugPanel={
@@ -531,10 +582,14 @@ function AgentSetupContent({
                     />
                   </div>
                 }
-                onConfigure={closeDebug}
+                onConfigure={() => {
+                  setIsPublicationVisible(false);
+                  closeDebug();
+                  setIsGenerationVisible(true);
+                }}
                 onOptimizePrompt={() => {
                   setIsGenerationVisible(true);
-                  nl2AgentChatPanelRef.current?.sendPrompt(
+                  nl2AgentChatPanelRef.current?.fillPrompt(
                     t("nl2agent.optimization.prompt.input")
                   );
                 }}
@@ -585,58 +640,64 @@ export default function AgentEditor() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
-  const { agentId } = useParams<{ agentId: string }>();
+  const { agentId, locale } = useParams<{ agentId: string; locale: string }>();
   const requestedAgentId = Number(agentId);
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const initialize = useAgentStore((state) => state.initialize);
   const reset = useAgentStore((state) => state.reset);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const isReturningRef = useRef(false);
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
+  const { isLoading: isDraftLoading, error: draftLoadError } =
+    useAgentEditorDraft(requestedAgentId);
 
   useEffect(() => {
     if (isReturningRef.current) return;
 
     if (!isValidAgentId) {
-      router.replace("/agents");
+      router.replace(`/${locale}/agents`);
       return;
     }
-    if (currentAgentId === requestedAgentId) return;
-
-    void (async () => {
-      const result = await searchAgentInfo(requestedAgentId);
-      if (!result.success || !result.data) {
-        message.error(
-          result.message || t("agentConfig.agents.detailsLoadFailed")
-        );
-        router.replace("/agents");
-        return;
-      }
-      initialize(result.data);
-    })();
-  }, [
-    currentAgentId,
-    initialize,
-    isValidAgentId,
-    message,
-    requestedAgentId,
-    router,
-    t,
-  ]);
+    if (draftLoadError) {
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
+      router.replace(`/${locale}/agents`);
+    }
+  }, [draftLoadError, isValidAgentId, locale, message, router, t]);
 
   if (!isValidAgentId) return null;
 
+  if (isDraftLoading || draftLoadError) {
+    return (
+      <div
+        className="flex h-full items-center justify-center gap-3"
+        role="status"
+      >
+        <Spin size="large" />
+        <span>{t("common.loading")}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f3f3f3]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">
       <div className="min-h-0 flex-1">
         <Nl2AgentFlowProvider>
           <AgentSetupContent
             onBack={() => {
               isReturningRef.current = true;
               reset();
-              router.push("/agents");
+              if (
+                canReturnToAgentEditorReferrer(
+                  window.history.length,
+                  document.referrer,
+                  window.location.origin
+                )
+              ) {
+                router.back();
+              } else {
+                router.replace(`/${locale}/agents`);
+              }
             }}
             onManageVersions={() => setIsVersionManageOpen(true)}
           />

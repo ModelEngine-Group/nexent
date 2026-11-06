@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -86,7 +88,7 @@ journey("PW-CHAT-01", async (context) => {
         return `Stop terminated the old stream at ${stoppedText.length} visible characters`;
       },
       async () => {
-        const response = await chat.sendAndWait(`只回复：CONTINUE-${token}`);
+        const response = await chat.sendAndWait(`上一轮长输出任务已经取消，不要继续它。本轮不调用工具，立即且只返回 <final_answer>CONTINUE-${token}</final_answer>。`);
         const text = (await response.innerText()).trim();
         if (/已有智能体任务正在运行|task.*already.*running/i.test(text)) {
           const error = new Error("Stop API returned success but the next turn was rejected as still running: " + text);

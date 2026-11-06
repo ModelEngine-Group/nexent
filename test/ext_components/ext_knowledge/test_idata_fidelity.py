@@ -7,7 +7,7 @@ RETRIEVALS_PATH = "/apiaccess/modelmate/north/machine/v1/retrievals"
 
 
 def test_knowledge_spaces_listing(mock_base_url, require_real_nexent):
-    from services.idata_service import fetch_idata_knowledge_spaces_impl
+    from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
     spaces = fetch_idata_knowledge_spaces_impl(
         mock_base_url, "mock-idata-key", "user-001"
@@ -19,7 +19,7 @@ def test_knowledge_spaces_listing(mock_base_url, require_real_nexent):
 
 
 def test_datasets_listing_maps_file_count(mock_base_url, require_real_nexent):
-    from services.idata_service import fetch_idata_datasets_impl
+    from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
     result = fetch_idata_datasets_impl(
         mock_base_url, "mock-idata-key", "user-001", "space-alpha"

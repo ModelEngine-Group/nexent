@@ -1,7 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import AgentSetupOrchestrator from "@/app/[locale]/agents/[agentId]/page";
+
+// The draft loader is an external boundary of the version-switch guard.
+vi.mock('@/hooks/agent/useAgentEditorDraft', () => ({
+  useAgentEditorDraft: () => ({ isLoading: false, error: null }),
+}));
 
 const mocks = vi.hoisted(() => {
   const storeState = {
@@ -43,6 +50,7 @@ vi.mock("@/stores/agentStore", () => {
 vi.mock("next/navigation", () => ({
   useParams: () => ({ agentId: mocks.agentIdParam, locale: 'en' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -57,9 +65,11 @@ vi.mock("react-i18next", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("antd", () => {
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>();
   const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
+    ...actual,
     Button: Box, Spin: Box, Switch: Box, Tag: Box, Tour: Box,
     App: { useApp: () => ({ message: { error: vi.fn() } }) },
     Modal: ({ open, children }: any) => open ? <div>{children}</div> : null,

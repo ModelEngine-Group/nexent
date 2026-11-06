@@ -13,7 +13,7 @@ case:
   title: Chat displays fast and promoted tool tasks correctly
   type: E2E
   priority: P0
-  status: blocked
+  status: active
   automation: automated
   objective: Chat displays fast and promoted tool tasks correctly
   preconditions:

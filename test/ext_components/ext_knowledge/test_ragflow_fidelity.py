@@ -6,7 +6,7 @@ RAGFLOW_AUTH = {"Authorization": "Bearer mock-ragflow-key"}
 
 
 def test_datasets_listing_formats_seed(mock_base_url, require_real_nexent):
-    from services.ragflow_service import fetch_ragflow_datasets_impl
+    from management.services.knowledge_base.providers.ragflow import fetch_ragflow_datasets_impl
 
     result = fetch_ragflow_datasets_impl(mock_base_url, "mock-ragflow-key")
     datasets = {ds["id"]: ds for ds in result["data"]}

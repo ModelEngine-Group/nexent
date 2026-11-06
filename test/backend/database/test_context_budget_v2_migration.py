@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from pathlib import Path
 
 
@@ -48,7 +50,7 @@ def test_context_budget_v2_migration_preserves_trigger_and_derives_target():
 
 
 def test_orm_uses_only_canonical_physical_columns():
-    model_source = (ROOT / "backend/database/db_models.py").read_text(encoding="utf-8")
+    model_source = (ROOT / "backend/management/db/monitoring/models.py").read_text(encoding="utf-8")
     model_contract = model_source.split("class ModelMonitoringRecord", 1)[1].split(
         "class ToolInfo", 1
     )[0]

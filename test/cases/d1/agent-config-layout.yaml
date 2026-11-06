@@ -393,7 +393,7 @@ cases:
   objective: Verify actual common drawer controls, scroll/mask, controlled model add/remove
     and no render-time selection callback.
   preconditions:
-  - Render real AddResourceDrawer and AddModelDrawer with existing model query controlled
+  - Render real ResourceDrawer and ModelDrawer with existing model query controlled
     at its hook boundary.
   test_data:
     profile: mock

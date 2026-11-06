@@ -13,3 +13,10 @@ preparation:
   - basic_agent
   - llm_agent
   - llm_model
+acceptance_bindings:
+  AC-01:
+  - PW-PROMPT-01
+  AC-02:
+  - PW-PROMPT-01
+  AC-03:
+  - PW-PROMPT-01

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5 reliability special case for the config service lifespan.
 
 Covers F-156: config_app switched from on_event to lifespan. Verifies that a
@@ -33,15 +34,15 @@ _SENSITIVE_KEY_PARTS = (
 
 @pytest.mark.parametrize('case', special_case_params(['REL-AUTO-53457E34A331A3FF']))
 def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, caplog):
-    from consts import const
-    from consts.task_recovery import CONFIG_SERVICE_NAME
+    import contracts.constants.environment as const
+    from contracts.constants.constants import CONFIG_SERVICE_NAME
 
-    import services.evaluation_maintenance as evaluation_maintenance
-    import services.startup_recovery_service as startup_recovery
+    from management.services.evaluation import maintenance as evaluation_maintenance
+    from management import recovery as startup_recovery
 
     from fastapi.testclient import TestClient
 
-    from apps import config_app
+    from management.api import application as config_app
     from nexent.core.concurrency import ManagerState
 
     # --- Static anchors ------------------------------------------------------
@@ -160,7 +161,7 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     assert len(recover_runs) == 1
     pool_name, task_name, owner = recover_runs[0]
     assert pool_name == 'control-io'
-    assert owner == 'apps.config_app'
+    assert owner == 'management.api.application'
 
     assert 'nexent-config' in calls['schedule_cleanup']
     assert calls['start_eval_maintenance'] == [manager]

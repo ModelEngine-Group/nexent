@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: CHAT-TITLE-D5-001
+implementations:
+- framework: pytest
+  file: test_title_revision.py
+  selector: CHAT-TITLE-D5-001
+timeout_seconds: 150
+acceptance_bindings:
+  AC-01: [test_activity_does_not_invalidate_pending_title]
+  AC-02: [test_title_revision_preserves_prior_rename]
+  AC-03: [test_deleted_or_foreign_history_rejects_title_write]
+  AC-04: [test_additive_title_revision_migration_preserves_rows_and_replays]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

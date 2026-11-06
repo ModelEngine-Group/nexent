@@ -44,11 +44,11 @@ def test_dependency_receipt_maps_to_blocked_outcome(case_dir):
 
 def test_receipt_adopted_without_preparation_log(case_dir):
     """Attach failures raise before any preparation step: preparation_log is None."""
-    write_receipt(case_dir, reason="profile selection config config/aidp-journey.yaml is missing")
+    write_receipt(case_dir, reason="the local ext-knowledge instance does not serve knowledge-provider")
     outcome, reason, details = suite.dependency_failure_outcome(
         case_dir, {}, outcome="AUTOMATION_ERROR", exc=RuntimeError("x"), preparation_log=None)
     assert outcome == "BLOCKED_BY_DEPENDENCY"
-    assert "aidp-journey" in reason
+    assert "knowledge-provider" in reason
     assert details == {"evidence": ["runtime/preparation-failure.json"]}
 
 

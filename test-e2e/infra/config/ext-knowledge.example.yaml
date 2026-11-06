@@ -1,14 +1,17 @@
-# ext-knowledge mock attach configuration (machine-local; copy to
+# ext-knowledge attach configuration for an OPTIONAL external shared
+# instance. Suite runs start a private mock process and never read this file;
+# it is consumed only by the operator CLI (status/recover) and direct callers
+# that attach a pre-deployed instance. Copy it to
 # <test-home>/config/ext-knowledge.yaml and fill in real values — this file
-# is an example and must never carry real credentials).
+# is an example and must never carry real credentials.
 #
-# Consumed by the suite worker when a selected case declares an ext-served
-# logical service (knowledge-provider / http-fixture / model-provider) in
-# its execution.yaml required_mock_services. The worker validates the
-# instance identity, takes the shared lock, checks readiness, resets state
-# per case and exports NEXENT_EXT_KNOWLEDGE_RUNNER_URL / _PRODUCT_URL.
-# It never starts or stops the Compose stack — deployment is an explicit
-# operator step (see test-e2e/infra/mock-services/ext-knowledge-mock/README.md).
+# Consumed when a selected case declares an ext-served logical service
+# (knowledge-provider / http-fixture / model-provider) in its execution.yaml
+# required_mock_services and a caller explicitly attaches an external instance.
+# The attach path validates the instance identity, takes the shared lock,
+# checks readiness, resets state per case and exports
+# NEXENT_EXT_KNOWLEDGE_RUNNER_URL / _PRODUCT_URL. An external deployment is an
+# explicit operator step (see test-e2e/infra/mock-services/ext-knowledge-mock/README.md).
 schema_version: 1
 
 # Runner-facing control plane (published 127.0.0.1 port of the mock).

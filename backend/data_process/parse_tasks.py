@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Celery tasks that execute CPU-heavy parsing in prefork children.
 
 This module intentionally has no top-level import of the SDK Core or any
@@ -19,17 +20,12 @@ from typing import Any
 from celery import Task, chord, group, states
 from celery.exceptions import Ignore
 
-from consts.const import (
-    DP_FILE_SPLIT_SIZE_MB,
-    DP_PART_PROCESSOR_COUNT,
-    DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
-    REDIS_BACKEND_URL,
-)
-from utils.knowledge_ingestion_errors import (
+from contracts.constants.environment import DP_FILE_SPLIT_SIZE_MB, DP_PART_PROCESSOR_COUNT, DP_REDIS_CHUNKS_WAIT_TIMEOUT_S, REDIS_BACKEND_URL
+from infrastructure.ingestion.errors import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )
-from utils.knowledge_telemetry import trace_knowledge_operation
+from infrastructure.observability.knowledge import trace_knowledge_operation
 
 from .app import app
 from .parser_runtime import ensure_parser_runtime, get_parser_runtime
@@ -108,7 +104,7 @@ def cleanup_parser_artifacts(
             )
 
     try:
-        from database.attachment_db import delete_file
+        from management.db.file.attachment import delete_file
     except Exception:
         logger.warning("Unable to import parser object cleanup helper task_id=%s", task_id, exc_info=True)
         return
@@ -145,7 +141,7 @@ def cleanup_failed_parser_parts(
 
 
 def _upload_part(task_id: str, index: int, filename: str, data: bytes) -> dict[str, Any]:
-    from database.attachment_db import build_s3_url, upload_fileobj
+    from management.db.file.attachment import build_s3_url, upload_fileobj
 
     object_name = f"data-process-tmp/{task_id}/parts/{index}"
     result = upload_fileobj(

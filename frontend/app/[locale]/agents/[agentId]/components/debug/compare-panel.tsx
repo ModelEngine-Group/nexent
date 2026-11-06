@@ -1,5 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
 import {
   useCallback,
   useEffect,
@@ -18,7 +24,6 @@ import {
   type ChatModelAdapter,
 } from "@assistant-ui/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Select } from "antd";
 import { useConfig } from "@/hooks/useConfig";
 import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -28,7 +33,8 @@ import { compositeAttachmentAdapter } from "@/app/newchat/adapter/attachment-ada
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { Composer, type ChatMode } from "@/app/newchat/assistant-ui/composer";
-import { Thread } from "@/app/newchat/assistant-ui/thread";
+import { ModelSelector } from "@/app/newchat/ui/model-selector";
+import { DebugConversation } from "./debug-conversation";
 
 const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
   if (!config?.modelName) return false;
@@ -39,6 +45,8 @@ const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
 };
 
 interface AgentDebugComparePanelProps {
+  sourcesPanelCloseEpoch?: number;
+  onSourcesPanelOpen?: () => void;
   agentId?: number | null;
   clearEpoch?: number;
   chatMode?: ChatMode;
@@ -75,12 +83,54 @@ const createSideAdapter = (
   },
 });
 
-interface SideThreadProps {
-  clearEpoch: number;
-  agent: Agent;
+interface CompareModelSelectorProps {
   modelId: number;
   availableModels: Array<{ id: number; displayName?: string; name: string }>;
   excludeModelId?: number | null;
+  onModelChange: (modelId: number) => void;
+}
+
+function CompareModelSelector({
+  modelId,
+  availableModels,
+  excludeModelId,
+  onModelChange,
+}: CompareModelSelectorProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 items-center justify-start px-4 py-2">
+      <ModelSelector.Root
+        value={String(modelId)}
+        onValueChange={(id) => onModelChange(Number(id))}
+        models={availableModels
+          .filter((model) => model.id !== excludeModelId)
+          .map((model) => ({
+            id: String(model.id),
+            name: model.displayName || model.name,
+          }))}
+      >
+        <ModelSelector.Trigger
+          variant="ghost"
+          size="sm"
+          aria-label={t("agent.debug.compareSelectModel", "Select model")}
+          className="min-w-0 max-w-full text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
+        >
+          <ModelSelector.Value />
+        </ModelSelector.Trigger>
+        <ModelSelector.Content align="start">
+          <ModelSelector.List />
+        </ModelSelector.Content>
+      </ModelSelector.Root>
+    </div>
+  );
+}
+
+interface SideThreadProps {
+  sourcesPanelCloseEpoch?: number;
+  onSourcesPanelOpen?: () => void;
+  clearEpoch: number;
+  agent: Agent;
+  modelId: number;
   enablePlan: boolean;
   chatMode: ChatMode;
   isDictationConfigured: boolean;
@@ -88,15 +138,15 @@ interface SideThreadProps {
   rightRuntimeRef?: MutableRefObject<AssistantRuntime | null>;
   onChatModeChange: (mode: ChatMode) => void;
   onRuntimeReady: (runtime: AssistantRuntime, modelId: number) => void;
-  onModelChange: (modelId: number) => void;
+  onSelectQuestion: (question: string) => void;
 }
 
 const SideThread: FC<SideThreadProps> = ({
+  sourcesPanelCloseEpoch,
+  onSourcesPanelOpen,
   clearEpoch,
   agent,
   modelId,
-  availableModels,
-  excludeModelId,
   enablePlan,
   chatMode,
   isDictationConfigured: dictationConfigured,
@@ -104,9 +154,8 @@ const SideThread: FC<SideThreadProps> = ({
   rightRuntimeRef,
   onChatModeChange,
   onRuntimeReady,
-  onModelChange,
+  onSelectQuestion,
 }) => {
-  const { t } = useTranslation();
   const { modelConfig } = useConfig();
   const mirroredMessageIds = useRef(new Set<string>());
 
@@ -175,38 +224,19 @@ const SideThread: FC<SideThreadProps> = ({
     return runtime.thread.subscribe(mirrorLatestUserMessage);
   }, [rightRuntimeRef, runtime]);
 
-  const filteredModels = useMemo(
-    () => availableModels.filter((model) => model.id !== excludeModelId),
-    [availableModels, excludeModelId]
-  );
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
         <div className="flex h-full w-full flex-col">
-          <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-4 py-2">
-            <Select
-              value={modelId}
-              onChange={onModelChange}
-              options={filteredModels.map((model) => ({
-                value: model.id,
-                label: model.displayName || model.name,
-              }))}
-              placeholder={t("agent.debug.compareSelectModel", "Select model")}
-              size="small"
-              className="w-full"
-            />
-          </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <Thread
+            <DebugConversation
+              onSourcesPanelOpen={onSourcesPanelOpen}
+              sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
               agent={agent}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
-              showModelSelector={false}
-              showConversationTitle={false}
-              isDictationConfigured={dictationConfigured}
-              variant="embedded"
-              showComposer={false}
+              comparison
+              onSelectQuestion={onSelectQuestion}
             />
             {composerPortalTarget &&
               createPortal(
@@ -215,8 +245,10 @@ const SideThread: FC<SideThreadProps> = ({
                   chatMode={chatMode}
                   onChatModeChange={onChatModeChange}
                   showModelSelector={false}
-                  isDictationConfigured={dictationConfigured}
-                />,
+                >
+                  <ComposerAttachment />
+                  <ComposerDictation configured={dictationConfigured} />
+                </Composer>,
                 composerPortalTarget
               )}
           </div>
@@ -227,6 +259,8 @@ const SideThread: FC<SideThreadProps> = ({
 };
 
 export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
+  sourcesPanelCloseEpoch,
+  onSourcesPanelOpen,
   agentId,
   clearEpoch = 0,
   chatMode: controlledChatMode,
@@ -248,6 +282,7 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
   const [composerPortalTarget, setComposerPortalTarget] =
     useState<HTMLElement | null>(null);
   const rightRuntimeRef = useRef<AssistantRuntime | null>(null);
+  const leftRuntimeRef = useRef<AssistantRuntime | null>(null);
 
   const debugAgent = useMemo(
     () =>
@@ -290,7 +325,12 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
     },
     [compareRightModelId]
   );
-  const handleLeftRuntimeReady = useCallback(() => {}, []);
+  const handleLeftRuntimeReady = useCallback((runtime: AssistantRuntime) => {
+    leftRuntimeRef.current = runtime;
+  }, []);
+  const handleSelectQuestion = useCallback((question: string) => {
+    leftRuntimeRef.current?.thread.composer.setText(question);
+  }, []);
 
   if (!debugAgent) {
     return (
@@ -301,17 +341,23 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200">
+    <div className="flex h-full w-full flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 flex-1 overflow-hidden"
+          data-testid="compare-results"
+        >
+          <div
+            className="flex min-h-0 flex-1 flex-col border-r border-gray-200"
+            data-testid="compare-result-left"
+          >
             {compareLeftModelId != null && (
               <SideThread
+                onSourcesPanelOpen={onSourcesPanelOpen}
+                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
                 clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareLeftModelId}
-                availableModels={availableLlmModels}
-                excludeModelId={compareRightModelId}
                 enablePlan={chatMode === "planning"}
                 chatMode={chatMode}
                 isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
@@ -319,32 +365,59 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
                 rightRuntimeRef={rightRuntimeRef}
                 onChatModeChange={setChatMode}
                 onRuntimeReady={handleLeftRuntimeReady}
-                onModelChange={setCompareLeftModelId}
+                onSelectQuestion={handleSelectQuestion}
               />
             )}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            data-testid="compare-result-right"
+          >
             {compareRightModelId != null && (
               <SideThread
+                onSourcesPanelOpen={onSourcesPanelOpen}
+                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
                 clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareRightModelId}
-                availableModels={availableLlmModels}
-                excludeModelId={compareLeftModelId}
                 enablePlan={chatMode === "planning"}
                 chatMode={chatMode}
                 isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
                 onChatModeChange={setChatMode}
                 onRuntimeReady={handleRightRuntimeReady}
-                onModelChange={setCompareRightModelId}
+                onSelectQuestion={handleSelectQuestion}
               />
             )}
           </div>
         </div>
-        <div
-          ref={setComposerPortalTarget}
-          className="shrink-0 border-t border-gray-200 bg-white px-4 pb-4 pt-3"
-        />
+        <div className="shrink-0 pt-3">
+          <div
+            className="grid grid-cols-2"
+            data-testid="compare-model-selectors"
+          >
+            <div className="min-w-0">
+              {compareLeftModelId != null && (
+                <CompareModelSelector
+                  modelId={compareLeftModelId}
+                  availableModels={availableLlmModels}
+                  excludeModelId={compareRightModelId}
+                  onModelChange={setCompareLeftModelId}
+                />
+              )}
+            </div>
+            <div className="min-w-0">
+              {compareRightModelId != null && (
+                <CompareModelSelector
+                  modelId={compareRightModelId}
+                  availableModels={availableLlmModels}
+                  excludeModelId={compareLeftModelId}
+                  onModelChange={setCompareRightModelId}
+                />
+              )}
+            </div>
+          </div>
+          <div ref={setComposerPortalTarget} />
+        </div>
       </div>
     </div>
   );

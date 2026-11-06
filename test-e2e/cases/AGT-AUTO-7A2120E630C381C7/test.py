@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 '''D3 AGENT-IT: ENABLE_AIDP_KNOWLEDGE 开启时 nl2agent 装配 aidp_search 工具并注入 kds 白名单，权限变更下次 run 生效(无缓存)。'''
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import pytest_asyncio
 from shared.asset_registry import register_asset, resolve_asset, mark_asset_state
 from shared.factories.ownership import register_owned_http
 from shared.http import assert_status, client
+from shared.aidp import create_payload
 
 CASE_ID = 'AGT-AUTO-7A2120E630C381C7'
 DEV_IDENTITY = 'tenant_a_dev'
@@ -72,12 +75,8 @@ async def test_aidp_search_whitelist_recomputed_every_run(tenant_a_admin, tenant
     async with client('config', token=tenant_a_admin.access_token) as api:
         created = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={
-                'name': kb_name,
-                'description': kb_name,
-                'ingroup_permission': 'READ_ONLY',
-                'group_ids': dev_group_ids,
-            },
+            json=await create_payload(tenant_a_admin, kb_name,
+                                      ingroup_permission='READ_ONLY', group_ids=dev_group_ids),
         )
     assert_status(created, 200)
     created_body = created.json()

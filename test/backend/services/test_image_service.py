@@ -1,4 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import socket
+
+from test.backend.management.import_patching import patch_import_object_context, set_import_attribute
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -21,11 +24,11 @@ helpers_env["mock_const"].MODEL_CONFIG_MAPPING = {
 }
 mock_const = helpers_env["mock_const"]
 
-from services.image_service import get_image_understanding_model, get_video_understanding_model, get_vlm_model, proxy_image_impl
-from services import image_service as image_service_module
-from services.image_service import _validate_loopback_url
 
-image_service_module = sys.modules[get_vlm_model.__module__]
+from management.services.file.image_proxy import get_image_understanding_model, get_video_understanding_model, get_vlm_model, proxy_image_impl
+from management.services.file import image_proxy as image_service_module
+from management.services.file.image_proxy import _validate_loopback_url
+
 if "services" in sys.modules:
     setattr(sys.modules["services"], "image_service", image_service_module)
 
@@ -61,7 +64,7 @@ async def test_proxy_image_impl_success():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -96,7 +99,7 @@ async def test_proxy_image_impl_remote_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -129,7 +132,7 @@ async def test_proxy_image_impl_500_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -157,7 +160,7 @@ async def test_proxy_image_impl_connection_exception():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function - should raise the exception
@@ -189,7 +192,7 @@ async def test_proxy_image_impl_with_special_chars():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function
@@ -224,7 +227,7 @@ async def test_proxy_image_impl_json_parse_error():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function - should raise the exception
@@ -264,7 +267,7 @@ async def test_proxy_image_impl_different_status_codes():
         mock_client_session.__aenter__.return_value = mock_session
 
         # Patch the ClientSession
-        with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+        with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
             mock_session_class.return_value = mock_client_session
 
             # Test the function
@@ -300,7 +303,7 @@ async def test_proxy_image_impl_url_encoding():
     mock_client_session.__aenter__.return_value = mock_session
 
     # Patch the ClientSession
-    with patch.object(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
+    with patch_import_object_context(image_service_module.aiohttp, 'ClientSession') as mock_session_class:
         mock_session_class.return_value = mock_client_session
 
         # Test the function with encoded URL
@@ -316,10 +319,10 @@ async def test_proxy_image_impl_url_encoding():
         assert f"url={encoded_url}" in called_url
 
 
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
+@patch_import_object_context(image_service_module, 'OpenAIVLModel')
+@patch_import_object_context(image_service_module, 'MessageObserver')
+@patch_import_object_context(image_service_module, 'get_model_name_from_config')
+@patch_import_object_context(image_service_module, 'tenant_config_manager')
 def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
     """Ensure get_vlm_model builds OpenAIVLModel with tenant config."""
     mock_config = {
@@ -355,10 +358,10 @@ def test_get_vlm_model_success(mock_tenant_config_manager, mock_get_model_name, 
     assert result == mock_model_instance
 
 
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
+@patch_import_object_context(image_service_module, 'OpenAIVLModel')
+@patch_import_object_context(image_service_module, 'MessageObserver')
+@patch_import_object_context(image_service_module, 'get_model_name_from_config')
+@patch_import_object_context(image_service_module, 'tenant_config_manager')
 def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
     """Return None when tenant config is None."""
     mock_tenant_config_manager.get_model_config.return_value = None
@@ -374,7 +377,7 @@ def test_get_vlm_model_with_none_config(mock_tenant_config_manager, mock_get_mod
     assert result is None
 
 
-@patch.object(image_service_module, 'get_vlm_model')
+@patch_import_object_context(image_service_module, 'get_vlm_model')
 def test_get_image_understanding_model_uses_first_multimodal_slot(mock_get_vlm_model):
     """Ensure the image understanding alias keeps using the first multimodal slot."""
     mock_get_vlm_model.return_value = "image-understanding-model"
@@ -385,10 +388,10 @@ def test_get_image_understanding_model_uses_first_multimodal_slot(mock_get_vlm_m
     assert result == "image-understanding-model"
 
 
-@patch.object(image_service_module, 'OpenAIVLModel')
-@patch.object(image_service_module, 'MessageObserver')
-@patch.object(image_service_module, 'get_model_name_from_config')
-@patch.object(image_service_module, 'tenant_config_manager')
+@patch_import_object_context(image_service_module, 'OpenAIVLModel')
+@patch_import_object_context(image_service_module, 'MessageObserver')
+@patch_import_object_context(image_service_module, 'get_model_name_from_config')
+@patch_import_object_context(image_service_module, 'tenant_config_manager')
 def test_get_video_understanding_model_success(mock_tenant_config_manager, mock_get_model_name, mock_message_observer, mock_openai_vl_model):
     """Ensure video understanding tools use the third multimodal model slot."""
     mock_config = {
@@ -471,7 +474,7 @@ def _fake_addrinfo(addresses):
     ],
 )
 def test_validate_loopback_url_accepts_loopback(raw_url, addresses, expected):
-    with patch.object(
+    with patch_import_object_context(
         image_service_module.socket,
         "getaddrinfo",
         return_value=_fake_addrinfo(addresses),
@@ -527,7 +530,7 @@ def test_validate_loopback_url_accepts_loopback(raw_url, addresses, expected):
     ],
 )
 def test_validate_loopback_url_rejects_unsafe(raw_url, addresses, reason):
-    with patch.object(
+    with patch_import_object_context(
         image_service_module.socket,
         "getaddrinfo",
         return_value=_fake_addrinfo(addresses),
@@ -542,7 +545,7 @@ def test_validate_loopback_url_rejects_unsupported_scheme():
 
 
 def test_validate_loopback_url_handles_dns_failure():
-    with patch.object(
+    with patch_import_object_context(
         image_service_module.socket,
         "getaddrinfo",
         side_effect=socket.gaierror("no such host"),
@@ -579,9 +582,9 @@ async def test_proxy_image_impl_loopback_uses_safe_url_and_no_redirects():
     mock_session_instance.__aenter__.return_value = mock_session
     mock_session_instance.__aexit__.return_value = False
 
-    with patch.object(
+    with patch_import_object_context(
         image_service_module, "_validate_loopback_url", side_effect=fake_validate
-    ), patch.object(
+    ), patch_import_object_context(
         image_service_module.aiohttp, "ClientSession", return_value=mock_session_instance
     ) as mock_session_class:
         result = await proxy_image_impl("http://127.0.0.1:8080/img.png")
@@ -636,11 +639,11 @@ async def test_proxy_image_impl_non_loopback_falls_back_to_data_process_service(
 
     # _validate_loopback_url rejects the URL (returns None) because the
     # hostname does not resolve to a loopback address.
-    with patch.object(
+    with patch_import_object_context(
         image_service_module, "_validate_loopback_url", return_value=None
-    ), patch.object(
+    ), patch_import_object_context(
         image_service_module, "_fetch_image_directly", side_effect=fake_fetch
-    ), patch.object(
+    ), patch_import_object_context(
         image_service_module.aiohttp, "ClientSession", return_value=mock_session_instance
     ):
         result = await proxy_image_impl("http://example.com/image.jpg")
@@ -696,7 +699,7 @@ async def test_proxy_image_impl_aidp_and_external_urls_use_proxy_path(external_u
     # Real validation: a non-loopback URL must produce None so the proxy
     # path is taken. We don't mock this function here; we let the real
     # implementation run to ensure the whole flow works.
-    with patch.object(
+    with patch_import_object_context(
         image_service_module.aiohttp, "ClientSession", return_value=mock_session_instance
     ):
         result = await proxy_image_impl(external_url)
@@ -717,37 +720,37 @@ class TestIsAidpUrl:
     adding the Bearer header."""
 
     def test_matches_when_host_and_path_match(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_accepts_alias_host_but_rewrites_to_configured_host(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._is_aidp_url(
             "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_rejects_right_host_wrong_path(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert not image_service_module._is_aidp_url(
             "https://aidp.example.com/some/other/path.png"
         )
 
     def test_rejects_when_env_empty(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "")
         assert not image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_ignores_trailing_slash_in_env(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com/")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com/")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
 
     def test_matches_view_image_path(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._is_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
             "KnowledgeBases/75/ViewImage/image-id.png"
@@ -760,8 +763,8 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_attaches_bearer_header_and_returns_base64(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "secret-key")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "secret-key")
 
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -775,7 +778,7 @@ class TestFetchAidpImage:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
-        with patch.object(
+        with patch_import_object_context(
             image_service_module.aiohttp, "ClientSession", return_value=mock_session
         ):
             result = await image_service_module._fetch_aidp_image(
@@ -791,8 +794,8 @@ class TestFetchAidpImage:
 
     @pytest.mark.asyncio
     async def test_returns_error_when_api_key_missing(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "")
         result = await image_service_module._fetch_aidp_image(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
@@ -807,8 +810,8 @@ class TestProxyImageImplAidpPath:
 
     @pytest.mark.asyncio
     async def test_aidp_url_short_circuits_to_fetch_aidp_image(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "secret")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "secret")
 
         sentinel = {"success": True, "base64": "abc", "content_type": "image/jpeg"}
         called = {"aidp": False, "direct": False, "dp": False}
@@ -823,7 +826,7 @@ class TestProxyImageImplAidpPath:
         aidp_spy = AsyncMock(side_effect=fake_aidp)
         direct_spy = AsyncMock(side_effect=fake_direct)
 
-        with patch.object(image_service_module, "_fetch_aidp_image", aidp_spy), patch.object(
+        with patch_import_object_context(image_service_module, "_fetch_aidp_image", aidp_spy), patch_import_object_context(
             image_service_module, "_fetch_image_directly", direct_spy
         ):
             result = await image_service_module.proxy_image_impl(
@@ -839,8 +842,8 @@ class TestProxyImageImplAidpPath:
         # Env says AIDP is at a different host -> this URL must NOT be
         # classified as AIDP and must fall through to the loopback check /
         # data-process fallback.
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "")
 
         aidp_spy = AsyncMock()
         # Force the data-process fallback to exit early by making the
@@ -854,9 +857,9 @@ class TestProxyImageImplAidpPath:
         bad_session.__aenter__ = AsyncMock(side_effect=_Boom("stop"))
         bad_session.__aexit__ = AsyncMock(return_value=False)
 
-        with patch.object(image_service_module, "_fetch_aidp_image", aidp_spy), patch.object(
+        with patch_import_object_context(image_service_module, "_fetch_aidp_image", aidp_spy), patch_import_object_context(
             image_service_module, "_validate_loopback_url", return_value=None
-        ), patch.object(
+        ), patch_import_object_context(
             image_service_module.aiohttp, "ClientSession", return_value=bad_session
         ), pytest.raises(_Boom):
             await image_service_module.proxy_image_impl("https://other.host/img.png")
@@ -874,49 +877,49 @@ class TestValidateAndReconstructAidpUrl:
     scheme, traversal, and authority replacement rules."""
 
     def test_returns_none_when_env_empty(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         ) is None
 
     def test_returns_none_for_non_http_scheme(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "ftp://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         ) is None
 
     def test_returns_none_when_path_outside_prefix(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/other/path.png"
         ) is None
 
     def test_returns_none_when_path_contains_traversal_segments(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/../evil/img.png"
         ) is None
 
     def test_returns_none_when_path_ends_with_dotdot(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/.."
         ) is None
 
     def test_returns_none_when_query_present(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png?foo=bar"
         ) is None
 
     def test_returns_none_when_fragment_present(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png#frag"
         ) is None
 
     def test_returns_reconstructed_url_with_configured_authority(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         result = image_service_module._validate_and_reconstruct_aidp_url(
             "https://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
@@ -927,7 +930,7 @@ class TestValidateAndReconstructAidpUrl:
         assert parsed_result.netloc != "other.host"
 
     def test_preserves_same_host_url(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         input_url = "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         result = image_service_module._validate_and_reconstruct_aidp_url(input_url)
         assert result is not None
@@ -936,7 +939,7 @@ class TestValidateAndReconstructAidpUrl:
         assert parsed_result.path == "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
 
     def test_returns_none_when_parsed_path_is_none(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         # Empty string has no scheme/netloc/path -> must return None
         assert image_service_module._validate_and_reconstruct_aidp_url("") is None
         # Malformed input with no netloc -> must return None
@@ -944,7 +947,7 @@ class TestValidateAndReconstructAidpUrl:
 
     def test_returns_reconstructed_url_with_base_scheme_and_netloc(self, monkeypatch):
         # Input uses http, base uses https -> output must use base scheme
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
         result = image_service_module._validate_and_reconstruct_aidp_url(
             "http://other.host/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         )
@@ -954,13 +957,13 @@ class TestValidateAndReconstructAidpUrl:
         assert parsed_result.netloc == "aidp.example.com"
 
     def test_returns_none_when_base_parsed_netloc_is_empty(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "file:///x")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "file:///x")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         ) is None
 
     def test_returns_none_when_base_scheme_not_http(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "ftp://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "ftp://aidp.example.com")
         assert image_service_module._validate_and_reconstruct_aidp_url(
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/img.png"
         ) is None
@@ -977,8 +980,8 @@ class TestFetchAidpImageHostReplacement:
 
     @pytest.mark.asyncio
     async def test_uses_reconstructed_url_with_configured_host(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "test-api-key")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "test-api-key")
 
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -997,7 +1000,7 @@ class TestFetchAidpImageHostReplacement:
             "KnowledgeBases/kb-1/img.png"
         )
 
-        with patch.object(
+        with patch_import_object_context(
             image_service_module.aiohttp, "ClientSession", return_value=mock_session
         ):
             result = await image_service_module._fetch_aidp_image(input_url)
@@ -1019,8 +1022,8 @@ class TestFetchAidpImageHostReplacement:
 
     @pytest.mark.asyncio
     async def test_rejects_url_with_path_traversal(self, monkeypatch):
-        monkeypatch.setattr(image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
-        monkeypatch.setattr(image_service_module, "AIDP_API_KEY", "test-api-key")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_SERVER_URL", "https://aidp.example.com")
+        set_import_attribute(monkeypatch, image_service_module, "AIDP_API_KEY", "test-api-key")
 
         traversal_url = (
             "https://aidp.example.com/KnowledgeBase/Tenants/../evil/img.png"

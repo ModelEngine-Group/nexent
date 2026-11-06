@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Model connection status type
 export type ModelConnectStatus =
   "not_detected" | "detecting" | "available" | "unavailable";
@@ -64,6 +66,15 @@ export interface ReasoningCapability {
 }
 
 // Model option interface
+export interface ModelMigrationDetails {
+  from_version?: string;
+  version?: string;
+  migrated_at?: string;
+  defaulted_fields?: string[];
+  unmatched_atoms?: string[];
+  unbound_legacy_parameters?: string[];
+}
+
 export interface ModelOption {
   id: number;
   name: string;
@@ -93,8 +104,16 @@ export interface ModelOption {
   // v2.6.0 inference params (model-level defaults)
   temperature?: number;
   topP?: number;
+  /** Read-only model/SDK sampling fallback; never part of a model save request. */
+  effectiveSampling?: { temperature: number; top_p: number };
   extraParams?: Record<string, unknown>;
   reasoningCapability?: ReasoningCapability;
+  profileSchemaVersion?: number;
+  configRevision?: number;
+  migrationStatus?: "migrated" | "failed";
+  migrationReviewRequired?: boolean;
+  migrationDetails?: ModelMigrationDetails;
+  migrationDiagnostic?: { category: string; field?: string | null };
   /** Whether the model-level thinking switch is enabled. */
   enableThinking?: boolean;
   /** Persisted model-level default, stored in extra_params.reasoning_effort. */

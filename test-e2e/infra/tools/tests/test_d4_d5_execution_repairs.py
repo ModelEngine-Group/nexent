@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression checks for prerequisite handling; not formal product results."""
 import json
 import os
@@ -267,6 +268,13 @@ function load(relative) {
     document.getElementById('cancel').onclick=()=>dialog.hidden=true;</script>`);
   assert.equal(await page.getByRole('button',{name:/Metadata/}).count(),3);
   const chat=new ChatPage(page);
+  assert.throws(()=>chat.currentConversationId(),/conversation_id response header/);
+  // Model the ID supplied by the run response and its actual history API.
+  chat.lastServerConversationId=7;
+  chat.persistedThreadTitle=async id=>{
+   assert.equal(id,7);
+   return mockHistory([{conversation_id:'7',conversation_title:'chat.[manual]+'}]).persistedThreadTitle(id);
+  };
   await chat.setRuntimeMetadata({test_run_id:'unique'});
   assert.equal(await page.getByRole('button',{name:'Metadata',exact:true}).count(),1);
   await chat.assertRuntimeMetadata({test_run_id:'unique'});

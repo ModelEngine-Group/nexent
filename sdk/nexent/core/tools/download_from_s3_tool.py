@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 import os
@@ -119,7 +120,7 @@ class DownloadFromS3Tool(Tool):
     def _check_access(self, object_key: str) -> bool:
         """Check if the current user has access to the given object key.
 
-        Mirrors the access rules in backend/services/file_management_service.py:
+        Mirrors the access rules in backend/management/services/file/service.py:
         - knowledge_base/*: all authenticated users
         - images_in_attachments/*: all authenticated users
         - attachments/{user_id}/*: only the owner

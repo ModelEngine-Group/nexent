@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import {
   useState,
@@ -74,6 +76,26 @@ const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
 ]);
 
 /**
+ * A required `expected` input means the evaluator grades against a reference
+ * answer. Code evaluators may declare it without using it, so the input
+ * declaration is the only signal considered here.
+ */
+type EvaluatorInputField = {
+  name?: string;
+  required?: boolean;
+};
+
+function evaluatorRequiresExpectedAnswer(
+  evaluator: { input_fields?: EvaluatorInputField[] | null } | null | undefined
+): boolean {
+  const fields = evaluator?.input_fields;
+  return (
+    Array.isArray(fields) &&
+    fields.some((field) => field.name === "expected" && field.required === true)
+  );
+}
+
+/**
  * Fire a body-less mutating request (DELETE / POST) and surface backend
  * errors as a toast. Returns true only on success so callers can skip
  * their success path (local row removal / list refresh).
@@ -141,7 +163,7 @@ function RunsTab() {
   const { t, i18n } = useTranslation("common");
   const { message } = App.useApp();
   const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
-  const [agents] = useList("/api/agent/published_list");
+  const [agents] = useList(API_ENDPOINTS.agent.publishedList);
 
   // ── Top-level list state ──────────────────────────────────────────────
   // An empty selection represents all agents. A detail-page link may provide
@@ -213,7 +235,7 @@ function RunsTab() {
       .then((d) => setEvaluators(d.data || []));
   };
   const refreshEvalSets = () => {
-    fetch("/api/evaluation-sets", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationSets.list, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => setEvalSets(d.data || d.items || []));
   };
@@ -441,6 +463,23 @@ function RunsTab() {
     },
   ];
 
+  // no_set mode generates questions only, so evaluators that need a golden
+  // answer stay visible but disabled, after the selectable ones.
+  const publishedEvaluators = evaluators.filter(
+    (e) => e.status === "PUBLISHED"
+  );
+  const evaluatorOptions =
+    evalMode === "no_set"
+      ? [
+          ...publishedEvaluators.filter(
+            (e) => !evaluatorRequiresExpectedAnswer(e)
+          ),
+          ...publishedEvaluators.filter((e) =>
+            evaluatorRequiresExpectedAnswer(e)
+          ),
+        ]
+      : publishedEvaluators;
+
   return (
     <div>
       <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
@@ -555,7 +594,7 @@ function RunsTab() {
                       setAVer(null);
                       setAgentVersions([]);
                       setErrors((e) => ({ ...e, a: false }));
-                      fetch(`/api/agent/${v}/versions`, {
+                      fetch(API_ENDPOINTS.agent.versions.list(Number(v)), {
                         headers: getAuthHeaders(),
                       })
                         .then((r) => r.json())
@@ -657,6 +696,11 @@ function RunsTab() {
               }
             >
               <Flex vertical gap={8}>
+                {evalMode === "no_set" && (
+                  <Text type="secondary" className="text-xs">
+                    {t("agentEvaluation.noSetEvaluatorHint")}
+                  </Text>
+                )}
                 <Select
                   mode="multiple"
                   maxCount={5}
@@ -682,9 +726,9 @@ function RunsTab() {
                     });
                     setMappings(newM);
                   }}
-                  options={evaluators
-                    .filter((e: any) => e.status === "PUBLISHED")
-                    .map((e: any) => ({
+                  options={evaluatorOptions.map((e) => {
+                    const needsExpected = evaluatorRequiresExpectedAnswer(e);
+                    return {
                       label:
                         currentLang === "en"
                           ? e.name_en || e.name
@@ -694,10 +738,34 @@ function RunsTab() {
                         currentLang === "en"
                           ? e.description_en || e.description || ""
                           : e.description || e.description_en || "",
-                    }))}
+                      needsExpected,
+                      disabled: evalMode === "no_set" && needsExpected,
+                    };
+                  })}
                   optionRender={(opt: any) => (
                     <Flex vertical gap={2}>
-                      <Text strong>{opt.label}</Text>
+                      <Flex align="center" gap={6} wrap>
+                        <Text
+                          strong
+                          type={opt.data.disabled ? "secondary" : undefined}
+                        >
+                          {opt.label}
+                        </Text>
+                        {evalMode === "no_set" && (
+                          <Tag
+                            color={
+                              opt.data.needsExpected ? "default" : "success"
+                            }
+                            style={{ margin: 0 }}
+                          >
+                            {opt.data.needsExpected
+                              ? t("agentEvaluation.evaluatorRequiresExpected")
+                              : t(
+                                  "agentEvaluation.evaluatorNoExpectedRequired"
+                                )}
+                          </Tag>
+                        )}
+                      </Flex>
                       {opt.data.desc && (
                         <Text
                           type="secondary"
@@ -746,7 +814,7 @@ function RunsTab() {
                     let q = trialQuery;
                     if (!q && sS) {
                       const r = await fetch(
-                        `/api/evaluation-sets/${sS}/cases?limit=1`,
+                        `${API_ENDPOINTS.evaluationSets.cases(sS)}?limit=1`,
                         { headers: getAuthHeaders() }
                       );
                       const d = await r.json();
@@ -773,7 +841,7 @@ function RunsTab() {
                         b.field_mappings = mappings;
                       }
                       const r = await fetch(
-                        "/api/agent-evaluations/trial-run",
+                        API_ENDPOINTS.agentEvaluations.trialRun,
                         {
                           method: "POST",
                           headers: {
@@ -996,7 +1064,7 @@ function EvaluatorsTab() {
   const fetchVersions = async (evaluatorId: number) => {
     setVersionBusy(true);
     try {
-      const r = await fetch(`/api/evaluators/${evaluatorId}/versions`, {
+      const r = await fetch(API_ENDPOINTS.evaluators.versions(evaluatorId), {
         headers: getAuthHeaders(),
       });
       const d = await r.json();
@@ -1009,7 +1077,10 @@ function EvaluatorsTab() {
     setVersionBusy(true);
     try {
       await fetch(
-        `/api/evaluators/${versionEval?.evaluator_id}/versions/${versionId}/restore`,
+        API_ENDPOINTS.evaluators.restoreVersion(
+          Number(versionEval?.evaluator_id),
+          versionId
+        ),
         { method: "POST", headers: getAuthHeaders() }
       );
       await fetchVersions(versionEval.evaluator_id);
@@ -1024,7 +1095,10 @@ function EvaluatorsTab() {
     setVersionBusy(true);
     try {
       await fetch(
-        `/api/evaluators/${versionEval?.evaluator_id}/versions/${versionId}`,
+        API_ENDPOINTS.evaluators.version(
+          Number(versionEval?.evaluator_id),
+          versionId
+        ),
         { method: "DELETE", headers: getAuthHeaders() }
       );
       await fetchVersions(versionEval.evaluator_id);
@@ -1500,47 +1574,61 @@ function EvaluatorsTab() {
                 </Flex>
               }
             >
-              <Flex vertical gap={8}>
+              <Flex vertical gap={4}>
                 <Text className="text-xs" type="secondary">
                   {t("agentEvaluation.evaluatorAiGenHint")}
                 </Text>
                 <Input.TextArea
                   rows={3}
                   maxLength={500}
-                  showCount
+                  aria-describedby="evaluator-generation-description-count"
                   value={genDesc}
                   onChange={(e) => setGenDesc(e.target.value)}
                   placeholder={t("agentEvaluation.evaluatorAiGenPlaceholder")}
                 />
-                <Flex gap={8} align="center" wrap>
-                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {t("agentEvaluation.aiGenModel")}
-                  </Text>
-                  <Select
-                    style={{ width: 200 }}
-                    value={genModel}
-                    onChange={setGenModel}
-                    options={availableLlmModels.map((m) => ({
-                      label: m.displayName || m.name,
-                      value: m.id,
-                    }))}
-                  />
-                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {t("agentEvaluation.aiGenAgent")}
-                  </Text>
-                  <Select
-                    style={{ width: 180 }}
-                    value={genAgent}
-                    onChange={setGenAgent}
-                    allowClear
-                    placeholder={t("agentEvaluation.genSelectAgent")}
-                    options={agents.map((a: any) => ({
-                      label: a.display_name || a.name,
-                      value: a.agent_id,
-                    }))}
-                  />
+                <Text
+                  id="evaluator-generation-description-count"
+                  className="block min-h-4 text-right text-xs leading-4"
+                  type="secondary"
+                >
+                  {genDesc.length} / 500
+                </Text>
+                <div className="-mt-1 flex flex-wrap items-end gap-2">
+                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
+                    <Text className="shrink-0 text-xs">
+                      {t("agentEvaluation.aiGenModel")}
+                    </Text>
+                    <Select
+                      style={{ minWidth: 0, flex: 1 }}
+                      aria-label={t("agentEvaluation.aiGenModel")}
+                      value={genModel}
+                      onChange={setGenModel}
+                      options={availableLlmModels.map((m) => ({
+                        label: m.displayName || m.name,
+                        value: m.id,
+                      }))}
+                    />
+                  </Flex>
+                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
+                    <Text className="shrink-0 text-xs">
+                      {t("agentEvaluation.aiGenAgent")}
+                    </Text>
+                    <Select
+                      style={{ minWidth: 0, flex: 1 }}
+                      aria-label={t("agentEvaluation.aiGenAgent")}
+                      value={genAgent}
+                      onChange={setGenAgent}
+                      allowClear
+                      placeholder={t("agentEvaluation.genSelectAgent")}
+                      options={agents.map((a: any) => ({
+                        label: a.display_name || a.name,
+                        value: a.agent_id,
+                      }))}
+                    />
+                  </Flex>
                   <Button
                     type="primary"
+                    className="shrink-0"
                     icon={<Zap className="size-4" />}
                     loading={busy}
                     onClick={async () => {
@@ -1593,7 +1681,7 @@ function EvaluatorsTab() {
                   >
                     {t("agentEvaluation.aiGenerate")}
                   </Button>
-                </Flex>
+                </div>
               </Flex>
             </Card>
             {/* Manual edit section */}
@@ -2108,7 +2196,7 @@ function SetsTab() {
   );
   const { availableLlmModels } = useModelList();
   const { enableAidpKnowledge } = useDeployment();
-  const [agentList] = useList("/api/agent/published_list");
+  const [agentList] = useList(API_ENDPOINTS.agent.publishedList);
   useEffect(() => {
     if (!genSetModel && availableLlmModels.length > 0)
       setGenSetModel(availableLlmModels[0].id);
@@ -2124,7 +2212,7 @@ function SetsTab() {
         let hasMore = true;
         while (hasMore && page <= 10) {
           const resp = await fetch(
-            `/api/aidp-mgmt/knowledge-bases?page=${page}&page_size=100`,
+            `${API_ENDPOINTS.aidpMgmt.knowledgeBases}?page=${page}&page_size=100`,
             { headers: getAuthHeaders() }
           );
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -2142,9 +2230,12 @@ function SetsTab() {
             }))
         );
       } else {
-        const resp = await fetch("/api/indices?include_stats=true", {
-          headers: getAuthHeaders(),
-        });
+        const resp = await fetch(
+          `${API_ENDPOINTS.knowledgeBase.indices}?include_stats=true`,
+          {
+            headers: getAuthHeaders(),
+          }
+        );
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         const info = data.indices_info || [];
@@ -2175,7 +2266,7 @@ function SetsTab() {
   const SET_CASE_PAGE_SIZE = 10;
 
   const refreshSets = () =>
-    fetch("/api/evaluation-sets", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationSets.list, { headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         setSets(d.data || d.items || []);
@@ -2215,7 +2306,7 @@ function SetsTab() {
   const loadSetCasesPage = async (setId: number, page: number, q?: string) => {
     const sq = q ?? setCaseQuery;
     const offset = (page - 1) * SET_CASE_PAGE_SIZE;
-    let url = `/api/evaluation-sets/${setId}/cases?limit=${SET_CASE_PAGE_SIZE}&offset=${offset}`;
+    let url = `${API_ENDPOINTS.evaluationSets.cases(setId)}?limit=${SET_CASE_PAGE_SIZE}&offset=${offset}`;
     if (sq) url += `&query=${encodeURIComponent(sq)}`;
     const r = await fetch(url, { headers: getAuthHeaders() });
     const d = await r.json();
@@ -2379,7 +2470,7 @@ function SetsTab() {
     if (!newQ.trim() || !newA.trim()) return;
     try {
       const r = await fetch(
-        `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases`,
+        API_ENDPOINTS.evaluationSets.cases(detailSet.evaluation_set_id),
         {
           method: "POST",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
@@ -2414,7 +2505,10 @@ function SetsTab() {
     const c = editingCase;
     try {
       const r = await fetch(
-        `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/${c.evaluation_set_case_id}`,
+        API_ENDPOINTS.evaluationSets.case(
+          detailSet.evaluation_set_id,
+          c.evaluation_set_case_id
+        ),
         {
           method: "PUT",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
@@ -2712,7 +2806,10 @@ function SetsTab() {
               onConfirm={async () => {
                 try {
                   const resp = await fetch(
-                    `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/${r.evaluation_set_case_id}`,
+                    API_ENDPOINTS.evaluationSets.case(
+                      detailSet.evaluation_set_id,
+                      r.evaluation_set_case_id
+                    ),
                     { method: "DELETE", headers: getAuthHeaders() }
                   );
                   if (!resp.ok) {
@@ -3158,7 +3255,7 @@ function SetsTab() {
                       if (genSetDesc) body.set_description = genSetDesc;
                     }
                     const r = await fetch(
-                      "/api/evaluation-sets/generate-cases-async",
+                      API_ENDPOINTS.evaluationSets.generateCases,
                       {
                         method: "POST",
                         headers: {
@@ -3226,7 +3323,9 @@ function SetsTab() {
                   setBatchDeleting(true);
                   try {
                     const resp = await fetch(
-                      `/api/evaluation-sets/${detailSet.evaluation_set_id}/cases/batch-delete`,
+                      API_ENDPOINTS.evaluationSets.casesBatchDelete(
+                        detailSet.evaluation_set_id
+                      ),
                       {
                         method: "POST",
                         headers: {

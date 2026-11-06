@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Non-browser A2A probes; credentials never cross the JSON stdout boundary."""
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from shared.auth import sign_in  # noqa: E402
 from shared.config import service_url  # noqa: E402
 from shared.http import assert_status, client  # noqa: E402
 from shared.case_evidence import write_case_evidence  # noqa: E402
+from shared.final_answers import final_answer_text  # noqa: E402
 
 
 class ProbeFailure(AssertionError):
@@ -48,8 +51,14 @@ def verify_invocation(response, marker):
     if any(str(part.get('text') or '').lstrip().startswith('Error:') for part in parts):
         raise ProbeFailure('published invocation returned an error text despite HTTP 200')
     answer = ''.join(str(part.get('text') or '') for part in parts)
-    answer += ''.join(str(event.get('content') or '') for event in events
-                      if event.get('type') == 'final_answer')
+    if any(event.get('answer_phase') for event in events if event.get('type') == 'final_answer'):
+        try:
+            answer += final_answer_text(events)
+        except AssertionError as exc:
+            raise ProbeFailure('published invocation has no completed root answer') from exc
+    else:
+        answer += ''.join(str(event.get('content') or '') for event in events
+                          if event.get('type') == 'final_answer' and not event.get('invocation_id'))
     if marker not in answer:
         raise ProbeFailure('published invocation omitted the required response marker')
 
@@ -115,6 +124,9 @@ async def run(args):
                 parts = [part for message in messages for part in (message.get('parts') or [])
                          if isinstance(part, dict)]
                 write_case_evidence('a2a-published-response', {
+                    # Keep the sanitized protocol envelope to distinguish schema
+                    # interpretation failures from missing runtime output.
+                    'response_payload': payload,
                     'http_status': response.status_code,
                     'task_state': (task.get('status') or {}).get('state'),
                     'part_count': len(parts),

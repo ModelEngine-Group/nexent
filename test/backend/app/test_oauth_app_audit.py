@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Audit entries recorded on successful OAuth login, signup and unlink operations.
 
 Feature-scoped companion to ``test_oauth_app.py``. The real audit service is
@@ -17,34 +18,34 @@ import pytest
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-_STUBBED_MODULES = ["services.audit_service", "services.oauth_service",
-                    "database.oauth_account_db", "apps.oauth_app"]
+_STUBBED_MODULES = ["management.services.monitor.audit", "management.services.permission.identity.oauth",
+                    "management.db.identity.oauth_account", "management.api.identity.oauth"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
 # A previously collected legacy file may replace the `services` package with a
 # MagicMock, which would shadow the audit service; loading it from its file keeps
 # the audit lines real.
 _audit_spec = importlib.util.spec_from_file_location(
-    "services.audit_service", os.path.join(backend_dir, "services", "audit_service.py")
+    "management.services.monitor.audit", os.path.join(backend_dir, "management", "services", "monitor", "audit.py")
 )
 _audit_service = importlib.util.module_from_spec(_audit_spec)
 _audit_spec.loader.exec_module(_audit_service)
-sys.modules["services.audit_service"] = _audit_service
+sys.modules["management.services.monitor.audit"] = _audit_service
 
 # Import-time isolation: the provider client and the account store reach
 # external services that these audit assertions do not exercise.
-sys.modules["services.oauth_service"] = MagicMock()
-sys.modules["database.oauth_account_db"] = MagicMock()
+sys.modules["management.services.permission.identity.oauth"] = MagicMock()
+sys.modules["management.db.identity.oauth_account"] = MagicMock()
 # Rebuild the app module against the collaborators above instead of reusing one
 # a legacy file already imported against its own stubs.
-sys.modules.pop("apps.oauth_app", None)
+sys.modules.pop("management.api.identity.oauth", None)
 
 from http import HTTPStatus  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import apps.oauth_app as oauth_app_module  # noqa: E402
+from management.api.identity import oauth as oauth_app_module
 
 for _name, _module in _ORIGINAL_MODULES.items():
     if _module is None:
@@ -76,6 +77,7 @@ def oauth_callback_stub(mocker):
     mocker.patch.object(oauth_app_module, "get_provider_user_info",
                         return_value={"id": "12345", "email": "octocat@github.com",
                                       "username": "octocat"})
+    mocker.patch.object(oauth_app_module, "require_active_account", return_value={"delete_flag":"N"})
     mocker.patch.object(oauth_app_module, "ensure_user_tenant_exists")
     mocker.patch.object(oauth_app_module, "create_or_update_oauth_account")
     mocker.patch.object(oauth_app_module, "generate_session_jwt", return_value="eyJ.mock.token")
@@ -106,6 +108,7 @@ def test_oauth_login_success_records_audit_entry(caplog, mocker, oauth_callback_
 
 def test_oauth_signup_success_records_audit_entry(caplog, mocker):
     """Completing a pending OAuth signup records the created user, never the password."""
+    mocker.patch.object(oauth_app_module, "parse_pending_oauth_token", return_value={"provider": "github", "provider_user_id": "provider-user", "provider_email": "", "provider_username": "octocat"})
     mocker.patch.object(
         oauth_app_module,
         "complete_pending_oauth_account",

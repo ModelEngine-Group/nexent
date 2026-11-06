@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import json
 import re
@@ -11,7 +13,7 @@ from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
 
-from agents.nl2agent_agent import (
+from management.services.agent.creation import (
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )
@@ -98,7 +100,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
         assert "once the action is known, emit executable code immediately" in prompt
-        assert 'equal to `["duty_prompt"]`' in prompt
+        assert 'equal to `["prompt"]`' in prompt
         assert "exactly one concise Think-Code example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
@@ -116,7 +118,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
         assert "确定动作后必须立即输出可执行代码" in prompt
-        assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
+        assert '`updated_fields` 是 `["prompt"]`' in prompt
         assert "只编写一个紧凑的“思考-代码”示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
@@ -127,14 +129,14 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 8
+    assert len(code_blocks) == 9
     for code_block in code_blocks:
         ast.parse(code_block)
 
     few_shots_save = next(
         code_block
         for code_block in code_blocks
-        if 'fields={"few_shots_prompt": few_shots}' in code_block
+        if 'fields={"prompt": prompt}' in code_block
     )
     assert r"\x3ccode>" in few_shots_save
     assert r"\x3c/code>" in few_shots_save
@@ -257,7 +259,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "listing only the potentially affected fields",
             "searches only for the newly requested capability",
             "reconfigure a specifically requested bound resource",
-            "Never start at `duty_prompt` or enter the full Prompt generation chain",
+            "Never start at `prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
             "Conversational removal is unsupported",
             "model settings, publication status, version state",
@@ -272,7 +274,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "只列出可能受影响的字段",
             "只搜索用户新请求的能力",
             "重新配置用户明确指定的已绑定资源",
-            "不得因卡片已确认就从 `duty_prompt` 开始",
+            "不得因卡片已确认就从 `prompt` 开始",
             "以“已更新：”开头",
             "不支持通过对话移除资源",
             "模型设置、发布状态、版本状态",
@@ -489,11 +491,10 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     save_inputs = json.loads(config.tools[3].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
+        "enable_protocol_repair_retry",
         "name",
         "description",
-        "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
     }

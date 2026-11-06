@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Read-only deployed-source, sandbox-event and trace observations."""
 
 import asyncio
@@ -5,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -39,7 +41,7 @@ def verify_deployment(cfg):
         assert "ReadSkillConfigTool" in deployed["NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS"].split(",")
     script = (
         "import hashlib,json; from pathlib import Path; import nexent; "
-        "from consts.const import AGENT_WORKSPACE_ROOT,NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT; "
+        "from contracts.constants.environment import AGENT_WORKSPACE_ROOT,NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT; "
         "from nexent.core.agents.sandbox_workspace import SandboxWorkspace; "
         "root=Path(nexent.__file__).parent; "
         f"sources={{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in {SOURCES!r}}}; "
@@ -97,8 +99,11 @@ def verify_sandbox_events(records, promoted):
     assert sorted(created) == sorted(destroyed), "An owned session sandbox was not reclaimed"
 
 
-async def trace_observations(cfg, conversation_id, final_marker):
+async def trace_observations(cfg, conversation_id, final_marker, *, expected_warmups=None):
     settings, credentials = trace_credentials(cfg)
+    if settings.get("api_version", "v1") == "v2":
+        return await trace_observations_v2(settings, credentials, conversation_id, final_marker,
+                                         expected_warmups=expected_warmups)
     deadline = time.monotonic() + 60
     async with httpx.AsyncClient(
         base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
@@ -109,7 +114,7 @@ async def trace_observations(cfg, conversation_id, final_marker):
             body = response.json()
             rows = complete_page(body)
             assert all(str(row.get("sessionId")) == str(conversation_id) for row in rows)
-            completed = [row for row in rows if final_marker in json.dumps(row.get("output"))]
+            completed = [row for row in rows if output_contains(row.get("output"), final_marker)]
             if completed:
                 observations = []
                 for row in rows:
@@ -123,6 +128,75 @@ async def trace_observations(cfg, conversation_id, final_marker):
                 return observations
             await asyncio.sleep(0.5)
     raise AssertionError("Completed Agent trace was not exported before the deadline")
+
+
+async def observation_pages(api, params):
+    """Read every cursor page; incomplete or cyclic pagination cannot prove absence."""
+    rows, cursors, ids = [], set(), set()
+    params = dict(params, limit=100, fields="core,basic,io,metadata")
+    for _ in range(100):
+        response = await api.get("/api/public/v2/observations", params=params)
+        assert response.status_code == 200, "Langfuse observation query failed"
+        body = response.json()
+        page = body.get("data")
+        assert isinstance(page, list) and isinstance(body.get("meta"), dict), "Invalid observation page"
+        for item in page:
+            assert item.get("id") and item["id"] not in ids, "Duplicate observation across cursor pages"
+            ids.add(item["id"])
+            rows.append(item)
+        cursor = body["meta"].get("cursor")
+        if not cursor:
+            return rows
+        assert cursor not in cursors, "Observation pagination cursor repeated"
+        cursors.add(cursor)
+        params["cursor"] = cursor
+    raise AssertionError("Observation pagination exceeded the bounded fixture limit")
+
+
+def output_contains(output, marker):
+    """Compare text before JSON escaping so multiline artifact answers match."""
+    if isinstance(output, str):
+        return marker in output
+    if isinstance(output, dict):
+        return any(output_contains(value, marker) for value in output.values())
+    if isinstance(output, list):
+        return any(output_contains(value, marker) for value in output)
+    return False
+
+
+async def trace_observations_v2(settings, credentials, conversation_id, final_marker, *, expected_warmups=None):
+    since = datetime.now(timezone.utc) - timedelta(minutes=15)
+    deadline = time.monotonic() + 60
+    async with httpx.AsyncClient(
+        base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
+    ) as api:
+        while time.monotonic() < deadline:
+            window = {"fromStartTime": since.isoformat(), "toStartTime": datetime.now(timezone.utc).isoformat()}
+            rows = await observation_pages(api, dict(window, sessionId=str(conversation_id)))
+            assert all(str(row.get("sessionId")) == str(conversation_id) for row in rows)
+            completed = [row for row in rows if row.get("name") == "agent.run" and row.get("endTime")
+                         and output_contains(row.get("output"), final_marker)]
+            if completed:
+                observations = []
+                for trace_id in sorted({row["traceId"] for row in completed}):
+                    page = await observation_pages(api, dict(window, traceId=trace_id))
+                    assert all(row.get("traceId") == trace_id for row in page)
+                    # The HTTP root has no session ID. Fetch the whole trace and
+                    # wait for its completed root before counting warm-ups.
+                    roots = [row for row in page if not row.get("parentObservationId") and row.get("endTime")]
+                    if not roots:
+                        break
+                    observations.extend(page)
+                else:
+                    assert observations, "Empty telemetry cannot prove absence of warm-up"
+                    warmups = [row for row in observations if row.get("name") == "agent.sandbox.warmup"]
+                    # Cloud indexes spans independently; a completed root can
+                    # become visible before its children. Never accept a missing
+                    # expected span, or suppress extra spans, at this boundary.
+                    if expected_warmups is None or len(warmups) >= expected_warmups:
+                        return observations
+            await asyncio.sleep(1)
+    raise AssertionError("Completed Agent observations were not exported before the deadline")
 
 
 def complete_page(body):
@@ -153,17 +227,24 @@ async def verify_trace_access(cfg):
         async with httpx.AsyncClient(
             base_url=settings["url"].rstrip("/"), auth=credentials, timeout=15, trust_env=False
         ) as api:
-            response = await api.get("/api/public/traces", params={"limit": 1, "sessionId": "tfp-preflight"})
+            if settings.get("api_version", "v1") == "v2":
+                now = datetime.now(timezone.utc)
+                response = await api.get("/api/public/v2/observations", params={
+                    "limit": 1, "sessionId": "tfp-preflight", "fields": "core",
+                    "fromStartTime": (now - timedelta(minutes=1)).isoformat(), "toStartTime": now.isoformat(),
+                })
+            else:
+                response = await api.get("/api/public/traces", params={"limit": 1, "sessionId": "tfp-preflight"})
     except httpx.RequestError as error:
         raise AssetDependencyError("monitoring", "tfp_langfuse", detail="Trace API is unreachable") from error
     if response.status_code != 200:
-        raise AssetDependencyError("monitoring", "tfp_langfuse", detail="Read-only trace preflight failed")
+        raise AssetDependencyError("monitoring", "tfp_langfuse", detail=f"Read-only trace preflight failed (HTTP {response.status_code})")
 
 
 def backend_values(value):
     if isinstance(value, dict):
         for key, child in value.items():
-            if key == "sandbox.backend":
+            if key in {"sandbox.backend", "attributes.sandbox.backend"}:
                 yield child
             else:
                 yield from backend_values(child)

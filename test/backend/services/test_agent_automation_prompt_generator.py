@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 
 import pytest
 
-from services.agent_automation import prompt_generator
-from services.agent_automation.prompt_generator import (
+from management.services.automation import prompt as prompt_generator
+from management.services.automation.prompt import (
     AutomationPromptStrategy,
     AutomationPromptStrategyFactory,
     AutomationPromptContext,
@@ -311,13 +312,13 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
 def test_prompt_strategy_factory_selects_llm_and_falls_back_on_config_error(monkeypatch):
     factory = AutomationPromptStrategyFactory()
     monkeypatch.setattr(
-        "utils.config_utils.tenant_config_manager.get_model_config",
+        "management.services.configuration.tenant.settings.tenant_config_manager.get_model_config",
         lambda **kwargs: {"model_name": "configured"},
     )
     assert isinstance(factory.create("tenant"), LLMAutomationPromptStrategy)
 
     monkeypatch.setattr(
-        "utils.config_utils.tenant_config_manager.get_model_config",
+        "management.services.configuration.tenant.settings.tenant_config_manager.get_model_config",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("config unavailable")),
     )
     assert isinstance(factory.create("tenant"), TemplateAutomationPromptStrategy)

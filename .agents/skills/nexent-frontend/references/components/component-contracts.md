@@ -53,3 +53,7 @@ For a reusable component with non-obvious behavior, document:
 - related components, hooks, services, or translation namespaces.
 
 Keep the document focused on decisions that an implementer or reviewer could otherwise miss. Update it when the component's contract changes.
+
+## Shared resource descriptions
+
+ResourceItem owns two-line description truncation and full-content Ant Design Tooltip behavior for tools, skills, knowledge and Workbench compatibility rows. Consumers must not add nested description tooltips for individual resource sources. Preserve renderDescription markup; use the full item description for tooltip content, falling back to the rendered description when no plain description exists. Empty descriptions produce no empty tooltip. Hovering never selects or persists a resource; action controls remain separate. MCP service headers use their existing standalone tooltip because they are not ResourceItem rows.

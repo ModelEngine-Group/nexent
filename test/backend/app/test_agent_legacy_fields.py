@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Removed run controls must never become an ordinary query silently."""
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from consts.model import AgentRequest
+from contracts.agent import AgentRequest
 
 
 @pytest.mark.parametrize("field,value", [

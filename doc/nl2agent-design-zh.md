@@ -106,9 +106,7 @@ Local MCP 工具只负责搜索目录。智能体草稿的编辑由前端配置 
   "name": "weather_assistant",
   "display_name": "天气助手",
   "description": "查询天气并提供出行建议",
-  "duty_prompt": "...",
-  "constraint_prompt": "...",
-  "few_shots_prompt": null
+  "prompt": "职责、约束、工具规则和必要示例"
 }
 ```
 
@@ -139,11 +137,8 @@ Draft 卡只展示生成完成状态、智能体名称和简短介绍，不展�
 - `name`
 - `display_name`
 - `description`
-- `duty_prompt`
-- `constraint_prompt`
-- `few_shots_prompt`
+- `prompt`
 
-`few_shots_prompt` 为 null 时转换为空字符串。之前确认的工具集合保持不变。
 
 ## 6. assistant-ui 映射
 

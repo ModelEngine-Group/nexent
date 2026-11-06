@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: MODEL-RECOVERY-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+  profiles: [mock]
+acceptance_bindings:
+  AC-RECOVERY:
+  - test_recovery_preserves_wire_and_rolls_back_failed_attempt
+  - test_shared_legacy_recovery_over_real_http
+  - test_terminal_bounds_and_private_diagnostics
+  AC-AGENT-REPAIR:
+  - test_agent_keeps_empty_budget_and_repairs_nonempty_protocol
+  AC-PRIVACY:
+  - test_terminal_bounds_and_private_diagnostics
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -9,6 +9,25 @@ This document summarizes the complete guidelines and best practices for tool dev
 The current SDK includes the following tool types:
 
 ### Search Tools
+
+`deepseek_search` calls the DeepSeek Search API independently of the conversation model.
+Configure the required `deepseek_api_key`. `max_results` defaults to 10 (range 1–50).
+The `only_high_quality` switch defaults to false; when enabled it retains results with
+`rerank_score >= 1.5`, without additional requests to fill the result count.
+`need_content` defaults to false (long summaries); enable it to prefer webpage content.
+Selected summaries and content are returned in full without truncation. No localization IP configuration is exposed.
+Filtered, deduplicated results are stably sorted by descending `rerank_score`, preserving input order for ties, before citation indices are assigned.
+
+The Agent supplies only `query`, with `site:`, `-site:`, `-keyword`, `-"excluded phrase"`,
+`"exact phrase"`, `after:`, `before:`, and multiple sites joined by `OR`.
+The platform replaces unquoted language operators with one trailing `lang:zh` or `lang:en`
+from the current frontend language. Normally keep input within 120 Unicode code points;
+the final query must fit 128. Validation uses the current UI language; direct SDK callers
+can explicitly pass internal `language` (default `zh`). Empty or fully filtered results
+return `[]`. Refresh the tool directory after upgrading.
+
+For SDK usage, construct `DeepSeekSearchTool(deepseek_api_key=key, only_high_quality=True, language="en")`
+and call `forward('DeepSeek site:github.com after:2025')`. The SDK never reads environment variables.
 - **ExaSearchTool**: Web search tool based on EXA API
 - **TavilySearchTool**: Web search tool based on Tavily API  
 - **LinkupSearchTool**: Search tool based on Linkup API
@@ -342,4 +361,4 @@ class SearchTool(Tool):
 4. **Configuration Management**: Support configuring key parameters through environment variables
 5. **Error Recovery**: Provide error recovery mechanisms when possible
 
-By following these guidelines, you can ensure that newly developed tools maintain consistency with existing tools and have good maintainability and extensibility. 
+By following these guidelines, you can ensure that newly developed tools maintain consistency with existing tools and have good maintainability and extensibility.

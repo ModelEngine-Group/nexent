@@ -1,0 +1,23 @@
+replicaCount: 1
+
+images:
+  backend:
+    repository: nexent/nexent
+    tag: latest
+    pullPolicy: IfNotPresent
+
+logs:
+  existingClaim: nexent-logs
+
+service:
+  type: NodePort
+  port: 5016
+  nodePort: 30016
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

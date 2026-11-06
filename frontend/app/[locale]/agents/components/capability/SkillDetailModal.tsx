@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -195,7 +197,7 @@ function formatSource(source: string | undefined, t: (key: string) => string) {
   const raw = (source || "").trim();
   if (!raw) return "-";
   if (OFFICIAL_SOURCES.has(raw)) return t("skillPool.group.official");
-  if (raw === "repository") return "\u4ed3\u5e93";
+  if (raw === "repository") return t("workbench.controls.repository");
   if (raw === "custom" || raw === "\u81ea\u5b9a\u4e49")
     return t("skillPool.group.custom");
   return raw;

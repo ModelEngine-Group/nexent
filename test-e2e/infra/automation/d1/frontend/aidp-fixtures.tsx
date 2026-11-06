@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { afterEach, beforeEach, vi } from "vitest";
 import {
@@ -65,7 +67,10 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ locale: "zh" }),
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/lib/auth", () => ({ getAuthHeaders: () => ({}) }));
+vi.mock("@/lib/auth", () => ({
+  getAuthHeaders: () => ({}),
+  fetchWithAuth: vi.fn(),
+}));
 vi.mock("@/lib/session", () => ({ handleSessionExpired: vi.fn() }));
 vi.mock("@/lib/logger", () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
@@ -165,6 +170,14 @@ export const filesResponse = (items = [file], total = items.length) => ({
   total_count: total,
   total_reliable: true,
   has_more: false,
+});
+export const uploadTasksResponse = () => ({
+  value: [],
+  total_count: 0,
+  total_reliable: true,
+  has_more: false,
+  stats: { total: 0, success: 0, extracting: 0, failed: 0, queued: 0 },
+  retention_days: 30,
 });
 export interface RequestRecord {
   url: URL;
@@ -315,6 +328,7 @@ export class UploadTransport {
 beforeEach(() => {
   identity.user = { id: "owner-a", tenantId: "tenant-a", role: "USER" };
   identity.enabled = true;
+  identity.push.mockClear();
   requests.length = 0;
   UploadTransport.sent = [];
   sessionStorage.clear();
@@ -340,10 +354,15 @@ beforeEach(() => {
       return reply(listResponse());
     if (request.url.pathname === base + "/kb-a") return reply(kb);
     if (
-      request.url.pathname === base + "/kb-a/documents" &&
+      request.url.pathname === base + "/kb-a/files" &&
       request.method === "GET"
     )
       return reply(filesResponse());
+    if (
+      request.url.pathname === base + "/kb-a/upload-tasks" &&
+      request.method === "GET"
+    )
+      return reply(uploadTasksResponse());
     throw new Error(
       `Unhandled component HTTP request: ${request.method} ${request.url.pathname}`,
     );

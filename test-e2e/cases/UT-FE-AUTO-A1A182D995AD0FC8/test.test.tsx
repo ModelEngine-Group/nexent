@@ -1,5 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
   getCitationKey,
   getCitationLabel,
@@ -43,12 +45,13 @@ vi.mock('@assistant-ui/react-markdown', () => ({
   useIsMarkdownCodeBlock: () => false,
 }));
 
-vi.mock('@assistant-ui/react', () => ({
+vi.mock('@assistant-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@assistant-ui/react')>()),
   useAuiState: (selector: (s: any) => any) => selector(h.aui),
 }));
 
 vi.mock('@/app/[locale]/newchat/ui/sources-panel-context', () => ({
-  useSourcesPanel: () => ({ open: h.open }),
+  useSourcesPanelActions: () => ({ open: h.open }),
 }));
 
 vi.mock('@/app/[locale]/newchat/ui/cite-marker', () => ({
@@ -118,7 +121,7 @@ describe('citation click-highlight feature gate', () => {
     ];
 
     h.citation.enabled = false;
-    const first = render(<Cite citekey='a1' />);
+    const first = render(<Cite citekey="a1" />);
     h.citeMarkerProps[0].onClick(null);
     expect(h.open.mock.calls[0][0].selectedCitationKey).toBe('a1');
     expect(h.open.mock.calls[0][0].citationContext).toBeUndefined();
@@ -127,9 +130,120 @@ describe('citation click-highlight feature gate', () => {
     h.open.mockClear();
     h.citeMarkerProps.length = 0;
     h.citation.enabled = true;
-    render(<Cite citekey='a1' />);
+    const highlighted = render(<Cite citekey="a1" />);
     h.citeMarkerProps[0].onClick(null);
     expect(h.open.mock.calls[0][0].selectedCitationKey).toBe('a1');
-    expect(h.open.mock.calls[0][0].citationContext).toBe('Highlight this sentence');
+    expect(h.open.mock.calls[0][0].citationContext).toBe(
+      'Highlight this sentence',
+    );
+    highlighted.unmount();
+
+    h.aui.message.content = [
+      { type: 'text', text: 'Last source first [[a45]], then [[a1]].' },
+      ...Array.from({ length: 45 }, (_, index) => ({
+        type: 'source',
+        citeIndex: index + 1,
+        toolSign: 'a',
+        title: `Source ${index + 1}`,
+        sourceType: 'document',
+      })),
+      ...Array.from({ length: 21 }, (_, index) => ({
+        type: 'source',
+        citeIndex: index + 1,
+        toolSign: 'b',
+        isImage: true,
+        title: `Image ${index + 1}`,
+        url: `https://example.invalid/${index + 1}.png`,
+      })),
+    ];
+    h.open.mockClear();
+    h.citeMarkerProps.length = 0;
+    const citation = render(<Cite citekey="a45" />);
+    expect(h.citeMarkerProps[0].displayIndex).toBe(1);
+    h.citeMarkerProps[0].onClick(null);
+    let selection = h.open.mock.calls.at(-1)![0];
+    expect(selection.sources).toHaveLength(45);
+    expect(selection.images).toHaveLength(21);
+    const close = vi.fn();
+    const panel = render(
+      <SourcesPanel
+        {...selection}
+        open
+        onClose={close}
+        selectionToken={selection}
+      />,
+    );
+    const aside = () => panel.container.querySelector('aside')!;
+    const sourceCards = () =>
+      panel.container.querySelectorAll('li[data-citation-key]');
+    expect(aside()).toHaveAttribute('data-source-page', '3');
+    expect(sourceCards()).toHaveLength(5);
+    expect(
+      panel.container.querySelector('[data-citation-key="a45"]'),
+    ).toHaveAttribute('data-citation-selected', 'true');
+    fireEvent.click(screen.getByTitle('1'));
+    expect(sourceCards()).toHaveLength(20);
+    expect(aside()).toHaveAttribute('data-source-page', '1');
+    h.citeMarkerProps[0].onClick(null);
+    selection = h.open.mock.calls.at(-1)![0];
+    panel.rerender(
+      <SourcesPanel
+        {...selection}
+        open
+        onClose={close}
+        selectionToken={selection}
+      />,
+    );
+    expect(aside()).toHaveAttribute('data-source-page', '3');
+    expect(
+      panel.container.querySelector('[data-citation-key="a45"]'),
+    ).toHaveAttribute('data-citation-selected', 'true');
+    citation.unmount();
+    h.citeMarkerProps.length = 0;
+    render(<Cite citekey="b21" />);
+    h.citeMarkerProps[0].onClick(null);
+    selection = h.open.mock.calls.at(-1)![0];
+    panel.rerender(
+      <SourcesPanel
+        {...selection}
+        open
+        onClose={close}
+        selectionToken={selection}
+      />,
+    );
+    expect(aside()).toHaveAttribute('data-source-page', '2');
+    expect(
+      panel.container.querySelectorAll('.aui-global-search-image'),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab', { name: /chat.sources.sources/ }));
+    expect(aside()).toHaveAttribute('data-source-page', '1');
+    expect(sourceCards()).toHaveLength(20);
+    selection = {
+      ...selection,
+      sources: selection.sources.slice(0, 2),
+      images: [],
+      selectedCitationKey: undefined,
+    };
+    panel.rerender(
+      <SourcesPanel
+        {...selection}
+        open
+        onClose={close}
+        selectionToken={selection}
+      />,
+    );
+    expect(sourceCards()).toHaveLength(2);
+    expect(screen.queryByRole('navigation')).toBeNull();
+    selection = { ...selection, sources: [] };
+    panel.rerender(
+      <SourcesPanel
+        {...selection}
+        open
+        onClose={close}
+        selectionToken={selection}
+      />,
+    );
+    expect(aside()).toHaveAttribute('data-source-page', '1');
+    expect(screen.getByText('chat.sources.noSources')).toBeInTheDocument();
   });
 });

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for config_sync_service STT model config saving.
 These tests cover the STT specific fields in save_config_impl.
@@ -31,23 +32,26 @@ minio_config_mock.validate = MagicMock()
 if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
     sys.modules.pop('consts', None)
 
-database_client_module = types.ModuleType('database.client')
+database_client_module = types.ModuleType('management.db.client')
 database_client_module.MinioClient = MagicMock()
 database_client_module.minio_client = minio_client_mock
 database_client_module.as_dict = MagicMock(side_effect=lambda value: value)
 database_client_module.db_client = MagicMock()
 database_client_module.db_client.clean_string_values = MagicMock(side_effect=lambda value: value)
 database_client_module.get_db_session = MagicMock()
-sys.modules['database.client'] = database_client_module
-database_package = sys.modules.get('database') or importlib.import_module('database')
+sys.modules['management.db.client'] = database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+database_package = importlib.import_module('management.db')
 setattr(database_package, 'client', database_client_module)
-database_model_management_module = types.ModuleType('database.model_management_db')
+database_model_management_module = types.ModuleType('management.db.model.repository')
 database_model_management_module.get_model_by_model_id = MagicMock()
 database_model_management_module.get_model_id_by_display_name = MagicMock()
 database_model_management_module.get_model_records = MagicMock(return_value=[])
-sys.modules['database.model_management_db'] = database_model_management_module
-setattr(database_package, 'model_management_db', database_model_management_module)
-backend_database_client_module = sys.modules.get('backend.database.client')
+sys.modules['management.db.model.repository'] = database_model_management_module
+backend_database_client_module = sys.modules.get('management.db.client')
 if backend_database_client_module is not None and not hasattr(backend_database_client_module, 'minio_client'):
     backend_database_client_module.minio_client = minio_client_mock
 
@@ -55,16 +59,16 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig',
       return_value=minio_config_mock).start()
-patch('backend.database.client.MinioClient',
+patch('management.db.client.MinioClient',
       return_value=minio_client_mock).start()
-patch('database.client.MinioClient', return_value=minio_client_mock).start()
-patch('backend.database.client.minio_client', minio_client_mock, create=True).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.minio_client', minio_client_mock, create=True).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import backend modules after all patches are applied
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
+with patch('management.db.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.services.config_sync_service import (
+    from management.services.configuration.tenant.service import (
         save_config_impl,
         build_model_config,
     )
@@ -73,13 +77,13 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
 @pytest.fixture
 def service_mocks():
     """Create mocks for service layer dependencies."""
-    with patch('backend.services.config_sync_service.tenant_config_manager') as mock_tenant_config_manager, \
-            patch('backend.services.config_sync_service.get_env_key') as mock_get_env_key, \
-            patch('backend.services.config_sync_service.safe_value') as mock_safe_value, \
-            patch('backend.services.config_sync_service.get_model_records') as mock_get_model_records, \
-            patch('backend.services.config_sync_service.get_model_id_by_display_name') as mock_get_model_id, \
-            patch('backend.services.config_sync_service.get_model_name_from_config') as mock_get_model_name, \
-            patch('backend.services.config_sync_service.logger') as mock_logger:
+    with patch('management.services.configuration.tenant.service.tenant_config_manager') as mock_tenant_config_manager, \
+            patch('management.services.configuration.tenant.service.get_env_key') as mock_get_env_key, \
+            patch('management.services.configuration.tenant.service.safe_value') as mock_safe_value, \
+            patch('management.services.configuration.tenant.service.get_model_records') as mock_get_model_records, \
+            patch('management.services.configuration.tenant.service.get_model_id_by_display_name') as mock_get_model_id, \
+            patch('management.services.configuration.tenant.service.get_model_name_from_config') as mock_get_model_name, \
+            patch('management.services.configuration.tenant.service.logger') as mock_logger:
 
         mock_get_model_records.return_value = []
         yield {

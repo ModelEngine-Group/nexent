@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Formal model service relocation contracts."""
 
 import ast
@@ -70,7 +71,7 @@ def test_msrf_d1_001():
 
     for path in MODEL.rglob("*.py"):
         assert len(path.read_text(encoding="utf-8-sig").splitlines()) <= 1500, path
-    assert len((ROOT / "backend/contracts/model.py").read_text().splitlines()) <= 1500
+    assert len((ROOT / "backend/contracts/model.py").read_text(encoding="utf-8").splitlines()) <= 1500
 
     for folder in ("backend", "sdk", "test", "test-e2e"):
         for path in _python_sources(folder):
@@ -88,7 +89,7 @@ def test_msrf_d1_001():
                             | {"llm_utils", "model_name_utils", "reasoning"}
                             for a in node.names
                         ), path
-                    if module == "utils.config_utils":
+                    if module == "management.services.configuration.tenant.settings":
                         assert not any(
                             a.name == "get_model_name_from_config" for a in node.names
                         ), path

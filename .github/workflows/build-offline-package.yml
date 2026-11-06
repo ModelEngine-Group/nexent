@@ -49,7 +49,7 @@ on:
 
 jobs:
   build-offline-package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +120,7 @@ jobs:
       - name: Set deployment components
         id: set-components
         run: |
-          COMPONENTS="infrastructure,application,data-process,supabase,terminal"
+          COMPONENTS="infrastructure,application,data-process,terminal"
 
           echo "components=$COMPONENTS" >> "$GITHUB_OUTPUT"
           echo "Selected deployment components: $COMPONENTS"

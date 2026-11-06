@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from datetime import datetime, timezone
@@ -5,9 +6,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from services.agent_automation.models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
-from services.agent_automation.schedule_engine import compute_next_fire_at
-from services.agent_automation.schedule_engine import is_valid_cron_expression
+from contracts.automation import ScheduleMode, ScheduleRuleType, ScheduleTrigger
+from management.services.automation.scheduler import compute_next_fire_at
+from management.services.automation.scheduler import is_valid_cron_expression
 from nexent.scheduler import triggers as trigger_engine
 
 

@@ -89,12 +89,12 @@ journey("PW-AGENT-02", async (context) => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(mainAgent);
         await agents.openAdvanced();
-        await agents.openSection("添加子智能体");
+        await agents.openSection("协作智能体管理");
         await expect(page.getByText(collaborator, { exact: true }).first()).toBeVisible();
         await agents.openBasic();
         await agents.openSection("知识库管理");
         await expect(page.getByText(knowledgeName, { exact: true }).first()).toBeVisible();
-        await agents.openSection("首页欢迎信息");
+        await agents.openSection("开场白与示例问题");
         // The greeting field keeps aria-label 开场白 across rendering modes.
         await expect(page.getByLabel("开场白", { exact: true })).toHaveValue(opening);
         return "full refresh recovered collaborator, knowledge and Conversation Guide from persisted Advanced config";
@@ -110,7 +110,7 @@ journey("PW-AGENT-02", async (context) => {
       },
       async () => {
         await agents.openAdvanced();
-        await agents.openSection("添加子智能体");
+        await agents.openSection("协作智能体管理");
         await expect(page.getByText(collaborator, { exact: true }).first()).toBeVisible();
         expect(await page.getByText("外部", { exact: true }).count()).toBe(0);
         return "the relation is an internal published Agent and is not an external A2A relation";

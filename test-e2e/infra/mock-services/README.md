@@ -120,6 +120,21 @@ python3 test-e2e/infra/mock-services/deploy.py up memory --env-file <test-home>/
 
 On Windows use the verified `python` interpreter instead of `python3`.
 
+### External knowledge
+
+The `ext-knowledge-mock` package serves DataMate, RAGFlow, Dify, iData,
+Haotian, AIDP, controlled assets and the fault model on one port. Suite runs
+do **not** need this dispatcher: a case declaring `required_mock_services`
+(`knowledge-provider` / `http-fixture` / `model-provider`) starts the mock as a
+suite-owned process on port `30090` and stops it after the case, with no
+machine-local YAML. Point the product's outbound knowledge settings at
+`http://host.docker.internal:30090` (Docker Desktop) or
+`http://127.0.0.1:30090` (host mode).
+
+Manual standalone start and the optional external Compose stack are documented
+in [ext-knowledge-mock/README.md](ext-knowledge-mock/README.md), including the
+per-adapter base URL conventions and control-plane endpoints.
+
 ### Extension registration
 
 Add `<service-directory>/deployment.json` under `test-e2e/infra/mock-services` and supply

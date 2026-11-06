@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-050-RULE-01
     description: Agent 工具选择、参数保存/回显、工具删除关联
+  - rule_id: F-050-RULE-02
+    description: MCP tools are grouped by service with expand/collapse, individual and matching-service selection, mixed selection state and current-page selection; filtering and cancellation preserve unrelated bindings and confirmation persists individual tool IDs.
   required_test_stages:
   - D3
   source:

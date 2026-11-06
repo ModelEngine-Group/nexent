@@ -1,0 +1,113 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CONTROLS-D4-003
+  feature_id: WB-CONTROLS
+  requirement_ids:
+  - WB-REASONING-CAPABILITY-20261014
+  - WB-EFFORT-LAYOUT-20261014
+  - CHAT-WORKBENCH-REFINEMENTS-20261015
+  - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
+  - WB-RESOURCE-LISTS-20261015
+  - CHAT-SAMPLING-20261016
+  business_rule_ids:
+  - WB-CONTROLS-RULE-004
+  title: Capability-driven reasoning controls and complete run parameters
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify identical capability-derived effort choices and actual frontend run request parameters for Workbench and
+    Agent chat.
+  preconditions:
+  - Local frontend with authorized mock tenant, saved Agent thinking disabled and mocked run endpoints.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open Workbench and enable thinking for a model supporting all effort enum values; select each concrete level and
+      explicitly send a message.
+    expected: Localized options match capability values; each request retains its selected raw Workbench thinking_effort.
+      Explicit sampling edits reach generation_config alongside unchanged reasoning values. Selected option text and checkmark
+      do not overlap; the model panel and effort popup remain anchored when switching among different-length levels. Effort
+      trigger fits its current label and chevron without fixed-width blank space. Shared reasoning and advanced-setting text
+      rows remain compact, with at most 16px between the effort label bottom and advanced label top.
+  - order: 2
+    action: Open Agent chat with the same model and disabled saved thinking; enable thinking and select each concrete effort
+      before an explicit send.
+    expected: Options match Workbench despite disabled saved configuration; each selected concrete value reaches reasoning_effort
+      and generation_config.thinking_effort unchanged. Selected option text and checkmark do not overlap; the model panel
+      and effort popup remain anchored when switching among different-length levels. Effort trigger fits its current label
+      and chevron without fixed-width blank space.
+  - order: 3
+    action: Choose automatic effort and explicitly send, then disable thinking and explicitly send in both routes. Switch
+      to a model without supported effort controls.
+    expected: Automatic retains its documented inherit behavior, disabled runs have no active reasoning override, and unsupported
+      controls never show invented low/medium/high choices. Model selection and existing request fields are retained. Effort/budget
+      rows collapse while thinking is off. Enabling again restores the selected Agent effort override, or model effort when
+      that field is absent, rather than the previous temporary effort. With no saved Agent/model effort, off/on restores auto
+      even when capability default is high; saved explicit Agent and model defaults still win.
+  - order: 4
+    action: Open missing, unknown-toggle, unsupported-toggle and supported toggle-only model controls. Inspect unavailable
+      explanations on hover and explicit activation and attempt changes; check focus alone and reopening/switching models do not show a tooltip or permanent text. Enable the toggle-only model. Resize Workbench to narrow panes and inspect the toolbar.
+    expected: All unavailable reasoning controls show the same localized message, 当前模型不支持开启思考模式, without exposing capability status distinctions. Explanations appear only on hover or explicit click/keyboard activation, never on menu autofocus or model switches, with no permanent visible paragraph. The text-only tooltip does not intercept clicks on the model menu trigger. Closing/reopening the menu and switching models clear stale tooltip state. Unavailable controls cannot change
+      their value or create requests. Toggle-only thinking has no empty effort/budget row. At 679px and 390px viewport widths,
+      model text, selector and send action remain visible, contained and usable; layout checks do not submit messages.
+  - order: 5
+    action: In Agent chat send with the default model, switch to a non-default model with explicit thinking and sampling, then open another history whose response is deliberately deferred. Return after loading and send again.
+    expected: Loading blocks composer interactions without unmounting its subtree. The other session uses its own controls. Returning restores the last model, thinking effort and explicit sampling, and the next request carries those same values. Earlier captured requests remain unchanged and switching alone never submits or writes configuration.
+  - order: 6
+    action: Start a blank Agent chat with no server conversation ID. Send once using the default model and accept the returned conversation_id header; change to a non-default model and explicit reasoning/sampling and send again. Open another history, then return through the newly listed server conversation and send once more.
+    expected: The first request omits conversation_id and later requests reuse the returned ID. The local draft and server history share the last selected model and controls without leaking into another draft/history. The final request matches the restored UI, earlier requests remain unchanged, and switching alone produces no run or configuration write.
+  expected_results:
+  - Users can select the same model-supported effort levels and send their actual values from both routes.
+  - Unavailable controls explain their reason, toggle-only controls contain no empty selectors and narrow composers retain usable model actions.
+  - Cold history switching retains independent session model controls and immutable prior requests; the next send matches the restored UI.
+  - Newly created chats preserve their latest model and run controls through local-to-server identity binding and history reopening.
+  forbidden_side_effects:
+  - No real model calls or database mutations; no implicit sampling override or global model configuration mutation; no unsupported
+    effort submission.
+  actor: Authorized mock tenant user
+  journey:
+  - Open Workbench
+  - Enable thinking
+  - Select levels
+  - Explicitly send
+  - Open Agent chat
+  - Repeat
+  - Disable thinking
+  final_business_result:
+  - Both entry points honor actual capability values and preserve non-reasoning parameters.
+  failure_evidence:
+  - Browser trace and assertion screenshot.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Capability parity and exact supported effort forwarding across both frontend run paths with safe mocked boundaries.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Reasoned unavailable states, toggle-only controls and usable narrow composer layout preserve existing request boundaries.
+    steps: [4]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Page-lifetime history restoration survives pending loads and preserves exact run controls and earlier snapshots.
+    steps: [5]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: A genuinely new conversation retains model controls after receiving a server identity, with exact subsequent requests and isolated drafts.
+    steps: [6]
+    expected_results: [4]
+    forbidden_side_effects: [1]

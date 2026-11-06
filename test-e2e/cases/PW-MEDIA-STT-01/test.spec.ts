@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -55,17 +57,17 @@ journey("PW-MEDIA-STT-01", async (context) => {
         // A received final frame can precede its React composer update. Do not
         // stop capture on an older non-empty but truncated transcription.
         try {
-          await expect(page.getByPlaceholder("发送消息...")).toHaveValue(marker, { timeout: 120000 });
+          await chat.expectComposerText(marker, 120_000);
         } catch {
           writeFileSync(join(contract.caseDir, "stt-websocket.json"), JSON.stringify(sttSocketEvents, null, 2), "utf8");
-          const received = await page.getByPlaceholder("发送消息...").inputValue();
+          const received = await chat.composerText();
           const failure = new Error(`real STT wire returned the complete 92831 marker but Composer did not apply it within 120000ms without stopping capture; value=${JSON.stringify(received)}; evidence=stt-websocket.json`);
           failure.name = "ProductFailure";
           throw failure;
         }
         return `real STT wire and Composer both received the fixed WAV number marker: ${wav}`;
       },
-      async () => { const stop = page.locator("button:has(svg.lucide-mic-off)"); if (await stop.isVisible()) await stop.click(); await expect(page.locator("button:has(svg.lucide-mic)")).toBeEnabled(); const composer = page.getByPlaceholder("发送消息..."); try { await expect(composer).not.toHaveValue("", { timeout: 180000 }); } catch { throw new Error(`STT returned no Composer text; websocket evidence=${JSON.stringify(sttSocketEvents)}`); } transcript = await composer.inputValue(); return `transcription completed: ${transcript}; websocket events=${sttSocketEvents.length}`; },
+      async () => { const stop = page.locator("button:has(svg.lucide-mic-off)"); if (await stop.isVisible()) await stop.click(); await expect(page.locator("button:has(svg.lucide-mic)")).toBeEnabled(); try { await expect.poll(async () => chat.composerText(), { timeout: 180_000 }).not.toBe(""); } catch { throw new Error(`STT returned no Composer text; websocket evidence=${JSON.stringify(sttSocketEvents)}`); } transcript = await chat.composerText(); return `transcription completed: ${transcript}; websocket events=${sttSocketEvents.length}`; },
       async () => { if (!/Nex[ea]nt/i.test(transcript) || !/9\D*2\D*8\D*3\D*1|九\D*二\D*八\D*三\D*一/.test(transcript)) { const error = new Error(`STT Composer transcript failed the fixed keyword/number oracle: ${JSON.stringify(transcript)}; websocket evidence=${JSON.stringify(sttSocketEvents)}`); error.name = "ProductFailure"; throw error; } return "transcript satisfies the V5 keyword/CER oracle with punctuation and number-format tolerance"; },
       async () => {
         const run = page.waitForResponse(r => r.request().method() === "POST" && r.url().includes("/api/agent/run") && (r.headers()["content-type"] || "").includes("text/event-stream"));
@@ -81,7 +83,7 @@ journey("PW-MEDIA-STT-01", async (context) => {
     ],
     assertions: [
       async () => { expect(transcript).toMatch(/Nex[ea]nt/i); return "the configured real STT produced the required content within the declared CER tolerance"; },
-      async () => { await expect(page.getByPlaceholder("发送消息...")).toBeVisible(); return "transcription entered the ordinary send path"; },
+      async () => { await chat.expectComposerText(/\S/); return "transcription entered the ordinary send path"; },
       async () => { await expect(page.locator("button:has(svg.lucide-mic)")).toBeEnabled(); return "voice connection terminated and Composer is not hung"; },
     ],
   });

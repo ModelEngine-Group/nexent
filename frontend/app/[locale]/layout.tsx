@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { Metadata } from "next";
 import React, { ReactNode } from "react";
 import { RootProvider } from "@/components/providers/rootProvider";
@@ -21,15 +23,9 @@ export async function generateMetadata({
   const { locale } = await params;
   const isZh = locale === "zh";
   return {
-    title: `AI Agent Platform`,
     description: isZh
       ? "一个强大的 AI 智能体平台，支持智能对话与流程自动化"
       : "A powerful AI agent platform for intelligent conversations and automation",
-    icons: {
-      icon: "/favicon.png",
-      shortcut: "/favicon.png",
-      apple: "/favicon.png",
-    },
   };
 }
 

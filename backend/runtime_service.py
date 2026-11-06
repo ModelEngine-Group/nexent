@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import logging.config
 import warnings
 
 import uvicorn
 
-from consts.const import APP_VERSION
+from contracts.constants.environment import APP_VERSION
 
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -14,8 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from apps.runtime_app import app
-from utils.logging_utils import (
+from runtime.api.application import app
+from infrastructure.logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )

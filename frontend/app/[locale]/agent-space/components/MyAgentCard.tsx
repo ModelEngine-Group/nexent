@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Button, Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
+  Bot,
   ClipboardCheck,
   Clock,
   Eye,
@@ -25,6 +28,7 @@ import {
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { MyAgentIcon } from "./MyAgentIcon";
+import { AgentCardTags } from "./AgentCardTags";
 
 interface MyAgentCardProps {
   agent: MyEditableAgentItem;
@@ -82,6 +86,7 @@ export function MyAgentCard({
   });
   const footerDate = formatMineDate(agent.version_create_time);
   const versionLabel = agent.version_label;
+  const isMainAgent = agent.is_main_agent !== false;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
@@ -159,17 +164,32 @@ export function MyAgentCard({
       aria-current={highlighted ? "true" : undefined}
       onClick={onView}
       subtitle={
-        versionLabel != null ? (
+        isMainAgent || versionLabel != null ? (
           <span className="flex min-w-0 items-center gap-1.5">
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-primary"
-              aria-hidden
-            />
-            <span className="min-w-0 truncate">
-              {t("agentRepository.mine.currentVersion", {
-                version: versionLabel,
-              })}
-            </span>
+            {isMainAgent ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                <Bot className="size-3" aria-hidden />
+                {t("agentRepository.card.mainAgent")}
+              </span>
+            ) : null}
+            {versionLabel != null ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                  aria-hidden
+                />
+                <span
+                  className="min-w-0 truncate"
+                  title={t("agentRepository.mine.currentVersion", {
+                    version: versionLabel,
+                  })}
+                >
+                  {t("agentRepository.mine.currentVersion", {
+                    version: versionLabel,
+                  })}
+                </span>
+              </span>
+            ) : null}
           </span>
         ) : undefined
       }
@@ -178,16 +198,9 @@ export function MyAgentCard({
       descriptionLines={2}
       tags={
         tags.length > 0 ? (
-          <>
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              >
-                {getAgentRepositoryTagLabel(tag, t)}
-              </span>
-            ))}
-          </>
+          <AgentCardTags
+            labels={tags.map((tag) => getAgentRepositoryTagLabel(tag, t))}
+          />
         ) : undefined
       }
       statusRow={

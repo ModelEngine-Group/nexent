@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: RERUN83-FIXTURES-20261023
+  change_type: test-fix
+  title: Repair verified fixture and stream interpretation drift from the unresolved-case rerun
+  description: >-
+    Use owned display names for repository text search, reconstruct committed
+    root answers through the existing invocation-aware SSE helper, bind ordinary
+    and creator preparation to the same case-owned MCP server, and save/read back
+    canonical FAF prompt instructions on draft and published versions. Locate the
+    current accessible policy checkbox without weakening persisted state checks.
+    Lock actual document-preview dependencies in the isolated frontend test package.
+    The user explicitly confirmed the new 180px Agent card design on 2026-10-23;
+    update its Feature and browser contract including derived inner/body/category/
+    footer geometry while preserving all interactions and negative boundaries.
+    The six newly enabled AIDP cases supply the now-required description and
+    catalog-resolved embedding_model, including otherwise-valid unauthenticated
+    requests so request-schema rejection cannot mask authorization assertions.
+    Complete the card HTTP fixture's verification configuration, recognize the
+    read-only name-check POST, wait for menu dismissal, select explicit page sizes
+    and bind fixed-header table data rows. Card-body activation verifies the current
+    editor route. Bound Windows transient atomic-replace retries without deleting
+    the previous evidence file or swallowing persistent write failures.
+    Keep FAF fixture setup and authentication as separate audited preconditions;
+    assert the NL2Agent checkbox during its owning editor step rather than inventing
+    an unimplemented precondition. Check contract/action counts through the actual
+    TypeScript syntax tree before a live rerun.
+    Refresh infrastructure regression fixtures for the current Redis task-state
+    import, server-owned conversation title lookup, accessible Debug panel/input
+    and atomic-file module dependency. These fixtures do not change product code
+    or replace real-provider acceptance evidence.
+    Align the AIDP empty-update error with the current supported-field contract;
+    require the exact HTTP 400 and message, keep subsequent no-mutation/delete/
+    isolation assertions, and prove wrong status/messages cannot pass.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: Product code is unchanged; these changes repair formal test assets and their runtime dependencies.
+  affected_features:
+    existing: [F-069, F-111, F-178, CHAT-MODEL-CONTROLS, FAF-001, NL2AGENT-PROTOCOL]
+    modified: [AGENT-LIST-VIEWS]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [API-AUTO-D6C1BBC6199D63C0, AGT-071, CHAT-MODEL-CONTROLS-D3-001,
+      CHAT-MODEL-CONTROLS-D3-002, FAF-D3-001, FAF-D4-001,
+      NL2AGENT-PROTOCOL-D4-001, AGENT-LIST-D4-002, AIDP-FE-FILES-01, AIDP-FE-GRAPH-01,
+      API-AUTO-0210A73052FA9CE0, API-AUTO-22F6CB69A36D094D, API-AUTO-3B8A8FB947806F0E,
+      API-AUTO-FECE331C989B771F, AGT-AUTO-7A2120E630C381C7, API-AUTO-7513FEF9904B9F3F]
+    added: []
+    retired: []
+  notes: >-
+    Preserve the unavailable-model callback and Workbench same-row product failures.
+    No production source, machine credentials, historical PASS receipts or running
+    Ubuntu campaign are modified. Infrastructure regression results do not certify
+    live acceptance; regenerate derived views and execute affected failed Cases
+    only after the active campaign has restored Local and released its lock.

@@ -1,8 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Knowledge Base List Layout Constants
  *
  * Shared layout configuration for knowledge base list components.
- * Used by both KnowledgeBaseList (standalone page) and KnowledgeBaseSelectorModal (popup).
+ * Used by both KnowledgeBaseList (standalone page) and KnowledgeSelectorDrawer (popup).
  */
 
 // Knowledge base layout constants configuration

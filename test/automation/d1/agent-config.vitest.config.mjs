@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -11,6 +13,7 @@ const frontendRoot = path.join(repositoryRoot, "frontend");
 const frontendRequire = createRequire(path.join(frontendRoot, "package.json"));
 
 export default defineConfig({
+  oxc: { jsx: { runtime: "automatic" } },
   root: frontendRoot,
   resolve: {
     alias: [

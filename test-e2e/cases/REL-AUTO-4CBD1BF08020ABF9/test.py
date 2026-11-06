@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5 reliability: interrupted-upload recovery must stay scoped to the restarting service.'''
 
 from __future__ import annotations
@@ -9,16 +10,11 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import inspect as schema_inspect
 
-from consts.task_recovery import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
-from database.client import db_client, get_db_session, minio_client
-from database.db_models import KnowledgeFileLifecycle
-from database.knowledge_file_lifecycle_db import (
-    create_file_record,
-    delete_file_record,
-    get_file_record,
-    list_uploading_files_created_before,
-)
-from services.startup_recovery_service import fail_interrupted_uploads
+from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
+from management.db.client import db_client, get_db_session, minio_client
+from management.db.models import KnowledgeFileLifecycle
+from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record, get_file_record, list_uploading_files_created_before
+from management.recovery import fail_interrupted_uploads
 
 
 def _set_create_time(file_id: str, create_time: datetime) -> None:

@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.services.memory_retrieval_service`` (Phase 2)."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.services.memory.retrieval`` (Phase 2)."""
 
 import importlib
 import sys
@@ -9,7 +10,7 @@ import pytest
 
 pytestmark = pytest.mark.anyio
 
-_MODULE_PREFIXES = ("database", "backend.database", "nexent", "services")
+_MODULE_PREFIXES = ("management.db.memory", "management.services.memory", "nexent")
 _ORIGINAL_MODULES = {
     name: module
     for name, module in sys.modules.items()
@@ -24,14 +25,15 @@ sys.path.insert(
 )
 
 
-# Stub database
-database_pkg = types.ModuleType("database")
-database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
-database_pkg.memory_long_term_db.get_active.return_value = None
-database_pkg.memory_record_db = MagicMock(name="memory_record_db")
-database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
-sys.modules["database"] = database_pkg
-sys.modules["backend.database"] = database_pkg
+# Stub the current persistence boundary before importing retrieval orchestration.
+database_pkg = types.ModuleType("management.db.memory")
+database_pkg.__path__ = []
+for _name in ("long_term", "record", "retrieval_hit"):
+    _collaborator = MagicMock(name=_name)
+    setattr(database_pkg, _name, _collaborator)
+    sys.modules[f"management.db.memory.{_name}"] = _collaborator
+database_pkg.long_term.get_active.return_value = None
+sys.modules["management.db.memory"] = database_pkg
 
 
 # Stub SDK nexent memory
@@ -140,30 +142,26 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 
-# Stub services package so relative imports within the package work.
-sys.modules["services"] = types.ModuleType("services")
-
-
-# Stub services.memory_index_service
-memory_index_service_mod = types.ModuleType("services.memory_index_service")
+# Stub management.services.memory.index
+memory_index_service_mod = types.ModuleType("management.services.memory.index")
 memory_index_service_mod.MemoryIndexService = MagicMock(name="MemoryIndexService")
 memory_index_service_mod.get_memory_index_service = MagicMock(name="get_memory_index_service")
 memory_index_service_mod.reset_memory_index_service = MagicMock(name="reset_memory_index_service")
-sys.modules["services.memory_index_service"] = memory_index_service_mod
+sys.modules["management.services.memory.index"] = memory_index_service_mod
 
 
-# Stub services.memory_record_service
-memory_record_service_mod = types.ModuleType("services.memory_record_service")
+# Stub management.services.memory.records
+memory_record_service_mod = types.ModuleType("management.services.memory.records")
 memory_record_service_mod.MemoryRecordService = MagicMock(name="MemoryRecordService")
 memory_record_service_mod._compute_content_embedding = MagicMock(name="_compute_content_embedding")
 memory_record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
     name="_resolve_tenant_embedding_model_info", return_value=None
 )
 memory_record_service_mod.get_memory_record_service = MagicMock(name="get_memory_record_service")
-sys.modules["services.memory_record_service"] = memory_record_service_mod
+sys.modules["management.services.memory.records"] = memory_record_service_mod
 
 
-from backend.services import memory_retrieval_service
+from management.services.memory import retrieval as memory_retrieval_service
 
 # The imported module keeps its boundary doubles; restore global import state
 # immediately so collection order cannot corrupt unrelated service/SDK tests.

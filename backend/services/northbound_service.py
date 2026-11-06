@@ -1,55 +1,42 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.authentication import NorthboundContext
 import asyncio
 import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
 from os.path import basename
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    ASSET_OWNER_TENANT_ID,
-    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
-    NORTHBOUND_RATE_LIMIT_ENABLED,
-    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-)
-from consts.exceptions import (
-    AppException,
-    RuntimeMetadataValidationError,
-    LimitExceededError,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    UnauthorizedError,
-    ConversationNotFoundError,
-)
-from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
-from consts.model import AgentRequest, ToolParamsRequest
-from database.knowledge_db import get_knowledge_info_by_tenant_id
-from database.conversation_db import get_conversation_list, get_conversation_messages
-from database.token_db import get_latest_usage_metadata, log_token_usage
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.agent import AgentRequest
+from contracts.tool import ToolParamsRequest
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
+from management.db.conversation.repository import get_conversation_list, get_conversation_messages
+from management.db.identity.token import get_latest_usage_metadata, log_token_usage
 from management.services.agent.service import (
     get_agent_by_name_impl,
 )
-from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
-from services.thread_lifecycle_service import northbound_thread_manager
-from services.runtime_state_service import runtime_state_service
-from services.agent_version_service import list_published_agents_impl
-from services.knowledge_scope_service import (
+from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from infrastructure.concurrency import northbound_thread_manager
+from management.services.agent.run_state import runtime_state_service
+from management.services.agent.versions import list_published_agents_impl
+from management.services.knowledge_base.scope import (
     AIDP_TOOL_CLASS,
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.resolver import get_model_descriptor
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
@@ -57,24 +44,17 @@ from services.conversation_management_service import (
     update_conversation_title as update_conversation_title_service,
 )
 from management.services.model.management import list_models_for_tenant
-from utils.runtime_metadata_utils import (
+from infrastructure.serialization.runtime_metadata import (
     runtime_metadata_hash,
     validate_runtime_metadata,
 )
-from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
-from database.attachment_db import get_file_url, get_file_size_from_minio
+from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from management.db.file.attachment import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
 
 
-@dataclass
-class NorthboundContext:
-    request_id: str
-    tenant_id: str
-    user_id: str
-    authorization: str
-    token_id: int = 0
 
 
 def _build_northbound_file_descriptor(
@@ -167,7 +147,7 @@ def _normalize_northbound_attachments(
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
     """
-    from database.attachment_db import _build_mcp_presigned_url
+    from management.db.file.attachment import _build_mcp_presigned_url
 
     if attachments is None:
         return None
@@ -385,6 +365,7 @@ async def start_streaming_chat(
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    final_answer_mode: Literal["complete", "delta"] = "complete",
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -488,6 +469,7 @@ async def start_streaming_chat(
             agent_request=agent_request,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
+            final_answer_mode=final_answer_mode,
         )
     finally:
         if composed_key:

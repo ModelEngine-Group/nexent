@@ -1,6 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend.apps.skill_app module.
+Unit tests for management.api.skill.skill module.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
+from contracts import skill as skill_app_management_skill_skill_skill
 import sys
 import os
 import io
@@ -107,16 +112,17 @@ nexent_skills_mock.SkillManager = MockSkillManager
 
 # Mock consts
 consts_mock = types.ModuleType('consts')
-consts_exceptions_mock = types.ModuleType('consts.exceptions')
-consts_model_mock = types.ModuleType('consts.model')
-consts_const_mock = types.ModuleType('consts.const')
-consts_agent_mock = types.ModuleType('consts.agent')
+consts_exceptions_mock = types.ModuleType('contracts.errors.exceptions')
+consts_model_mock = types.ModuleType('contracts.agent')
+consts_const_mock = types.ModuleType('contracts.constants.environment')
+consts_agent_mock = types.ModuleType('contracts.constants.constants')
 consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
-sys.modules['consts.agent'] = consts_agent_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
-sys.modules['consts.model'] = consts_model_mock
-sys.modules['consts.const'] = consts_const_mock
+install_shared_contract_stub(consts_agent_mock, 'agent_constants')
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
+install_business_contract_stubs(consts_model_mock)
+sys.modules['contracts.constants.environment'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
 consts_const_mock.ENABLE_AGENT_WORKBENCH = False
@@ -140,6 +146,12 @@ class AppException(Exception):
 consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+class RunModelControlsError(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+consts_exceptions_mock.RunModelControlsError = RunModelControlsError
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 
 # Use real Pydantic model for SkillInstanceInfoRequest
@@ -212,15 +224,16 @@ services_mock.__path__ = [
 ]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('management.services.skill.service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
-services_creation_history_mock = types.ModuleType('services.workbench_creation_history_service')
-services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
-services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
+services_creation_history_mock = types.ModuleType('management.services.conversation.creation_history')
+services_asset_owner_visibility_mock = types.ModuleType('management.services.permission.asset_owner')
+services_agent_draft_permission_mock = types.ModuleType('management.services.agent.authorization')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
+sys.modules['management.services.skill.transfer'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'workbench_creation_history_service', services_creation_history_mock)
@@ -239,6 +252,8 @@ class ResourceBindingError(Exception):
 
 services_agent_draft_permission_mock.AgentDraftEditError = AgentDraftEditError
 services_agent_draft_permission_mock.ResourceBindingError = ResourceBindingError
+consts_exceptions_mock.AgentDraftEditError = AgentDraftEditError
+consts_exceptions_mock.ResourceBindingError = ResourceBindingError
 services_agent_draft_permission_mock.require_agent_draft_edit = MagicMock()
 
 class MockSkillService:
@@ -262,30 +277,31 @@ def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
     sys.modules['management.services.skill.service'] = services_skill_service_mock
+    sys.modules['management.services.skill.transfer'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-    sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-    sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-    sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+    sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+    sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+    sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
-utils_config_utils_mock = types.ModuleType('utils.config_utils')
+utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
+utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_auth_utils_mock
-sys.modules['utils.config_utils'] = utils_config_utils_mock
+sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
 utils_config_utils_mock.tenant_config_manager = MagicMock()
 utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-# Set utils.config_utils as attribute for attribute-based imports
+# Set management.services.configuration.tenant.settings as attribute for attribute-based imports
 setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
-# Mock utils.prompt_template_utils
-utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
-sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
+# Mock management.services.agent.prompt
+utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
+sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={
     "system_prompt": "You are a skill creator",
     "user_prompt": "Create a skill"
@@ -307,9 +323,9 @@ nexent_core_utils_observer_mock.MessageObserver = type('MessageObserver', (), {}
 
 # Mock database
 database_mock = types.ModuleType('database')
-database_skill_db_mock = types.ModuleType('database.skill_db')
+database_skill_db_mock = types.ModuleType('management.db.skill.repository')
 sys.modules['database'] = database_mock
-sys.modules['database.skill_db'] = database_skill_db_mock
+sys.modules['management.db.skill.repository'] = database_skill_db_mock
 
 # Set up MinIOStorageConfig mock properly
 class MockMinIOStorageConfig:
@@ -320,8 +336,17 @@ nexent_storage_minio_config_mock.MinIOStorageConfig = MockMinIOStorageConfig
 # Skip redundant patches - mocks are already set up via sys.modules
 # These patches would fail because the modules are already mocked
 
+# The HTTP suite controls orchestration; persistence is exercised in creator service UT and D5.
+creator_execution_mock = types.ModuleType("management.services.conversation.creator_execution")
+async def start_creation_turn_boundary(request, *, stream_factory, **kwargs):
+    return await stream_factory(request, None), 42
+creator_execution_mock.start_creation_turn = start_creation_turn_boundary
+sys.modules["management.services.conversation.creator_execution"] = creator_execution_mock
+
 # Now import the app module
-from backend.apps import skill_app
+from management.api.skill import skill as skill_app
+from contracts.constants import constants as skill_app_management_skill_skill
+from runtime.api.skill import creation as skill_app_creation
 
 
 # ===== List Skills Endpoint Tests =====
@@ -330,9 +355,9 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_success(self, mocker):
         """Test successful listing of skills."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.list_visible_skills.return_value = [
@@ -353,9 +378,9 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_empty(self, mocker):
         """Test listing skills when none exist."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.list_visible_skills.return_value = []
@@ -372,10 +397,10 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_error(self, mocker):
         """Test listing skills when service throws exception."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.list_visible_skills.side_effect = SkillException("Database error")
@@ -390,9 +415,9 @@ class TestListSkillsEndpoint:
 
     def test_list_skills_super_admin_with_tenant_id(self, mocker):
         """Test super admin listing skills for a specific tenant via tenant_id query param."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("super_user", "super_tenant")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.list_visible_skills.return_value = [
@@ -427,10 +452,10 @@ class TestCreateSkillEndpoint:
     async def test_create_skill_preserves_app_exception(self, mocker):
         """Quota exceptions must reach the global AppException handler."""
         mocker.patch(
-            "backend.apps.skill_app.get_current_user_id",
+            "management.api.skill.skill.get_current_user_id",
             return_value=("user123", "tenant123"),
         )
-        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service = mocker.patch("management.api.skill.skill.SkillService").return_value
         mock_service.create_skill.side_effect = AppException("quota", "limit reached")
 
         request = skill_app.SkillCreateRequest(
@@ -443,8 +468,8 @@ class TestCreateSkillEndpoint:
 
     def test_create_skill_success(self, mocker):
         """Test successful skill creation."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -475,8 +500,8 @@ class TestCreateSkillEndpoint:
 
     def test_create_skill_with_tool_names(self, mocker):
         """Test skill creation with tool_names returns 500 (NotImplementedError)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -501,9 +526,9 @@ class TestCreateSkillEndpoint:
 
     def test_create_skill_already_exists(self, mocker):
         """Test skill creation when skill already exists."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -527,8 +552,8 @@ class TestCreateSkillEndpoint:
 
     def test_create_skill_unauthorized(self, mocker):
         """Test skill creation with invalid auth."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("Invalid token")
 
             app = FastAPI()
@@ -549,9 +574,9 @@ class TestCreateSkillEndpoint:
 
     def test_create_skill_validation_error(self, mocker):
         """Test skill creation with invalid data."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -582,10 +607,10 @@ class TestCreateSkillFromFileEndpoint:
     async def test_upload_preserves_app_exception(self, mocker):
         """Upload quota and file-size errors must not be converted to HTTP 500."""
         mocker.patch(
-            "backend.apps.skill_app.get_current_user_id",
+            "management.api.skill.skill.get_current_user_id",
             return_value=("user123", "tenant123"),
         )
-        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service = mocker.patch("management.api.skill.skill.SkillService").return_value
         mock_service.create_skill_from_file.side_effect = AppException("quota", "limit reached")
 
         from fastapi import UploadFile
@@ -596,8 +621,8 @@ class TestCreateSkillFromFileEndpoint:
 
     def test_upload_md_file_success(self, mocker):
         """Test successful skill upload from MD file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -628,8 +653,8 @@ description: Uploaded skill
 
     def test_upload_zip_file_success(self, mocker):
         """Test successful skill upload from ZIP file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -658,8 +683,8 @@ description: Uploaded skill
 
     def test_upload_with_skill_name_override(self, mocker):
         """Test skill upload with name override."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -689,7 +714,7 @@ class TestGetSkillEndpoint:
 
     def test_get_skill_success(self, mocker):
         """Test successful skill retrieval."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.return_value = {
@@ -710,7 +735,7 @@ class TestGetSkillEndpoint:
 
     def test_get_skill_not_found(self, mocker):
         """Test skill not found."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.return_value = None
@@ -731,9 +756,9 @@ class TestAssetOwnerSkillVisibility:
         """Non-asset-owner callers receive a denial payload for asset-owner skills."""
         asset_owner_tenant_id = "asset_owner_tenant_id"
 
-        with patch("backend.apps.skill_app.can_view_skill", return_value=False), \
-             patch("backend.apps.skill_app.get_current_user_id", return_value=("user123", "regular_tenant")), \
-             patch("backend.apps.skill_app.SkillService") as mock_service_class:
+        with patch("management.api.skill.skill.can_view_skill", return_value=False), \
+             patch("management.api.skill.skill.get_current_user_id", return_value=("user123", "regular_tenant")), \
+             patch("management.api.skill.skill.SkillService") as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.return_value = {
@@ -758,8 +783,8 @@ class TestUpdateSkillEndpoint:
 
     def test_update_skill_success(self, mocker):
         """Test successful skill update."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -784,9 +809,9 @@ class TestUpdateSkillEndpoint:
 
     def test_update_skill_not_found(self, mocker):
         """Test update non-existent skill."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -807,8 +832,8 @@ class TestUpdateSkillEndpoint:
 
     def test_update_skill_no_fields(self, mocker):
         """Test update with no fields to update."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -834,8 +859,8 @@ class TestDeleteSkillEndpoint:
 
     def test_delete_skill_success(self, mocker):
         """Test successful skill deletion."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -854,9 +879,9 @@ class TestDeleteSkillEndpoint:
 
     def test_delete_skill_not_found(self, mocker):
         """Test delete non-existent skill."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -880,7 +905,7 @@ class TestGetSkillFileTreeEndpoint:
 
     def test_get_file_tree_success(self, mocker):
         """Test successful file tree retrieval."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_tree.return_value = {
@@ -902,7 +927,7 @@ class TestGetSkillFileTreeEndpoint:
 
     def test_get_file_tree_not_found(self, mocker):
         """Test file tree for non-existent skill."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_tree.return_value = None
@@ -922,7 +947,7 @@ class TestGetSkillFileContentEndpoint:
 
     def test_get_file_content_success(self, mocker):
         """Test successful file content retrieval."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_content.return_value = "# README content"
@@ -939,7 +964,7 @@ class TestGetSkillFileContentEndpoint:
 
     def test_get_file_content_not_found(self, mocker):
         """Test file content for non-existent file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_content.return_value = None
@@ -961,10 +986,10 @@ class TestUpdateSkillFromFileEndpoint:
     async def test_update_upload_preserves_app_exception(self, mocker):
         """Update uploads must preserve structured file-size errors."""
         mocker.patch(
-            "backend.apps.skill_app.get_current_user_id",
+            "management.api.skill.skill.get_current_user_id",
             return_value=("user123", "tenant123"),
         )
-        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service = mocker.patch("management.api.skill.skill.SkillService").return_value
         mock_service.update_skill_from_file.side_effect = AppException("file", "too large")
 
         from fastapi import UploadFile
@@ -979,8 +1004,8 @@ class TestUpdateSkillFromFileEndpoint:
 
     def test_update_skill_from_md_success(self, mocker):
         """Test successful skill update from MD file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1009,9 +1034,9 @@ description: Updated description
 
     def test_update_skill_not_found(self, mocker):
         """Test update from file for non-existent skill."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1031,10 +1056,10 @@ description: Updated description
                 assert response.status_code == 404
 
     def test_update_skill_from_file_forbidden(self, mocker):
-        from backend.apps.skill_app import ForbiddenError
+        from management.api.skill.skill import ForbiddenError
 
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1059,11 +1084,11 @@ class TestUpdateSkillInstanceEndpoint:
     """Test POST /skills/instance/update endpoint."""
 
     @pytest.mark.asyncio
-    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    @patch('management.api.skill.skill.require_agent_draft_edit')
     async def test_update_instance_success(self, mock_require_edit, mocker):
         """Test successful skill instance update."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1089,11 +1114,11 @@ class TestUpdateSkillInstanceEndpoint:
                 assert "instance" in data
 
     @pytest.mark.asyncio
-    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    @patch('management.api.skill.skill.require_agent_draft_edit')
     async def test_update_instance_skill_not_found(self, mock_require_edit, mocker):
         """Test update instance for non-existent skill."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1119,8 +1144,8 @@ class TestListSkillInstancesEndpoint:
 
     def test_list_instances_success(self, mocker):
         """Test successful skill instances listing."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1150,8 +1175,8 @@ class TestListSkillInstancesEndpoint:
 
     def test_list_instances_empty(self, mocker):
         """Test listing instances when none exist."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1175,8 +1200,8 @@ class TestGetSkillInstanceEndpoint:
 
     def test_get_instance_success(self, mocker):
         """Test successful skill instance retrieval."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1207,8 +1232,8 @@ class TestGetSkillInstanceEndpoint:
 
     def test_get_instance_not_found(self, mocker):
         """Test instance not found."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1233,9 +1258,9 @@ class TestErrorHandling:
 
     def test_unexpected_error_in_list_skills(self, mocker):
         """Test unexpected error handling in list_skills."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.list_visible_skills.side_effect = Exception("Unexpected error")
@@ -1251,8 +1276,8 @@ class TestErrorHandling:
 
     def test_unexpected_error_in_get_skill(self, mocker):
         """Test unexpected error handling in get_skill."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.side_effect = SkillException("Error")
@@ -1267,8 +1292,8 @@ class TestErrorHandling:
 
     def test_unauthorized_in_create(self, mocker):
         """Test unauthorized error in create_skill."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1286,8 +1311,8 @@ class TestErrorHandling:
 
     def test_get_instance_not_found(self, mocker):
         """Test instance not found."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1311,12 +1336,12 @@ class TestUpdateSkillInstanceEndpointExtended:
     """Additional tests for POST /skills/instance/update endpoint."""
 
     @pytest.mark.asyncio
-    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    @patch('management.api.skill.skill.require_agent_draft_edit')
     async def test_update_instance_validation_error(self, mock_require_edit, mocker):
         """Test update instance with validation error."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1339,8 +1364,8 @@ class TestUpdateSkillInstanceEndpointExtended:
 
     def test_update_instance_unauthorized(self, mocker):
         """Test update instance without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1366,8 +1391,8 @@ class TestListSkillInstancesEndpointExtended:
 
     def test_list_instances_with_skill_info(self, mocker):
         """Test listing instances with enriched skill info."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1401,8 +1426,8 @@ class TestListSkillInstancesEndpointExtended:
 
     def test_list_instances_with_version(self, mocker):
         """Test listing instances with specific version."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1435,8 +1460,8 @@ class TestGetSkillInstanceEndpointExtended:
 
     def test_get_instance_with_enrichment(self, mocker):
         """Test instance retrieval with skill info enrichment."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1481,8 +1506,8 @@ class TestGetSkillInstanceEndpointExtended:
 
     def test_get_instance_unauthorized(self, mocker):
         """Test instance retrieval without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1503,9 +1528,9 @@ class TestErrorHandlingExtended:
 
     def test_skill_exception_409_in_create(self, mocker):
         """Test SkillException with 'already exists' returns 409."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1529,9 +1554,9 @@ class TestErrorHandlingExtended:
 
     def test_skill_exception_409_in_upload(self, mocker):
         """Test SkillException with 'already exists' in upload returns 409."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1552,8 +1577,8 @@ class TestErrorHandlingExtended:
 
     def test_unexpected_error_in_get_skill_instance(self, mocker):
         """Test unexpected error in get_skill_instance."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1572,8 +1597,8 @@ class TestErrorHandlingExtended:
 
     def test_unexpected_error_in_list_instances(self, mocker):
         """Test unexpected error in list_skill_instances."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1597,8 +1622,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_with_tool_ids_and_tool_names(self, mocker):
         """Test update with both tool_ids and tool_names (both are ignored - returns 400)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1618,8 +1643,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_with_tool_names_only(self, mocker):
         """Test update with only tool_names (returns 400 - not supported)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1639,8 +1664,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_with_tags(self, mocker):
         """Test update skill with tags field."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1664,8 +1689,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_with_source(self, mocker):
         """Test update skill with source field."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1689,8 +1714,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_with_config_values(self, mocker):
         """Test update skill with config_values field."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1714,8 +1739,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_unauthorized(self, mocker):
         """Test update skill without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1732,9 +1757,9 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_service_exception(self, mocker):
         """Test update skill with generic SkillException (non-404)."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1754,8 +1779,8 @@ class TestUpdateSkillEndpointExtended:
 
     def test_update_skill_unexpected_error(self, mocker):
         """Test update skill with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1780,8 +1805,8 @@ class TestDeleteSkillEndpointExtended:
 
     def test_delete_skill_unauthorized(self, mocker):
         """Test delete skill without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1797,8 +1822,8 @@ class TestDeleteSkillEndpointExtended:
 
     def test_delete_skill_unexpected_error(self, mocker):
         """Test delete skill with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1822,8 +1847,8 @@ class TestGetSkillEndpointExtended:
 
     def test_get_skill_service_exception(self, mocker):
         """Test get skill with SkillException."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.side_effect = SkillException("Service error")
@@ -1838,7 +1863,7 @@ class TestGetSkillEndpointExtended:
 
     def test_get_skill_unexpected_error(self, mocker):
         """Test get skill with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.side_effect = Exception("Unexpected error")
@@ -1858,8 +1883,8 @@ class TestGetSkillFileTreeEndpointExtended:
 
     def test_get_file_tree_service_exception(self, mocker):
         """Test file tree with SkillException."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_tree.side_effect = SkillException("Service error")
@@ -1874,7 +1899,7 @@ class TestGetSkillFileTreeEndpointExtended:
 
     def test_get_file_tree_unexpected_error(self, mocker):
         """Test file tree with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_tree.side_effect = Exception("Unexpected error")
@@ -1894,8 +1919,8 @@ class TestGetSkillFileContentEndpointExtended:
 
     def test_get_file_content_service_exception(self, mocker):
         """Test file content with SkillException."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_content.side_effect = SkillException("Service error")
@@ -1910,7 +1935,7 @@ class TestGetSkillFileContentEndpointExtended:
 
     def test_get_file_content_unexpected_error(self, mocker):
         """Test file content with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill_file_content.side_effect = Exception("Unexpected error")
@@ -1925,10 +1950,10 @@ class TestGetSkillFileContentEndpointExtended:
 
     def test_get_file_content_traversal_returns_forbidden(self):
         """Unsafe file paths should map to HTTP 403 without leaking local paths."""
-        from backend.apps.skill_app import ForbiddenError
+        from management.api.skill.skill import ForbiddenError
 
-        with patch("backend.apps.skill_app.get_current_user_id", return_value=("user-1", "tenant-1")), \
-                patch("backend.apps.skill_app.SkillService") as mock_service_class:
+        with patch("management.api.skill.skill.get_current_user_id", return_value=("user-1", "tenant-1")), \
+                patch("management.api.skill.skill.SkillService") as mock_service_class:
             mock_service = MagicMock()
             mock_service_class.return_value = mock_service
             mock_service.get_skill.return_value = {"name": "test_skill", "tenant_id": "tenant-1"}
@@ -1948,8 +1973,8 @@ class TestUpdateSkillFromFileEndpointExtended:
 
     def test_update_from_zip_file(self, mocker):
         """Test update skill from ZIP file."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -1977,8 +2002,8 @@ class TestUpdateSkillFromFileEndpointExtended:
 
     def test_update_from_file_unauthorized(self, mocker):
         """Test update from file without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -1996,9 +2021,9 @@ class TestUpdateSkillFromFileEndpointExtended:
 
     def test_update_from_file_service_exception(self, mocker):
         """Test update from file with generic SkillException."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2019,8 +2044,8 @@ class TestUpdateSkillFromFileEndpointExtended:
 
     def test_update_from_file_unexpected_error(self, mocker):
         """Test update from file with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2046,8 +2071,8 @@ class TestCreateSkillFromFileEndpointExtended:
 
     def test_upload_unauthorized(self, mocker):
         """Test upload without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -2065,9 +2090,9 @@ class TestCreateSkillFromFileEndpointExtended:
 
     def test_upload_service_exception(self, mocker):
         """Test upload with generic SkillException."""
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2088,8 +2113,8 @@ class TestCreateSkillFromFileEndpointExtended:
 
     def test_upload_unexpected_error(self, mocker):
         """Test upload with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2115,8 +2140,8 @@ class TestCreateSkillEndpointExtended:
 
     def test_create_skill_unexpected_error(self, mocker):
         """Test create skill with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2152,7 +2177,7 @@ class TestUpdateSkillInstanceEndpointErrorHandling:
         )
 
         with patch(
-            'backend.apps.skill_app.get_current_user_id',
+            'management.api.skill.skill.get_current_user_id',
             side_effect=expected_exception,
         ):
             with pytest.raises(skill_app.HTTPException) as exc_info:
@@ -2168,11 +2193,11 @@ class TestUpdateSkillInstanceEndpointErrorHandling:
         assert exc_info.value is expected_exception
 
     @pytest.mark.asyncio
-    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    @patch('management.api.skill.skill.require_agent_draft_edit')
     async def test_update_instance_unexpected_error(self, mock_require_edit, mocker):
         """Test update instance with unexpected error."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2200,8 +2225,8 @@ class TestListSkillInstancesEndpointErrorHandling:
 
     def test_list_instances_unauthorized(self, mocker):
         """Test list instances without authorization."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -2222,8 +2247,8 @@ class TestGetSkillInstanceEndpointErrorHandling:
 
     def test_get_instance_http_exception_propagation(self, mocker):
         """Test HTTPException is propagated when instance not found."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2243,8 +2268,8 @@ class TestGetSkillInstanceEndpointErrorHandling:
     def test_get_instance_http_exception_from_service(self, mocker):
         """Test HTTPException from service layer is propagated."""
         from fastapi import HTTPException as FastAPIHTTPException
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2268,8 +2293,8 @@ class TestUpdateSkillFieldEdgeCases:
 
     def test_update_skill_with_content_field(self, mocker):
         """Test update skill with content field (line 399)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2293,8 +2318,8 @@ class TestUpdateSkillFieldEdgeCases:
 
     def test_update_skill_with_tool_ids_only(self, mocker):
         """Test update skill with tool_ids only (returns 400 - not supported)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2319,9 +2344,9 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_success(self, mocker):
         """Test successful listing of official skills."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+            with patch('management.api.skill.skill.get_official_skills_with_status') as mock_func:
                 mock_func.return_value = [
                     {"skill_id": 1, "name": "skill1", "source": "official", "status": "installable"},
                     {"skill_id": 2, "name": "skill2", "source": "official", "status": "installed"}
@@ -2344,9 +2369,9 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_empty(self, mocker):
         """Test listing official skills when none available."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+            with patch('management.api.skill.skill.get_official_skills_with_status') as mock_func:
                 mock_func.return_value = []
 
                 app = FastAPI()
@@ -2364,8 +2389,8 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_unauthorized(self, mocker):
         """Test listing official skills without auth returns 500 (no explicit UnauthorizedError handler)."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -2379,9 +2404,9 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_super_admin_with_tenant_id(self, mocker):
         """Test super admin listing official skills for a specific tenant via tenant_id query param."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("super_user", "super_tenant")
-            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+            with patch('management.api.skill.skill.get_official_skills_with_status') as mock_func:
                 mock_func.return_value = [
                     {"skill_id": 1, "name": "admin_skill", "source": "official", "status": "installable"}
                 ]
@@ -2404,9 +2429,9 @@ class TestListOfficialSkillsEndpoint:
 
     def test_list_official_skills_error(self, mocker):
         """Test listing official skills with error."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.get_official_skills_with_status') as mock_func:
+            with patch('management.api.skill.skill.get_official_skills_with_status') as mock_func:
                 mock_func.side_effect = Exception("Database error")
 
                 app = FastAPI()
@@ -2429,23 +2454,23 @@ class TestInstallSkillsEndpoint:
     async def test_install_skills_preserves_app_exception(self, mocker):
         """Official Skill installation must preserve tenant quota errors."""
         mocker.patch(
-            "backend.apps.skill_app.get_current_user_id",
+            "management.api.skill.skill.get_current_user_id",
             return_value=("user123", "tenant123"),
         )
         mocker.patch(
-            "backend.apps.skill_app.install_skills_from_zip_for_tenant",
+            "management.api.skill.skill.install_skills_from_zip_for_tenant",
             side_effect=AppException("quota", "limit reached"),
         )
 
-        request = skill_app.InstallSkillsRequest(skill_names=["skill"])
+        request = skill_app_management_skill_skill_skill.InstallSkillsRequest(skill_names=["skill"])
         with pytest.raises(AppException):
             await skill_app.install_skills(request=request, http_request=None, authorization="token")
 
     def test_install_skills_success(self, mocker):
         """Test successful skill installation."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('management.api.skill.skill.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1", "skill2"]
 
                 app = FastAPI()
@@ -2470,9 +2495,9 @@ class TestInstallSkillsEndpoint:
 
     def test_install_skills_empty_list(self, mocker):
         """Test installing empty skill list."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('management.api.skill.skill.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = []
 
                 app = FastAPI()
@@ -2491,8 +2516,8 @@ class TestInstallSkillsEndpoint:
 
     def test_install_skills_unauthorized(self, mocker):
         """Test installing skills without auth returns 500 (no explicit UnauthorizedError handler)."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -2509,9 +2534,9 @@ class TestInstallSkillsEndpoint:
 
     def test_install_skills_super_admin_with_tenant_id(self, mocker):
         """Test super admin installing skills for a specific tenant via tenant_id query param."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("super_user", "super_tenant")
-            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('management.api.skill.skill.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.return_value = ["skill1"]
 
                 app = FastAPI()
@@ -2536,9 +2561,9 @@ class TestInstallSkillsEndpoint:
 
     def test_install_skills_error(self, mocker):
         """Test installing skills with error."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.install_skills_from_zip_for_tenant') as mock_install:
+            with patch('management.api.skill.skill.install_skills_from_zip_for_tenant') as mock_install:
                 mock_install.side_effect = Exception("Installation failed")
 
                 app = FastAPI()
@@ -2560,11 +2585,11 @@ class TestScanSkillEndpoint:
 
     def test_scan_skill_success(self, mocker):
         """Test successful skill scan."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
             async def mock_update(*args, **kwargs):
                 return None
-            with patch('backend.apps.skill_app.update_skill_list', side_effect=mock_update):
+            with patch('management.api.skill.skill.update_skill_list', side_effect=mock_update):
                 app = FastAPI()
                 app.include_router(skill_app.router)
                 client = TestClient(app)
@@ -2581,8 +2606,8 @@ class TestScanSkillEndpoint:
 
     def test_scan_skill_unauthorized(self, mocker):
         """Test scanning skills without auth returns 500 (no explicit UnauthorizedError handler)."""
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("No token")
 
             app = FastAPI()
@@ -2596,9 +2621,9 @@ class TestScanSkillEndpoint:
 
     def test_scan_skill_error(self, mocker):
         """Test scanning skills with error."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('management.services.skill.service.update_skill_list', new_callable=AsyncMock) as mock_update:
+            with patch('management.services.skill.transfer.update_skill_list', new_callable=AsyncMock) as mock_update:
                 mock_update.side_effect = Exception("Scan failed")
 
                 app = FastAPI()
@@ -2619,18 +2644,18 @@ class TestCreateSkillInteractiveEndpoint:
 
     def test_create_skill_interactive_success(self, mocker):
         """Test successful interactive skill creation."""
-        with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
+        with patch('runtime.api.skill.creation.get_current_user_info') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123", "zh")
             async def stream():
                 yield 'data: {"type":"done","content":""}\n\n'
 
             with patch(
-                'backend.apps.skill_app.create_nl2skill_stream',
+                'runtime.api.skill.creation.create_nl2skill_stream',
                 new_callable=AsyncMock,
                 return_value=stream(),
             ) as mock_stream:
                 app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
+                app.include_router(skill_app_creation.skill_creator_router)
                 client = TestClient(app)
 
                 response = client.post(
@@ -2644,17 +2669,17 @@ class TestCreateSkillInteractiveEndpoint:
                 mock_stream.assert_awaited_once()
 
     def test_create_skill_interactive_uses_user_language_when_request_omits_it(self):
-        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "en")):
+        with patch('runtime.api.skill.creation.get_current_user_info', return_value=("user123", "tenant123", "en")):
             async def stream():
                 yield 'data: {"type":"done","content":""}\n\n'
 
             with patch(
-                'backend.apps.skill_app.create_nl2skill_stream',
+                'runtime.api.skill.creation.create_nl2skill_stream',
                 new_callable=AsyncMock,
                 return_value=stream(),
             ) as mock_stream:
                 app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
+                app.include_router(skill_app_creation.skill_creator_router)
                 response = TestClient(app).post(
                     "/skills/nl2skill/run",
                     json={"query": "Create a skill"},
@@ -2666,14 +2691,14 @@ class TestCreateSkillInteractiveEndpoint:
         assert mock_stream.await_args.kwargs["language"] == "en"
 
     def test_create_skill_interactive_maps_runtime_error_to_server_error(self):
-        with patch('backend.apps.skill_app.get_current_user_info', return_value=("user123", "tenant123", "zh")):
+        with patch('runtime.api.skill.creation.get_current_user_info', return_value=("user123", "tenant123", "zh")):
             with patch(
-                'backend.apps.skill_app.create_nl2skill_stream',
+                'runtime.api.skill.creation.create_nl2skill_stream',
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("failed"),
             ):
                 app = FastAPI()
-                app.include_router(skill_app.skill_creator_router)
+                app.include_router(skill_app_creation.skill_creator_router)
                 response = TestClient(app).post(
                     "/skills/nl2skill/run",
                     json={"query": "Create a skill"},
@@ -2685,11 +2710,11 @@ class TestCreateSkillInteractiveEndpoint:
 
     def test_create_skill_interactive_unauthorized(self, mocker):
         """Test interactive skill creation without auth."""
-        with patch('backend.apps.skill_app.get_current_user_info') as mock_auth:
+        with patch('runtime.api.skill.creation.get_current_user_info') as mock_auth:
             mock_auth.side_effect = Exception("Unauthorized")
 
             app = FastAPI()
-            app.include_router(skill_app.skill_creator_router)
+            app.include_router(skill_app_creation.skill_creator_router)
             client = TestClient(app)
 
             response = client.post(
@@ -2707,7 +2732,7 @@ class TestStopSkillCreationEndpoint:
     def test_stop_skill_creation_success(self, mocker):
         """Test successful stop skill creation."""
         app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
+        app.include_router(skill_app_creation.skill_creator_router)
         client = TestClient(app)
         response = client.get("/skills/stop/task123")
         assert response.status_code == 404
@@ -2715,7 +2740,7 @@ class TestStopSkillCreationEndpoint:
     def test_stop_skill_creation_not_found(self, mocker):
         """Test stop skill creation when task not found."""
         app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
+        app.include_router(skill_app_creation.skill_creator_router)
         client = TestClient(app)
         response = client.get("/skills/stop/nonexistent")
         assert response.status_code == 404
@@ -2723,7 +2748,7 @@ class TestStopSkillCreationEndpoint:
     def test_stop_skill_creation_unauthorized(self, mocker):
         """Removed routes return not found before authentication."""
         app = FastAPI()
-        app.include_router(skill_app.skill_creator_router)
+        app.include_router(skill_app_creation.skill_creator_router)
         client = TestClient(app)
         response = client.get("/skills/stop/task123")
         assert response.status_code == 404
@@ -2734,11 +2759,11 @@ class TestUpdateSkillInstanceWithConfigMerge:
     """Test config_values merge in update skill instance."""
 
     @pytest.mark.asyncio
-    @patch('backend.apps.skill_app.require_agent_draft_edit')
+    @patch('management.api.skill.skill.require_agent_draft_edit')
     async def test_update_instance_with_config_values_merge(self, mock_require_edit, mocker):
         """Test instance update with config_values merges with template defaults (lines 368-371)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2782,8 +2807,8 @@ class TestUpdateSkillWithConfigSchemas:
 
     def test_update_skill_with_config_schemas(self, mocker):
         """Test update skill with config_schemas (line 482)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2812,8 +2837,8 @@ class TestUpdateSkillWithFiles:
 
     def test_update_skill_with_files(self, mocker):
         """Test update skill with files (line 486)."""
-        with patch('backend.apps.skill_app.SkillService') as mock_service_class:
-            with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
                 mock_auth.return_value = ("user123", "tenant123")
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
@@ -2842,9 +2867,9 @@ class TestUpdateSkillWithFiles:
 # ===== Build Model Config From Tenant Tests =====
 class TestGetSkillByIdEndpoint:
     def test_get_skill_by_id_success(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill_by_id.return_value = {
@@ -2860,9 +2885,9 @@ class TestGetSkillByIdEndpoint:
                 mock_service.get_skill_by_id.assert_called_once_with(1, tenant_id="tenant123")
 
     def test_get_skill_by_id_not_found(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill_by_id.return_value = None
@@ -2873,10 +2898,10 @@ class TestGetSkillByIdEndpoint:
                 assert response.status_code == 404
 
     def test_get_skill_by_id_skill_exception(self, mocker):
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill_by_id.side_effect = SkillException("Internal error")
@@ -2887,9 +2912,9 @@ class TestGetSkillByIdEndpoint:
                 assert response.status_code == 500
 
     def test_get_skill_by_id_unexpected_error(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill_by_id.side_effect = Exception("Unexpected error")
@@ -2906,10 +2931,10 @@ class TestAssetOwnerSkillVisibility:
 
     def test_asset_owner_skill_view_denied_response_returns_json_when_cannot_view(self, mocker):
         """Test _asset_owner_skill_view_denied_response returns denial JSON when tenant cannot view."""
-        with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+        with patch('management.api.skill.skill.can_view_skill') as mock_can_view:
             mock_can_view.return_value = False  # Cannot view
 
-            from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+            from management.api.skill.skill import _asset_owner_skill_view_denied_response
             skill = {"tenant_id": "other_tenant"}
             result = _asset_owner_skill_view_denied_response(skill, "my_tenant")
 
@@ -2921,10 +2946,10 @@ class TestAssetOwnerSkillVisibility:
 
     def test_asset_owner_skill_view_denied_response_returns_none_when_can_view(self, mocker):
         """Test _asset_owner_skill_view_denied_response returns None when tenant can view."""
-        with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+        with patch('management.api.skill.skill.can_view_skill') as mock_can_view:
             mock_can_view.return_value = True  # Can view
 
-            from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+            from management.api.skill.skill import _asset_owner_skill_view_denied_response
             skill = {"tenant_id": "other_tenant"}
             result = _asset_owner_skill_view_denied_response(skill, "my_tenant")
 
@@ -2932,13 +2957,13 @@ class TestAssetOwnerSkillVisibility:
 
     def test_asset_owner_skill_view_denied_response_returns_none_when_skill_none(self, mocker):
         """Test _asset_owner_skill_view_denied_response returns None when skill is None."""
-        from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+        from management.api.skill.skill import _asset_owner_skill_view_denied_response
         result = _asset_owner_skill_view_denied_response(None, "my_tenant")
         assert result is None
 
     def test_asset_owner_skill_view_denied_returns_none_when_same_tenant(self, mocker):
         """Test _asset_owner_skill_view_denied_response returns None when tenants match."""
-        from backend.apps.skill_app import _asset_owner_skill_view_denied_response
+        from management.api.skill.skill import _asset_owner_skill_view_denied_response
         skill = {"tenant_id": "same_tenant"}
         result = _asset_owner_skill_view_denied_response(skill, "same_tenant")
         assert result is None
@@ -2950,7 +2975,7 @@ class TestBuildSkillUpdateData:
 
     def test_build_skill_update_data_with_all_fields(self, mocker):
         """Test _build_skill_update_data with all fields provided."""
-        from backend.apps.skill_app import _build_skill_update_data
+        from management.api.skill.skill import _build_skill_update_data
 
         mock_file_data = MagicMock()
         mock_file_data.model_dump.return_value = {"path": "test.py", "content": "code"}
@@ -2982,7 +3007,7 @@ class TestBuildSkillUpdateData:
 
     def test_build_skill_update_data_with_partial_fields(self, mocker):
         """Test _build_skill_update_data with only some fields provided."""
-        from backend.apps.skill_app import _build_skill_update_data
+        from management.api.skill.skill import _build_skill_update_data
 
         request = MagicMock()
         request.name = None
@@ -3004,7 +3029,7 @@ class TestBuildSkillUpdateData:
 
     def test_build_skill_update_data_with_empty_files(self, mocker):
         """Test _build_skill_update_data when files is an empty list (still gets included)."""
-        from backend.apps.skill_app import _build_skill_update_data
+        from management.api.skill.skill import _build_skill_update_data
 
         request = MagicMock()
         request.name = "test"
@@ -3030,14 +3055,14 @@ class TestGetSkillFileTreeAssetOwner:
 
     def test_get_file_tree_denied_for_non_asset_owner(self, mocker):
         """Test file tree access denied when tenant cannot view skill."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill.return_value = {"tenant_id": "other_tenant"}
 
-                with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+                with patch('management.api.skill.skill.can_view_skill') as mock_can_view:
                     mock_can_view.return_value = False
 
                     app = FastAPI()
@@ -3059,14 +3084,14 @@ class TestGetSkillFileContentAssetOwner:
 
     def test_get_file_content_denied_for_non_asset_owner(self, mocker):
         """Test file content access denied when tenant cannot view skill."""
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.get_skill.return_value = {"tenant_id": "other_tenant"}
 
-                with patch('backend.apps.skill_app.can_view_skill') as mock_can_view:
+                with patch('management.api.skill.skill.can_view_skill') as mock_can_view:
                     mock_can_view.return_value = False
 
                     app = FastAPI()
@@ -3083,9 +3108,9 @@ class TestGetSkillFileContentAssetOwner:
 
 
     def test_update_skill_by_id_success(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.return_value = {
@@ -3109,9 +3134,9 @@ class TestGetSkillFileContentAssetOwner:
                 )
 
     def test_update_skill_by_id_no_fields(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 app = FastAPI()
@@ -3124,10 +3149,10 @@ class TestGetSkillFileContentAssetOwner:
                 assert response.status_code == 400
 
     def test_update_skill_by_id_not_found(self, mocker):
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.side_effect = SkillException("Skill not found: 999")
@@ -3141,10 +3166,10 @@ class TestGetSkillFileContentAssetOwner:
                 assert response.status_code == 404
 
     def test_update_skill_by_id_skill_exception_generic(self, mocker):
-        from backend.apps.skill_app import SkillException
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import SkillException
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.side_effect = SkillException("Update failed")
@@ -3158,10 +3183,10 @@ class TestGetSkillFileContentAssetOwner:
                 assert response.status_code == 400
 
     def test_update_skill_by_id_forbidden(self, mocker):
-        from backend.apps.skill_app import ForbiddenError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import ForbiddenError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.side_effect = ForbiddenError("Not authorized")
@@ -3175,8 +3200,8 @@ class TestGetSkillFileContentAssetOwner:
                 assert response.status_code == 403
 
     def test_update_skill_by_id_unauthorized(self, mocker):
-        from backend.apps.skill_app import UnauthorizedError
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        from management.api.skill.skill import UnauthorizedError
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.side_effect = UnauthorizedError("Invalid token")
             app = FastAPI()
             app.include_router(skill_app.router)
@@ -3188,9 +3213,9 @@ class TestGetSkillFileContentAssetOwner:
             assert response.status_code == 401
 
     def test_update_skill_by_id_unexpected_error(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.side_effect = Exception("Unexpected error")
@@ -3204,9 +3229,9 @@ class TestGetSkillFileContentAssetOwner:
                 assert response.status_code == 500
 
     def test_update_skill_by_id_with_multiple_fields(self, mocker):
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.update_skill_by_id.return_value = {
@@ -3254,7 +3279,7 @@ class TestGetSkillFileContentAssetOwner:
 
 class TestSkillAppCoverageGaps:
     def test_asset_owner_view_denied_response(self):
-        with patch('backend.apps.skill_app.can_view_skill', return_value=False):
+        with patch('management.api.skill.skill.can_view_skill', return_value=False):
             response = skill_app._asset_owner_skill_view_denied_response(
                 {"tenant_id": "owner-tenant"}, "requester-tenant"
             )
@@ -3263,7 +3288,7 @@ class TestSkillAppCoverageGaps:
         assert response.body.decode() == '{"content":"您无权限查看"}'
 
     def test_asset_owner_view_allowed_and_missing_skill(self):
-        with patch('backend.apps.skill_app.can_view_skill', return_value=True):
+        with patch('management.api.skill.skill.can_view_skill', return_value=True):
             assert skill_app._asset_owner_skill_view_denied_response(
                 {"tenant_id": "owner-tenant"}, "requester-tenant"
             ) is None
@@ -3398,20 +3423,21 @@ class TestSkillAppRemainingExceptionMappings:
     @pytest.mark.asyncio
     async def test_nl2skill_preserves_http_exception(self, mocker):
         mocker.patch.object(
-            skill_app,
+            skill_app_creation,
             "get_current_user_info",
             return_value=("user", "tenant", "en"),
         )
-        expected = skill_app.HTTPException(status_code=409, detail="conflict")
-        mocker.patch.object(skill_app, "create_nl2skill_stream", side_effect=expected)
+        expected = skill_app_creation.HTTPException(status_code=409, detail="conflict")
+        mocker.patch.object(skill_app_creation, "create_nl2skill_stream", side_effect=expected)
         request = MagicMock(
+            conversation_id=None,
             language=None,
             persist_history=False,
             workbench_config=None,
         )
 
-        with pytest.raises(skill_app.HTTPException) as exc_info:
-            await skill_app.nl2skill_run_api(request=request, authorization="token")
+        with pytest.raises(skill_app_creation.HTTPException) as exc_info:
+            await skill_app_creation.nl2skill_run_api(request=request, authorization="token")
 
         assert exc_info.value is expected
 
@@ -3423,9 +3449,9 @@ class TestSkillAuditEntries:
     def test_create_emits_audit_entry_without_content(self, mocker, caplog):
         """Successful create records name/source, never the skill body."""
         import logging
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.create_skill.return_value = {"skill_id": 5, "name": "my-skill"}
@@ -3456,9 +3482,9 @@ class TestSkillAuditEntries:
     def test_upload_emits_audit_entry_without_file_content(self, mocker, caplog):
         """Successful upload records filename/source, never the file bytes."""
         import logging
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
                 mock_service.create_skill_from_file.return_value = {"skill_id": 6}
@@ -3487,9 +3513,9 @@ class TestSkillAuditEntries:
     def test_delete_emits_audit_entry(self, mocker, caplog):
         """Successful delete records the removed skill name."""
         import logging
-        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+        with patch('management.api.skill.skill.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+            with patch('management.api.skill.skill.SkillService') as mock_service_class:
                 mock_service = MagicMock()
                 mock_service_class.return_value = mock_service
 

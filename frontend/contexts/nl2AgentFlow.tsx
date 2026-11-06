@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -23,10 +25,7 @@ export type Nl2AgentFlowPhase =
 
 export type Nl2AgentConfigFocusTarget =
   | { section: "display_info" }
-  | {
-      section: "role_model";
-      promptTab: "duty" | "constraint" | "few-shots";
-    }
+  | { section: "role_model" }
   | {
       section: "tools_skills";
       capabilityTab: "tools" | "skills";
@@ -112,6 +111,7 @@ function reducer(
         ...state,
         phase: "running",
         agentId: action.agentId,
+        activeCard: null,
         completionSyncFailed: false,
         isFormLocked: true,
       };
@@ -132,6 +132,7 @@ function reducer(
       };
     case "register_card":
       if (state.submittedCardKeys.has(action.card.key)) return state;
+      // Restoring a card does not start a generation run or acquire its edit lock.
       return {
         ...state,
         phase:
@@ -143,7 +144,6 @@ function reducer(
                 ? "binding"
                 : state.phase,
         activeCard: action.card,
-        isFormLocked: state.agentId !== null || state.isFormLocked,
       };
     case "submit_card": {
       const submittedCardKeys = new Set(state.submittedCardKeys);

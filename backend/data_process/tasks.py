@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Celery tasks for data processing and vector storage
 """
@@ -17,21 +18,16 @@ from celery import Task, chain, chord, group, states
 from celery.exceptions import Retry
 from celery.result import allow_join_result
 
-from consts.const import (
-    ELASTICSEARCH_SERVICE,
-    FORWARD_REDIS_RETRY_DELAY_S,
-    FORWARD_REDIS_RETRY_MAX,
-    REDIS_BACKEND_URL,
-)
-from consts.error_code import ErrorCode
-from database.knowledge_db import get_knowledge_record
-from services.redis_service import get_redis_service
-from utils.file_management_utils import get_file_size
-from utils.knowledge_ingestion_errors import (
+from contracts.constants.environment import ELASTICSEARCH_SERVICE, FORWARD_REDIS_RETRY_DELAY_S, FORWARD_REDIS_RETRY_MAX, REDIS_BACKEND_URL
+from contracts.errors.codes import ErrorCode
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.file.upload import get_file_size
+from infrastructure.ingestion.errors import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )
-from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
+from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
 
 from .app import app
 from .parse_tasks import process

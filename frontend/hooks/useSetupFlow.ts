@@ -1,9 +1,10 @@
-import {useRouter} from "next/navigation";
-import {useTranslation} from "react-i18next";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-interface UseSetupFlowOptions {
-  // Options reserved for future use
-}
+import { useRouter } from "next/navigation";
+import { useReducedMotion } from "framer-motion";
+import { useTranslation } from "react-i18next";
+
+type UseSetupFlowOptions = Record<string, never>;
 
 interface UseSetupFlowReturn {
 
@@ -15,7 +16,7 @@ interface UseSetupFlowReturn {
   };
   pageTransition: {
     type: "tween";
-    ease: "anticipate";
+    ease: "easeOut";
     duration: number;
   };
 
@@ -39,29 +40,31 @@ interface UseSetupFlowReturn {
  */
 export function useSetupFlow(options: UseSetupFlowOptions = {}): UseSetupFlowReturn {
 
+  void options;
   const router = useRouter();
-  const {t} = useTranslation();
+  const { t } = useTranslation();
+  const shouldReduceMotion = useReducedMotion() === true;
 
   // Animation variants for smooth page transitions
   const pageVariants = {
     initial: {
-      opacity: 0,
-      x: 20,
+      opacity: shouldReduceMotion ? 1 : 0,
+      x: shouldReduceMotion ? 0 : 8,
     },
     in: {
       opacity: 1,
       x: 0,
     },
     out: {
-      opacity: 0,
-      x: -20,
+      opacity: shouldReduceMotion ? 1 : 0,
+      x: shouldReduceMotion ? 0 : -8,
     },
   };
 
   const pageTransition = {
     type: "tween" as const,
-    ease: "anticipate" as const,
-    duration: 0.4,
+    ease: "easeOut" as const,
+    duration: shouldReduceMotion ? 0 : 0.16,
   };
 
   return {

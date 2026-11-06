@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -6,7 +8,9 @@ from fastapi import HTTPException, Request
 from test.backend.app import test_agent_app as legacy
 
 
-agent_app = __import__("apps.agent_app", fromlist=["get_workbench_bootstrap_api"])
+from runtime.api.agent import execution as runtime_agent
+
+agent_app = __import__("management.api.agent.agent", fromlist=["get_workbench_bootstrap_api"])
 
 
 @pytest.mark.asyncio
@@ -25,43 +29,23 @@ async def test_workbench_bootstrap_returns_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workbench_bootstrap_lazily_initializes_missing_agent(monkeypatch):
-    profile = {"display_name": "Workbench", "default_skill_resources": []}
-    load = MagicMock(side_effect=[RuntimeError("missing"), profile])
+@pytest.mark.parametrize("reason", ["missing", "unavailable"])
+async def test_workbench_bootstrap_fails_without_provisioning(monkeypatch, reason):
+    load = MagicMock(side_effect=RuntimeError(reason))
     initialize = AsyncMock()
     monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(agent_app, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
     monkeypatch.setattr(agent_app, "build_workbench_main_profile", load)
     monkeypatch.setattr(agent_app, "run_blocking", initialize)
 
-    response = await agent_app.get_workbench_bootstrap_api("Bearer token")
+    with pytest.raises(HTTPException) as caught:
+        await agent_app.get_workbench_bootstrap_api("Bearer token")
 
-    initialize.assert_awaited_once_with(
-        "workbench-bootstrap",
-        agent_app.ensure_workbench_main_agent,
-        "tenant-a",
-        "system",
-    )
-    assert response["data"]["generic_agent"] == profile
-
-
-@pytest.mark.asyncio
-async def test_workbench_bootstrap_uses_safe_fallback_after_initialization_failure(monkeypatch):
-    monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(agent_app, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
-    monkeypatch.setattr(
-        agent_app,
-        "build_workbench_main_profile",
-        MagicMock(side_effect=RuntimeError("missing")),
-    )
-    monkeypatch.setattr(agent_app, "run_blocking", AsyncMock(side_effect=RuntimeError("failed")))
-
-    response = await agent_app.get_workbench_bootstrap_api("Bearer token")
-
-    assert response["data"]["generic_agent"] == {
-        "display_name": "Nexent Workbench",
-        "default_skill_resources": [],
-    }
+    assert caught.value.status_code == 503
+    assert caught.value.detail == {"code": "WORKBENCH_SYSTEM_AGENT_UNAVAILABLE"}
+    load.assert_called_once()
+    initialize.assert_not_awaited()
+    assert not hasattr(agent_app, "ensure_workbench_main_agent")
 
 
 @pytest.mark.asyncio
@@ -110,23 +94,23 @@ async def test_capability_preview_is_hidden_when_disabled(monkeypatch):
     ("error", "status", "detail"),
     [
         (
-            agent_app.WorkbenchError("WORKBENCH_DISABLED", status_code=404),
+            runtime_agent.WorkbenchError("WORKBENCH_DISABLED", status_code=404),
             404,
             {"code": "WORKBENCH_DISABLED"},
         ),
         (
-            agent_app.WorkbenchConfigVersionConflict(7),
+            runtime_agent.WorkbenchConfigVersionConflict(7),
             409,
             {"code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": 7},
         ),
     ],
 )
 async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detail):
-    monkeypatch.setattr(agent_app, "run_agent_stream", AsyncMock(side_effect=error))
-    request = agent_app.AgentRequest(query="hello", agent_id=7)
+    monkeypatch.setattr(runtime_agent, "run_agent_stream", AsyncMock(side_effect=error))
+    request = runtime_agent.AgentRequest(query="hello", agent_id=7)
 
     with pytest.raises(HTTPException) as caught:
-        await agent_app.agent_run_api(
+        await runtime_agent.agent_run_api(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",
@@ -137,13 +121,13 @@ async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detai
 
 @pytest.mark.asyncio
 async def test_nl2agent_history_is_hidden_when_workbench_disabled(monkeypatch):
-    monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", False)
-    request = agent_app.NL2AgentRunRequest(
-        query="Create an agent", agent_id=7, persist_history=True
+    monkeypatch.setattr(runtime_agent, "ENABLE_AGENT_WORKBENCH", False)
+    request = runtime_agent.NL2AgentRunRequest(
+        query="Create an agent", agent_id=7, persist_history=True, workbench_config={"mode": "agent_create"}
     )
 
     with pytest.raises(HTTPException) as caught:
-        await agent_app.nl2agent_run_api(
+        await runtime_agent.nl2agent_run_api(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",

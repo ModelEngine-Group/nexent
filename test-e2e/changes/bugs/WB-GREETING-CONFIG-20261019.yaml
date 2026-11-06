@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: WB-GREETING-CONFIG-20261019
+  change_type: bugfix
+  bug_id: WB-GREETING-CONFIG-20261019
+  title: Workbench greeting follows the global product name
+  description: Read the current global productName and interpolate it into the localized empty-workbench greeting.
+  observed_behavior: Chinese and English greeting translations hard-code Nexent despite a customized global productName.
+  expected_behavior: The greeting follows the current productName and updates with configuration and language changes, falling back to Nexent for missing or empty configuration.
+  escaped_stage: production
+  coverage_gap:
+    type: unknown_baseline
+    description: The layout SPEC references UX-WB-001 and UX-WB-D4-002, absent from this checkout. Existing WB-CONTROLS scripts have no greeting assertion. Add focused rendering UT without claiming browser coverage.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/workbench/WorkbenchGreeting.test.tsx
+    behaviors:
+    - Both supported languages display the configured name and localized question.
+    - Missing and empty names fall back to Nexent; later store and locale updates refresh the output.
+    - Special characters remain literal text without markup interpretation or double escaping.
+    reason: Frontend store-to-view unit behavior; real store and i18next provide the required proof. No Python change, API contract, new runtime integration or risk boundary. A new D1 would duplicate unit assertions.
+  notes: 'Design: ../nexent-doc-new/docs/Developing/ux-agent-workbench-layout/changes/ux-workbench-greeting-config/design.md. WB-CONTROLS mode/resource browser cases are unaffected; historical greeting browser baseline is unavailable.'

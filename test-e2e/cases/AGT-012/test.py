@@ -1,76 +1,39 @@
-"""Exercise actual Provider failure and timeout, not a nonexistent model ID."""
-import os
-import time
-import uuid
-from contextlib import asynccontextmanager
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import httpx
+"""Exercise actual Provider failure and timeout, not a nonexistent model ID."""
+import time
+
 import pytest
 
-from shared.asset_registry import AssetDependencyError, register_asset, mark_asset_state
+from shared.asset_registry import AssetDependencyError
 from shared.case_evidence import write_case_evidence
-from shared.config import controlled_asset_url
 from shared.factories.agent import _draft_agent, _llm_id
-from shared.http import assert_status, client, MODEL_TIMEOUT
+from shared.http import MODEL_TIMEOUT, assert_status, client, response_message
+from shared.prompt_fault import fault_control, owned_prompt_fault_model
 
 CASE_ID = 'AGT-012'
 
 
-async def fault_control(nonce, operation, mode=None):
-    base = os.environ.get('NEXENT_TEST_ASSETS_LOCAL_URL', '').rstrip('/')
-    if not base:
-        raise AssetDependencyError('services', 'prompt_fault', detail='Runner-owned controlled HTTP service required')
-    async with httpx.AsyncClient(base_url=base, timeout=10, trust_env=False) as api:
-        path = f'/prompt-fault/{nonce}'
-        if operation == 'reset':
-            response = await api.post(path + '/reset', json={'mode': mode})
-        elif operation == 'state':
-            response = await api.get(path + '/state')
-        else:
-            response = await api.delete(path)
-    assert_status(response, 200)
-    return response.json()
+def fault_model(identity, mode):
+    """Use the runner-owned Provider and its failure-preserving cleanup."""
+    return owned_prompt_fault_model(identity, CASE_ID, mode)
 
 
-@asynccontextmanager
-async def fault_model(identity, mode):
-    nonce = uuid.uuid4().hex
-    display = 'prompt_fault_' + nonce
-    await fault_control(nonce, 'reset', mode)
-    created = False
-    try:
-        async with client('config', token=identity.access_token) as api:
-            response = await api.post('/model/create', json={
-                'model_factory': 'OpenAI-API-Compatible', 'model_name': 'controlled-prompt-failure',
-                'model_type': 'llm', 'display_name': display, 'api_key': nonce,
-                'base_url': controlled_asset_url(f'/prompt-fault/{nonce}/v1'),
-                'max_tokens': 1024, 'timeout_seconds': 1, 'skip_default_backfill': True})
-            assert_status(response, 200)
-            created = True
-            register_asset('owned_models', display, display, owner_case_id=CASE_ID,
-                cleanup={'service': 'config', 'identity': identity.id, 'method': 'POST',
-                         'path': '/model/delete', 'params': {'display_name': display}, 'allowed_statuses': [200, 404]})
-            listed = await api.get('/model/list')
-            assert_status(listed, 200)
-            matches = [row for row in listed.json().get('data', []) if row.get('display_name') == display]
-            assert len(matches) == 1, 'Owned failure model must be uniquely registered'
-            yield int(matches[0].get('model_id') or matches[0]['id']), nonce
-    finally:
-        try:
-            if created:
-                async with client('config', token=identity.access_token) as api:
-                    response = await api.post('/model/delete', params={'display_name': display})
-                assert_status(response, (200, 404))
-                mark_asset_state('owned_models', display, 'DELETED')
-        finally:
-            await fault_control(nonce, 'delete')
+def require_prompt_sdk(response, receipt):
+    """Distinguish the explicit capability rejection from other HTTP 400 errors."""
+    if (receipt['calls'] == 0 and response.status_code == 400
+            and response_message(response) ==
+            'Auto optimize from debug requires Jiuwen SDK to be enabled.'):
+        raise AssetDependencyError(
+            'capabilities', 'jiuwen',
+            detail='Enable NEXENT_ENABLE_JIUWEN_SDK and install the configuration service Jiuwen adapter dependencies')
 
 
 def snapshot(body):
     body = body.get('data') or body
     assert body.get('agent_id') or body.get('id'), 'Draft read-back must contain the owned Agent identity'
-    fields = ('name', 'display_name', 'description', 'duty_prompt', 'constraint_prompt',
-              'few_shots_prompt', 'greeting_message', 'example_questions', 'model_ids',
+    fields = ('name', 'display_name', 'description', 'prompt',
+              'greeting_message', 'example_questions', 'model_ids',
               'tools', 'skills', 'related_agent_ids')
     return {field: body.get(field) for field in fields}
 
@@ -89,13 +52,21 @@ def assert_fault(response, receipt, before, after, elapsed, mode):
 
 async def exercise_provider_fault(identity, mode):
     async with fault_model(identity, mode) as (model_id, nonce):
-        async with _draft_agent(identity, model_ids=[model_id], owner_case_id=CASE_ID) as (agent_id, _):
+        async with _draft_agent(identity, model_ids=[model_id], owner_case_id=CASE_ID) as (agent_id, draft):
             payload = {'agent_id': agent_id, 'model_id': model_id, 'feedback': 'Do not invent facts',
                        'selected': {'user_question': 'What is X?', 'assistant_answer': 'Unverified answer'},
                        'history': [{'role': 'user', 'content': 'What is X?'}]}
             async with client('config', token=identity.access_token, timeout=120) as api:
+                # Debug optimization requires an existing system prompt. New
+                # drafts no longer receive one from retired prompt templates.
+                initialized = await api.post('/agent/update', json={
+                    **draft, 'agent_id': agent_id,
+                    'prompt': 'Answer questions using verified facts.',
+                })
+                assert_status(initialized, 200)
                 before = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
                 assert_status(before, 200)
+                assert (snapshot(before.json()).get('prompt') or '').strip(), 'Owned draft requires a saved prompt'
                 started = time.monotonic()
                 response = await api.post('/prompt/optimize/from_debug', json=payload)
                 elapsed = time.monotonic() - started
@@ -109,8 +80,7 @@ async def exercise_provider_fault(identity, mode):
             write_case_evidence(CASE_ID + '-' + mode, {'mode': mode, 'receipt': receipt,
                 'http_status': response.status_code, 'elapsed_seconds': elapsed,
                 'draft_unchanged': snapshot(before.json()) == snapshot(after.json())})
-            if receipt['calls'] == 0 and response.status_code == 400:
-                raise AssetDependencyError('capabilities', 'jiuwen', detail='Prompt optimization SDK is unavailable')
+            require_prompt_sdk(response, receipt)
             assert_fault(response, receipt, snapshot(before.json()), snapshot(after.json()), elapsed, mode)
             # A configured real LLM proves the shared endpoint and Agent remain
             # usable after the isolated fault. Do not replace tenant defaults.

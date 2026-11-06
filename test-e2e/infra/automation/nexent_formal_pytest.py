@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Formal case fixtures and evidence hooks, registered under a unique name."""
 
 from __future__ import annotations
@@ -69,7 +70,7 @@ def isolated_migration_database(request, monkeypatch):
                 'DEP-AUTO-8213435EA30EB371','REL-AUTO-DD1A9CB3B544F39F'}
     ids = {str(mark.args[0]) for mark in request.node.iter_markers('case_id') if mark.args}
     if ids & {'REL-AUTO-3CE643378A04EF53', 'API-AUTO-2B3A078E3CD1B151'}:
-        from services import redis_service
+        from management.services.knowledge_base import task_state as redis_service
         from shared.factories.redis_target import deployed_redis_urls
         general, backend = deployed_redis_urls()
         monkeypatch.setattr(redis_service, 'REDIS_URL', general)
@@ -77,7 +78,7 @@ def isolated_migration_database(request, monkeypatch):
         if 'API-AUTO-2B3A078E3CD1B151' in ids:
             # The fallback assertion imports the real Celery task module, which
             # reads canonical constants rather than redis_service's aliases.
-            from consts import const
+            import contracts.constants.environment as const
             monkeypatch.setattr(const, 'REDIS_URL', general)
             monkeypatch.setattr(const, 'REDIS_BACKEND_URL', backend)
         # Single-case processes have no pre-existing service. Refuse to

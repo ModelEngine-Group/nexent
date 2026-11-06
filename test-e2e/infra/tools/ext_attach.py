@@ -1,32 +1,29 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Attach cases to the pre-deployed ext-knowledge mock instance.
+"""Attach cases to the ext-knowledge mock instance.
 
-The suite NEVER starts or stops the mock's Compose stack (deployment and
-teardown are explicit operator steps); attaching means validating a
-batch-owned instance, taking a shared lock, resetting per-case state and
-exporting the runner/product URLs. Design contract:
+Default (suite-owned): cases that declare an ext-served logical service make
+``suite_services.controlled_services`` start a private mock process on a free
+port. This module then only validates health, resets per-case state and
+exports the runner/product URLs. No machine-local YAML, identity handshake or
+cross-batch lock is involved.
+
+External shared mode (optional): a pre-deployed instance can still be
+described by ``<test-home>/config/ext-knowledge.yaml``. Only that mode uses
+the identity/lock contract below; it is never required by the suite.
 
 - Cases declare dependencies through ``required_mock_services`` (logical
-  IDs). The machine-local ``config/ext-knowledge.yaml`` explicitly maps
-  which logical services THIS instance serves; other providers (the
-  controlled test-assets service, memory-provider, ...) are never
-  redirected here implicitly.
-- Identity: ``GET /_mock/identity`` must report the run_id / source_revision
-  / build_manifest_sha256 configured locally. A foreign or unowned instance
-  is never attached — and never reset.
-- Exclusivity: a machine-local ``lock_directory`` shared across test-homes
-  holds one lock file per normalized runner endpoint, so two runners cannot
-  drive the same instance concurrently.
-- Unknown cleanup state: a hard-killed worker cannot release its lock state;
+  IDs). A single mock process serves all ext logical services.
+- External identity: ``GET /_mock/identity`` must report the run_id /
+  source_revision / build_manifest_sha256 configured locally. A foreign or
+  unowned external instance is never attached — and never reset.
+- External exclusivity: a machine-local ``lock_directory`` shared across
+  test-homes holds one lock file per normalized runner endpoint, so two
+  runners cannot drive the same external instance concurrently.
+- External cleanup state: a hard-killed worker cannot release its lock state;
   the next attach refuses until an operator confirms ownership and runs
   ``python ext_attach.py --test-home <home> recover`` (identity check, full
   reset, state cleared).
-- Multi-profile cases (``profile_selection`` in execution.yaml) resolve
-  their effective dependencies from a machine-local profile config, e.g.
-  ``config/aidp-journey.yaml`` selecting mock or real_smoke for the AIDP
-  journey; the selection is recorded into the case evidence and exported
-  as ``NEXENT_TEST_SELECTED_PROFILE``.
 
 Every dependency failure is recorded through shared.preparation_evidence
 (the worker then reports BLOCKED / BLOCKED_BY_DEPENDENCY) — a missing
@@ -143,8 +140,8 @@ def load_config(home: Path, repo: Path) -> dict:
     path = home / "config" / CONFIG_NAME
     if not path.is_file():
         raise AttachError(
-            f"config/{CONFIG_NAME} is missing; cases declaring ext-served mock "
-            "services cannot attach without it"
+            f"config/{CONFIG_NAME} is missing; external shared ext-knowledge "
+            "mode requires it (the suite-owned default starts its own mock)"
         )
     try:
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -164,12 +161,25 @@ def load_config(home: Path, repo: Path) -> dict:
     return payload
 
 
-def config_problems(home: Path, repo: Path) -> list[str]:
-    """Preflight helper: shape problems when the config exists, else []."""
+def config_problems(home: Path, repo: Path, required_services=(), *, live=False) -> list[str]:
+    """Optional external-mode checks; the default suite never calls this."""
+    needed = sorted(set(required_services) & set(EXT_LOGICAL_SERVICES))
     if not (home / "config" / CONFIG_NAME).is_file():
-        return []
+        return [f"config/{CONFIG_NAME} is required by selected mock services: {', '.join(needed)}"] if needed else []
     try:
-        load_config(home, repo)
+        config = load_config(home, repo)
+        missing = set(needed) - set(config["logical_services"])
+        if missing:
+            raise AttachError("local instance does not serve " + ", ".join(sorted(missing)))
+        if live and needed:
+            _, identity = _request(f"{config['runner_url']}/_mock/identity")
+            for key in IDENTITY_KEYS:
+                if str(identity.get(key, "")) != str(config["owner_run_id" if key == "run_id" else key]):
+                    raise AttachError(f"identity mismatch for {key}; refusing foreign instance")
+            _, health = _request(f"{config['runner_url']}/health")
+            if health.get("status") != "ok" or any(
+                    health.get("services", {}).get(name) != "ok" for name in ALL_HEALTH_SERVICES):
+                raise AttachError("not all external knowledge route sets are healthy")
     except AttachError as exc:
         return [f"config/{CONFIG_NAME}: {exc}"]
     return []
@@ -287,91 +297,6 @@ class _FileLock:
 
 
 # ---------------------------------------------------------------------------
-# profile selection (multi-profile cases, e.g. the AIDP journey)
-# ---------------------------------------------------------------------------
-
-def _load_profile_config(home: Path, repo: Path, key: str, case_id: str) -> dict:
-    config_path = home / "config" / f"{key}.yaml"
-    if not config_path.is_file():
-        raise _dependency_failure(
-            case_id, f"profile selection config config/{key}.yaml is missing"
-        )
-    try:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        raise _dependency_failure(case_id, f"config/{key}.yaml is not valid YAML") from None
-    schema_path = repo / "test-e2e/infra/config" / f"{key}.schema.json"
-    if schema_path.is_file():
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=str)
-        if errors:
-            raise _dependency_failure(
-                case_id, f"config/{key}.yaml is invalid at " + ", ".join(str(list(e.path)) for e in errors)
-            )
-    if not isinstance(payload, dict):
-        raise _dependency_failure(case_id, f"config/{key}.yaml must contain a mapping")
-    return payload
-
-
-def resolve_profile_selection(repo: Path, home: Path, record: dict) -> dict | None:
-    """Resolve a multi-profile case's selected profile and effective services.
-
-    Returns None for single-profile cases (the plain required_mock_services
-    path). Raises AssetDependencyError (after recording the receipt) when a
-    declared profile selection cannot be resolved.
-    """
-    execution = record.get("execution") or {}
-    key = execution.get("profile_selection")
-    if not key:
-        return None
-    case_id = record["case_id"]
-    declared = (execution.get("implementations") or [{}])[0].get("profiles") or []
-    if len(declared) < 2:
-        raise _dependency_failure(
-            case_id, "profile_selection requires an implementation with multiple profiles"
-        )
-    payload = _load_profile_config(home, repo, str(key), case_id)
-    selected = payload.get("selected_profile")
-    if selected not in declared:
-        raise _dependency_failure(
-            case_id,
-            f"config/{key}.yaml selects profile {selected!r} which the case does not declare ({sorted(declared)})",
-        )
-    case_path = repo / "test-e2e/cases" / case_id / "case.yaml"
-    try:
-        case_document = yaml.safe_load(case_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        # A declared profile selection must be backed by a readable case
-        # contract: a silent empty fallback would skip the mock dependency
-        # (identity, lock, reset) while the batch report still looks clean.
-        raise _dependency_failure(
-            case_id,
-            f"cannot read the case contract test-e2e/cases/{case_id}/case.yaml "
-            f"to resolve profile {selected!r}: {exc}",
-        ) from None
-    entries = ((case_document or {}).get("case", {}).get("execution") or {}).get("profiles") or []
-    entry = next(
-        (item for item in entries if isinstance(item, dict) and item.get("name") == selected),
-        None,
-    )
-    if entry is None:
-        declared_entries = [str(item.get("name")) for item in entries if isinstance(item, dict)]
-        raise _dependency_failure(
-            case_id,
-            f"the case contract declares no execution.profiles entry for profile {selected!r} "
-            f"(entries: {sorted(declared_entries) or 'none'}); refusing to attach with an "
-            "empty dependency set",
-        )
-    required = list(entry.get("required_services") or [])
-    return {
-        "selection_key": str(key),
-        "selected_profile": str(selected),
-        "config": payload,
-        "required_services": required,
-    }
-
-
-# ---------------------------------------------------------------------------
 # attach context
 # ---------------------------------------------------------------------------
 
@@ -387,9 +312,9 @@ class ExtKnowledgeAttach:
         self.required_services = list(required_services or [])
         self.case_id = case_id
         self.record = record or {}
-        self.profile: dict | None = None
         self.config: dict | None = None
         self.attached = False
+        self.owned = False
         self._identity: dict = {}
         self._instance_mutations = False
         self._lock: _FileLock | None = None
@@ -398,25 +323,21 @@ class ExtKnowledgeAttach:
     # -- lifecycle ---------------------------------------------------------
 
     def attach(self) -> None:
-        """Validate and lock the instance; export case env; reset state.
+        """Validate the instance; export case env; reset state.
+
+        Suite-owned instances (started by ``controlled_services``) need no
+        machine-local YAML, identity handshake or cross-batch lock. External
+        shared instances keep the legacy YAML identity/lock path.
 
         Raises AssetDependencyError (receipt recorded) on any dependency
         failure; the worker maps that to BLOCKED/BLOCKED_BY_DEPENDENCY.
         """
-        self.profile = resolve_profile_selection(self.repo, self.home, self.record)
-        if self.profile:
-            self.env["NEXENT_TEST_SELECTED_PROFILE"] = self.profile["selected_profile"]
-            required = self.profile["required_services"]
-            self._export_profile_values(self.profile)
-        else:
-            required = self.required_services
+        required = self.required_services
         needed = [service for service in required if service in EXT_LOGICAL_SERVICES]
         if not needed:
-            # Nothing this instance serves: no attach, no lock, no reset. The
-            # selected profile (if any) is still recorded as case evidence.
+            # Nothing this instance serves: no attach, no lock, no reset.
             self._write_evidence({
                 "attached": False,
-                "selected_profile": self.profile["selected_profile"] if self.profile else None,
                 "required_services": required,
             })
             return
@@ -428,13 +349,48 @@ class ExtKnowledgeAttach:
         self.attached = True
         self._write_evidence({
             "attached": True,
-            "selected_profile": self.profile["selected_profile"] if self.profile else None,
             "required_services": required,
             "served_services": needed,
             "identity": self._identity,
         })
 
+    def _owned_config(self) -> dict | None:
+        """Descriptor for the suite-owned mock; None for an external instance."""
+        if self.env.get("NEXENT_EXT_KNOWLEDGE_OWNED") != "1":
+            return None
+        runner_url = str(self.env.get("NEXENT_EXT_KNOWLEDGE_RUNNER_URL") or "").rstrip("/")
+        if not runner_url:
+            raise AttachError("suite-owned ext-knowledge runner URL is missing")
+        product_url = str(
+            self.env.get("NEXENT_EXT_KNOWLEDGE_PRODUCT_URL") or runner_url
+        ).rstrip("/")
+        _check_root_url(runner_url, "runner_url")
+        _check_root_url(product_url, "product_url")
+        return {
+            "runner_url": runner_url,
+            "product_url": product_url,
+            "owner_run_id": str(
+                self.env.get("NEXENT_EXT_KNOWLEDGE_OWNER_RUN_ID")
+                or "suite-controlled"
+            ),
+            "source_revision": "",
+            "build_manifest_sha256": "",
+            "logical_services": list(EXT_LOGICAL_SERVICES),
+        }
+
     def _attach_locked(self, needed: list[str], required: list[str]) -> None:
+        config = self._owned_config()
+        if config is not None:
+            self.owned = True
+            self.config = config
+            # A suite-owned process needs no identity handshake or cross-batch
+            # lock: it was started for this case and is stopped after it. The
+            # identity read is informational only.
+            _, identity = _request(f"{config['runner_url']}/_mock/identity")
+            self._identity = identity
+            self._run_health_and_reset(config)
+            return
+
         config = load_config(self.home, self.repo)
         self.config = config
         missing = [service for service in needed if service not in config["logical_services"]]
@@ -479,39 +435,8 @@ class ExtKnowledgeAttach:
         # failures before this point leave the instance untouched, so the
         # state file can be marked released; a failed reset means the
         # instance state is unknown and the next runner must be blocked.
-        self._instance_mutations = False
         try:
-            # Runner-side readiness: all eight route sets must be healthy.
-            status, health = _request(f"{config['runner_url']}/health")
-            services = health.get("services") or {}
-            unhealthy = [name for name in ALL_HEALTH_SERVICES if services.get(name) != "ok"]
-            if health.get("status") != "ok" or unhealthy:
-                raise AttachError(
-                    "ext-knowledge health check failed for: " + ", ".join(unhealthy or ["status"])
-                )
-
-            # Product-side readiness: the migrated consumers drive the live
-            # product config and runtime services; an unreachable product
-            # stack is a dependency failure, not a confusing test error.
-            # Reachability follows the local_preflight semantics (a 404
-            # service root is a live service).
-            for env_name in ("NEXENT_CONFIG_URL", "NEXENT_RUNTIME_URL"):
-                endpoint = self.env.get(env_name, "").rstrip("/")
-                if not endpoint:
-                    continue
-                if not _reachable(endpoint):
-                    raise AttachError(
-                        f"the product service behind {env_name} is not reachable at {endpoint}"
-                    )
-
-            # Per-case baseline: full reset (route sets + AIDP data, failure
-            # counters and knobs) and a clean wire log, so every case starts
-            # from the seed contract.
-            self._instance_mutations = True
-            status, _ = _request(f"{config['runner_url']}/_reset", method="POST", payload={})
-            if status != 200:
-                raise AttachError(f"per-case reset failed with HTTP {status}")
-            status, _ = _request(f"{config['runner_url']}/_wire-log/clear", method="POST", payload={})
+            self._run_health_and_reset(config)
         except AttachError:
             # Decide the final instance state BEFORE dropping the lock (same
             # rule as release()): an attach failure before any mutation left
@@ -527,42 +452,42 @@ class ExtKnowledgeAttach:
                 self._release_lock()
             raise
 
+    def _run_health_and_reset(self, config: dict) -> None:
+        self._instance_mutations = False
+        # Runner-side readiness: all eight route sets must be healthy.
+        status, health = _request(f"{config['runner_url']}/health")
+        services = health.get("services") or {}
+        unhealthy = [name for name in ALL_HEALTH_SERVICES if services.get(name) != "ok"]
+        if health.get("status") != "ok" or unhealthy:
+            raise AttachError(
+                "ext-knowledge health check failed for: " + ", ".join(unhealthy or ["status"])
+            )
+
+        # Product-side readiness: the migrated consumers drive the live
+        # product config and runtime services; an unreachable product
+        # stack is a dependency failure, not a confusing test error.
+        # Reachability follows the local_preflight semantics (a 404
+        # service root is a live service).
+        for env_name in ("NEXENT_CONFIG_URL", "NEXENT_RUNTIME_URL"):
+            endpoint = self.env.get(env_name, "").rstrip("/")
+            if not endpoint:
+                continue
+            if not _reachable(endpoint):
+                raise AttachError(
+                    f"the product service behind {env_name} is not reachable at {endpoint}"
+                )
+
+        # Per-case baseline: full reset (route sets + AIDP data, failure
+        # counters and knobs) and a clean wire log, so every case starts
+        # from the seed contract.
+        self._instance_mutations = True
+        status, _ = _request(f"{config['runner_url']}/_reset", method="POST", payload={})
+        if status != 200:
+            raise AttachError(f"per-case reset failed with HTTP {status}")
+        status, _ = _request(f"{config['runner_url']}/_wire-log/clear", method="POST", payload={})
+
         self.env["NEXENT_EXT_KNOWLEDGE_RUNNER_URL"] = str(config["runner_url"])
         self.env["NEXENT_EXT_KNOWLEDGE_PRODUCT_URL"] = str(config["product_url"])
-
-    def _export_profile_values(self, profile: dict) -> None:
-        """Export the selected profile's machine-local values for the script.
-
-        The AIDP journey's real_smoke profile needs the real KB identity,
-        retrieval query and oracle; the mock profile's oracle is fixed by
-        the seed contract and needs no extra values.
-        """
-        if profile["selected_profile"] != "real_smoke":
-            return
-        values = profile["config"].get("real_smoke") or {}
-        mapping = {
-            "kb_id": "NEXENT_TEST_AIDP_REAL_KB_ID",
-            "kb_name": "NEXENT_TEST_AIDP_REAL_KB_NAME",
-            "doc_name": "NEXENT_TEST_AIDP_REAL_DOC_NAME",
-            "query": "NEXENT_TEST_AIDP_REAL_QUERY",
-            "expected_text": "NEXENT_TEST_AIDP_REAL_EXPECTED_TEXT",
-            "expected_source": "NEXENT_TEST_AIDP_REAL_EXPECTED_SOURCE",
-        }
-        # doc_name is optional (the file-management view check); the rest are
-        # required by the aidp-journey schema, so an empty value here means
-        # the schema file and this mapping drifted apart.
-        optional = {"doc_name"}
-        for source, env_name in mapping.items():
-            value = str(values.get(source) or "").strip()
-            if not value:
-                if source in optional:
-                    continue
-                raise _dependency_failure(
-                    self.case_id,
-                    f"config/{profile['selection_key']}.yaml real_smoke.{source} is required "
-                    "for the real_smoke profile",
-                )
-            self.env[env_name] = value
 
     def collect_evidence(self) -> None:
         """Save wire/control evidence; best-effort, never masks the result."""
@@ -640,7 +565,9 @@ class ExtKnowledgeAttach:
         runtime.mkdir(parents=True, exist_ok=True)
         body = {
             "case_id": self.case_id,
-            "config_fingerprint_source": CONFIG_NAME,
+            "config_fingerprint_source": (
+                "suite-controlled" if self.owned else CONFIG_NAME
+            ),
             **payload,
         }
         if self.config:

@@ -13,6 +13,7 @@ case:
   automation: automated
   objective: 模型上游故障
   preconditions:
+  - suite 创建专属 OpenAI-compatible 故障模型，禁止默认模型回填；模型目录状态为 available 后才登记 READY，并在准备失败或用例结束后清理。普通业务模型不执行健康检查。
   - '- ${NEXENT_TEST_HOME}/config/models.yaml
 
     - ${NEXENT_TEST_HOME}/config/secrets.env

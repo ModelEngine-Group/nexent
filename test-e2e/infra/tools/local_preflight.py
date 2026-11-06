@@ -13,8 +13,6 @@ from urllib.request import build_opener, ProxyHandler
 
 import yaml
 
-from test_asset_lib import repository_root
-
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 SERVICES = ("config", "runtime", "northbound", "data_process")
@@ -62,7 +60,7 @@ def valid_url(value: object) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname) and not parsed.username and not parsed.password
 
 
-def static_config_problems(home: Path, records: list[dict]) -> list[str]:
+def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> list[str]:
     config = home / "config"
     daily, problems = env_file(config / "daily.env")
     _, errors = env_file(config / "secrets.env")
@@ -82,6 +80,10 @@ def static_config_problems(home: Path, records: list[dict]) -> list[str]:
             problems.append("secrets.env must not be readable by group or others")
 
     online = [record for record in records if record["stage"] != "D1" and record["status"] == "active"]
+    for record in online:
+        execution = record.get("execution")
+        if execution and "preparation" not in execution:
+            problems.append(f"{record.get('case_id', 'Selected case')} requires a per-case preparation declaration")
     if online:
         loaded = {}
         for name in ("users.yaml", "models.yaml", "test-assets.yaml", "asset-policy.yaml", "anchor-assets.yaml"):
@@ -109,19 +111,15 @@ def static_config_problems(home: Path, records: list[dict]) -> list[str]:
             for name in ("NEXENT_TEST_ASSETS_CONTAINER_HOST", "NEXENT_TEST_MCP_CONTAINER_HOST"):
                 if not daily.get(name):
                     problems.append(f"daily.env {name} is required by selected anchored cases")
-    # ext-knowledge attach: validate the machine-local configuration when it
-    # exists (missing config is reported at attach time, only by cases that
-    # actually declare an ext-served logical service).
-    from ext_attach import config_problems
-    problems.extend(config_problems(home, repository_root()))
-    # Profile-selected cases demand their selection config up front.
-    for record in records:
-        selection = (record.get("execution") or {}).get("profile_selection")
-        if selection and not (home / "config" / f"{selection}.yaml").is_file():
-            problems.append(
-                f"config/{selection}.yaml is required by {record['case_id']} profile selection"
-            )
+    # ext-knowledge is a suite-owned controlled service, so there is no
+    # machine-local attach config to validate. The optional external YAML is
+    # only consumed by the operator CLI, never by the suite run.
     return sorted(set(problems))
+
+
+def required_mock_services(records: list[dict]) -> set[str]:
+    return {service for record in records if record.get("status") == "active"
+            for service in (record.get("execution") or {}).get("required_mock_services", [])}
 
 
 def live_service_problems(home: Path) -> list[str]:

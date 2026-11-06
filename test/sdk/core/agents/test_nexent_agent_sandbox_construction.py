@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Construction and fallback preserve the run's mapping and resource ownership."""
 
 from concurrent.futures import CancelledError
@@ -31,6 +33,24 @@ def factory(tmp_path):
 def test_constructor_creates_run_scoped_mapping(factory, tmp_path):
     assert factory.workspace_mapping.host_root == tmp_path / 'run'
     assert str(factory.workspace_mapping.container_root) == '/mnt/work/run'
+
+
+@pytest.mark.parametrize('history_enabled', [False, True])
+@pytest.mark.parametrize('deferred', [False, True])
+def test_execution_reader_enables_host_bridge_without_business_tools(construction, mocker, history_enabled, deferred):
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    c = construction
+    c.factory.observer.execution_history = ExecutionHistory() if history_enabled else None
+    c.factory.tool_fastpath_enabled = deferred
+    mocker.patch.object(c.factory, '_push_file_workspace_to_sandbox')
+    mocker.patch.object(c.factory, '_initialize_sandbox_workspaces')
+    c.factory.create_single_agent(c.config)
+    if deferred:
+        wrapper = c.core.call_args.kwargs['executor']
+        wrapper.send_tools({})
+        wrapper('import math')
+    assert c.build.call_args.kwargs['host_tools_exist'] is history_enabled
 
 
 def test_explicit_local_bind_config_keeps_mapping_disabled(tmp_path):
@@ -101,9 +121,14 @@ def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool')
+    tool.name = 'read'
     tool.workspace_mapping = c.factory.workspace_mapping
     plain_tool = Mock(name='plain-tool', workspace_mapping=None)
-    c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})] * 2
+    plain_tool.name = 'plain_tool'
+    c.config.tools = [
+        ToolConfig(name='read', class_name='ReadFileTool', source='local', params={}),
+        ToolConfig(name='plain_tool', class_name='PlainTool', source='local', params={}),
+    ]
     mocker.patch.object(c.factory, 'create_tool', side_effect=[tool, plain_tool])
     mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
     result = c.factory.create_single_agent(c.config)
@@ -158,6 +183,7 @@ def test_deferred_local_fallback_clears_mapping_and_warns(construction, mocker):
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool', workspace_mapping=c.factory.workspace_mapping)
+    tool.name = 'read'
     c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})]
     mocker.patch.object(c.factory, 'create_tool', return_value=tool)
     mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)

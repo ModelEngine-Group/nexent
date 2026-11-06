@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import pytest
@@ -12,8 +13,8 @@ _ORDINARY_LOCAL_TOOL = 'read_file'
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D2')
 def test_tool_list_is_user_selectable_deployment_control(monkeypatch):
-    import services.tool_configuration_service as svc
-    from consts import const
+    from management.services.tool import configuration as svc
+    import contracts.constants.environment as const
 
     selectable = svc._get_user_selectability
 

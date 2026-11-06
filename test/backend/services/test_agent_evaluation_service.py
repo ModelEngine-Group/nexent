@@ -1,5 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for agent_evaluation_service focusing on the new
 delete-only-creator behavior and the failed-cases-only Excel report."""
+
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_contract_stubs
+from test.backend.management.import_patching import bind_import_attribute, set_import_attribute
 
 import sys
 import types
@@ -87,7 +93,7 @@ sys.modules["sqlalchemy"] = _sqlalchemy_root
 
 
 # Stub out the ``services`` and ``nexent`` packages so importing
-# ``services.agent_evaluation_service`` does not pull in the full dependency
+# ``management.services.evaluation.runs`` does not pull in the full dependency
 # graph. We pre-register the specific submodules the service module imports
 # under ``sys.modules`` so attribute lookups succeed.
 def _register_package(name: str) -> types.ModuleType:
@@ -204,7 +210,7 @@ _db_pkg.as_dict = MagicMock()
 
 _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.query_version_list = MagicMock()
-sys.modules["database.agent_version_db"] = _agent_version_db_mock
+sys.modules["management.db.agent.version"] = _agent_version_db_mock
 _db_pkg.agent_version_db = _agent_version_db_mock
 
 _evaluation_set_db_mock = MagicMock()
@@ -218,7 +224,7 @@ _evaluation_set_db_mock.materialize_virtual_evaluation_set_for_run = MagicMock(
 _evaluation_set_db_mock.insert_evaluation_set_cases = MagicMock(return_value=0)
 _evaluation_set_db_mock.update_evaluation_set_case_count = MagicMock()
 _evaluation_set_db_mock.hard_delete_evaluation_set = MagicMock()
-sys.modules["database.evaluation_set_db"] = _evaluation_set_db_mock
+sys.modules["management.db.evaluation.sets"] = _evaluation_set_db_mock
 _db_pkg.evaluation_set_db = _evaluation_set_db_mock
 
 _agent_evaluation_db_mock = MagicMock()
@@ -236,51 +242,55 @@ _agent_evaluation_db_mock.list_agent_evaluations_by_agent = MagicMock(return_val
 _agent_evaluation_db_mock.update_agent_evaluation_analysis_report = MagicMock()
 _agent_evaluation_db_mock.update_agent_evaluation_case_result = MagicMock()
 _agent_evaluation_db_mock.update_agent_evaluation_status = MagicMock()
-sys.modules["database.agent_evaluation_db"] = _agent_evaluation_db_mock
+sys.modules["management.db.evaluation.runs"] = _agent_evaluation_db_mock
 _db_pkg.agent_evaluation_db = _agent_evaluation_db_mock
 
 _knowledge_db_mock = MagicMock()
 _knowledge_db_mock.search_knowledge_records = MagicMock(return_value=[])
 _knowledge_db_mock.get_knowledge_name_by_id = MagicMock()
 _knowledge_db_mock.get_index_name_by_knowledge_name = MagicMock()
-sys.modules["database.knowledge_db"] = _knowledge_db_mock
+sys.modules["management.db.knowledge_base.repository"] = _knowledge_db_mock
 _db_pkg.knowledge_db = _knowledge_db_mock
 
-# ---- 补齐 evaluator_db（service L62：from database.evaluator_db import get_evaluator）----
+# ---- 补齐 evaluator_db（service L62：from management.db.evaluation.evaluator import get_evaluator）----
 _evaluator_db_mock = MagicMock()
 _evaluator_db_mock.get_evaluator = MagicMock(return_value={"evaluator_id": 1, "pass_threshold": 0.8, "version_no": 1})
-sys.modules["database.evaluator_db"] = _evaluator_db_mock
+sys.modules["management.db.evaluation.evaluator"] = _evaluator_db_mock
 _db_pkg.evaluator_db = _evaluator_db_mock
 
-# ---- 补齐 user_tenant_db（service：from database.user_tenant_db import get_user_tenant_by_user_id）----
+# ---- 补齐 user_tenant_db（service：from management.db.identity.user_tenant import get_user_tenant_by_user_id）----
 # Default role is USER (fail-closed) so existing creator-only rejection tests
 # keep their semantics; the delete-permission tests override the role per case.
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(return_value={"user_role": "USER"})
-sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 _db_pkg.user_tenant_db = _user_tenant_db_mock
 
-# database.client / database.db_models are imported by both service modules.
+# management.db.client / management.db.models are imported by both service modules.
 _db_client_module = MagicMock()
 _db_client_module.get_db_session = MagicMock()
 _db_client_module.as_dict = MagicMock()
-sys.modules["database.client"] = _db_client_module
+sys.modules["management.db.client"] = _db_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()
 _db_models_module.AgentEvaluation = MagicMock()
 _db_models_module.ModelRecord = MagicMock()
-sys.modules["database.db_models"] = _db_models_module
+sys.modules["management.db.models"] = _db_models_module
 _db_pkg.db_models = _db_models_module
 
-# consts.model referenced by the service
+# contracts.agent referenced by the service
 _consts_pkg = _register_package("consts")
-_consts_model_module = types.ModuleType("consts.model")
+_consts_model_module = types.ModuleType("contracts.agent")
 _consts_model_module.AgentRequest = MagicMock()
-sys.modules["consts.model"] = _consts_model_module
+install_business_contract_stubs(_consts_model_module)
 _consts_pkg.model = _consts_model_module
 
-_consts_error_code_module = types.ModuleType("consts.error_code")
+_consts_error_code_module = types.ModuleType("contracts.errors.codes")
 
 
 class _ErrorCode:
@@ -312,20 +322,20 @@ class _ErrorCode:
 
 
 _consts_error_code_module.ErrorCode = _ErrorCode
-sys.modules["consts.error_code"] = _consts_error_code_module
+install_shared_contract_stub(_consts_error_code_module, 'error_code')
 _consts_pkg.error_code = _consts_error_code_module
 
-_consts_limits_module = types.ModuleType("consts.evaluation_limits")
+_consts_limits_module = types.ModuleType("contracts.constants.constants")
 _consts_limits_module.DEFAULT_PASS_THRESHOLD = 0.8
 _consts_limits_module.MAX_CONCURRENT_RUNS = 10
 _consts_limits_module.MAX_EVALUATORS_PER_RUN = 3
 _consts_limits_module.MAX_TOTAL_RUNS = 100
 _consts_limits_module.MAX_TURNS_PER_SESSION = 20
 _consts_limits_module.MAX_CASES_PER_SET = 10000
-sys.modules["consts.evaluation_limits"] = _consts_limits_module
+install_shared_contract_stub(_consts_limits_module, 'evaluation_limits')
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-_consts_status_module = types.ModuleType("consts.evaluation_status")
+_consts_status_module = types.ModuleType("contracts.constants.constants")
 _consts_status_module.MAX_FAILURE_EXAMPLES = 5
 _consts_status_module.EvalCaseStatus = type(
     "EvalCaseStatus",
@@ -352,10 +362,10 @@ _consts_status_module.EvalRunStatus = type(
         "CANCELLED": "CANCELLED",
     },
 )
-sys.modules["consts.evaluation_status"] = _consts_status_module
+install_shared_contract_stub(_consts_status_module, 'evaluation_status')
 _consts_pkg.evaluation_status = _consts_status_module
 
-_consts_exceptions_module = types.ModuleType("consts.exceptions")
+_consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 
 
 class _AppException(Exception):
@@ -373,7 +383,7 @@ _consts_exceptions_module.NoInviteCodeException = Exception
 _consts_exceptions_module.MCPConnectionError = Exception
 _consts_exceptions_module.ToolExecutionException = Exception
 _consts_exceptions_module.VoiceServiceException = Exception
-sys.modules["consts.exceptions"] = _consts_exceptions_module
+install_shared_contract_stub(_consts_exceptions_module, 'exceptions')
 _consts_pkg.exceptions = _consts_exceptions_module
 
 # adapters (Jiuwen SDK) stubs
@@ -391,7 +401,7 @@ _adapters_pkg.jiuwen_sdk_adapter = _jiuwen_module
 
 # Make sure pre-existing real utils package is in sys.modules so
 # the app test (and any sibling tests) can resolve doted paths like
-# ``utils.auth_utils`` without hitting a stubbed package.
+# ``gateway.authentication.auth`` without hitting a stubbed package.
 _existing_utils = sys.modules.get("utils")
 if _existing_utils is None or not hasattr(_existing_utils, "__path__"):
     _utils_pkg = _register_package("utils")
@@ -432,13 +442,17 @@ _utils_llm_module.call_llm_for_system_prompt = MagicMock()
 sys.modules["management.services.model.invocation"] = _utils_llm_module
 _utils_pkg.llm_utils = _utils_llm_module
 
-# utils.agent_profile_utils is imported lazily inside _generate_test_queries.
-sys.modules["utils.agent_profile_utils"] = MagicMock()
-_utils_pkg.agent_profile_utils = sys.modules["utils.agent_profile_utils"]
+# management.services.agent.profile is imported lazily inside _generate_test_queries.
+# Declare fetch_agent_profile so set_import_attribute can patch it later.
+_agent_profile_stub = MagicMock()
+_agent_profile_stub.fetch_agent_profile = MagicMock()
+_agent_profile_stub.format_agent_profile_context = MagicMock()
+sys.modules["management.services.agent.profile"] = _agent_profile_stub
+_utils_pkg.agent_profile_utils = _agent_profile_stub
 
 _utils_prompt_template_module = MagicMock()
 _utils_prompt_template_module.get_prompt_template = MagicMock()
-sys.modules["utils.prompt_template_utils"] = _utils_prompt_template_module
+sys.modules["management.services.agent.prompt"] = _utils_prompt_template_module
 _utils_pkg.prompt_template_utils = _utils_prompt_template_module
 
 _nexent_core_models_module = types.ModuleType("nexent.core.models")
@@ -468,17 +482,17 @@ sys.modules["services.evaluation_prompt_service"] = _eval_prompt_service_module
 _services_pkg.evaluation_prompt_service = _eval_prompt_service_module
 
 _thread_lifecycle_service_module = types.ModuleType(
-    "services.thread_lifecycle_service"
+    "infrastructure.concurrency"
 )
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_service_module.config_thread_manager = MagicMock()
-sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_service_module
+sys.modules["infrastructure.concurrency"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
 
-# ---- 补齐 services.evaluation_set_service（agent_evaluation_service.py L64）----
-_eval_set_service_module = types.ModuleType("services.evaluation_set_service")
+# ---- 补齐 management.services.evaluation.sets（agent_evaluation_service.py L64）----
+_eval_set_service_module = types.ModuleType("management.services.evaluation.sets")
 _eval_set_service_module.resolve_latest_published_version_no = MagicMock(return_value=1)
-sys.modules["services.evaluation_set_service"] = _eval_set_service_module
+sys.modules["management.services.evaluation.sets"] = _eval_set_service_module
 _services_pkg.evaluation_set_service = _eval_set_service_module
 
 _agent_service_module.list_model_providers_impl = MagicMock(return_value=[])
@@ -486,8 +500,8 @@ _agent_service_module.list_model_providers_impl = MagicMock(return_value=[])
 # an attribute on the ``utils`` package, so doted ``patch`` resolution in
 # sibling tests can find it.
 try:
-    importlib.import_module("utils.auth_utils")
-    _utils_pkg.auth_utils = sys.modules["utils.auth_utils"]
+    importlib.import_module("gateway.authentication.auth")
+    _utils_pkg.auth_utils = sys.modules["gateway.authentication.auth"]
 except Exception:  # noqa: BLE001
     pass
 
@@ -587,8 +601,11 @@ def service_module(monkeypatch):
     previous_module_state = _capture_module_state()
     _apply_module_state(_STUB_MODULE_STATE)
     try:
-        if "services.agent_evaluation_service" in sys.modules:
-            del sys.modules["services.agent_evaluation_service"]
+        for name in ("runs", "execution", "scoring", "case_generation", "analysis", "queries", "common"):
+            sys.modules.pop("management.services.evaluation." + name, None)
+            package = sys.modules.get("management.services.evaluation")
+            if package is not None and name in vars(package):
+                delattr(package, name)
         # Also clear the attribute on the services package so the ``from
         # services`` below triggers a fresh import (and therefore repopulates
         # ``sys.modules``). Without this, Python's package attribute lookup can
@@ -599,32 +616,26 @@ def service_module(monkeypatch):
             except AttributeError:
                 pass
 
-        from services import agent_evaluation_service  # noqa: E402
+        agent_evaluation_service = importlib.import_module("management.services.evaluation.runs")
 
         # Make sure the freshly imported submodule is also visible as an
         # attribute of the ``services`` package, so subsequent ``from
         # services.X import Y`` access remains consistent with sys.modules.
         _services_pkg.agent_evaluation_service = agent_evaluation_service
-        agent_evaluation_service.openpyxl = openpyxl_mock
-        agent_evaluation_service.agent_run_manager = MagicMock()
-        # ``services.agent_evaluation_service`` may or may not do
+        bind_import_attribute(agent_evaluation_service, 'openpyxl', openpyxl_mock)
+        bind_import_attribute(agent_evaluation_service, 'agent_run_manager', MagicMock())
+        # ``management.services.evaluation.runs`` may or may not do
         # ``from openpyxl import Workbook`` at module load depending on the
         # current code shape; either way we install a patch under the module
         # attribute so the workbook recorder picks it up when used.
-        agent_evaluation_service.Workbook = _workbook_factory
-        monkeypatch.setattr(
+        bind_import_attribute(agent_evaluation_service, 'Workbook', _workbook_factory)
+        set_import_attribute(monkeypatch,
             agent_evaluation_service, "Workbook", _workbook_factory, raising=False
         )
 
-        agent_evaluation_service.get_agent_evaluation = (
-            _agent_evaluation_db_mock.get_agent_evaluation
-        )
-        agent_evaluation_service.list_agent_evaluation_cases = (
-            _agent_evaluation_db_mock.list_agent_evaluation_cases
-        )
-        agent_evaluation_service.soft_delete_agent_evaluation = (
-            _agent_evaluation_db_mock.soft_delete_agent_evaluation
-        )
+        bind_import_attribute(agent_evaluation_service, 'get_agent_evaluation', _agent_evaluation_db_mock.get_agent_evaluation)
+        bind_import_attribute(agent_evaluation_service, 'list_agent_evaluation_cases', _agent_evaluation_db_mock.list_agent_evaluation_cases)
+        bind_import_attribute(agent_evaluation_service, 'soft_delete_agent_evaluation', _agent_evaluation_db_mock.soft_delete_agent_evaluation)
 
         _agent_evaluation_db_mock.get_agent_evaluation.reset_mock(side_effect=True)
         _agent_evaluation_db_mock.list_agent_evaluation_cases.reset_mock(side_effect=True)
@@ -651,7 +662,7 @@ def _make_case(case_id: int, *, status: str, score, pass_status: str | None):
 
 
 def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 1,
         "tenant_id": "t1",
@@ -668,7 +679,7 @@ def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
 
 
 def test_delete_agent_evaluation_run_admin_can_delete_others(service_module):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -686,7 +697,7 @@ def test_delete_agent_evaluation_run_admin_can_delete_others(service_module):
 
 
 def test_delete_agent_evaluation_run_dev_cannot_delete_others(service_module):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -704,7 +715,7 @@ def test_delete_agent_evaluation_run_dev_cannot_delete_others(service_module):
 
 
 def test_delete_agent_evaluation_run_unknown_role_rejected(service_module):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -815,32 +826,14 @@ def _wire_full_db_module(service_module):
     bodies stay focused on behaviour rather than mocking boilerplate.
     """
     create_mock = MagicMock(return_value={"agent_evaluation_id": 999})
-    service_module.create_agent_evaluation = create_mock
-    service_module.create_agent_evaluation_cases = MagicMock(return_value=3)
-    service_module.list_agent_evaluations_by_agent = MagicMock(return_value=[{"id": 1}])
-    service_module.update_agent_evaluation_case_result = MagicMock()
-    service_module.update_agent_evaluation_status = MagicMock()
-    service_module.get_evaluation_set_cases_all = MagicMock(
-        return_value=[
-            {
-                "evaluation_set_case_id": 1,
-                "inputs": {"query": "q1"},
-                "label": {"answer": "a1"},
-            },
-            {
-                "evaluation_set_case_id": 2,
-                "inputs": {"query": "q2"},
-                "label": {"answer": "a2"},
-            },
-            {
-                "evaluation_set_case_id": 3,
-                "inputs": {"query": "q3"},
-                "label": {"answer": "a3"},
-            },
-        ]
-    )
-    service_module.resolve_latest_published_version_no = MagicMock(return_value=7)
-    service_module.prepare_agent_run = MagicMock()
+    bind_import_attribute(service_module, 'create_agent_evaluation', create_mock)
+    bind_import_attribute(service_module, 'create_agent_evaluation_cases', MagicMock(return_value=3))
+    bind_import_attribute(service_module, 'list_agent_evaluations_by_agent', MagicMock(return_value=[{'id': 1}]))
+    bind_import_attribute(service_module, 'update_agent_evaluation_case_result', MagicMock())
+    bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
+    bind_import_attribute(service_module, 'get_evaluation_set_cases_all', MagicMock(return_value=[{'evaluation_set_case_id': 1, 'inputs': {'query': 'q1'}, 'label': {'answer': 'a1'}}, {'evaluation_set_case_id': 2, 'inputs': {'query': 'q2'}, 'label': {'answer': 'a2'}}, {'evaluation_set_case_id': 3, 'inputs': {'query': 'q3'}, 'label': {'answer': 'a3'}}]))
+    bind_import_attribute(service_module, 'resolve_latest_published_version_no', MagicMock(return_value=7))
+    bind_import_attribute(service_module, 'prepare_agent_run', MagicMock())
     return create_mock
 
 
@@ -908,7 +901,7 @@ def test_list_agent_evaluation_cases_impl_forwards_pagination(service_module):
 
 def test_delete_agent_evaluation_run_not_found_raises(service_module):
     """A missing run bubbles up the ``AppException`` from the DB layer."""
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.side_effect = AppException(
         error_code="AGENT_EVALUATION_NOT_FOUND",
@@ -922,7 +915,7 @@ def test_delete_agent_evaluation_run_not_found_raises(service_module):
 
 def test_delete_agent_evaluation_run_creator_missing_raises(service_module):
     """``created_by`` is None on the run record — never matches any user."""
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 1,
@@ -967,10 +960,8 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
     """The async runner streams JSON ``final_answer`` chunks and joins them."""
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
-    service_module.prepare_agent_run = AsyncMock(
-        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
-    )
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(MagicMock(name='run_info'), MagicMock(name='memory_ctx'))))
 
     final_answer_parts = [
         json.dumps({"type": "final_answer", "content": "hello "}),
@@ -981,7 +972,7 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
         for chunk in final_answer_parts:
             yield chunk
 
-    service_module.agent_run = _fake_agent_run
+    bind_import_attribute(service_module, 'agent_run', _fake_agent_run)
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1005,10 +996,10 @@ def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
 
 
 def test_dispatch_agent_evaluation_run_uses_runtime_proxy(service_module, monkeypatch):
-    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
     dispatch = MagicMock(return_value={"accepted": True})
     runtime_proxy.dispatch_agent_evaluation_run = dispatch
-    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
 
     result = service_module._dispatch_agent_evaluation_run(7, "u1", "t1")
 
@@ -1023,19 +1014,17 @@ def test_dispatch_agent_evaluation_run_uses_runtime_proxy(service_module, monkey
 def test_run_agent_to_final_answer_releases_registered_run_on_error(service_module):
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
     run_info = MagicMock(name="run_info")
-    service_module.prepare_agent_run = AsyncMock(
-        return_value=(run_info, MagicMock(name="memory_ctx"))
-    )
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(run_info, MagicMock(name='memory_ctx'))))
 
     async def _failing_agent_run(_run_info, **_kwargs):
         raise RuntimeError("agent failed")
         yield  # pragma: no cover
 
-    service_module.agent_run = _failing_agent_run
+    bind_import_attribute(service_module, 'agent_run', _failing_agent_run)
     unregister = MagicMock()
-    service_module.agent_run_manager = MagicMock()
+    bind_import_attribute(service_module, 'agent_run_manager', MagicMock())
     service_module.agent_run_manager.unregister_agent_run = unregister
 
     async def invoke_failing_run():
@@ -1063,10 +1052,8 @@ def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module)
     """Chunks whose ``type`` is not ``final_answer`` are ignored."""
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
-    service_module.prepare_agent_run = AsyncMock(
-        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
-    )
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(MagicMock(name='run_info'), MagicMock(name='memory_ctx'))))
 
     chunks = [
         json.dumps({"type": "thought", "content": "thinking..."}),
@@ -1078,7 +1065,7 @@ def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module)
         for chunk in chunks:
             yield chunk
 
-    service_module.agent_run = _fake_agent_run
+    bind_import_attribute(service_module, 'agent_run', _fake_agent_run)
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1098,10 +1085,8 @@ def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(
     """Non-string chunks and unparseable JSON are silently dropped."""
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
-    service_module.prepare_agent_run = AsyncMock(
-        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
-    )
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(MagicMock(name='run_info'), MagicMock(name='memory_ctx'))))
 
     chunks = [
         "not json",
@@ -1113,7 +1098,7 @@ def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(
         for chunk in chunks:
             yield chunk
 
-    service_module.agent_run = _fake_agent_run
+    bind_import_attribute(service_module, 'agent_run', _fake_agent_run)
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1131,15 +1116,13 @@ def test_run_agent_to_final_answer_handles_no_final_answer_chunks(service_module
     """When no chunk is a ``final_answer``, the result is the empty string."""
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
-    service_module.prepare_agent_run = AsyncMock(
-        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
-    )
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(MagicMock(name='run_info'), MagicMock(name='memory_ctx'))))
 
     async def _fake_agent_run(_run_info, **_kwargs):
         yield json.dumps({"type": "thought"})
 
-    service_module.agent_run = _fake_agent_run
+    bind_import_attribute(service_module, 'agent_run', _fake_agent_run)
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1160,7 +1143,7 @@ def test_make_background_done_callback_failure_marks_run_failed(service_module):
     def _fake_update(**kwargs):
         captured.update(kwargs)
 
-    service_module.update_agent_evaluation_status = _fake_update
+    bind_import_attribute(service_module, 'update_agent_evaluation_status', _fake_update)
 
     callback = service_module._make_background_done_callback(
         tenant_id="t1",
@@ -1186,7 +1169,7 @@ def test_make_background_done_callback_no_exception_is_noop(service_module):
     def _fake_update(**kwargs):
         captured.update(kwargs)
 
-    service_module.update_agent_evaluation_status = _fake_update
+    bind_import_attribute(service_module, 'update_agent_evaluation_status', _fake_update)
 
     callback = service_module._make_background_done_callback(
         tenant_id="t1",
@@ -1208,7 +1191,7 @@ def test_make_background_done_callback_update_failure_is_logged(service_module):
     def _failing_update(**_kwargs):
         raise RuntimeError("db unavailable")
 
-    service_module.update_agent_evaluation_status = _failing_update
+    bind_import_attribute(service_module, 'update_agent_evaluation_status', _failing_update)
 
     callback = service_module._make_background_done_callback(
         tenant_id="t1",
@@ -1228,7 +1211,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     pool_mock = MagicMock()
     future = MagicMock()
     pool_mock.submit.return_value = types.SimpleNamespace(future=future)
-    service_module.config_thread_manager = pool_mock
+    bind_import_attribute(service_module, 'config_thread_manager', pool_mock)
 
     run = service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1266,7 +1249,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
 
 def test_create_agent_evaluation_run_empty_set_raises(service_module):
     """An evaluation set with no cases is rejected before any DB writes happen."""
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_evaluation_set_cases_all.return_value = []
 
@@ -1286,7 +1269,7 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     """The published version number flows from ``resolve_latest_published_version_no``."""
     create_mock = _wire_full_db_module(service_module)
     service_module.resolve_latest_published_version_no.return_value = 13
-    service_module.config_thread_manager = MagicMock()
+    bind_import_attribute(service_module, 'config_thread_manager', MagicMock())
     service_module.config_thread_manager.submit.return_value = types.SimpleNamespace(
         future=MagicMock()
     )
@@ -1311,7 +1294,7 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
 def _wire_executor_dependencies(service_module, cases):
     """Wire the collaborators touched by ``execute_agent_evaluation_run``."""
     _wire_full_db_module(service_module)
-    service_module.JiuwenSDKAdapter = MagicMock()
+    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
     adapter = MagicMock()
     adapter.evaluate_semantic_consistency.return_value = (1, "ok")
     service_module.JiuwenSDKAdapter.return_value = adapter
@@ -1331,7 +1314,7 @@ def _wire_executor_dependencies(service_module, cases):
         # real signature -> Tuple[str, List[dict]].
         return "agent-said-X", []
 
-    service_module._run_agent_to_final_answer = _fake_run_to_final_answer
+    bind_import_attribute(service_module, '_run_agent_to_final_answer', _fake_run_to_final_answer)
     return adapter
 
 
@@ -1371,7 +1354,7 @@ def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module
         raise RuntimeError("boom")
 
     _wire_executor_dependencies(service_module, cases)
-    service_module._run_agent_to_final_answer = _flaky
+    bind_import_attribute(service_module, '_run_agent_to_final_answer', _flaky)
 
     service_module.execute_agent_evaluation_run("t1", "u1", 50, judge_model_id=99)
 
@@ -1391,9 +1374,7 @@ def test_execute_agent_evaluation_run_case_exception_marks_failed(service_module
 def test_execute_agent_evaluation_run_top_level_error_marks_run_failed(service_module):
     """An exception raised before the loop starts must transition the run FAILED."""
     _wire_full_db_module(service_module)
-    service_module.JiuwenSDKAdapter = MagicMock(
-        side_effect=RuntimeError("adapter init boom")
-    )
+    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock(side_effect=RuntimeError('adapter init boom')))
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
@@ -1428,7 +1409,7 @@ def test_execute_agent_evaluation_run_falls_back_to_persisted_judge_model(
 def test_execute_agent_evaluation_run_missing_judge_model_raises(service_module):
     """Both the argument and persisted judge_model_id are absent — outer except fires."""
     _wire_full_db_module(service_module)
-    service_module.JiuwenSDKAdapter = MagicMock()
+    bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
@@ -1486,7 +1467,7 @@ class TestGenerateFriendlyErrorMessage:
                 raise ImportError("openai not available")
             return real_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(_bi, "__import__", _failing_import)
+        set_import_attribute(monkeypatch, _bi, "__import__", _failing_import)
         # Even with an LLM-related error, the openai import failure is caught
         # inside the helper and we get the default message back.
         result = service_module._generate_friendly_error_message(
@@ -1502,12 +1483,8 @@ class TestGenerateFriendlyErrorMessage:
 
         # The service calls call_llm_for_system_prompt (not openai directly).
         # Mock it to return a non-empty string so the helper returns it.
-        service_module.call_llm_for_system_prompt = MagicMock(
-            return_value="Friendly error from LLM"
-        )
-        service_module.load_prompt = MagicMock(
-            return_value={"USER_PROMPT": "test", "SYSTEM_PROMPT": "test"}
-        )
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='Friendly error from LLM'))
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'USER_PROMPT': 'test', 'SYSTEM_PROMPT': 'test'}))
 
         result = service_module._generate_friendly_error_message(
             RuntimeError("openai timeout"),
@@ -1532,8 +1509,8 @@ class TestGenerateFriendlyErrorMessage:
 
 
 def _call_evaluator(service_module, response):
-    service_module.call_llm_for_system_prompt = MagicMock(return_value=response)
-    service_module._build_evaluator_prompt = MagicMock(return_value="prompt")
+    bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value=response))
+    bind_import_attribute(service_module, '_build_evaluator_prompt', MagicMock(return_value='prompt'))
     return service_module._call_one_llm_evaluator(
         eid=1,
         ev={"name": "judge-a"},
@@ -1601,27 +1578,27 @@ class TestValidateCodeEvaluator:
         service_module.validate_code_evaluator(_valid_evaluator_code(var_keyword=True))
 
     def test_syntax_error_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="Code syntax error"):
             service_module.validate_code_evaluator("def :")
 
     def test_forbidden_operations_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        monkeypatch.setattr(
+        from contracts.errors.exceptions import AppException
+        set_import_attribute(monkeypatch,
             service_module, "_scan_shell_calls", MagicMock(return_value=["open"])
         )
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator("x = 1")
 
     def test_dunder_globals_escape_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator(
                 "esc = json.JSONDecoder.__init__.__globals__['__builtins__']"
             )
 
     def test_dunder_class_chain_escape_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator(
                 "esc = ().__class__.__base__.__subclasses__()"
@@ -1637,22 +1614,22 @@ class TestValidateCodeEvaluator:
         service_module.validate_code_evaluator(code)
 
     def test_undefined_name_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden or undefined name"):
             service_module.validate_code_evaluator("undefined_name()")
 
     def test_exec_error_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="Code execution failed"):
             service_module.validate_code_evaluator("1 / 0")
 
     def test_missing_evaluate_callable_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="must define"):
             service_module.validate_code_evaluator("x = 1")
 
     def test_missing_required_params_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="missing required parameters"):
             service_module.validate_code_evaluator(
                 "def evaluate(query):\n    return {'score': 1}"
@@ -1678,18 +1655,18 @@ class TestValidateCodeEvaluator:
 def test_run_agent_to_final_answer_parses_straggler_messages(service_module):
     import asyncio
 
-    service_module.AgentRequest = MagicMock()
+    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
     run_info = MagicMock()
     run_info.observer.get_cached_message.return_value = [
         "not json",
         json.dumps({"type": "step_count"}),
     ]
-    service_module.prepare_agent_run = AsyncMock(return_value=(run_info, None))
+    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(run_info, None)))
 
     async def _fake_agent_run(_ri, **_kwargs):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
-    service_module.agent_run = _fake_agent_run
+    bind_import_attribute(service_module, 'agent_run', _fake_agent_run)
 
     result = asyncio.run(
         service_module._run_agent_to_final_answer(
@@ -1920,7 +1897,7 @@ class TestBuildEvaluatorPrompt:
 
     def test_injects_runtime_stats_when_placeholder_present(self, service_module, monkeypatch):
         ev = {"prompt": "ctx={{runtime_stats}}"}
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module,
             "_format_runtime_context",
             MagicMock(return_value="RUNTIME"),
@@ -1967,7 +1944,7 @@ class TestCollectLlmResults:
         f1, f2 = MagicMock(), MagicMock()
         f1.result.return_value = (1, "n1", 0.8, "r1")
         f2.result.side_effect = RuntimeError("boom")
-        monkeypatch.setattr(service_module, "as_completed", lambda fut: [f1, f2])
+        set_import_attribute(monkeypatch, service_module, "as_completed", lambda fut: [f1, f2])
         llm_evals = {1: {"name": "n1"}, 2: {"name": "n2"}}
         scores, reasons = service_module._collect_llm_results({f1: 1, f2: 2}, llm_evals)
         assert scores == {"n1": 0.8, "n2": 0.0}
@@ -1992,8 +1969,8 @@ class TestScoreWithEvaluators:
         executor = MagicMock()
         future = MagicMock()
         executor.submit.return_value = types.SimpleNamespace(future=future)
-        monkeypatch.setattr(service_module, "runtime_thread_manager", executor)
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch, service_module, "runtime_thread_manager", executor)
+        set_import_attribute(monkeypatch,
             service_module,
             "_collect_llm_results",
             MagicMock(return_value=({"n1": 0.9}, {"n1": "r"})),
@@ -2016,23 +1993,23 @@ class TestScoreWithEvaluators:
 
 class TestCheckRunLimits:
     def test_active_limit_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        monkeypatch.setattr(service_module, "count_active_runs", MagicMock(return_value=10))
-        monkeypatch.setattr(service_module, "count_total_runs", MagicMock(return_value=0))
+        from contracts.errors.exceptions import AppException
+        set_import_attribute(monkeypatch, service_module, "count_active_runs", MagicMock(return_value=10))
+        set_import_attribute(monkeypatch, service_module, "count_total_runs", MagicMock(return_value=0))
         with pytest.raises(AppException) as excinfo:
             service_module._check_run_limits("t1")
         assert excinfo.value.error_code == service_module.ErrorCode.COMMON_RATE_LIMIT_EXCEEDED
 
     def test_total_limit_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        monkeypatch.setattr(service_module, "count_active_runs", MagicMock(return_value=0))
-        monkeypatch.setattr(service_module, "count_total_runs", MagicMock(return_value=100))
+        from contracts.errors.exceptions import AppException
+        set_import_attribute(monkeypatch, service_module, "count_active_runs", MagicMock(return_value=0))
+        set_import_attribute(monkeypatch, service_module, "count_total_runs", MagicMock(return_value=100))
         with pytest.raises(AppException):
             service_module._check_run_limits("t1")
 
     def test_ok(self, service_module, monkeypatch):
-        monkeypatch.setattr(service_module, "count_active_runs", MagicMock(return_value=0))
-        monkeypatch.setattr(service_module, "count_total_runs", MagicMock(return_value=0))
+        set_import_attribute(monkeypatch, service_module, "count_active_runs", MagicMock(return_value=0))
+        set_import_attribute(monkeypatch, service_module, "count_total_runs", MagicMock(return_value=0))
         service_module._check_run_limits("t1")
 
 
@@ -2044,26 +2021,26 @@ class TestValidateAndFreezeEvaluators:
         assert service_module._validate_and_freeze_evaluators(None, "t1", None, "zh") is None
 
     def test_too_many_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._validate_and_freeze_evaluators([1, 2, 3, 4], "t1", None, "zh")
 
     def test_not_found_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        monkeypatch.setattr(service_module, "get_evaluator", MagicMock(return_value=None))
+        from contracts.errors.exceptions import AppException
+        set_import_attribute(monkeypatch, service_module, "get_evaluator", MagicMock(return_value=None))
         with pytest.raises(AppException):
             service_module._validate_and_freeze_evaluators([1], "t1", None, "zh")
 
     def test_not_published_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        monkeypatch.setattr(
+        from contracts.errors.exceptions import AppException
+        set_import_attribute(monkeypatch,
             service_module, "get_evaluator", MagicMock(return_value=self._evaluator("DRAFT"))
         )
         with pytest.raises(AppException):
             service_module._validate_and_freeze_evaluators([1], "t1", None, "zh")
 
     def test_returns_snapshot(self, service_module, monkeypatch):
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module, "get_evaluator", MagicMock(return_value=self._evaluator())
         )
         snapshot = service_module._validate_and_freeze_evaluators(
@@ -2078,7 +2055,7 @@ class TestValidateAndFreezeEvaluators:
 
 class TestCreateNoSetModeRun:
     def test_query_count_out_of_range_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._create_no_set_mode_run(
                 "t1", "u1", 1, 1, 99, None, None, 0, "zh", None
@@ -2090,9 +2067,9 @@ class TestCreateNoSetModeRun:
 
     def test_creates_run_and_submits(self, service_module, monkeypatch):
         create = MagicMock(return_value={"agent_evaluation_id": 5})
-        monkeypatch.setattr(service_module, "create_agent_evaluation", create)
+        set_import_attribute(monkeypatch, service_module, "create_agent_evaluation", create)
         run_bg = MagicMock()
-        monkeypatch.setattr(service_module, "_run_in_background", run_bg)
+        set_import_attribute(monkeypatch, service_module, "_run_in_background", run_bg)
 
         run = service_module._create_no_set_mode_run(
             "t1", "u1", 7, 3, 99, [1], {"m": "x"}, 10, "zh", {"old": 1}
@@ -2106,15 +2083,15 @@ class TestCreateNoSetModeRun:
 
 class TestCreateNoSetModeBranch:
     def test_forwards_to_no_set_mode_when_no_set_id(self, service_module, monkeypatch):
-        monkeypatch.setattr(service_module, "_check_run_limits", MagicMock())
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch, service_module, "_check_run_limits", MagicMock())
+        set_import_attribute(monkeypatch,
             service_module, "_validate_and_freeze_evaluators", MagicMock(return_value=None)
         )
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module, "resolve_latest_published_version_no", MagicMock(return_value=3)
         )
         no_set = MagicMock(return_value={"agent_evaluation_id": 1})
-        monkeypatch.setattr(service_module, "_create_no_set_mode_run", no_set)
+        set_import_attribute(monkeypatch, service_module, "_create_no_set_mode_run", no_set)
 
         run = service_module.create_agent_evaluation_run_impl(
             tenant_id="t1", user_id="u1", agent_id=7, judge_model_id=99
@@ -2133,19 +2110,20 @@ class TestBuildAgentProfileParts:
         profile = {
             "name": "A",
             "description": "d",
-            "duty_prompt": "dp",
+            "prompt": "dp",
             "constraint_prompt": "cp",
             "business_description": "bd",
         }
         parts = service_module._build_agent_profile_parts(profile)
         assert "- Name: A" in parts[0]
-        assert len(parts) == 5
+        assert len(parts) == 4
+        assert "cp" not in "\n".join(parts)
 
     def test_skips_empty_fields(self, service_module):
         profile = {
             "name": "A",
             "description": "",
-            "duty_prompt": None,
+            "prompt": None,
             "constraint_prompt": "",
             "business_description": None,
         }
@@ -2161,7 +2139,7 @@ class TestExtractCasesFromMarkdownFence:
         assert cases == [{"inputs": {"query": "q"}}]
 
     def test_no_fence_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException) as excinfo:
             service_module._extract_cases_from_markdown_fence("no fence here")
         assert (
@@ -2170,7 +2148,7 @@ class TestExtractCasesFromMarkdownFence:
         )
 
     def test_bad_json_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._extract_cases_from_markdown_fence("```json\n[oops]\n```")
 
@@ -2189,12 +2167,12 @@ class TestParseCasesFromLlmResponse:
         assert cases == [{"a": 1}]
 
     def test_empty_list_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._parse_cases_from_llm_response("[]")
 
     def test_non_list_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._parse_cases_from_llm_response('{"a": 1}')
 
@@ -2204,24 +2182,24 @@ class TestGenerateTestQueries:
         return {
             "name": "A",
             "description": "d",
-            "duty_prompt": "",
+            "prompt": "",
             "constraint_prompt": "",
             "business_description": "",
         }
 
     def test_profile_missing_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
-        monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=None))
+        from contracts.errors.exceptions import AppException
+        profile_utils = sys.modules["management.services.agent.profile"]
+        set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=None))
         with pytest.raises(AppException) as excinfo:
             service_module._generate_test_queries(1, "t1", 99)
         assert excinfo.value.error_code == service_module.ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND
 
     def test_llm_failure_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
-        monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
-        monkeypatch.setattr(
+        from contracts.errors.exceptions import AppException
+        profile_utils = sys.modules["management.services.agent.profile"]
+        set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
+        set_import_attribute(monkeypatch,
             service_module,
             "call_llm_for_system_prompt",
             MagicMock(side_effect=RuntimeError("llm down")),
@@ -2234,11 +2212,11 @@ class TestGenerateTestQueries:
         )
 
     def test_no_valid_queries_raises(self, service_module, monkeypatch):
-        from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
-        monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
+        from contracts.errors.exceptions import AppException
+        profile_utils = sys.modules["management.services.agent.profile"]
+        set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         # Non-empty list whose queries are all blank -> filtered to nothing -> EMPTY.
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module,
             "call_llm_for_system_prompt",
             MagicMock(
@@ -2255,8 +2233,8 @@ class TestGenerateTestQueries:
         )
 
     def test_generates_queries(self, service_module, monkeypatch):
-        profile_utils = sys.modules["utils.agent_profile_utils"]
-        monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
+        profile_utils = sys.modules["management.services.agent.profile"]
+        set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         response = json.dumps(
             [
                 {"inputs": {"query": "q1"}, "label": {"answer": "a1"}},
@@ -2265,7 +2243,7 @@ class TestGenerateTestQueries:
                 "not-a-dict",
             ]
         )
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module, "call_llm_for_system_prompt", MagicMock(return_value=response)
         )
         queries = service_module._generate_test_queries(1, "t1", 99, query_count=2)
@@ -2281,11 +2259,11 @@ class TestEvaluateQuery:
     def test_with_evaluators(self, service_module, monkeypatch):
         import asyncio
 
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module, "_run_agent_to_final_answer",
             AsyncMock(return_value=("answer", [{"type": "step_count"}])),
         )
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module,
             "_score_with_evaluators",
             MagicMock(return_value=({"n1": 0.9}, {"n1": "r"})),
@@ -2304,7 +2282,7 @@ class TestEvaluateQuery:
     def test_without_evaluators_uses_adapter(self, service_module, monkeypatch):
         import asyncio
 
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch,
             service_module, "_run_agent_to_final_answer",
             AsyncMock(return_value=("answer", [])),
         )
@@ -2364,12 +2342,8 @@ class TestCasePassStatusHelpers:
 
 
 def test_generate_friendly_error_message_llm_exception_returns_default(service_module):
-    service_module.load_prompt = MagicMock(
-        return_value={"USER_PROMPT": "u {{error_message}}", "SYSTEM_PROMPT": "s"}
-    )
-    service_module.call_llm_for_system_prompt = MagicMock(
-        side_effect=RuntimeError("boom")
-    )
+    bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'USER_PROMPT': 'u {{error_message}}', 'SYSTEM_PROMPT': 's'}))
+    bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(side_effect=RuntimeError('boom')))
     result = service_module._generate_friendly_error_message(
         RuntimeError("openai timeout"), "default", model_id=99, tenant_id="t1"
     )
@@ -2457,16 +2431,12 @@ class TestSetupNoSetAndExecute:
             sessions.append(s)
             return s
 
-        service_module.get_db_session = _gs
-        service_module._generate_test_queries = MagicMock(return_value=["q1", "q2"])
-        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
-            return_value=7
-        )
-        service_module.get_evaluation_set_cases_all = MagicMock(
-            return_value=[{"evaluation_set_case_id": 1}]
-        )
-        service_module.create_agent_evaluation_cases = MagicMock()
-        service_module._dispatch_agent_evaluation_run = MagicMock()
+        bind_import_attribute(service_module, 'get_db_session', _gs)
+        bind_import_attribute(service_module, '_generate_test_queries', MagicMock(return_value=['q1', 'q2']))
+        bind_import_attribute(service_module, 'materialize_virtual_evaluation_set_for_run', MagicMock(return_value=7))
+        bind_import_attribute(service_module, 'get_evaluation_set_cases_all', MagicMock(return_value=[{'evaluation_set_case_id': 1}]))
+        bind_import_attribute(service_module, 'create_agent_evaluation_cases', MagicMock())
+        bind_import_attribute(service_module, '_dispatch_agent_evaluation_run', MagicMock())
         return sessions
 
     def test_success_judge_is_llm(self, service_module):
@@ -2518,23 +2488,19 @@ class TestSetupNoSetAndExecute:
             sessions.append(s)
             return s
 
-        service_module.get_db_session = _flaky_gs
-        service_module._generate_test_queries = MagicMock(return_value=["q1"])
-        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
-            return_value=1
-        )
-        service_module.get_evaluation_set_cases_all = MagicMock(return_value=[])
-        service_module.create_agent_evaluation_cases = MagicMock()
-        service_module._dispatch_agent_evaluation_run = MagicMock()
+        bind_import_attribute(service_module, 'get_db_session', _flaky_gs)
+        bind_import_attribute(service_module, '_generate_test_queries', MagicMock(return_value=['q1']))
+        bind_import_attribute(service_module, 'materialize_virtual_evaluation_set_for_run', MagicMock(return_value=1))
+        bind_import_attribute(service_module, 'get_evaluation_set_cases_all', MagicMock(return_value=[]))
+        bind_import_attribute(service_module, 'create_agent_evaluation_cases', MagicMock())
+        bind_import_attribute(service_module, '_dispatch_agent_evaluation_run', MagicMock())
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
 
     def test_failure_marks_run_failed(self, service_module, monkeypatch):
-        service_module.get_db_session = MagicMock(side_effect=RuntimeError("db down"))
-        service_module._generate_test_queries = MagicMock(
-            side_effect=RuntimeError("llm down")
-        )
-        service_module.update_agent_evaluation_status = MagicMock()
+        bind_import_attribute(service_module, 'get_db_session', MagicMock(side_effect=RuntimeError('db down')))
+        bind_import_attribute(service_module, '_generate_test_queries', MagicMock(side_effect=RuntimeError('llm down')))
+        bind_import_attribute(service_module, 'update_agent_evaluation_status', MagicMock())
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         kw = service_module.update_agent_evaluation_status.call_args.kwargs
         assert kw["status"] == service_module.EvalRunStatus.FAILED
@@ -2553,13 +2519,7 @@ class TestPreloadEvaluatorsForRun:
         )
 
     def test_filters_non_published(self, service_module):
-        service_module.get_evaluator = MagicMock(
-            side_effect=[
-                {"status": "PUBLISHED", "name": "a"},
-                {"status": "DRAFT", "name": "b"},
-                None,
-            ]
-        )
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(side_effect=[{'status': 'PUBLISHED', 'name': 'a'}, {'status': 'DRAFT', 'name': 'b'}, None]))
         evs = service_module._preload_evaluators_for_run(
             {"evaluator_config": {"evaluator_ids": [1, 2, 3]}}, "t1"
         )
@@ -2568,9 +2528,7 @@ class TestPreloadEvaluatorsForRun:
 
 class TestResolveJudgeContextWindow:
     def _run(self, service_module, model_row):
-        service_module.get_db_session = lambda: _FakeEvalSession(
-            models=[model_row] if model_row else []
-        )
+        bind_import_attribute(service_module, 'get_db_session', lambda: _FakeEvalSession(models=[model_row] if model_row else []))
         return service_module._resolve_judge_context_window(99, "t1")
 
     def test_uses_model_window(self, service_module):
@@ -2587,19 +2545,12 @@ class TestResolveJudgeContextWindow:
 
 class TestLoadAllEvaluationCases:
     def test_paginated_dict_response(self, service_module):
-        service_module.list_agent_evaluation_cases = MagicMock(
-            side_effect=[
-                {"items": [{"agent_evaluation_case_id": 1}, {"agent_evaluation_case_id": 2}]},
-                {"items": []},
-            ]
-        )
+        bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(side_effect=[{'items': [{'agent_evaluation_case_id': 1}, {'agent_evaluation_case_id': 2}]}, {'items': []}]))
         cases = service_module._load_all_evaluation_cases(1, "t1")
         assert len(cases) == 2
 
     def test_list_response_advances_offset(self, service_module):
-        service_module.list_agent_evaluation_cases = MagicMock(
-            side_effect=[[{"agent_evaluation_case_id": 1}], []]
-        )
+        bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(side_effect=[[{'agent_evaluation_case_id': 1}], []]))
         cases = service_module._load_all_evaluation_cases(1, "t1")
         assert len(cases) == 1
         assert service_module.list_agent_evaluation_cases.call_args_list[1].kwargs["offset"] == 1
@@ -2623,7 +2574,7 @@ class TestLoadAllEvaluationCases:
 
 def test_execute_run_sdk_unavailable_marks_failed(service_module):
     _wire_full_db_module(service_module)
-    service_module.JiuwenSDKAdapter = None
+    bind_import_attribute(service_module, 'JiuwenSDKAdapter', None)
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 50,
         "agent_id": 11,
@@ -2667,9 +2618,7 @@ class TestAnalysisHelpers:
         assert service_module._normalize_cases_response(None) == []
 
     def test_load_evaluator_thresholds_from_config(self, service_module):
-        service_module.get_evaluator = MagicMock(
-            return_value={"name": "judge-a", "pass_threshold": 0.7}
-        )
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value={'name': 'judge-a', 'pass_threshold': 0.7}))
         assert service_module._load_evaluator_thresholds_from_config(
             {"evaluator_ids": [1]}, "t1"
         ) == {"judge-a": 0.7}
@@ -2682,7 +2631,7 @@ class TestAnalysisHelpers:
         )
 
     def test_load_evaluator_thresholds_skips_bad_ids(self, service_module):
-        service_module.get_evaluator = MagicMock(side_effect=ValueError("bad id"))
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(side_effect=ValueError('bad id')))
         assert (
             service_module._load_evaluator_thresholds_from_config(
                 {"evaluator_ids": ["x"]}, "t1"
@@ -2691,13 +2640,7 @@ class TestAnalysisHelpers:
         )
 
     def test_load_evaluator_thresholds_default_and_skips(self, service_module):
-        service_module.get_evaluator = MagicMock(
-            side_effect=[
-                {"name": "a"},  # no threshold -> default
-                {"name": ""},   # no name -> skipped
-                None,           # not a dict -> skipped
-            ]
-        )
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(side_effect=[{'name': 'a'}, {'name': ''}, None]))
         thresholds = service_module._load_evaluator_thresholds_from_config(
             {"evaluator_ids": [1, 2, 3]}, "t1"
         )
@@ -2790,19 +2733,19 @@ class TestAnalysisHelpers:
 
     def test_call_analysis_llm_and_parse(self, service_module):
         from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
-        service_module.call_llm_for_system_prompt = MagicMock(return_value='{"summary": "x"}')
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='{"summary": "x"}'))
         assert service_module._call_analysis_llm_and_parse(
             {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
         ) == {"summary": "x"}
-        service_module.call_llm_for_system_prompt = MagicMock(return_value={"summary": "y"})
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value={'summary': 'y'}))
         assert service_module._call_analysis_llm_and_parse(
             {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
         ) == {"summary": "y"}
 
     def test_call_analysis_llm_and_parse_non_dict_raises(self, service_module):
         from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
-        from consts.exceptions import AppException
-        service_module.call_llm_for_system_prompt = MagicMock(return_value="[1, 2]")
+        from contracts.errors.exceptions import AppException
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='[1, 2]'))
         with pytest.raises(AppException) as excinfo:
             service_module._call_analysis_llm_and_parse(
                 {"judge_model_id": 99}, AuxiliaryPrompt(system="sp", user="up"), "t1"
@@ -2828,7 +2771,7 @@ class TestGenerateAnalysisReportImpl:
         return run
 
     def test_run_not_found_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         service_module.get_agent_evaluation.return_value = None
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
@@ -2843,7 +2786,7 @@ class TestGenerateAnalysisReportImpl:
         assert service_module.generate_analysis_report_impl(1, "t1") == cached
 
     def test_not_ready_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module, status="RUNNING")
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
@@ -2855,35 +2798,10 @@ class TestGenerateAnalysisReportImpl:
     def test_success_path(self, service_module):
         self._run(service_module)
         service_module.update_agent_evaluation_analysis_report.reset_mock()
-        service_module.list_agent_evaluation_cases = MagicMock(
-            return_value={
-                "items": [
-                    {
-                        "agent_evaluation_case_id": 1,
-                        "pass_status": "pass",
-                        "score": {"judge-a": 0.9},
-                        "reason": "{}",
-                        "inputs": {"query": "q1"},
-                        "predict": {"answer": "a1"},
-                    },
-                    {
-                        "agent_evaluation_case_id": 2,
-                        "pass_status": "fail",
-                        "score": {"judge-a": 0.3},
-                        "reason": '{"judge-a": "bad"}',
-                        "inputs": {"query": "q2"},
-                        "predict": {"answer": "a2"},
-                    },
-                ]
-            }
-        )
-        service_module.get_evaluator = MagicMock(
-            return_value={"name": "judge-a", "pass_threshold": 0.8}
-        )
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
-        service_module.call_llm_for_system_prompt = MagicMock(
-            return_value='{"summary": "ok", "failures": []}'
-        )
+        bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(return_value={'items': [{'agent_evaluation_case_id': 1, 'pass_status': 'pass', 'score': {'judge-a': 0.9}, 'reason': '{}', 'inputs': {'query': 'q1'}, 'predict': {'answer': 'a1'}}, {'agent_evaluation_case_id': 2, 'pass_status': 'fail', 'score': {'judge-a': 0.3}, 'reason': '{"judge-a": "bad"}', 'inputs': {'query': 'q2'}, 'predict': {'answer': 'a2'}}]}))
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value={'name': 'judge-a', 'pass_threshold': 0.8}))
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='{"summary": "ok", "failures": []}'))
         result = service_module.generate_analysis_report_impl(1, "t1")
         assert result["summary"] == "ok"
         service_module.update_agent_evaluation_analysis_report.assert_called_once_with(
@@ -2891,14 +2809,12 @@ class TestGenerateAnalysisReportImpl:
         )
 
     def test_llm_failure_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module)
-        service_module.list_agent_evaluation_cases = MagicMock(return_value=[])
-        service_module.get_evaluator = MagicMock(return_value=None)
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
-        service_module.call_llm_for_system_prompt = MagicMock(
-            side_effect=RuntimeError("llm down")
-        )
+        bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(return_value=[]))
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value=None))
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(side_effect=RuntimeError('llm down')))
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
         assert (
@@ -2907,12 +2823,12 @@ class TestGenerateAnalysisReportImpl:
         )
 
     def test_non_dict_llm_response_raises(self, service_module):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module)
-        service_module.list_agent_evaluation_cases = MagicMock(return_value=[])
-        service_module.get_evaluator = MagicMock(return_value=None)
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
-        service_module.call_llm_for_system_prompt = MagicMock(return_value="[1, 2]")
+        bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(return_value=[]))
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value=None))
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
+        bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='[1, 2]'))
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
         assert (
@@ -2928,7 +2844,7 @@ class TestGenerateAnalysisReportImpl:
 
 class TestGetEvaluationStatsImpl:
     def test_empty(self, service_module):
-        service_module.get_evaluation_case_scores = MagicMock(return_value=[])
+        bind_import_attribute(service_module, 'get_evaluation_case_scores', MagicMock(return_value=[]))
         assert service_module.get_evaluation_stats_impl(1, "t1") == {
             "per_evaluator": [],
             "histogram": [],
@@ -2949,7 +2865,7 @@ class TestGetEvaluationStatsImpl:
             },
             {"pass_status": "pass", "score": None},
         ]
-        service_module.get_evaluation_case_scores = MagicMock(return_value=scores)
+        bind_import_attribute(service_module, 'get_evaluation_case_scores', MagicMock(return_value=scores))
         stats = service_module.get_evaluation_stats_impl(1, "t1")
         assert stats["pass_count"] == 2
         assert stats["fail_count"] == 1
@@ -2965,7 +2881,7 @@ class TestGetEvaluationStatsImpl:
 
     def test_non_finite_skipped(self, service_module):
         scores = [{"pass_status": "pass", "score": {"judge-a": float("inf")}}]
-        service_module.get_evaluation_case_scores = MagicMock(return_value=scores)
+        bind_import_attribute(service_module, 'get_evaluation_case_scores', MagicMock(return_value=scores))
         stats = service_module.get_evaluation_stats_impl(1, "t1")
         assert stats["per_evaluator"] == []
         assert stats["histogram"][4]["count"] == 0
@@ -2986,7 +2902,7 @@ class TestDeleteRunNoSetBranch:
             "evaluation_set_id": 7,
         }
         service_module.delete_agent_evaluation_run_impl(1, "t1", "u1")
-        from database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
         evaluation_set_db.hard_delete_evaluation_set.assert_called_once_with(7, "t1")
         service_module.hard_delete_agent_evaluation.assert_called_once_with(
             agent_evaluation_id=1, tenant_id="t1"
@@ -3001,7 +2917,7 @@ class TestDeleteRunNoSetBranch:
             "evaluator_config": {"no_set_mode": True},
             "evaluation_set_id": 7,
         }
-        from database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
         evaluation_set_db.hard_delete_evaluation_set.side_effect = RuntimeError("boom")
         service_module.delete_agent_evaluation_run_impl(1, "t1", "u1")
         service_module.hard_delete_agent_evaluation.assert_called_once_with(
@@ -3018,19 +2934,14 @@ class TestDeleteRunNoSetBranch:
 class TestTrialRunEvaluatorImpl:
     def test_success(self, service_module):
         import asyncio
-        service_module.get_evaluator = MagicMock(
-            side_effect=[
-                {"status": "PUBLISHED", "name": "a"},
-                {"status": "DRAFT", "name": "b"},
-            ]
-        )
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
-        service_module.JiuwenSDKAdapter = MagicMock()
+        bind_import_attribute(service_module, 'get_evaluator', MagicMock(side_effect=[{'status': 'PUBLISHED', 'name': 'a'}, {'status': 'DRAFT', 'name': 'b'}]))
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
+        bind_import_attribute(service_module, 'JiuwenSDKAdapter', MagicMock())
 
         async def _fake_eval(**kwargs):
             return "ans", [], {"judge-a": 0.9}, {"judge-a": "ok"}
 
-        service_module._evaluate_query = _fake_eval
+        bind_import_attribute(service_module, '_evaluate_query', _fake_eval)
         result = asyncio.run(
             service_module.trial_run_evaluator_impl("t1", "u1", 1, 2, "query", 99, [1, 2])
         )
@@ -3043,8 +2954,8 @@ class TestTrialRunEvaluatorImpl:
 
     def test_sdk_unavailable_raises(self, service_module):
         import asyncio
-        service_module.load_prompt = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
-        service_module.JiuwenSDKAdapter = None
+        bind_import_attribute(service_module, 'load_prompt', MagicMock(return_value={'SYSTEM_PROMPT': 'sp'}))
+        bind_import_attribute(service_module, 'JiuwenSDKAdapter', None)
         with pytest.raises(service_module.JiuwenSDKUnavailableError):
             asyncio.run(
                 service_module.trial_run_evaluator_impl("t1", "u1", 1, 2, "q", 99)

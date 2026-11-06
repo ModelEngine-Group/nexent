@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: NL2SKILL-CONTINUE-20261020
+  change_type: bugfix
+  bug_id: NL2SKILL-CONTINUE-20261020
+  title: Preserve failed skill creation history and remove inactive file confirmation
+  description: Materialize prior skill creation turns in the authorized runtime context and remove the disabled confirmation button from file previews.
+  observed_behavior: Request history is restored into legacy AgentMemory but omitted from final context; a follow-up continue request loses the initial requirements. File preview confirmation is permanently disabled.
+  expected_behavior: Continuations retain initial requests and prior successful or failed turns without duplicating them; skill previews have no inactive confirmation button and retain expansion, references and the actual save action.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing service UT checks run_info.history but not the assembled model messages. Preview rendering tests do not cover disabled confirmation controls.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-078]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Final model context contains prior user requirements and assistant responses for skill creation continuations, including empty failed answers and unanswered prior user turns.
+      - Empty history produces only the localized system message and current task; unsupported history roles never become platform instructions.
+      - File preview has no confirmation or inactive run action and still expands to show generated content, including streaming and completed Python files.
+      - The frontend continuation request retains the initial user request across a failed assistant turn.
+    reason: Strengthen real context rendering and controlled frontend adapter tests; preserve existing classifier, stream, save and output protocol regressions. No duplicate D1 case is introduced.
+    test_selectors:
+      - test/backend/services/test_nl2skill_continuation.py
+      - test/backend/services/test_nl2skill_service.py
+      - frontend/tests/workbench/SkillFileCard.test.tsx
+      - frontend/tests/workbench/SkillCreationReasoningStream.test.ts
+      - frontend/tests/workbench/CreationResultCards.test.tsx
+  no_case_change_reason: This changes deterministic context construction and removes an inert UI control, without changing HTTP payloads or persisted schema. Existing AGT-040/041 remain intact; deployment and interactive real-model checks are recorded separately from formal execution.
+  notes: Reuse ../nexent-doc/nexent/agent-workbench/design.md, NL2SKILL-CONTINUE-20261020 appendix. Searched owning Feature F-078 and AGT-040/041 scripts; neither asserts final model-visible continuation history or preview controls.

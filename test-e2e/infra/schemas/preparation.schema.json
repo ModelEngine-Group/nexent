@@ -28,7 +28,8 @@
           "embedding_model",
           "knowledge",
           "mcp",
-          "file_chat"
+          "file_chat",
+          "aidp_knowledge"
         ]
       }
     },

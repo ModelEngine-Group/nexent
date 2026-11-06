@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: Authentication
+feature:
+  feature_id: AUTH-LOCAL
+  name: PostgreSQL local accounts and legacy credential migration
+  status: active
+  description: Authenticate without Supabase while retaining existing identities and
+    CAS behavior.
+  business_rules:
+  - rule_id: AUTH-LOCAL-RULE-01
+    description: Native password/JWT authentication uses delete_flag alone for account availability; canonical role/email are account-owned. API-only identities remain active without email/password and batch creation is atomic across accounts, memberships, groups and keys.
+  - rule_id: AUTH-LOCAL-RULE-02
+    description: Atomic idempotent migration preserves IDs and compatible password
+      hashes without changing permissions; source audit records are neither read nor archived. Completion requires per-user coverage by usable local credentials, recognized passwordless identities, explicit local disabling, or source-unavailability exclusion evidence; new account tables are committed only after all identities pass validation. Existing incomplete account data stops deployment without automatic repair or deletion. Consolidated account SQL creates the final schema without account_status or pending placeholders; existing status columns are converted and removed on replay. Schema/profile/credential changes commit together and failure removes the new table while restoring legacy fields without persistent credential process files. Final unavailable ordinary identities stay in original records instead of local accounts; the default SPEED system identity is retained. Email uniqueness uses final available accounts and conflicts report IDs. Recognizable legacy API-only users retain working API keys; successful applied imports reclaim local Supabase containers while keeping data volumes and failures preserve the stack.
+  required_test_stages:
+  - D2
+  - D5
+  source:
+    notes: User-approved removal and historical migration; SPEC auth-local-account-migration.

@@ -1,0 +1,8 @@
+schema_version = 1
+rule_id = "alibaba_cn_endpoint_hints_v1"
+version = 1
+target_kind = "provider"
+target_key = "alibaba-cn"
+reason = "Retain the copied China endpoint as an explicit selection hint"
+evidence = "models.dev pinned alibaba-cn/provider.toml api field; upstream e69e1844210e5cfe7c7e7f68d57328bc7451a51c"
+endpoint_hints = ["https://dashscope.aliyuncs.com/compatible-mode/v1"]

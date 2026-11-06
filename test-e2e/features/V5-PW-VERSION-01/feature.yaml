@@ -9,7 +9,8 @@ feature:
   description: 验证发布和版本管理真实生命周期。
   business_rules:
   - rule_id: V5-PW-VERSION-01-RULE-01
-    description: Publish→Version Manage→切换/比较→回到Draft
+    description: Publish→Version Manage→切换/比较→回到Draft; publish success selects the editor publication tab, with
+      access information and A2A state consistent with the published agent.
   required_test_stages:
   - D4
   source:

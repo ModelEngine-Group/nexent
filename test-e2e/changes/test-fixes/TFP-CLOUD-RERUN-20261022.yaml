@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: TFP-CLOUD-RERUN-20261022
+  change_type: test-fix
+  title: Align deployed fast-path acceptance with current Agent and Langfuse protocols
+  description: >-
+    Use the supported duty_prompt field to identify controlled Agent requests.
+    Reconstruct streamed final-answer deltas only after their unique completion
+    event, retaining exact comparison to persisted history. Add an explicit
+    Langfuse v2 observation profile with bounded time filters, complete cursor
+    pagination and completed Agent/HTTP-root checks; retain self-hosted v3
+    compatibility. Compare multiline outputs before JSON escaping and recognize
+    flattened OTEL sandbox metadata, waiting within a fixed deadline for delayed
+    warm-up indexing. Read current files.file_uploads events and structured
+    minio_files history attachments for verification and scoped cleanup. Select
+    the current browser execution-mode popover and expand collapsed tool groups
+    before counting actual invocation cards. Use the current new-chat action and
+    assert an empty conversation with the selected Agent. Preserve per-scenario diagnostics
+    and cleanup HTTP status evidence. Preserve all tool counts, Docker activation,
+    artifact-byte, cross-tenant denial and cleanup requirements.
+  affected_features:
+    existing: [TFP-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [TFP-D3-001, TFP-D4-001]
+    retired: []
+  notes: >-
+    These are test-harness and fixture compatibility repairs, not product-code
+    changes. The owned provider, dedicated users with memory pre-search disabled,
+    session sandbox workspace and current SDK fingerprints remain prerequisites.
+    Runtime prerequisites have been provisioned and both cases are executable;
+    active catalog status does not imply PASS. Harness regression checks are
+    separate from actual D3/D4 acceptance results. Keep missing-file HTTP 500
+    failures visible rather than accepting arbitrary download failures as cleanup.

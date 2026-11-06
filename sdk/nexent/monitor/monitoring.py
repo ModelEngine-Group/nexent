@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Nexent LLM Performance Monitoring System
 
@@ -11,8 +12,8 @@ When OpenTelemetry dependencies are not available, the module gracefully degrade
 and disables monitoring functionality without breaking the application.
 
 Installation:
-- Basic: pip install nexent
-- With monitoring: pip install nexent[performance]
+- Basic: uv pip install nexent
+- With monitoring: uv pip install nexent[performance]
 """
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
@@ -46,6 +47,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
 from dataclasses import dataclass, field
+
+from .span_filter_config import (
+    DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
+    DEFAULT_EXCLUDED_SPAN_NAMES,
+    normalize_span_exclusions,
+)
+from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
 
 logger = logging.getLogger(__name__)
 
@@ -415,9 +423,17 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
+    excluded_elasticsearch_operations: List[str] | str = field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
+    )
+    excluded_span_names: List[str] | str = field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_SPAN_NAMES)
+    )
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
+        self.excluded_elasticsearch_operations = normalize_span_exclusions(self.excluded_elasticsearch_operations)
+        self.excluded_span_names = normalize_span_exclusions(self.excluded_span_names)
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
             logger.warning(
@@ -465,7 +481,7 @@ class MonitoringConfig:
         if self.enable_telemetry and not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Disabling telemetry. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             self.enable_telemetry = False
 
@@ -559,7 +575,7 @@ class MonitoringManager:
         if not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Telemetry initialization skipped. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             return
 
@@ -602,7 +618,11 @@ class MonitoringManager:
                 )
                 from .span_processor import MonitoringSpanProcessor
 
-                self._tracer_provider.add_span_processor(MonitoringSpanProcessor(span_processor))
+                self._tracer_provider.add_span_processor(MonitoringSpanProcessor(
+                    span_processor,
+                    excluded_elasticsearch_operations=self._config.excluded_elasticsearch_operations,
+                    excluded_span_names=self._config.excluded_span_names,
+                ))
 
             metric_readers = []
             if self._config.export_metrics:
@@ -735,7 +755,7 @@ class MonitoringManager:
             elif not OPENTELEMETRY_AVAILABLE:
                 logger.warning(
                     "OpenTelemetry not available. FastAPI monitoring skipped. "
-                    "Install with: pip install nexent[performance]"
+                    "Install with: uv pip install nexent[performance]"
                 )
             return False
         except Exception as e:
@@ -874,24 +894,26 @@ class MonitoringManager:
             )
             trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
             if trace_name:
-                # Only the main run may name the trace; children retain their own Agent names.
-                attributes["langfuse.trace.name"] = trace_name
+                # The main Agent owns the trace name; children retain their own node identities.
+                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+            parent_span = self.get_current_span()
             try:
                 with self.trace_operation(
                     operation_name,
                     OPENINFERENCE_SPAN_KIND_AGENT,
                     **attributes,
                 ) as span:
-                    self.add_span_event(f"{operation_name}.started")
-                    try:
-                        yield span
-                        self.add_span_event(f"{operation_name}.completed")
-                    except Exception as error:
-                        self.add_span_event(f"{operation_name}.error", {
-                            "error.type": type(error).__name__,
-                            "error.message": str(error),
-                        })
-                        raise
+                    with agent_trace_name_scope(span, trace_name, parent_span):
+                        self.add_span_event(f"{operation_name}.started")
+                        try:
+                            yield span
+                            self.add_span_event(f"{operation_name}.completed")
+                        except Exception as error:
+                            self.add_span_event(f"{operation_name}.error", {
+                                "error.type": type(error).__name__,
+                                "error.message": str(error),
+                            })
+                            raise
             finally:
                 _monitoring_agent_run_active.reset(active_token)
 
@@ -1957,8 +1979,8 @@ class LLMTokenTracker:
                 "token_length": len(token)
             })
 
-    def record_completion(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
-        """Record completion metrics using OpenInference semantic conventions."""
+    def record_completion(self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Any = ...) -> None:
+        """Preserve legacy inferred totals; explicit None means the provider did not report one."""
         if not self.manager.is_enabled:
             return
 
@@ -1985,18 +2007,22 @@ class LLMTokenTracker:
             usage_details = {
                 "input": input_tokens,
                 "output": output_tokens,
-                "total": input_tokens + output_tokens,
             }
-            self.span.set_attributes({
+            total = input_tokens + output_tokens if total_tokens is ... else total_tokens
+            if total is not None:
+                usage_details["total"] = total
+            attributes = {
                 "llm.token_count.prompt": input_tokens,
                 "llm.token_count.completion": output_tokens,
-                "llm.token_count.total": input_tokens + output_tokens,
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
                 "llm.duration.total": total_duration,
                 "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
-            })
+            }
+            if total is not None:
+                attributes["llm.token_count.total"] = total
+            self.span.set_attributes(attributes)
 
 
 # ---------------------------------------------------------------------------
@@ -2743,8 +2769,8 @@ class MonitoringRecordBuffer:
             if os.path.exists(backend_path) and backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
 
-            from database.client import get_monitoring_db_session
-            from database.db_models import ModelMonitoringRecord
+            from management.db.client import get_monitoring_db_session
+            from management.db.models import ModelMonitoringRecord
         except ImportError as e:
             logger.debug(
                 f"Monitoring buffer: backend database not available: {e}")

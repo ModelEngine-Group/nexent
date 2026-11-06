@@ -16,13 +16,13 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务或外部记忆 Provider 在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
-  - 可创建/清理临时插件目录，写入合法与非法 plugin.yaml、provider.py 样例；backend/services/memory_provider_plugin_loader.py 及其依赖 nexent.memory.providers.base
+  - 可创建/清理临时插件目录，写入合法与非法 plugin.yaml、provider.py 样例；backend/management/services/memory/providers/plugins.py 及其依赖 nexent.memory.providers.base
     可被导入。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/plugins/fixtures（临时构造的 plugin.yaml 与 provider.py 样例，测试结束清理）'
   steps:
   - order: 1
-    action: 导入 backend/services/memory_provider_plugin_loader.py 的 PluginLoader 与 PluginInfo，构造临时插件目录，放入一个合法插件（plugin.yaml
+    action: 导入 backend/management/services/memory/providers/plugins.py 的 PluginLoader 与 PluginInfo，构造临时插件目录，放入一个合法插件（plugin.yaml
       含 name/version/entry_point/class_name/implements 且 provider_class 实现 search/ingest）与多组非法插件 fixture。
     expected: 合法插件被正确解析为 PluginInfo，包含 name/version/implements/config_schema/plugin_dir/provider_class 等字段，implements 与 config_schema
       内容来自 plugin.yaml。

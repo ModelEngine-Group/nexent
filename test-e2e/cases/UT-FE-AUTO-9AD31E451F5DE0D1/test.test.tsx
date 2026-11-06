@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { conversationService } from '@/services/conversationService';
 import { remoteChatModelAdapter } from '@/app/[locale]/newchat/adapter/remote-chat-model-adapter';
@@ -45,6 +47,7 @@ async function collect(lines: string[]): Promise<any[]> {
   const stream = (remoteChatModelAdapter as unknown as {
     run: (options: unknown) => AsyncIterable<{ content: any[] }>;
   }).run({
+    abortSignal: new AbortController().signal,
     messages: [
       { id: 'm1', role: 'user', content: [{ type: 'text', text: 'hello' }] },
     ],

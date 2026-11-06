@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- 本地组件测试依赖与固定 repository 行 fixture；DB 层经 monkeypatch 固定，无外部资产。'
   steps:
   - order: 1
-    action: 在本地工作区导入 backend/services/agent_repository_service.py 的 _get_agent_download_totals、_to_summary_item、list_agent_repository_listings_impl、list_my_editable_agents_impl、get_agent_repository_listing_detail_impl，以及
+    action: 在本地工作区导入 backend/management/services/repository/agent/listing.py 的 _get_agent_download_totals、_to_summary_item、list_agent_repository_listings_impl、list_my_editable_agents_impl、get_agent_repository_listing_detail_impl，以及
       backend/apps/agent_repository_app.py 对应 API 路由函数。
     expected: 列表/Mine/详情三处 downloads 均等于同 agent_id 跨全部 repository 行的 downloads 求和值（此处为 8），而非任一单行值 3 或 5。
   - order: 2

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Server Service - Agent Card operations.
 
@@ -13,8 +14,8 @@ from unittest.mock import MagicMock, patch
 # Mock database modules before importing the service
 import sys
 _agent_db_mock = MagicMock()
-sys.modules['database.agent_db'] = _agent_db_mock
-sys.modules['backend.database.agent_db'] = _agent_db_mock
+sys.modules['management.db.agent.repository'] = _agent_db_mock
+sys.modules['management.db.agent.repository'] = _agent_db_mock
 
 
 class TestResolveBaseUrl:
@@ -22,17 +23,17 @@ class TestResolveBaseUrl:
 
     def test_uses_northbound_url(self):
         """Test uses NORTHBOUND_EXTERNAL_URL when use_northbound=True."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
+        with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
             result = service._resolve_base_url(use_northbound=True, base_url="https://other.com")
             assert result == "https://api.example.com"
 
     def test_uses_base_url_when_no_northbound(self):
         """Test uses base_url when use_northbound=False."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -41,11 +42,11 @@ class TestResolveBaseUrl:
 
     def test_returns_empty_when_no_url(self):
         """Test returns empty string when no URL available."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", ""):
+        with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", ""):
             result = service._resolve_base_url(use_northbound=True, base_url=None)
             assert result == ""
 
@@ -55,7 +56,7 @@ class TestResolveAgentUrl:
 
     def test_prefers_stored_url(self):
         """Test prefers stored URL over base."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -67,7 +68,7 @@ class TestResolveAgentUrl:
 
     def test_uses_base_when_no_stored(self):
         """Test uses base URL when no stored URL."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -79,7 +80,7 @@ class TestResolveAgentUrl:
 
     def test_handles_empty_base(self):
         """Test handles empty base URL."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -95,7 +96,7 @@ class TestBuildAgentCardBase:
 
     def test_builds_complete_card(self):
         """Test building complete agent card."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -120,7 +121,7 @@ class TestBuildAgentCardBase:
 
     def test_includes_default_modes(self):
         """Test includes default input/output modes."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -140,7 +141,7 @@ class TestBuildAgentCardBase:
 
     def test_includes_skills(self):
         """Test includes skills from agent info."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -164,8 +165,8 @@ class TestBuildSupportedInterfaces:
 
     def test_builds_interfaces_with_prefix(self):
         """Test building supported interfaces with prefix."""
-        from backend.services.a2a_server_service import A2AServerService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from management.services.agent.a2a.service import A2AServerService
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 
@@ -183,7 +184,7 @@ class TestBuildSupportedInterfaces:
 
     def test_handles_base_url_without_trailing_slash(self):
         """Test handles base URL without trailing slash."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -197,7 +198,7 @@ class TestBuildSupportedInterfaces:
 
     def test_handles_empty_base_url(self):
         """Test handles empty base URL."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -215,7 +216,7 @@ class TestBuildSkillsFromAgent:
 
     def test_builds_default_skill(self):
         """Test building default chat skill."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -232,7 +233,7 @@ class TestBuildSkillsFromAgent:
 
     def test_handles_missing_fields(self):
         """Test handles missing agent info fields."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -246,14 +247,14 @@ class TestGetAgentCard:
 
     def test_raises_error_when_not_found(self):
         """Test raises error when endpoint not found."""
-        from backend.services.a2a_server_service import (
+        from management.services.agent.a2a.service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = None
 
             with pytest.raises(EndpointNotFoundError) as exc_info:
@@ -263,7 +264,7 @@ class TestGetAgentCard:
 
     def test_raises_error_when_disabled(self):
         """Test raises error when endpoint is disabled."""
-        from backend.services.a2a_server_service import (
+        from management.services.agent.a2a.service import (
             A2AServerService,
             EndpointNotFoundError
         )
@@ -275,7 +276,7 @@ class TestGetAgentCard:
             "is_enabled": False
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_agent
 
             with pytest.raises(EndpointNotFoundError) as exc_info:
@@ -285,7 +286,7 @@ class TestGetAgentCard:
 
     def test_returns_agent_card(self):
         """Test returns valid agent card."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -305,11 +306,11 @@ class TestGetAgentCard:
             "description": "A test agent"
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
             mock_db.search_agent_info_by_agent_id.return_value = mock_agent_info
 
-            with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
+            with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
                 result = service.get_agent_card("test-endpoint")
 
                 assert result["name"] == "Test Agent"
@@ -326,11 +327,11 @@ class TestResolveBaseUrlEdgeCases:
 
     def test_resolve_base_url_prefers_northbound_over_base_url(self):
         """Test _resolve_base_url prefers NORTHBOUND_EXTERNAL_URL over base_url."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", "https://northbound.example.com"):
+        with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://northbound.example.com"):
             result = service._resolve_base_url(
                 use_northbound=True,
                 base_url="https://base.example.com"
@@ -340,12 +341,12 @@ class TestResolveBaseUrlEdgeCases:
 
     def test_resolve_base_url_logs_warning_when_empty(self):
         """Test _resolve_base_url logs warning when no URL available."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", ""):
-            with patch("backend.services.a2a_server_service.logger") as mock_logger:
+        with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", ""):
+            with patch("management.services.agent.a2a.service.logger") as mock_logger:
                 result = service._resolve_base_url(
                     use_northbound=False,
                     base_url=None
@@ -360,7 +361,7 @@ class TestResolveAgentUrlEdgeCases:
 
     def test_resolve_agent_url_with_slash_in_base(self):
         """Test _resolve_agent_url strips trailing slash from base URL."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -373,7 +374,7 @@ class TestResolveAgentUrlEdgeCases:
 
     def test_resolve_agent_url_returns_empty_when_both_empty(self):
         """Test _resolve_agent_url returns empty when both URLs are empty."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -390,7 +391,7 @@ class TestBuildAgentCardBaseExtended:
 
     def test_build_agent_card_base_with_empty_agent_info(self):
         """Test _build_agent_card_base handles empty agent_info."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -411,7 +412,7 @@ class TestBuildAgentCardBaseExtended:
 
     def test_build_agent_card_base_skills_uses_fallback(self):
         """Test _build_agent_card_base skills uses fallback for missing name/description."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -431,7 +432,7 @@ class TestBuildAgentCardBaseExtended:
 
     def test_build_agent_card_base_includes_security_fields(self):
         """Test _build_agent_card_base includes security-related fields."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -456,7 +457,7 @@ class TestBuildSkillsFromAgentEdgeCases:
 
     def test_build_skills_includes_examples(self):
         """Test _build_skills_from_agent includes example conversations."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -470,7 +471,7 @@ class TestBuildSkillsFromAgentEdgeCases:
 
     def test_build_skills_with_special_characters_in_name(self):
         """Test _build_skills_from_agent handles special characters."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -488,8 +489,8 @@ class TestBuildSupportedInterfacesEdgeCases:
 
     def test_protocol_bindings_are_correct(self):
         """Test built interfaces have correct protocol bindings."""
-        from backend.services.a2a_server_service import A2AServerService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from management.services.agent.a2a.service import A2AServerService
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 
@@ -503,7 +504,7 @@ class TestBuildSupportedInterfacesEdgeCases:
 
     def test_urls_are_absolute_when_base_provided(self):
         """Test built interfaces produce absolute URLs when base provided."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -521,7 +522,7 @@ class TestGetAgentCardWithBaseUrl:
 
     def test_get_agent_card_uses_base_url_when_northbound_disabled(self):
         """Test get_agent_card uses provided base_url when use_northbound=False."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -542,7 +543,7 @@ class TestGetAgentCardWithBaseUrl:
             "description": "Local description"
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
             mock_db.search_agent_info_by_agent_id.return_value = mock_agent_info
 
@@ -564,7 +565,7 @@ class TestGetAgentCardEdgeCases:
 
     def test_get_agent_card_with_no_name_uses_fallback(self):
         """Test get_agent_card falls back to agent_info name when server_agent name is None."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -584,14 +585,14 @@ class TestGetAgentCardEdgeCases:
             "description": "Fallback description"
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
-            # Mock the database.agent_db module that is imported inside get_agent_card
+            # Mock the management.db.agent.repository module that is imported inside get_agent_card
             mock_agent_db_module = MagicMock()
             mock_agent_db_module.search_agent_info_by_agent_id.return_value = mock_agent_info
-            with patch.dict("sys.modules", {"database.agent_db": mock_agent_db_module}):
-                with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
+            with patch.dict("sys.modules", {"management.db.agent.repository": mock_agent_db_module}):
+                with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
                     result = service.get_agent_card("test-endpoint")
 
                     # Verify fallback to agent_info.name
@@ -601,7 +602,7 @@ class TestGetAgentCardEdgeCases:
 
     def test_get_agent_card_with_empty_supported_interfaces(self):
         """Test get_agent_card handles empty base_url case."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -622,11 +623,11 @@ class TestGetAgentCardEdgeCases:
             "description": "Test"
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
             mock_db.search_agent_info_by_agent_id.return_value = mock_agent_info
 
-            with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", ""):
+            with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", ""):
                 result = service.get_agent_card(
                     "test-endpoint",
                     base_url=None,
@@ -641,7 +642,7 @@ class TestGetAgentCardWithCardOverrides:
 
     def test_get_agent_card_applies_card_overrides(self):
         """Test get_agent_card applies card_overrides from server_agent."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -666,11 +667,11 @@ class TestGetAgentCardWithCardOverrides:
             "description": "Test"
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
             mock_db.search_agent_info_by_agent_id.return_value = mock_agent_info
 
-            with patch("backend.services.a2a_server_service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
+            with patch("management.services.agent.a2a.service.NORTHBOUND_EXTERNAL_URL", "https://api.example.com"):
                 result = service.get_agent_card("test-endpoint")
 
                 assert result["capabilities"]["streaming"] is False

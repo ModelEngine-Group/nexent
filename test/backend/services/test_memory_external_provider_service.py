@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,18 +9,19 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 database_pkg = types.ModuleType("database")
-config_db_mod = types.ModuleType("database.memory_provider_config_db")
+config_db_mod = types.ModuleType("management.db.memory.provider_config")
 config_db_mod.disable_provider_config = MagicMock(name="disable_provider_config")
 database_pkg.memory_provider_config_db = config_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_provider_config_db"] = config_db_mod
+sys.modules["management.db.memory.provider_config"] = config_db_mod
 
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-memory-provider-plugins"
 consts_pkg.const = consts_mod
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")
@@ -149,16 +152,16 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 services_pkg = types.ModuleType("services")
-config_service_mod = types.ModuleType("services.memory_provider_config_service")
-plugin_loader_mod = types.ModuleType("services.memory_provider_plugin_loader")
+config_service_mod = types.ModuleType("management.services.memory.providers.configuration")
+plugin_loader_mod = types.ModuleType("management.services.memory.providers.plugins")
 config_service_mod.MemoryProviderConfigService = MagicMock
 plugin_loader_mod.PluginLoader = MagicMock
 sys.modules["services"] = services_pkg
-sys.modules["services.memory_provider_config_service"] = config_service_mod
-sys.modules["services.memory_provider_plugin_loader"] = plugin_loader_mod
+sys.modules["management.services.memory.providers.configuration"] = config_service_mod
+sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
 
-from backend.services import memory_external_provider_service as service_module  # noqa: E402
-from backend.services.memory_external_provider_service import MemoryExternalProviderService  # noqa: E402
+from management.services.memory.providers import service as service_module  # noqa: E402
+from management.services.memory.providers.service import MemoryExternalProviderService  # noqa: E402
 
 
 @pytest.fixture
@@ -238,7 +241,7 @@ def test_build_provider_missing_plugin_name(service):
 
 def test_ac_009_runtime_factory_loads_builtin_and_external_plugins(monkeypatch):
     monkeypatch.setattr(
-        sys.modules["consts.const"],
+        sys.modules["contracts.constants.environment"],
         "MEMORY_PROVIDER_PLUGINS_DIR",
         "/tmp/test-memory-provider-plugins",
         raising=False,

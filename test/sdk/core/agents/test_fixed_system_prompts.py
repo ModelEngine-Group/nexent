@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for SDK-owned fixed system prompts."""
 
 from pathlib import Path
@@ -12,6 +14,7 @@ EXPECTED_CLARIFICATION = {
         "该能力并非每次会话都必须使用，当用户请求清晰且无关键事实缺失时可直接回答。\n"
         "不要询问可选的偏好信息、用户已提供的信息或工具能够取得或已经取得的事实。只有缺少的信息会阻止智能体正确或安全地继续运行，或者上下文无法消除会显著改变结果的歧义时，才使用人在回路能力。\n"
         "每轮会话中需要用户澄清时，仅调用一次 ask_user(questions=[...]) ，其中仅包括需要确认的关键核心问题；只有存在相互独立的阻塞项时才可询问更多问题。\n"
+        "ask_user 是终止当前回合并展示确认选项的声明式动作。请在独立的 <code>...</code> 中直接调用，无需赋值或 print；普通业务工具保存变量、打印结果的规则不适用于该动作。调用后停止，等待用户选择，不再追加其他动作或文字回答。\n"
         "问题标题使用用户语言，每个问题只询问一个事实，并尽可能提供有用选项。每个问题包含 id、type、title 和 required；type 为 text、single_choice 或 multiple_choice。选择题还要在问题对象上直接提供 options [{id,label}] 和 allow_other，不要嵌套 choices 对象。示例：\n"
         "<code>\n"
         "ask_user(questions=[{\"id\": \"topic\", \"type\": \"text\", \"title\": \"通知的主题是什么？\", \"required\": True}])\n"
@@ -23,6 +26,7 @@ EXPECTED_CLARIFICATION = {
         "This capability is not required in every conversation. Answer directly when the request is clear and no key fact is missing.\n"
         "Do not ask about optional preferences, information already supplied, or facts tools can obtain or have already obtained. Only use the human-in-the-loop capability to request clarification when a missing key fact prevents correct or safe progress, or when context cannot reasonably resolve an ambiguity that would materially change the result.\n"
         "When clarification is necessary, call ask_user(questions=[...]) once with one concise structured card. Ask only a small number of essential core questions; ask more only when there are independent and indispensable blockers.\n"
+        "ask_user is a declarative terminal action that ends the current turn and displays confirmation options. Call it directly in its own <code>...</code> block without assignment or print; ordinary business-tool rules for saving variables and printing results do not apply. Stop after the call and wait for the user's selection, without another action or prose answer.\n"
         "Use short titles in the user's language, one fact per question, and useful choices where possible. Each question has id, type, title and required; type is text, single_choice or multiple_choice. For choice questions, put options [{id,label}] and allow_other directly on the question object, never inside a nested choices object. Example:\n"
         "<code>\n"
         "ask_user(questions=[{\"id\": \"topic\", \"type\": \"text\", \"title\": \"What is the notice about?\", \"required\": True}])\n"

@@ -5,6 +5,7 @@
   "skill_name": "tfp-verification",
   "config": {"marker": "TFP_RULES", "value": 7},
   "langfuse": {
+    "api_version": "v2",
     "url": "http://trace.example.invalid",
     "public_key_env": "TFP_TRACE_PUBLIC_KEY",
     "secret_key_env": "TFP_TRACE_SECRET_KEY"

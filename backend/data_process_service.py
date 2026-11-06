@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import argparse
 import logging
 import os
@@ -15,21 +16,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from consts.const import (
-    DISABLE_CELERY_FLOWER,
-    DOCKER_ENVIRONMENT,
-    DP_PARSE_MAX_PROCESSES,
-    DP_PARSE_MAX_TASKS_PER_CHILD,
-    DP_PARSE_MIN_PROCESSES,
-    DP_PARSE_THREADS_PER_PROCESS,
-    DP_PARSER_STARTUP_TIMEOUT_S,
-    DP_PRELOAD_MODELS,
-    FLOWER_PORT,
-    REDIS_BACKEND_URL,
-    REDIS_PORT,
-    REDIS_URL,
-)
-from utils.logging_utils import configure_logging, get_uvicorn_logging_config
+from contracts.constants.environment import DISABLE_CELERY_FLOWER, DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PARSE_MIN_PROCESSES, DP_PARSE_THREADS_PER_PROCESS, DP_PARSER_STARTUP_TIMEOUT_S, DP_PRELOAD_MODELS, FLOWER_PORT, REDIS_BACKEND_URL, REDIS_PORT, REDIS_URL
+from infrastructure.logging import configure_logging, get_uvicorn_logging_config
 
 
 # Load environment variables
@@ -72,13 +60,13 @@ class ServiceManager:
             import redis
             redis_client = redis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
             redis_client.ping()
-            from services.redis_service import get_redis_service
+            from management.services.knowledge_base.task_state import get_redis_service
             cleanup_stats = get_redis_service().cleanup_error_info_keys()
             logger.info(f"Redis error info cleanup stats: {cleanup_stats}")
             logger.info(f"✅ Redis connection successful: {redis_url}")
             return True
         except ImportError:
-            logger.error("❌ Redis Python client not available. Please install: pip install redis")
+            logger.error("❌ Redis Python client not available. Please install: uv pip install redis")
             return False
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e!s}")
@@ -487,7 +475,7 @@ except Exception as e_exec:
             return True
 
         except FileNotFoundError:
-            logger.error("❌ Flower not found. Please install: pip install flower")
+            logger.error("❌ Flower not found. Please install: uv pip install flower")
             logger.error("   Note: Use 'python -m flower' instead of 'flower' command")
             return False
         except Exception as e:
@@ -518,7 +506,7 @@ except Exception as e_exec:
             if service_name == "Celery Workers" and service_enabled:
                 # Redis must be available for cancellation markers, while
                 # recovery must finish before Celery can consume work.
-                from services.startup_recovery_service import recover_data_process_tasks
+                from management.recovery import recover_data_process_tasks
 
                 recover_data_process_tasks()
             if service_enabled:
@@ -544,7 +532,7 @@ except Exception as e_exec:
             self.log_service_info()
 
         # Start auto-summary scheduler
-        from services.auto_summary_scheduler import auto_summary_scheduler
+        from management.services.knowledge_base.scheduler import auto_summary_scheduler
         auto_summary_scheduler.start()
 
         return success_count == enabled_count
@@ -663,7 +651,7 @@ except Exception as e_exec:
                 service_processes['flower'] = None
 
         # Stop auto-summary scheduler
-        from services.auto_summary_scheduler import auto_summary_scheduler
+        from management.services.knowledge_base.scheduler import auto_summary_scheduler
         auto_summary_scheduler.stop()
 
         # Stop Redis last
@@ -755,7 +743,7 @@ async def lifespan(app: FastAPI):
 def create_app():
     """Create FastAPI application"""
     # Lazy import router to avoid overhead during module initialization
-    from apps.data_process_app import router as data_process_router
+    from data_process.api.tasks.routes import router as data_process_router
 
     app = FastAPI(root_path="/api", lifespan=lifespan)
     app.include_router(data_process_router)

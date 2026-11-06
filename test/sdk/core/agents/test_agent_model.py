@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.agent_model module.
 
@@ -249,6 +251,13 @@ def _load_agent_model_module():
         fingerprint: str = "budget"
     capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
     sys.modules["sdk.nexent.core.models"] = models_package
+    sampling_spec = importlib.util.spec_from_file_location(
+        "sdk.nexent.core.models.sampling",
+        os.path.join(project_root, "sdk", "nexent", "core", "models", "sampling.py"),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["sdk.nexent.core.models.sampling"] = sampling_module
     sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
     context_package = ModuleType("sdk.nexent.core.agents.context")
     context_package.__path__ = []
@@ -346,8 +355,8 @@ class TestModelConfig:
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
         assert config.extra_body is None
@@ -363,8 +372,8 @@ class TestModelConfig:
             url="https://example.com"
         )
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
 
@@ -889,6 +898,16 @@ class TestAgentRunInfoPlanning:
 # Tests for ExternalA2AAgentConfig
 # ----------------------------------------------------------------------------
 
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+def test_certificate_preference_reaches_proxy(preference):
+    config = agent_model_module.ExternalA2AAgentConfig(
+        agent_id="peer", name="Peer", url="https://peer", **preference)
+    config.to_a2a_agent_info()
+    proxy_info = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+    assert proxy_info.call_args.kwargs["ssl_verify"] is preference.get("ssl_verify", True)
+    proxy_info.reset_mock()
+
+
 class TestExternalA2AAgentConfig:
     """Tests for ExternalA2AAgentConfig Pydantic model."""
 
@@ -908,7 +927,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
         assert config.raw_card is None
 
     def test_external_a2a_agent_config_with_all_fields(self):
@@ -944,7 +963,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
 
     def test_external_a2a_agent_config_custom_headers_default(self):
         """Test custom_headers defaults to None."""

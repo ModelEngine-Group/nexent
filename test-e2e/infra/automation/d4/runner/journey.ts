@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { test, expect, Page } from "playwright/test";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { atomicJson } from "./atomic-file";
 import { dirname, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -38,13 +41,6 @@ function required(name: string): string {
   return value;
 }
 
-function atomicJson(path: string, value: object): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.next`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
-}
-
 function control(args: string[]): void {
   const result = spawnSync(process.env.FIXED_TEST_PYTHON || "python3", [join(required("NEXENT_REPO"), "test-e2e/infra/automation/d4/control.py"), ...args], {encoding: "utf8", env: process.env});
   if (result.status !== 0) throw new Error(`d4 control failed: ${redact(result.stderr || result.stdout)}`);
@@ -63,6 +59,8 @@ export class ContractExecution {
   private currentId = "";
   private cursors: Record<CheckKind, number> = { preconditions: 0, steps: 0, assertions: 0 };
   private cleanups: Array<() => Promise<void>> = [];
+  private cleanupPromise?: Promise<void>;
+  private finished = false;
   readonly caseDir: string;
   readonly evidencePath: string;
   readonly eventsPath: string;
@@ -98,6 +96,7 @@ export class ContractExecution {
   }
 
   private persist(): void {
+    if (this.finished) return;
     this.evidence.finished_at = new Date().toISOString();
     atomicJson(this.evidencePath, this.evidence);
     this.status("RUNNING");
@@ -135,10 +134,15 @@ export class ContractExecution {
   step(id: string, action: () => Promise<unknown>): Promise<void> { return this.runItem("steps", id, action); }
   assertion(id: string, action: () => Promise<unknown>): Promise<void> { return this.runItem("assertions", id, action); }
   deferCleanup(action: () => Promise<void>): void { this.cleanups.push(action); }
-  addConsoleError(value: string): void { this.evidence.console_errors.push(redact(value)); this.persist(); }
-  addUnexpected5xx(value: string): void { this.evidence.unexpected_5xx.push(redact(value)); this.persist(); }
+  addConsoleError(value: string): void { if (!this.finished) { this.evidence.console_errors.push(redact(value)); this.persist(); } }
+  addUnexpected5xx(value: string): void { if (!this.finished) { this.evidence.unexpected_5xx.push(redact(value)); this.persist(); } }
 
-  async cleanup(): Promise<void> {
+  cleanup(): Promise<void> {
+    // A late failure can enter the catch path after cleanup already completed.
+    return this.cleanupPromise ??= this.runCleanup();
+  }
+
+  private async runCleanup(): Promise<void> {
     const errors: string[] = [];
     for (const action of [...this.cleanups].reverse()) {
       try { await action(); } catch (error) { errors.push(redact(error)); }
@@ -170,6 +174,7 @@ export class ContractExecution {
   }
 
   finish(result: FinalResult, reason = ""): void {
+    this.finished = true;
     this.evidence.status = result === "PASS" ? "PASS" : result.startsWith("BLOCKED") ? "BLOCKED" : "FAIL";
     this.evidence.notes = redact(reason);
     this.evidence.finished_at = new Date().toISOString();
@@ -214,7 +219,12 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
       await body({ page, contract, expect });
       contract.complete();
       await contract.cleanup();
-      await page.context().tracing.stop();
+      contract.complete();
+      // Preserve the trace until the final check has ruled out late responses.
+      await page.context().tracing.stop({ path: traceZip });
+      // Cleanup/tracing may yield while an in-flight response reports a product 5xx.
+      contract.complete();
+      try { unlinkSync(traceZip); } catch { /* retain a successful trace if removal is unavailable */ }
       contract.finish("PASS");
     } catch (error) {
       result = contract.failKind(error);
@@ -238,8 +248,8 @@ export function journey(caseId: string, body: (context: JourneyContext) => Promi
       try { await contract.cleanup(); } catch { /* cleanup details are retained */ }
       try {
         await page.context().tracing.stop({ path: traceZip });
-        if (existsSync(traceZip)) evidence.push(relative(required("RESULT_DIR"), traceZip).replaceAll("\\", "/"));
       } catch { /* retain any evidence already written */ }
+      if (existsSync(traceZip)) evidence.push(relative(required("RESULT_DIR"), traceZip).replaceAll("\\", "/"));
       if ((result === "FAIL" || result === "TIMEOUT") && productPageWasOpened && (!existsSync(failurePng) || !existsSync(traceZip))) {
         result = "AUTOMATION_ERROR";
         reason = `browser evidence unavailable after failure: ${reason}`;

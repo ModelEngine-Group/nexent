@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -6,15 +7,12 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from consts.evaluation_status import EvalRunStatus
-from database.agent_evaluation_db import (
-    claim_agent_evaluation_run,
-    list_dispatchable_pending_runs,
-)
-from database.client import get_db_session
-from database.db_models import AgentEvaluation
-from services import evaluation_maintenance
-from services import runtime_proxy_service
+from contracts.evaluation import EvalRunStatus
+from management.db.evaluation.runs import claim_agent_evaluation_run, list_dispatchable_pending_runs
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation
+from management.services.evaluation import maintenance as evaluation_maintenance
+from management.services.agent import runtime_client as runtime_proxy_service
 
 
 def _insert_run(session, *, tenant_id, created_by, evaluation_set_id, status, delete_flag, create_time):

@@ -1,0 +1,59 @@
+schema_version: "1.0"
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D4-003
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-SIDEBAR-REQ-001]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-011]
+  title: Selected Agent history loads and retries across 101 conversations
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the selected Agent history uses the available sidebar height, fills the initial viewport, recovers from a failed page, and reaches all 101 conversations through internal scroll pagination.
+  preconditions:
+    - Local frontend with a controlled authorized user, one published Agent, one other discovery Agent, 101 saved conversations under the selected Agent and no running generation.
+  test_data:
+    profile: mock
+  steps:
+    - order: 1
+      action: Open the target Agent from discovery while its first history request is delayed.
+      expected: The selected Agent page appears with animated row-shaped skeleton placeholders in the matching sidebar palette and no visible loading copy; after resolution, the first ten histories appear in a full-height sidebar viewport.
+    - order: 2
+      action: Scroll within two rows of the bottom to request the next page, fail that request once, retry it, then continue scrolling until the final page.
+      expected: A failed page shows a retry action rather than an empty-history message; retry preserves existing rows and loads the next ten; all 101 histories become reachable once without duplicates; the selected Agent viewport fills the remaining sidebar height and paginates automatically inside that scroll area; scroll shadows show at both ends in the middle and only at the remaining end near a boundary; the end-of-list message appears briefly and retracts when scrolling stops; no global Agent-chat page is used.
+  expected_results:
+    - The selected Agent's history is loaded directly and the first request displays a visible skeleton without loading text.
+    - Retry recovers an independent page without losing loaded history; the selected Agent history uses the remaining sidebar height, all 101 rows are reachable by scrolling within the per-group cursor, scroll shadows reflect content above and below, and the end-of-list message is transient.
+  forbidden_side_effects:
+    - No conversation is sent, renamed, pinned, deleted or selected for batch deletion; the unrelated Agent's history remains outside the selected Agent page.
+  actor: Authorized mock Agent-chat user
+  journey:
+    [
+      Discover Agent,
+      Open Agent chat,
+      Observe skeleton,
+      Load history pages,
+      Retry failure,
+      Verify all 101 histories,
+    ]
+  final_business_result:
+    - High-volume history remains completely reachable for the selected Agent even when loading fails once.
+  failure_evidence:
+    - Browser trace and assertion screenshot.
+  execution:
+    profiles:
+      - name: mock
+        required_services: []
+  acceptance:
+    - id: AC-01
+      description: The selected Agent loads directly with a distinguishable skeleton and no visible loading copy.
+      steps: [1]
+      expected_results: [1]
+      forbidden_side_effects: [1]
+    - id: AC-02
+      description: A failed page can be retried, the full-height viewport stays independently scrollable, all 101 histories are reachable without duplicates, scrolling triggers the next page within two rows of the bottom, and the transient end-of-list message retracts after scrolling stops.
+      steps: [2]
+      expected_results: [2]
+      forbidden_side_effects: [1]

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Coverage-focused tests for the Ray-free Celery data-process boundary."""
 
 import asyncio
@@ -14,7 +15,7 @@ def _configure_celery_environment(monkeypatch):
     backend_url = "redis://localhost:6379/1"
     monkeypatch.setenv("REDIS_URL", broker_url)
     monkeypatch.setenv("REDIS_BACKEND_URL", backend_url)
-    from consts import const as constants
+    import contracts.constants.environment as constants
 
     monkeypatch.setattr(constants, "REDIS_URL", broker_url)
     monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)
@@ -422,10 +423,10 @@ def test_parser_runtime_initialization_and_image_append(parser_runtime, monkeypa
     assert runtime.initialized and calls[1] == ["unstructured_default"]
 
     uploads = []
-    attachment = types.ModuleType("database.attachment_db")
+    attachment = types.ModuleType("management.db.file.attachment")
     attachment.upload_fileobj = lambda **kwargs: uploads.append(kwargs) or {"success": True, "object_name": "image.png"}
     attachment.build_s3_url = lambda name: "s3://" + name
-    monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
+    monkeypatch.setitem(sys.modules, "management.db.file.attachment", attachment)
     chunks = []
     parser_runtime.ParserRuntime._append_image_chunks(
         "doc.pdf", chunks, [{"image_bytes": b"x", "image_format": "png", "position": 1}, {"position": 2}]
@@ -464,7 +465,7 @@ def test_parse_task_storage_bootstrap_and_part_tasks(parser_runtime, monkeypatch
 
     client = Client()
     monkeypatch.setattr(parse_tasks, "_redis_client", lambda: client)
-    import database.attachment_db as attachment
+    from management.db.file import attachment as attachment
 
     deleted = []
     monkeypatch.setattr(attachment, "delete_file", lambda uri: deleted.append(uri))
@@ -599,13 +600,13 @@ def test_parser_runtime_configuration_prepare_params_and_minio(parser_runtime, m
 
     runtime = parser_runtime.ParserRuntime(1, [])
     runtime.model_paths = {"unstructured_default": str(config_file), "table_transformer": str(table_path)}
-    model_db = types.ModuleType("database.model_management_db")
+    model_db = types.ModuleType("management.db.model.repository")
     model_db.get_model_by_model_id = lambda **kwargs: {
         "maximum_chunk_size": 123,
         "expected_chunk_size": 45,
         "model_type": "custom",
     }
-    monkeypatch.setitem(sys.modules, "database.model_management_db", model_db)
+    monkeypatch.setitem(sys.modules, "management.db.model.repository", model_db)
     params = runtime._prepare_params(task_id="task", model_id=7, tenant_id="tenant", params={"extra": True})
     assert params["task_id"] == "task" and params["max_characters"] == 123
     assert params["new_after_n_chars"] == 45 and params["model_type"] == "custom"
@@ -614,7 +615,7 @@ def test_parser_runtime_configuration_prepare_params_and_minio(parser_runtime, m
     closed = []
     original_close = stream.close
     stream.close = lambda: (closed.append(True), original_close())[1]
-    import database.attachment_db as attachment
+    from management.db.file import attachment as attachment
 
     monkeypatch.setattr(attachment, "get_file_stream", lambda _source: stream)
     assert parser_runtime.ParserRuntime.read_source("s3://object", "minio") == b"minio-data"
@@ -750,11 +751,11 @@ def test_worker_ready_bootstrap_and_process_resource_paths(monkeypatch):
     worker.worker_ready_handler()
     assert len(bootstrap_calls) == 2 and all(call["queue"] == "parse_q" for call in bootstrap_calls)
 
-    monitoring = types.ModuleType("utils.monitoring")
+    monitoring = types.ModuleType("infrastructure.observability.bootstrap")
     monitoring.monitoring_manager = types.SimpleNamespace(is_enabled=True)
-    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", monitoring)
     worker.setup_worker_process_resources()
-    monkeypatch.setitem(sys.modules, "utils.monitoring", None)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", None)
     worker.setup_worker_process_resources()
 
     worker.worker_state["start_time"] = 0
@@ -830,7 +831,7 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
     client.value = None
     assert parse_tasks.load_chunks_from_redis("missing") == []
 
-    import database.attachment_db as attachment
+    from management.db.file import attachment as attachment
     monkeypatch.setattr(attachment, "delete_file", lambda _uri: (_ for _ in ()).throw(RuntimeError("delete failed")))
     parse_tasks.cleanup_parser_artifacts("task", [{"part_index": 1, "uri": "s3://part"}], include_final=False)
     parse_tasks.cleanup_parser_artifacts("task", None, include_final=True)
@@ -918,12 +919,12 @@ def test_task_base_helpers_lifecycle_and_batch_edge_cases(tasks, monkeypatch):
     assert tasks._redis_error_reason(types.SimpleNamespace(error_code=None, error_message="x" * 205)).endswith("...")
 
     lifecycle_calls = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle = types.ModuleType("management.db.knowledge_base.file_lifecycle")
     lifecycle.get_file_record = lambda **kwargs: (
         {"file_id": "record", "status": "PROCESSING"} if kwargs.get("object_name") else None
     )
     lifecycle.transition_file_record = lambda file_id, **kwargs: lifecycle_calls.append((file_id, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    monkeypatch.setitem(sys.modules, "management.db.knowledge_base.file_lifecycle", lifecycle)
     tasks._update_file_lifecycle(
         file_id="missing", tenant_id="tenant", index_name="idx", source="source", status="FAILED", stage="PROCESS"
     )
@@ -947,7 +948,7 @@ def test_parse_task_hooks_and_low_level_failure_branches(parser_runtime, monkeyp
     with pytest.raises(RuntimeError, match="REDIS_BACKEND_URL"):
         parse_tasks._redis_client()
 
-    import database.attachment_db as attachment
+    from management.db.file import attachment as attachment
     monkeypatch.setattr(attachment, "upload_fileobj", lambda **kwargs: {"success": False, "error": "quota"})
     with pytest.raises(RuntimeError, match="Failed to upload"):
         parse_tasks._upload_part("task", 0, "file.txt", b"x")
@@ -1175,9 +1176,9 @@ def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runt
         failed.ensure_initialized()
     assert failed._core is None and failed.initialized is False
 
-    model_db = types.ModuleType("database.model_management_db")
+    model_db = types.ModuleType("management.db.model.repository")
     model_db.get_model_by_model_id = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable"))
-    monkeypatch.setitem(sys.modules, "database.model_management_db", model_db)
+    monkeypatch.setitem(sys.modules, "management.db.model.repository", model_db)
     runtime._initialized = True
     runtime._core = types.SimpleNamespace(file_process=lambda **_kwargs: ([{"content": "chunk"}], []))
     assert runtime.process_source(
@@ -1185,9 +1186,9 @@ def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runt
     ) == [{"content": "chunk"}]
 
     stream = io.BytesIO(b"minio-data")
-    attachment = types.ModuleType("database.attachment_db")
+    attachment = types.ModuleType("management.db.file.attachment")
     attachment.get_file_stream = lambda _source: stream
-    monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
+    monkeypatch.setitem(sys.modules, "management.db.file.attachment", attachment)
     assert parser_runtime.ParserRuntime.read_source("s3://object", "minio") == b"minio-data"
     assert stream.closed
     attachment.get_file_stream = lambda _source: None
@@ -1258,15 +1259,15 @@ def test_parse_cancellation_and_cleanup_boundaries(parser_runtime, monkeypatch):
             raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(parse_tasks, "_redis_client", lambda: FailingRedis())
-    import database.attachment_db as attachment
+    from management.db.file import attachment as attachment
     monkeypatch.setattr(attachment, "delete_file", lambda _uri: {"success": False, "error": "gone"})
     parse_tasks.cleanup_parser_artifacts(
         "cleanup", [{"part_index": 0, "uri": "s3://part"}], include_final=True
     )
 
-    monkeypatch.setitem(sys.modules, "database.attachment_db", None)
+    monkeypatch.setitem(sys.modules, "management.db.file.attachment", None)
     parse_tasks.cleanup_parser_artifacts("missing-attachment", None, include_final=False)
-    monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
+    monkeypatch.setitem(sys.modules, "management.db.file.attachment", attachment)
 
     cleanup_calls = []
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: cleanup_calls.append((args, kwargs)))
@@ -1376,7 +1377,7 @@ def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monke
     monkeypatch.setattr(parse_tasks.parser_bootstrap, "apply_async", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dispatch")))
     worker.worker_ready_handler()
 
-    monkeypatch.setitem(sys.modules, "utils.monitoring", None)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", None)
     monkeypatch.setattr(worker, "QUEUES", "forward_q")
     monkeypatch.setattr(worker, "app", types.SimpleNamespace(worker_main=lambda _args: None))
     monkeypatch.setattr(worker, "_validate_parser_config", lambda: None)

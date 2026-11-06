@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SHARED-SELECTORS-20261019
+  change_type: requirement
+  requirement_id: WB-SHARED-SELECTORS-20261019
+  title: 共享资源选择抽屉与 AIDP 知识库选择
+  description: Reuse configuration selector controls in Workbench with Mine/Repository, no tag management and preserved scope
+    identity and workflows.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    retired: []
+  affected_cases:
+    existing:
+    - WB-CONTROLS-D4-001
+    added:
+    - WB-CONTROLS-D4-004
+    - WB-CONTROLS-D4-005
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/workbench/AgentPicker.test.tsx
+    - frontend/tests/workbench/SkillPicker.test.tsx
+    - frontend/tests/workbench/KnowledgePicker.test.tsx
+    - frontend/tests/workbench/SharedResourceComponents.test.tsx
+    - frontend/tests/component/knowledgeDrawer.test.tsx
+    - frontend/tests/component/agentDrawer.test.tsx
+    - frontend/tests/component/resourceDrawer.test.tsx
+    behaviors:
+    - Shared controls preserve scene tabs, selection, paging and import/install/config flows without Workbench management
+      actions.
+    - Shared Close/Confirm footer has no Workbench settings/default actions; pagination defaults to 10 and supports exactly 10/20/50, with selection limits unchanged.
+    - AIDP string identities, cap, cancel and error behavior remain; local IDs and validation remain scene-specific.
+    - Shared Agent cards preserve icon/version/tags; all three shared header checkboxes retain caps and page-local behavior; knowledge refresh preserves unsaved settings and blocks confirmation on errors.
+    reason: Strengthen existing owners; no new D1 quota. D4 proves actual shared controls and AIDP routing/payloads; existing
+      runtime/scope UT remains separate.
+  notes: 'SPEC docs/Developing/chat-shared-resource-selectors; live AIDP provider smoke distinct from controlled browser proof.
+    Original D4-001 is regression-only: baseline send-icon color differs from its contract, confirmed in HEAD source before
+    edits. D4-005 isolates the required shared-selector journey without weakening D4-001.'

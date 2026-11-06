@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from unittest import mock
 
-import services.agent_repository_service as svc
+from management.services.repository.agent import publishing as svc
+from management.services.repository.agent import common as shared
 
 CASE_ID = 'UT-BE-AUTO-2448EA6E8C27143B'
 
@@ -48,7 +50,8 @@ def _install_mocks(monkeypatch):
     mocks = {}
     for name in _MOCK_NAMES:
         patched = mock.Mock()
-        monkeypatch.setattr(svc, name, patched)
+        owner = shared if name == 'reset_agent_repository_status' else svc
+        monkeypatch.setattr(owner, name, patched)
         mocks[name] = patched
     mocks['update_agent_repository_status_by_id'].return_value = 1
     mocks['_get_user_role'].return_value = 'SU'

@@ -1,6 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n, { ThirdPartyModule } from "i18next";
 import { initReactI18next } from "react-i18next";
 import { withBasePath } from "@/lib/basePath";
+import log from "@/lib/logger";
+
+type LocalePath = "en" | "zh";
+type ReplacementEntry = { pattern: string; str: string };
+type CustomLocaleResources = {
+  custom: Record<string, string>;
+  replacemenKeyArr: ReplacementEntry[];
+};
 
 const resources = {
   en: {
@@ -11,7 +21,7 @@ const resources = {
   },
 }
 
-export const resourcesCustom = {
+export const resourcesCustom: Record<LocalePath, CustomLocaleResources> = {
   en: {
     custom: {},
     replacemenKeyArr: [],
@@ -22,32 +32,88 @@ export const resourcesCustom = {
   },
 }
 
-export const loadLocaleMessages = async (locale: string) => {
-  try {
-    const localePath = locale === 'zh' ? 'zh' : 'en';
-    const response = await fetch(withBasePath(`/locales/${localePath}/common.json`));
-    const common = await response.json();
-    if (resources[localePath]) {
-      resources[localePath].common = common;
-    }
+const commonMessageRequests = new Map<LocalePath, Promise<unknown>>();
+let customMessageRequest: Promise<void> | undefined;
 
-    const customLang = ['zh', 'en'];
-    for (const index in customLang) {
-      const lang = customLang[index] as 'zh' | 'en';
-      const responseCustom = await fetch(withBasePath(`/locales/${lang}/custom.json`));
-      const commonCustom = await responseCustom.json();
-      if (resourcesCustom[lang]) {
-        resourcesCustom[lang].custom = commonCustom;
-        resourcesCustom[lang].replacemenKeyArr = Object.entries(commonCustom).map(([key, value]) => {
-          const item = { pattern: key, str: value };
-          return item;
-        }) as any;
-      }
+const fetchLocaleJson = async (path: string) => {
+  const response = await fetch(withBasePath(path), { cache: "no-cache" });
+  if (!response.ok) {
+    throw new Error(`Failed to load locale resource ${path}: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+const loadCachedRequest = async <T,>(
+  cache: Map<LocalePath, Promise<T>>,
+  locale: LocalePath,
+  load: () => Promise<T>
+): Promise<T> => {
+  const cachedRequest = cache.get(locale);
+  if (cachedRequest) {
+    return cachedRequest;
+  }
+
+  const request = load();
+  cache.set(locale, request);
+
+  try {
+    return await request;
+  } catch (error) {
+    if (cache.get(locale) === request) {
+      cache.delete(locale);
     }
+    throw error;
+  }
+};
+
+const loadCustomMessages = () => {
+  if (!customMessageRequest) {
+    customMessageRequest = Promise.all(
+      (["zh", "en"] as const).map(async (locale) => {
+        const custom = await fetchLocaleJson(
+          `/locales/${locale}/custom.json`
+        );
+        return [locale, custom] as const;
+      })
+    )
+      .then((entries) => {
+        entries.forEach(([locale, custom]) => {
+          if (resourcesCustom[locale]) {
+            resourcesCustom[locale].custom = custom;
+            resourcesCustom[locale].replacemenKeyArr = Object.entries(custom).map(
+              ([pattern, str]) => ({ pattern, str: String(str) })
+            );
+          }
+        });
+      })
+      .catch((error) => {
+        customMessageRequest = undefined;
+        throw error;
+      });
+  }
+
+  return customMessageRequest;
+};
+
+export const loadLocaleMessages = async (locale: string) => {
+  const localePath: LocalePath = locale.toLowerCase().startsWith("zh")
+    ? "zh"
+    : "en";
+
+  try {
+    const [common] = await Promise.all([
+      loadCachedRequest(commonMessageRequests, localePath, () =>
+        fetchLocaleJson(`/locales/${localePath}/common.json`)
+      ),
+      loadCustomMessages(),
+    ]);
+
+    resources[localePath].common = common;
 
     return { resourcesCustom, resources };
   } catch (error) {
-    console.log(`Failed to load locale ${locale}:`, error)
+    log.error(`Failed to load locale ${locale}`, error);
   }
   return { resourcesCustom, resources };
 }

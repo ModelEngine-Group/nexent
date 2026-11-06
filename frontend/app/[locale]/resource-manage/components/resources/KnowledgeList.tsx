@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
@@ -26,7 +28,7 @@ import {
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
@@ -38,6 +40,7 @@ import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -70,9 +73,12 @@ export default function KnowledgeList({
   const knowledgeBases = data || [];
   const [keyword, setKeyword] = useState("");
   const [groupFilters, setGroupFilters] = useState<number[]>([]);
+  const [previewingKnowledgeId, setPreviewingKnowledgeId] = useState<
+    string | null
+  >(null);
 
   // Get actual user role from auth context
-  const { user } = useAuthorization();
+  const { user } = useAuthorizationContext();
   const userRole = user?.role ?? "";
   // Only ADMIN can edit per-KB soft quotas
   const isAdmin = userRole === "ADMIN";
@@ -553,15 +559,38 @@ export default function KnowledgeList({
                 danger
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
-                onClick={() =>
-                  confirm({
-                    title: t("knowledgeBase.modal.deleteConfirm.title"),
-                    content: t("common.cannotBeUndone"),
-                    okText: t("common.confirm"),
-                    cancelText: t("common.cancel"),
-                    onOk: () => handleDelete(record.id),
-                  })
-                }
+                loading={previewingKnowledgeId === record.id}
+                disabled={previewingKnowledgeId !== null}
+                onClick={async () => {
+                  // Deletion cascades: the dialog lists the agents that lose
+                  // their binding, plus a fixed notice for conversations.
+                  setPreviewingKnowledgeId(record.id);
+                  try {
+                    const preview =
+                      await knowledgeBaseService.previewBoundAgents(
+                        record.id,
+                        tenantId
+                      );
+                    confirm({
+                      title: t("knowledgeBase.modal.deleteConfirm.title", {
+                        name: record.name,
+                      }),
+                      content: (
+                        <div>
+                          <div>
+                            {t("knowledgeBase.modal.deleteConfirm.content")}
+                          </div>
+                          <KnowledgeBaseDeleteNotice preview={preview} />
+                        </div>
+                      ),
+                      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
+                      cancelText: t("common.cancel"),
+                      onOk: () => handleDelete(record.id),
+                    });
+                  } finally {
+                    setPreviewingKnowledgeId(null);
+                  }
+                }}
               />
             </Tooltip>
           </div>

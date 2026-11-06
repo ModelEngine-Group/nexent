@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useCallback } from "react";
 import { App } from "antd";
 import type { TFunction } from "i18next";
@@ -5,17 +7,20 @@ import { useTranslation } from "react-i18next";
 
 import { checkAgentNameConflictBatch } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
+import {
+  AGENT_DISPLAY_NAME_MAX_LENGTH,
+  isValidAgentName,
+} from "@/lib/agentName";
 
-const AGENT_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-export const AGENT_NAME_MAX_LENGTH = 60;
+export {
+  AGENT_NAME_MAX_LENGTH,
+  AGENT_DISPLAY_NAME_MAX_LENGTH,
+  isValidAgentName,
+} from "@/lib/agentName";
 export const AGENT_DESCRIPTION_MAX_LENGTH = 500;
 
-export const isValidAgentName = (name: string): boolean =>
-  name.length <= AGENT_NAME_MAX_LENGTH && AGENT_NAME_PATTERN.test(name);
-
 export const isValidAgentDisplayName = (name: string): boolean =>
-  name.length <= AGENT_NAME_MAX_LENGTH;
+  name.length <= AGENT_DISPLAY_NAME_MAX_LENGTH;
 
 export const isValidAgentDescription = (description: string): boolean =>
   description.length <= AGENT_DESCRIPTION_MAX_LENGTH;
@@ -23,10 +28,7 @@ export const isValidAgentDescription = (description: string): boolean =>
 type AgentNameField = "name" | "display_name";
 
 type AgentNameConflictStatus =
-  | "available"
-  | "name_duplicate"
-  | "display_name_duplicate"
-  | "check_failed";
+  "available" | "name_duplicate" | "display_name_duplicate" | "check_failed";
 
 export async function checkAgentNameConflict(
   field: AgentNameField,
@@ -86,7 +88,7 @@ export const useSaveGuard = () => {
     const { agentId, editedAgent } = useAgentStore.getState();
     if (!editedAgent || agentId === null) return false;
 
-    const name = (editedAgent.name ?? "").trim();
+    const name = editedAgent.name ?? "";
     const displayName = (editedAgent.display_name ?? "").trim();
     const description = (editedAgent.description ?? "").trim();
 
@@ -97,7 +99,7 @@ export const useSaveGuard = () => {
     if (!isValidAgentDisplayName(displayName)) {
       message.error(
         t("agent.validation.displayNameMaxLength", {
-          max: AGENT_NAME_MAX_LENGTH,
+          max: AGENT_DISPLAY_NAME_MAX_LENGTH,
         })
       );
       return false;
@@ -167,7 +169,6 @@ export const useSaveGuard = () => {
     }
 
     return validateCurrentAgent();
-
   }, [message, t, validateCurrentAgent]);
 
   return { save, saveWithModal: save };

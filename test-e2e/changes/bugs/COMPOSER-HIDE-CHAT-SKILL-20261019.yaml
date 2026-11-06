@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: COMPOSER-HIDE-CHAT-SKILL-20261019
+  change_type: bugfix
+  bug_id: COMPOSER-HIDE-CHAT-SKILL-20261019
+  title: Hide unconnected ordinary-chat temporary skill selection
+  description: Keep skill selection available through the Workbench callback, without advertising ordinary-chat drafts that are not sent.
+  observed_behavior: Ordinary chat exposes a skill picker whose result only updates local UI state.
+  expected_behavior: Ordinary chat hides the skill action; knowledge, model controls and Workbench skill actions retain their behavior.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing Composer tests explicitly expect the ordinary-chat skill button despite the absent runtime scope path.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [WB-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Ordinary chat has no temporary skill action in idle, running and disabled states; knowledge cancellation is unchanged.
+    - Workbench still delegates its skill button to the supplied callback and creation modes hide resource controls.
+    test_selectors:
+    - frontend/tests/workbench/Composer.test.tsx
+    reason: Visibility and callback delegation are directly observable in existing render tests. No backend, request or persistence behavior changes; no duplicate formal unit Case.
+  notes: 'Follow-up in ../nexent-doc/docs/Developing/chat-composer-empty-hint/design.md. Unchanged Workbench D4-001/005 remain capability inventory; current fix is a UI visibility boundary proved by UT.'

@@ -1,8 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for backend/database/knowledge_db.py
+Unit tests for backend/management/db/knowledge_base/repository.py
 Tests knowledge database utility functions
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import types
@@ -51,29 +54,9 @@ minio_config_mock.validate = MagicMock()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
+with patch('management.db.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.database.knowledge_db import (
-        _lock_and_check_knowledge_name,
-        create_knowledge_record,
-        update_knowledge_record,
-        delete_knowledge_record,
-        get_knowledge_record,
-        get_knowledge_info_by_knowledge_ids,
-        get_knowledge_ids_by_index_names,
-        get_knowledge_info_by_tenant_id,
-        update_model_name_by_index_name,
-        get_index_name_by_knowledge_name,
-        get_knowledge_info_by_tenant_and_source,
-        get_knowledge_info_by_ids_and_tenant,
-        upsert_knowledge_record,
-        _generate_index_name,
-        get_knowledge_name_map_by_index_names,
-        update_summary_frequency,
-        update_last_summary_time,
-        update_last_doc_update_time,
-        get_knowledge_bases_for_auto_summary,
-    )
+    from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_summary_frequency, update_last_summary_time, update_last_doc_update_time, get_knowledge_bases_for_auto_summary
 
 
 # Add project root to Python path
@@ -95,12 +78,13 @@ consts_mock.const.POSTGRES_DB = 'test_db'
 consts_mock.const.POSTGRES_PORT = '5432'
 consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-# Mock consts.scheduler module
+# Mock contracts.constants.constants module
 consts_scheduler_mock = MagicMock()
 consts_scheduler_mock.VALID_SUMMARY_FREQUENCIES = ["1h", "3h", "6h", "1d", "1w", None]
-sys.modules['consts.scheduler'] = consts_scheduler_mock
+install_shared_contract_stub(consts_scheduler_mock, 'scheduler')
 
 # Mock MinioClient and PostgresClient
 minio_client_mock2 = MagicMock()
@@ -112,7 +96,11 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -121,8 +109,8 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 utils_mock.str_utils = MagicMock()
 utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.str_utils'] = utils_mock.str_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -184,28 +172,11 @@ class MockKnowledgeRecord:
 
 
 db_models_mock.KnowledgeRecord = MockKnowledgeRecord
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Import backend modules after all patches are applied
-from backend.database.knowledge_db import (
-        _lock_and_check_knowledge_name,
-        create_knowledge_record,
-        update_knowledge_record,
-        delete_knowledge_record,
-        get_knowledge_record,
-        get_knowledge_info_by_knowledge_ids,
-        get_knowledge_ids_by_index_names,
-        get_knowledge_info_by_tenant_id,
-        update_model_name_by_index_name,
-        update_embedding_model_by_index_name,
-        get_index_name_by_knowledge_name,
-        get_knowledge_info_by_tenant_and_source,
-        upsert_knowledge_record,
-        _generate_index_name,
-        get_knowledge_name_map_by_index_names,
-        _enforce_knowledge_limits,
-    )
+from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, update_embedding_model_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, _enforce_knowledge_limits
 
 
 @pytest.fixture
@@ -231,7 +202,7 @@ def test_lock_and_check_knowledge_name_available(mock_session):
 
 
 def test_lock_and_check_knowledge_name_conflict(mock_session):
-    from consts.exceptions import DuplicateError
+    from contracts.errors.exceptions import DuplicateError
 
     session, query = mock_session
     query.filter.return_value.first.return_value = object()
@@ -260,7 +231,7 @@ def setup_mock_db_session(monkeypatch, session):
 
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
     return mock_ctx
 
 
@@ -293,7 +264,7 @@ class _LimitSession:
 
 def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
     """The tenant ceiling rejects creation at the boundary with structured details."""
-    from backend.database import knowledge_db
+    from management.db.knowledge_base import repository as knowledge_db
 
     monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 1)
     monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 10)
@@ -311,7 +282,7 @@ def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
 
 def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeypatch):
     """Missing identity is ordinary-user safe, while a tenant role is normalized."""
-    from backend.database import knowledge_db
+    from management.db.knowledge_base import repository as knowledge_db
 
     assert knowledge_db._count_or_zero(3) == 3
     assert knowledge_db._count_or_zero(MagicMock()) == 0
@@ -331,7 +302,7 @@ def test_knowledge_limit_helpers_handle_missing_identity_and_role_lookup(monkeyp
 
 def test_knowledge_limit_skips_user_scope_without_creator(monkeypatch):
     """Legacy integrations without a creator still observe the tenant ceiling."""
-    from backend.database import knowledge_db
+    from management.db.knowledge_base import repository as knowledge_db
 
     monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
     session = _LimitSession([0])
@@ -364,7 +335,7 @@ def test_knowledge_limit_skips_all_scopes_without_tenant():
 )
 def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expected_limit):
     """The creator ceiling is checked after the tenant ceiling and includes role details."""
-    from backend.database import knowledge_db
+    from management.db.knowledge_base import repository as knowledge_db
 
     monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_TENANT", 10)
     monkeypatch.setattr(knowledge_db, "MAX_KNOWLEDGE_BASES_PER_USER", 1)
@@ -408,7 +379,7 @@ def test_create_knowledge_record_success(monkeypatch, mock_session):
     }
 
     # Mock KnowledgeRecord constructor
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
 
     assert result == {
@@ -429,7 +400,7 @@ def test_create_knowledge_record_normalizes_knowledge_name(monkeypatch, mock_ses
     mock_record.index_name = "idx-124"
 
     with patch(
-        "backend.database.knowledge_db.KnowledgeRecord",
+        "management.db.knowledge_base.repository.KnowledgeRecord",
         return_value=mock_record,
     ) as mock_constructor:
         result = create_knowledge_record(
@@ -467,7 +438,7 @@ def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Prepare test data with group_ids as list
     test_query = {
@@ -482,7 +453,7 @@ def test_create_knowledge_record_with_group_ids_list(monkeypatch, mock_session):
     }
 
     # Mock KnowledgeRecord constructor
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record) as mock_constructor:
         result = create_knowledge_record(test_query)
 
     assert result == {
@@ -517,7 +488,7 @@ def test_create_knowledge_record_sets_multimodal_flag(monkeypatch, mock_session)
         "knowledge_name": "test_knowledge",
     }
 
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record) as mock_constructor:
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record) as mock_constructor:
         _ = create_knowledge_record(test_query)
 
 
@@ -538,7 +509,7 @@ def test_create_knowledge_record_exception(monkeypatch, mock_session):
     }
 
     mock_record = MockKnowledgeRecord()
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         with pytest.raises(MockSQLAlchemyError, match="Database error"):
             create_knowledge_record(test_query)
 
@@ -556,7 +527,7 @@ def test_create_knowledge_record_generates_index_name(monkeypatch, mock_session)
 
     # Deterministic index name
     monkeypatch.setattr(
-        "backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
+        "management.db.knowledge_base.repository._generate_index_name", lambda _: "7-generated")
 
     test_query = {
         "knowledge_describe": "desc",
@@ -566,7 +537,7 @@ def test_create_knowledge_record_generates_index_name(monkeypatch, mock_session)
         "knowledge_name": "kb1",
     }
 
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
 
     assert result == {
@@ -602,7 +573,7 @@ def test_update_knowledge_record_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -644,7 +615,7 @@ def test_update_knowledge_record_updates_all_fields(monkeypatch, mock_session):
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -685,7 +656,7 @@ def test_update_knowledge_record_sets_multimodal(monkeypatch, mock_session):
 
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -721,7 +692,7 @@ def test_update_knowledge_record_partial_update(monkeypatch, mock_session):
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -760,7 +731,7 @@ def test_update_knowledge_record_not_found(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "nonexistent_knowledge",
@@ -795,7 +766,7 @@ def test_update_knowledge_record_without_knowledge_describe(monkeypatch, mock_se
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Test query without knowledge_describe field
     test_query = {
@@ -834,7 +805,7 @@ def test_update_knowledge_record_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -870,7 +841,7 @@ def test_delete_knowledge_record_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -904,7 +875,7 @@ def test_delete_knowledge_record_not_found(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "nonexistent_knowledge",
@@ -936,7 +907,7 @@ def test_delete_knowledge_record_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -972,7 +943,7 @@ def test_get_knowledge_record_found(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Mock as_dict function
     expected_result = {
@@ -981,7 +952,7 @@ def test_get_knowledge_record_found(monkeypatch, mock_session):
         "knowledge_describe": "test description"
     }
     monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
+        "management.db.knowledge_base.repository.as_dict", lambda x: expected_result)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -1012,7 +983,7 @@ def test_get_knowledge_record_not_found(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "nonexistent_knowledge"
@@ -1042,11 +1013,11 @@ def test_get_knowledge_record_without_tenant_id(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     expected_result = {"knowledge_id": 1}
     monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
+        "management.db.knowledge_base.repository.as_dict", lambda x: expected_result)
 
     test_query = {
         "index_name": "test_knowledge"
@@ -1073,7 +1044,7 @@ def test_get_knowledge_record_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge"
@@ -1097,7 +1068,7 @@ def test_get_knowledge_record_with_none_query(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # When query is None, checking 'index_name' in query will raise TypeError
     with pytest.raises(TypeError):
@@ -1123,7 +1094,7 @@ def test_get_knowledge_record_without_index_name_key(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # When query doesn't have 'index_name' or 'knowledge_name' key, no specific filter is applied
     test_query = {
@@ -1169,7 +1140,7 @@ def test_get_knowledge_info_by_knowledge_ids_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     knowledge_ids = ["1", "2"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
@@ -1209,7 +1180,7 @@ def test_get_knowledge_info_by_knowledge_ids_exception(monkeypatch, mock_session
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     knowledge_ids = ["1", "2"]
 
@@ -1250,7 +1221,7 @@ def test_get_knowledge_ids_by_index_names_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = ["knowledge1", "knowledge2"]
     result = get_knowledge_ids_by_index_names(index_names)
@@ -1273,7 +1244,7 @@ def test_get_knowledge_ids_by_index_names_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = ["knowledge1", "knowledge2"]
 
@@ -1307,13 +1278,13 @@ def test_get_knowledge_info_by_tenant_id_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Mock as_dict function
     def mock_as_dict(record):
         return {"knowledge_id": record.knowledge_id, "tenant_id": record.tenant_id}
 
-    monkeypatch.setattr("backend.database.knowledge_db.as_dict", mock_as_dict)
+    monkeypatch.setattr("management.db.knowledge_base.repository.as_dict", mock_as_dict)
 
     tenant_id = "tenant1"
     result = get_knowledge_info_by_tenant_id(tenant_id)
@@ -1336,7 +1307,7 @@ def test_get_knowledge_info_by_tenant_id_orders_paginated_source(monkeypatch, mo
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx
     )
 
     result = get_knowledge_info_by_tenant_id("tenant1", ordered=True)
@@ -1360,7 +1331,7 @@ def test_get_knowledge_info_by_tenant_id_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     tenant_id = "tenant1"
 
@@ -1387,7 +1358,7 @@ def test_update_model_name_by_index_name_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     result = update_model_name_by_index_name(
         "test_index", "new_model", "tenant1", "user1")
@@ -1416,7 +1387,7 @@ def test_update_model_name_by_index_name_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         update_model_name_by_index_name(
@@ -1443,7 +1414,7 @@ def test_create_knowledge_record_with_index_name_only(monkeypatch, mock_session)
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_index",
@@ -1454,7 +1425,7 @@ def test_create_knowledge_record_with_index_name_only(monkeypatch, mock_session)
         # No knowledge_name provided
     }
 
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
 
     assert result == {
@@ -1486,7 +1457,7 @@ def test_create_knowledge_record_without_user_id(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_index",
@@ -1497,7 +1468,7 @@ def test_create_knowledge_record_without_user_id(monkeypatch, mock_session):
         # No user_id provided
     }
 
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
 
     assert result["knowledge_id"] == 123
@@ -1523,11 +1494,11 @@ def test_create_knowledge_record_without_index_name_and_knowledge_name(monkeypat
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Deterministic index name
     monkeypatch.setattr(
-        "backend.database.knowledge_db._generate_index_name", lambda _: "7-generated")
+        "management.db.knowledge_base.repository._generate_index_name", lambda _: "7-generated")
 
     test_query = {
         "knowledge_describe": "desc",
@@ -1537,7 +1508,7 @@ def test_create_knowledge_record_without_index_name_and_knowledge_name(monkeypat
         # Neither index_name nor knowledge_name provided
     }
 
-    with patch('backend.database.knowledge_db.KnowledgeRecord', return_value=mock_record):
+    with patch('management.db.knowledge_base.repository.KnowledgeRecord', return_value=mock_record):
         result = create_knowledge_record(test_query)
 
     assert result == {
@@ -1572,7 +1543,7 @@ def test_update_knowledge_record_without_user_id(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -1612,7 +1583,7 @@ def test_delete_knowledge_record_without_user_id(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_knowledge"
@@ -1650,11 +1621,11 @@ def test_get_knowledge_record_with_tenant_id_none(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     expected_result = {"knowledge_id": 123}
     monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
+        "management.db.knowledge_base.repository.as_dict", lambda x: expected_result)
 
     test_query = {
         "index_name": "test_knowledge",
@@ -1691,7 +1662,7 @@ def test_get_knowledge_record_by_knowledge_name_success(monkeypatch, mock_sessio
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Mock as_dict function
     expected_result = {
@@ -1700,7 +1671,7 @@ def test_get_knowledge_record_by_knowledge_name_success(monkeypatch, mock_sessio
         "index_name": "test_index"
     }
     monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: expected_result)
+        "management.db.knowledge_base.repository.as_dict", lambda x: expected_result)
 
     test_query = {
         "knowledge_name": "test_kb",
@@ -1731,7 +1702,7 @@ def test_get_knowledge_record_by_knowledge_name_not_found(monkeypatch, mock_sess
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "knowledge_name": "nonexistent_kb",
@@ -1759,10 +1730,10 @@ def test_get_knowledge_record_filters_multimodal(monkeypatch, mock_session):
 
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     monkeypatch.setattr(
-        "backend.database.knowledge_db.as_dict", lambda x: {"knowledge_id": 1})
+        "management.db.knowledge_base.repository.as_dict", lambda x: {"knowledge_id": 1})
 
     _ = get_knowledge_record({"index_name": "test_index", "is_multimodal": "Y"})
 
@@ -1787,7 +1758,7 @@ def test_get_knowledge_info_by_knowledge_ids_empty_list(monkeypatch, mock_sessio
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     knowledge_ids = []
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
@@ -1820,7 +1791,7 @@ def test_get_knowledge_info_by_knowledge_ids_includes_knowledge_name(monkeypatch
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     knowledge_ids = ["1"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
@@ -1864,7 +1835,7 @@ def test_get_knowledge_info_by_knowledge_ids_with_none_knowledge_name(monkeypatc
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     knowledge_ids = ["1"]
     result = get_knowledge_info_by_knowledge_ids(knowledge_ids)
@@ -1907,7 +1878,7 @@ def test_get_index_name_by_knowledge_name_success(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     result = get_index_name_by_knowledge_name("My Knowledge Base", "tenant1")
 
@@ -1932,7 +1903,7 @@ def test_get_index_name_by_knowledge_name_not_found(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(ValueError, match="Knowledge base 'Nonexistent KB' not found for the current tenant"):
         get_index_name_by_knowledge_name("Nonexistent KB", "tenant1")
@@ -1953,7 +1924,7 @@ def test_get_index_name_by_knowledge_name_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_index_name_by_knowledge_name("My Knowledge Base", "tenant1")
@@ -1965,7 +1936,7 @@ def test_generate_index_name_format(monkeypatch):
     mock_uuid = MagicMock()
     mock_uuid.hex = "abc123def456"
     monkeypatch.setattr(
-        "backend.database.knowledge_db.uuid.uuid4", lambda: mock_uuid)
+        "management.db.knowledge_base.repository.uuid.uuid4", lambda: mock_uuid)
 
     result = _generate_index_name(123)
 
@@ -1998,7 +1969,7 @@ def test_get_knowledge_ids_by_index_names_empty_list(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = []
     result = get_knowledge_ids_by_index_names(index_names)
@@ -2025,7 +1996,7 @@ def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Mock the same-session creator used to keep the existence check and limit
     # check in one transaction.
@@ -2036,7 +2007,7 @@ def test_upsert_knowledge_record_create_new(monkeypatch, mock_session):
     }
 
     with patch(
-        'backend.database.knowledge_db._create_knowledge_record_in_session',
+        'management.db.knowledge_base.repository._create_knowledge_record_in_session',
         return_value=expected_result,
     ):
         test_query = {
@@ -2082,7 +2053,7 @@ def test_upsert_knowledge_record_update_existing(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_index",
@@ -2125,7 +2096,7 @@ def test_upsert_knowledge_record_exception(monkeypatch, mock_session):
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     test_query = {
         "index_name": "test_index",
@@ -2168,7 +2139,7 @@ def test_get_knowledge_info_by_tenant_and_source_success(monkeypatch, mock_sessi
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     # Mock as_dict function
     def mock_as_dict(record):
@@ -2178,7 +2149,7 @@ def test_get_knowledge_info_by_tenant_and_source_success(monkeypatch, mock_sessi
             "knowledge_sources": record.knowledge_sources
         }
 
-    monkeypatch.setattr("backend.database.knowledge_db.as_dict", mock_as_dict)
+    monkeypatch.setattr("management.db.knowledge_base.repository.as_dict", mock_as_dict)
 
     result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
 
@@ -2209,7 +2180,7 @@ def test_get_knowledge_info_by_tenant_and_source_empty_result(monkeypatch, mock_
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     result = get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
 
@@ -2231,7 +2202,7 @@ def test_get_knowledge_info_by_tenant_and_source_exception(monkeypatch, mock_ses
         return None  # Don't suppress the exception
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_info_by_tenant_and_source("tenant1", "datamate")
@@ -2265,7 +2236,7 @@ def test_get_knowledge_name_map_by_index_names_success(monkeypatch, mock_session
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
     result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
@@ -2306,7 +2277,7 @@ def test_get_knowledge_name_map_by_index_names_with_fallback(monkeypatch, mock_s
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = ["index1", "index2"]
     result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
@@ -2342,7 +2313,7 @@ def test_get_knowledge_name_map_by_index_names_no_results(monkeypatch, mock_sess
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     index_names = ["nonexistent1", "nonexistent2"]
     result = get_knowledge_name_map_by_index_names(index_names, tenant_id="tenant-1")
@@ -2369,7 +2340,7 @@ def test_get_knowledge_name_map_by_index_names_exception(monkeypatch, mock_sessi
         return None
     mock_ctx.__exit__.side_effect = mock_exit
     monkeypatch.setattr(
-        "backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+        "management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_knowledge_name_map_by_index_names(["index1", "index2"], tenant_id="tenant-1")
@@ -2384,7 +2355,7 @@ def test_get_index_name_by_knowledge_name_fallback_to_index_name(monkeypatch, mo
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     result = get_index_name_by_knowledge_name("idx-1", "tenant1")
     assert result == "idx-1"
@@ -2399,7 +2370,7 @@ def test_update_summary_frequency_paths(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
 
     assert update_summary_frequency("idx-1", "1d", "tenant-1", "user-1") is True
     assert rec.summary_frequency == "1d"
@@ -2423,8 +2394,8 @@ def test_update_last_times_and_get_auto_summary(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.knowledge_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.knowledge_db.as_dict", lambda r: {"index_name": r.index_name})
+    monkeypatch.setattr("management.db.knowledge_base.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.knowledge_base.repository.as_dict", lambda r: {"index_name": r.index_name})
 
     update_last_summary_time("idx-1")
     update_last_doc_update_time("idx-1")
@@ -2461,7 +2432,7 @@ def test_sqlalchemy_error_paths_raise(monkeypatch, func_name, args, kwargs):
     Cover SQLAlchemyError branches for DB operations by forcing get_db_session
     context enter to fail.
     """
-    from backend.database import knowledge_db as knowledge_db_module
+    from management.db.knowledge_base import repository as knowledge_db_module
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.side_effect = MockSQLAlchemyError("db-error")
@@ -2510,7 +2481,7 @@ def test_get_knowledge_info_by_ids_and_tenant_preserves_order(monkeypatch, mock_
 
 
 def test_private_knowledge_queries_filter_and_serialize(monkeypatch, mock_session):
-    from backend.database import knowledge_db as knowledge_db_module
+    from management.db.knowledge_base import repository as knowledge_db_module
 
     session, query = mock_session
     setup_mock_db_session(monkeypatch, session)

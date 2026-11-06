@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for the ephemeral NL2Skill runtime stream."""
 
 import asyncio
@@ -8,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from consts.model import NL2SkillRunRequest
-import services.nl2skill_service as nl2skill_service
+from contracts.agent import NL2SkillRunRequest
+from services import nl2skill_service as nl2skill_service
 from services.nl2skill_service import (
     _assemble_draft_content,
     _convert_history,
@@ -21,14 +23,23 @@ from services.nl2skill_service import (
     build_nl2skill_run_info,
     create_nl2skill_stream,
 )
-from agents.nl2skill_agent import NL2SKILL_NAME, create_nl2skill_agent_config
+from management.services.skill.creation import NL2SKILL_NAME, create_nl2skill_agent_config
+
+
+@pytest.fixture(autouse=True)
+def creator_identity(mocker):
+    from contracts.agent import SystemAgentRef
+    mocker.patch.object(nl2skill_service.system_agent_provider, "get_nl2skill_main_ref", return_value=SystemAgentRef("shared", "nl2skill_main", 78, 0))
 
 
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
+    assert config.name == "nl2skill_main"
+    assert config.display_name == "技能创建助手"
     assert config.model_name == "model"
-    assert config.instructions == "system"
+    assert config.instructions is None
+    assert config.context_items[0].content["text"] == "system"
     assert config.tools == []
     assert config.max_steps == 5
     assert config.output_protocol == "final_envelope"
@@ -150,7 +161,7 @@ def test_resolve_model_for_nl2skill_selects_requested_configured_or_fallback(
 
 def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocker):
     mocker.patch.object(nl2skill_service, "get_model_by_model_id", return_value=None)
-    with pytest.raises(ValueError, match="Requested model_id"):
+    with pytest.raises(ValueError, match="model_not_available"):
         _resolve_model_for_nl2skill("tenant", 9, [])
 
     mocker.patch.object(nl2skill_service.tenant_config_manager, "get_model_config", return_value=None)
@@ -176,6 +187,7 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
         language="en",
     )
 
+    assert result.tenant_id == "tenant"
     assert result.query == "rendered query"
     prompt_loader.assert_called_once()
     assert "complexity" not in prompt_loader.call_args.kwargs
@@ -420,7 +432,7 @@ async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure(mo
 
 
 @pytest.mark.asyncio
-async def test_stream_classifies_final_answer_control_content_and_skips_later_tail(mocker):
+async def test_stream_classifies_final_answer_deltas_including_later_tail(mocker):
     stop_event = threading.Event()
     mocker.patch.object(
         nl2skill_service,
@@ -430,15 +442,15 @@ async def test_stream_classifies_final_answer_control_content_and_skips_later_ta
 
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo"})
-        yield json.dumps({"type": "final_answer", "content": "tail"})
+        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo", "answer_phase": "delta"})
+        yield json.dumps({"type": "final_answer", "content": "tail\n</skill>", "answer_phase": "delta"})
 
     mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
     stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert any(item["type"] == "skill_body" and "# Demo" in item["content"] for item in payloads)
-    assert not any(item.get("content") == "tail" for item in payloads)
+    assert "".join(item["content"] for item in payloads if item["type"] == "skill_body") == "# Demotail\n"
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
 

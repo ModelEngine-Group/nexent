@@ -13,6 +13,8 @@ case:
   automation: automated
   objective: 验证 /aidp-mgmt 全部管理端点鉴权与权限面：401/403/404 及 USER 仅管理自有 PRIVATE｜接口契约
   preconditions:
+  - 权限扫描的创建请求包含合法 description 和目录解析的 embedding_model；仅被测凭据或权限无效，不混入请求结构错误。
+  - 由 aidp 部署例外组执行，产品 ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启；外部 AIDP 使用用例所属 knowledge-provider Mock，产品权限、数据库、缓存和接口链路不被替换，结束后恢复 Local。
   - 后端服务已在隔离测试环境启动并挂载 /aidp-mgmt 路由；当次 run_id 已生成，执行时记录实际被测 commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
   - users.yaml 中 SU/Admin/DEV/UserA/UserB 等隔离账号可登录并签发 Authorization token；其中 UserA/UserB 为 USER 角色，SU/Admin 为管理角色，DEV 归属指定
@@ -31,7 +33,7 @@ case:
       与 kb_shared 两条权限 fixture，供后续 403 断言使用。
     expected: 全部管理端点对缺失 Authorization 头、非法 token 均返回 401，不进入业务处理，不泄漏 KB/权限数据。
   - order: 2
-    action: 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+    action: 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/files、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
       Authorization 头的请求，断言均返回 401。
     expected: 请求不存在 kds_id 的资源操作返回 404，与 AidpKbNotFoundError 语义一致。
   - order: 3
@@ -72,7 +74,7 @@ case:
     request_expectations:
     - 从 users.yaml/secrets.env 加载 SU/Admin/DEV/UserA/UserB 账号，各自获取 Authorization token；向 aidp_kb_permission_t 插入 kb_private
       与 kb_shared 两条权限 fixture，供后续 403 断言使用。
-    - 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+    - 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/files、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
       Authorization 头的请求，断言均返回 401。
     - 携带非法/过期 Authorization token 请求详情端点与列表端点，断言返回 401，且响应体不包含 KB 列表、权限或详情数据。
     - 用 UserB token 请求 GET /knowledge-bases/{不存在的 kds_id}，断言返回 404。

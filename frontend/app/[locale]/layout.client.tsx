@@ -1,35 +1,52 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { type CSSProperties, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import {
+  useCallback,
+  useRef,
+  useState,
+  useTransition,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Layout, Spin } from "antd";
-import { TopNavbar } from "@/components/navigation/TopNavbar";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
-import { FooterLayout } from "@/components/navigation/FooterLayout";
-import { FOOTER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
+import { SIDER_CONFIG } from "@/const/layoutConstants";
 import { AuthDialogs } from "@/components/auth/AuthDialogs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
 import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
+import { RouteTransitionContent } from "@/components/navigation/RouteTransitionContent";
 
-const { Sider, Content, Footer } = Layout;
+const { Sider, Content } = Layout;
 
 export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isNavigating, startNavigation] = useTransition();
+  const [targetPath, setTargetPath] = useState<string | null>(null);
+  const navigate = useCallback(
+    (path: string) => {
+      if (contentRef.current) contentRef.current.scrollTop = 0;
+      setTargetPath(path);
+      startNavigation(() => router.push(path));
+    },
+    [router]
+  );
   const { isAuthorized } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const sidebarWidth = sidebarPinned ? 240 : SIDER_CONFIG.WIDTH;
 
   const effectivePath = getEffectiveRoutePath(pathname);
-  const isNewChatPage = effectivePath?.startsWith("/newchat") ?? false;
   const isHomePage = effectivePath === "/";
   const isOAuthCompletePage = effectivePath === "/oauth/complete";
   const isSharePage = effectivePath.startsWith("/share/");
-  const isAgentConfigPage =
-    effectivePath === "/agents" || effectivePath.startsWith("/agents/");
-
-  const footerReservedHeight = parseInt(FOOTER_CONFIG.RESERVED_HEIGHT);
 
   const layoutStyle: CSSProperties = {
     height: "100vh",
@@ -48,19 +65,10 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     top: 0,
     bottom: 0,
     left: 0,
-    width: SIDER_CONFIG.WIDTH,
+    width: sidebarWidth,
     backgroundColor: "#f0f0f0",
-    overflow: "hidden",
+    overflow: "visible",
     zIndex: 30,
-  };
-
-  const footerStyle: CSSProperties = {
-    textAlign: "center",
-    height: footerReservedHeight,
-    lineHeight: footerReservedHeight,
-    padding: 0,
-    flexShrink: 0,
-    backgroundColor: "#fff",
   };
 
   const contentStyle: CSSProperties = {
@@ -96,37 +104,41 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
       <Sider
         style={siderStyle}
-        width={SIDER_CONFIG.WIDTH}
+        width={sidebarWidth}
         collapsedWidth={SIDER_CONFIG.WIDTH}
         trigger={null}
-        className="!bg-[#f0f0f0] border-r border-[#c9c9c9]"
+        className="!bg-[#f0f0f0]"
       >
-        <SideNavigation />
+        <SideNavigation
+          onPinnedChange={setSidebarPinned}
+          onNavigate={navigate}
+          isNavigating={isNavigating}
+        />
       </Sider>
 
       <Layout
+        className="transition-[margin-left] duration-[180ms] motion-reduce:transition-none"
         style={{
           minHeight: "100vh",
-          marginLeft: `${SIDER_CONFIG.WIDTH}px`,
+          marginLeft: `${sidebarWidth}px`,
         }}
       >
-        {!isAgentConfigPage && !isNewChatPage && <TopNavbar />}
-
-        <Content style={contentStyle}>
-          {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
-            children
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <Spin />
-            </div>
-          )}
+        <Content ref={contentRef} style={contentStyle}>
+          <RouteTransitionContent
+            pendingPath={isNavigating ? targetPath : null}
+          >
+            {isHomePage ||
+            isOAuthCompletePage ||
+            isSharePage ||
+            isAuthorized ? (
+              children
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <Spin />
+              </div>
+            )}
+          </RouteTransitionContent>
         </Content>
-
-        {!isAgentConfigPage && !isNewChatPage && (
-          <Footer style={footerStyle}>
-            <FooterLayout />
-          </Footer>
-        )}
       </Layout>
 
       {!isSpeedMode && <AuthDialogs />}

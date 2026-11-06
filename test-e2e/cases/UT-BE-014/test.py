@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-014")
 def test_repository_transition_enforces_owner_and_reviewer_roles() -> None:
-    from consts.exceptions import UnauthorizedError
-    from services.agent_repository_service import _validate_repository_status_transition
+    from contracts.errors.exceptions import UnauthorizedError
+    from management.services.repository.agent.listing import _validate_repository_status_transition
 
     record = {"publisher_tenant_id": "t1", "publisher_user_id": "dev-1"}
     result = _validate_repository_status_transition(
@@ -35,25 +36,3 @@ def test_repository_transition_enforces_owner_and_reviewer_roles() -> None:
             user_role="SU", current_status="not_shared", new_status="approved",
             record=record, user_id="su", tenant_id="root",
         )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

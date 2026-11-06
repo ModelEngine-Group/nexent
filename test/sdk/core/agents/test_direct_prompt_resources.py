@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for split Agent policies and direct SDK resource loading."""
 
 import hashlib
@@ -11,8 +13,8 @@ import yaml
 ROOT = Path(__file__).parents[4]
 PROMPTS = ROOT / "sdk/nexent/core/prompts"
 POLICY_HASHES = {
-    "zh/agent/human_interaction.yaml": "31bb381d4603d6d0ae5ab4492dc3d6d980d4ad9a3b64de84685b479927d71b2d",
-    "en/agent/human_interaction.yaml": "af8fe686dd7e1549a1ba24c563800076bf291a38c36c653d9a8f86e6a5a50f79",
+    "zh/agent/human_interaction.yaml": "057d4a6a3402000f193cfa6051d3e6e4d8e0437ea6c0d0f7fd63b46b410c164a",
+    "en/agent/human_interaction.yaml": "37b61ad58222b39fa2e07d14dcab2d731384ea27c1deca2bc1711476c5158ffc",
     "en/agent/context_summary.yaml": "dd689841e3e4f03809ea6d198121688dbbb8531234fc90e2dc0107ae0939543b",
     "en/agent/answer_verifier.yaml": "0232a3c067ebff27194ea6d9abe9f4bfb2005aea678e18281a91742077d0ac15",
 }
@@ -209,7 +211,7 @@ def test_ut_sdk_fps_012_tool_policy_registry_is_active_not_a_prompt_alias():
     assert set(result.tools) == {"visible"}
     assert set(result.execution_tools) == {"visible", "hidden"}
     assert result.audit["policy_version"] == "p1"
-    assert "prompt_registry" in (ROOT / "backend/agents/create_agent_info.py").read_text(encoding="utf-8")
+    assert "prompt_registry" in (ROOT / "backend/management/services/agent/preparation/compiler.py").read_text(encoding="utf-8")
     assert "prompt_registry" in (ROOT / "sdk/nexent/core/agents/nexent_agent.py").read_text(encoding="utf-8")
 
 

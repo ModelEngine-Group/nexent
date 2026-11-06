@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: AIDP-RET-PROTOCOL-D2-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: AIDP-RET-PROTOCOL-D2-001
+acceptance_bindings:
+  AC-01: [test_wire_channels_and_sources, test_wire_retry_errors_and_no_invalid_http]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained consumer protocol proof. The pytest provider fixture owns an
+  ephemeral loopback HTTP server and its thread, and shuts down, closes and joins
+  them in finally. Tools use fixture credentials and knowledge-base identifiers;
+  no shared Agent, deployed provider, account or persistent business asset is needed.

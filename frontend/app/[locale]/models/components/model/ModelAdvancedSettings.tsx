@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { t as translate } from "i18next";
 
 import { Fragment, useEffect } from "react";
 
@@ -767,8 +771,8 @@ const renderBoolField = (
     />
     {value === undefined || value === null ? (
       <span className="text-xs text-gray-400">
-        <Tooltip title="默认开启（跟随模型默认）。切换开关以显式启用或禁用。">
-          <span>默认</span>
+        <Tooltip title={translate("ui.localization.inheritEnabledHelp")}>
+          <span>{translate("ui.localization.default")}</span>
         </Tooltip>
       </span>
     ) : null}

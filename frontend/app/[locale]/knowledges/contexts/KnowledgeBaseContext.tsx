@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -244,6 +246,36 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   // knowledge base page against the knowledge base's own model record.
   const hasKnowledgeBaseModelMismatch = useCallback(() => false, []);
 
+  const dataMateEndpoint = appConfig?.datamateUrl ?? null;
+  const readCatalogPage = useCallback(
+    async (
+      skipHealthCheck: boolean,
+      includeDataMateSync: boolean,
+      query: KnowledgeBaseListQuery
+    ) => {
+      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+        skipHealthCheck,
+        includeDataMateSync,
+        null,
+        dataMateEndpoint,
+        query,
+        { strict: true }
+      );
+      if (!includeDataMateSync || !dataMateEndpoint) return result;
+      // Sync may append all external records; read the canonical page afterwards.
+      const page = await knowledgeBaseService.getKnowledgeBasesInfo(
+        true,
+        false,
+        null,
+        dataMateEndpoint,
+        query,
+        { strict: true }
+      );
+      return { ...page, dataMateSyncError: result.dataMateSyncError };
+    },
+    [dataMateEndpoint]
+  );
+
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
   const fetchKnowledgeBases = useCallback(
     async (
@@ -266,14 +298,12 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         localStorage.removeItem("preloaded_kb_data");
         localStorage.removeItem("kb_cache");
 
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+        const result = await readCatalogPage(
           skipHealthCheck,
           includeDataMateSync,
-          null,
-          appConfig?.datamateUrl ?? null,
           {
             ...queryRef.current,
-            offset: 0,
+            offset: queryRef.current.offset ?? 0,
             limit:
               query?.limit ??
               queryRef.current.limit ??
@@ -330,7 +360,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         }
       }
     },
-    [appConfig?.datamateUrl, t]
+    [readCatalogPage, t]
   );
 
   const loadMoreKnowledgeBases = useCallback(async () => {
@@ -338,17 +368,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     const requestId = listRequestIdRef.current;
     setIsLoadingMore(true);
     try {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        true,
-        false,
-        null,
-        appConfig?.datamateUrl ?? null,
-        {
-          ...queryRef.current,
-          offset: listPagination.nextOffset ?? state.knowledgeBases.length,
-          limit: KNOWLEDGE_BASE_PAGE_SIZE,
-        }
-      );
+      const result = await readCatalogPage(true, false, {
+        ...queryRef.current,
+        offset: listPagination.nextOffset ?? state.knowledgeBases.length,
+        limit: KNOWLEDGE_BASE_PAGE_SIZE,
+      });
       if (requestId !== listRequestIdRef.current) return;
       const merged = [...state.knowledgeBases, ...result.knowledgeBases].filter(
         (kb, index, items) =>
@@ -371,7 +395,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       setIsLoadingMore(false);
     }
   }, [
-    appConfig?.datamateUrl,
+    readCatalogPage,
     isLoadingMore,
     listPagination.hasMore,
     listPagination.nextOffset,
@@ -510,17 +534,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-          false,
-          true,
-          null,
-          appConfig?.datamateUrl ?? null,
-          {
-            ...queryRef.current,
-            offset: 0,
-            limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
-          }
-        );
+        const result = await readCatalogPage(false, true, {
+          ...queryRef.current,
+          offset: queryRef.current.offset ?? 0,
+          limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+        });
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
@@ -570,23 +588,17 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         });
       }
     },
-    [state.activeKnowledgeBase]
+    [state.activeKnowledgeBase, readCatalogPage]
   );
 
   // Add a function to refresh the knowledge base data with DataMate sync and create records
   const refreshKnowledgeBaseDataWithDataMate = useCallback(async () => {
     try {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        false,
-        true,
-        null,
-        appConfig?.datamateUrl ?? null,
-        {
-          ...queryRef.current,
-          offset: 0,
-          limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
-        }
-      );
+      const result = await readCatalogPage(false, true, {
+        ...queryRef.current,
+        offset: queryRef.current.offset ?? 0,
+        limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+      });
 
       dispatch({
         type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
@@ -642,7 +654,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         payload: "Failed to refresh knowledge base data with DataMate",
       });
     }
-  }, [state.activeKnowledgeBase]);
+  }, [state.activeKnowledgeBase, readCatalogPage]);
 
   // Initial data loading - with optimized dependencies
   useEffect(() => {

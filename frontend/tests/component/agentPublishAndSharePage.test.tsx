@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,6 +13,16 @@ import { publishVersion } from "@/services/agentVersionService";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({}),
+  // Routed pages reach these through the shared shell / publish flow.
+  usePathname: () => "/zh/agents",
+  useRouter: () => ({
+    push: () => undefined,
+    replace: () => undefined,
+    prefetch: () => undefined,
+    back: () => undefined,
+    forward: () => undefined,
+    refresh: () => undefined,
+  }),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

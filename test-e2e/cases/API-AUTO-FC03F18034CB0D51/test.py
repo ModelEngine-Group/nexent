@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from apps import vectordatabase_app as vdb_app
+from management.api.knowledge_base import vectordatabase as vdb_app
 
 
 class _FakeDeletionService:
@@ -59,11 +59,11 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     monkeypatch.setattr(vdb_app, 'get_current_user_id', lambda authorization: ('user-1', 'tenant-1'))
     monkeypatch.setattr(vdb_app, 'require_knowledge_base_edit_permission', lambda index_name, user_id, tenant_id: None)
     monkeypatch.setattr(
-        'services.tag_management_service.TagManagementService.cleanup_document_assignments',
+        'management.services.tag.library.TagManagementService.cleanup_document_assignments',
         lambda *args, **kwargs: None,
     )
     # Isolate the audit trail at its actual lookup site (vectordatabase_app
-    # imports record_security_event from services.audit_service) so the
+    # imports record_security_event from management.services.monitor.audit) so the
     # direct-call test never touches a real audit sink, and so the security
     # events themselves stay observable.
     audit = MagicMock()
@@ -168,7 +168,7 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert audit.call_count == 0
 
     monkeypatch.setattr(vdb_app, 'require_knowledge_base_edit_permission', lambda index_name, user_id, tenant_id: None)
-    monkeypatch.setattr('database.knowledge_file_lifecycle_db.get_file_record', lambda **kwargs: {'file_id': 'f1'})
+    monkeypatch.setattr('management.db.knowledge_base.file_lifecycle.get_file_record', lambda **kwargs: {'file_id': 'f1'})
     with pytest.raises(HTTPException) as exc_info:
         await run(
             result={'status': 'success', 'message': 'Documents deleted successfully'},

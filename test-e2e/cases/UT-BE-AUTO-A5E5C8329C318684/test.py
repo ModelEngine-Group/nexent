@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''BE-UT F-131 thread_lifecycle_service lane policies and cross-lane isolation.
 
 Case UT-BE-AUTO-A5E5C8329C318684 (D1).
@@ -9,23 +10,14 @@ import time
 
 import pytest
 
-from consts.const import (
-    NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE,
-    NORTHBOUND_CONTROL_THREAD_MAX_WORKERS,
-    NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS,
-    RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
-    RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE,
-    RUNTIME_AGENT_THREAD_MAX_WORKERS,
-    RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
-    RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
-)
+from contracts.constants.environment import NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE, NORTHBOUND_CONTROL_THREAD_MAX_WORKERS, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS, RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS, RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
     ManagerState,
     ThreadManager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     config_thread_manager,
     mcp_thread_manager,
     northbound_thread_manager,

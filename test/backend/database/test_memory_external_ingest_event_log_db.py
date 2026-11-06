@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.memory_external_ingest_event_log_db``."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.memory.external_ingest_event_log``."""
 
 from unittest.mock import MagicMock
 
@@ -30,11 +32,7 @@ class MemoryExternalIngestEventLog:
 
 install_database_stubs("MemoryExternalIngestEventLog", MemoryExternalIngestEventLog)
 
-from backend.database.memory_external_ingest_event_log_db import (
-    get_event_log_by_idempotency,
-    insert_event_log,
-    list_event_logs,
-)
+from management.db.memory.external_ingest_event_log import get_event_log_by_idempotency, insert_event_log, list_event_logs
 
 
 @pytest.fixture
@@ -53,7 +51,7 @@ def test_insert_event_log_success(monkeypatch, mock_session_ctx):
         obj.log_id = 100
 
     session.refresh.side_effect = fake_refresh
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     result = insert_event_log({"provider": "mem0", "tenant_id": "t1"})
     assert result == 100
@@ -64,7 +62,7 @@ def test_insert_event_log_success(monkeypatch, mock_session_ctx):
 def test_insert_event_log_failure(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.add.side_effect = Exception("db error")
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     assert insert_event_log({"provider": "x"}) is None
     session.rollback.assert_called_once()
@@ -84,7 +82,7 @@ def test_get_event_log_by_idempotency_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = row
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     result = get_event_log_by_idempotency("nexent:t1:a1:u1:c1:memory_stored:e1")
     assert result is not None
@@ -99,7 +97,7 @@ def test_get_event_log_by_idempotency_not_found(monkeypatch, mock_session_ctx):
     mock_filter.first.return_value = None
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     assert get_event_log_by_idempotency("nonexistent") is None
 
@@ -122,7 +120,7 @@ def test_list_event_logs_with_filters(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = rows
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     result = list_event_logs("t1", user_id="u1", agent_id="a1", limit=10)
     assert len(result) == 1
@@ -141,7 +139,7 @@ def test_list_event_logs_default_limit(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = []
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_external_ingest_event_log_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.external_ingest_event_log.get_db_session", lambda: ctx)
 
     result = list_event_logs("t1")
     assert result == []

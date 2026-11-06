@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.utils.evaluation_set_excel_utils``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.services.evaluation.spreadsheet``.
 
 Tests cover Excel template generation and case parsing for both .xlsx
 and .xls (legacy ``xlrd`` path) formats, including bilingual header
@@ -41,7 +42,7 @@ def _ensure_real_openpyxl_loaded_for_module_imports():
     sys.modules.pop("openpyxl.styles", None)
     importlib.import_module("openpyxl")
     importlib.import_module("openpyxl.styles")
-    parser = sys.modules.get("backend.utils.evaluation_set_excel_utils")
+    parser = sys.modules.get("management.services.evaluation.spreadsheet")
     if parser is not None:
         importlib.reload(parser)
     yield
@@ -126,9 +127,9 @@ try:
 except Exception:
     pass
 
-_existing_module = sys.modules.get("backend.utils.evaluation_set_excel_utils")
+_existing_module = sys.modules.get("management.services.evaluation.spreadsheet")
 if _existing_module is None:
-    _module = _importlib.import_module("backend.utils.evaluation_set_excel_utils")
+    _module = _importlib.import_module("management.services.evaluation.spreadsheet")
 elif getattr(_existing_module, "xlrd", None) is not _xlrd_stub:
     _module = _importlib.reload(_existing_module)
 else:

@@ -6,7 +6,7 @@ case:
   feature_id: V5-PW-AGENT-02
   business_rule_ids:
   - V5-PW-AGENT-02-RULE-01
-  title: 三Tab：Basic(知识库+开场白)→Advanced(协作Agent版本选择+护栏)→Debug
+  title: 连续卡片：知识库+开场白→协作Agent版本选择+护栏→Debug
   type: E2E
   priority: P1
   status: active
@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: config/models.yaml；assets/knowledge/*
   steps:
   - order: 1
-    action: 打开 /agents，选择主 Agent，Config 面板默认【Basic】Tab。
+    action: 打开 /agents，使用目标卡片更多操作菜单中的配置入口，进入主 Agent 编辑器。
     expected: Basic 的知识库与开场白、Advanced 的协作 Agent 与护栏 autosave 持久化。
   - order: 2
     action: Basic 展开「知识库」，选择测试 KB。
@@ -32,7 +32,7 @@ case:
 
       候选项展示自定义版本名 daily-baseline。'
   - order: 4
-    action: 切【Advanced】Tab，展开「协作 Agent」。
+    action: 展开资源管理中的协作智能体管理卡片。
     expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
 
       候选项展示自定义版本名 daily-baseline。'
@@ -47,7 +47,7 @@ case:
 
       候选项展示自定义版本名 daily-baseline。'
   - order: 7
-    action: 切回【Basic】再切回【Advanced】，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
+    action: 在知识库、开场白、协作智能体及高级设置分区之间往返，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
     expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
 
       候选项展示自定义版本名 daily-baseline。'
@@ -81,13 +81,13 @@ case:
     legacy_row: 19
   actor: Nexent browser user
   journey:
-  - 打开 /agents，选择主 Agent，Config 面板默认【Basic】Tab。
+  - 打开 /agents，使用目标卡片更多操作菜单中的配置入口，进入主 Agent 编辑器。
   - Basic 展开「知识库」，选择测试 KB。
   - Basic 展开「开场白」，配置 greeting 与 example questions。
-  - 切【Advanced】Tab，展开「协作 Agent」。
+  - 展开资源管理中的协作智能体管理卡片。
   - 点击「选择 Agent」打开 CollaborativeAgentSelectorModal，切 Internal 标签选择内部协作 Agent 并确认；断言列表展示 V{version_no} 版本号。
   - Advanced 展开「安全护栏」，配置一个稳定可验证的简单规则(若启用)。
-  - 切回【Basic】再切回【Advanced】，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
+  - 在知识库、开场白、协作智能体及高级设置分区之间往返，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
   - 点击底部【Debug】按钮，等待 save 完成后调试面板打开。
   - 在 Debug 发送需要 KB+协作的固定问题，等待完成。
   - '检查用户可见协作/知识状态，刷新确认 Basic/Advanced 配置持续。

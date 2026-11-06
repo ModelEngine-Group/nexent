@@ -1,0 +1,28 @@
+schema_version: '1.0'
+case_id: AUTO-RUN-D5-001
+implementations:
+- framework: pytest
+  file: test_transactions.py
+  selector: test_
+timeout_seconds: 120
+acceptance_bindings:
+  AC-01:
+  - test_message_and_run_reference_rollback_together
+  - test_duplicate_creation_is_idempotent_and_rejects_conflicting_prompt
+  AC-02:
+  - test_duplicate_creation_is_idempotent_and_rejects_conflicting_prompt
+  - test_cancel_races_message_binding_without_orphan_or_late_completion
+  - test_cancel_and_projection_commit_keep_links_and_terminal_status
+  - test_binding_rejects_foreign_and_deleted_records
+  AC-03:
+  - test_cancel_advances_once_and_preserves_manual_and_paused_schedule
+  - test_finalization_rolls_back_run_and_task_together
+  - test_concurrent_terminal_winners_advance_one_occurrence
+  - test_stale_claim_does_not_create_another_run
+  - test_history_uses_actual_time_and_deterministic_ties
+  - test_terminal_result_preserves_paused_or_reclaimed_task
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

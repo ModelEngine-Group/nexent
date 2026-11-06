@@ -1,13 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useRouter } from "next/navigation";
-import { App, Button, Col, Dropdown, Flex, Row } from "antd";
+import { useParams, useRouter } from "next/navigation";
+import { App, Button, Col, Flex, Row } from "antd";
 import {
   BlocksIcon,
-  ChevronRight,
-  MoreHorizontal,
+  ExternalLink,
   Plug,
   RefreshCw,
   Wrench,
@@ -27,10 +28,10 @@ import ToolManagement from "./capability/ToolManagement";
 import SkillBuildModal from "../../components/capability/SkillBuildModal";
 import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
-import { AddToolDrawer } from "@/components/resource-picker/AddToolDrawer";
-import LabelManagementModal from "./capability/tool/LabelManagementModal";
-import { AddSkillDrawer } from "@/components/resource-picker/AddSkillDrawer";
-import SkillTagManagementModal from "./capability/skill/SkillTagManagementModal";
+import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
+import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
+
+const EMPTY_SELECTED_SKILLS: import("@/types/agentConfig").Skill[] = [];
 
 export function AgentToolCapability({
   highFidelity = false,
@@ -38,14 +39,14 @@ export function AgentToolCapability({
 }: ResourceSectionProps = {}) {
   const { t } = useTranslation("common");
   const router = useRouter();
+  const { locale } = useParams<{ locale: string }>();
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
-  const [labelModalOpen, setLabelModalOpen] = useState(false);
-  const { invalidate, availableTools } = useToolList();
+  const { invalidate } = useToolList();
 
   const prepareAgentForMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
@@ -97,42 +98,14 @@ export function AgentToolCapability({
       <Button
         type="link"
         disabled={isReadOnly}
-        onClick={() => router.push("/mcp-space")}
+        onClick={() => router.push(`/${locale}/mcp-space`)}
         className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newTool")}
-          <ChevronRight size={14} />
+          <ExternalLink size={14} />
         </span>
       </Button>
-      <Dropdown
-        menu={{
-          items: [
-            {
-              key: "refresh",
-              label: t("toolManagement.refresh.button.refresh"),
-              disabled: isRefreshing,
-            },
-            {
-              key: "mcp",
-              label: t("toolManagement.mcp.button"),
-              disabled: isReadOnly,
-            },
-          ],
-          onClick: ({ key }) => {
-            if (key === "refresh") void handleRefreshTools();
-            if (key === "mcp") setIsMcpModalOpen(true);
-          },
-        }}
-      >
-        <Button
-          type="text"
-          size="small"
-          icon={<MoreHorizontal size={16} />}
-          aria-label={t("agentConfig.layout.moreActions")}
-          className="!size-6 !p-0 !text-[#191919]"
-        />
-      </Dropdown>
     </div>
   );
   const resourceContent = (
@@ -212,16 +185,10 @@ export function AgentToolCapability({
         onBeforeMcpDelete={prepareAgentForMcpDeletion}
         onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
-      <AddToolDrawer
+      <ToolDrawer
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
-        onOpenManageLabels={() => setLabelModalOpen(true)}
         currentAgentId={currentAgentId ?? undefined}
-      />
-      <LabelManagementModal
-        open={labelModalOpen}
-        onClose={() => setLabelModalOpen(false)}
-        availableTools={availableTools}
       />
     </>
   );
@@ -237,8 +204,10 @@ export function AgentSkillCapability({
   const isReadOnly = useAgentReadOnly();
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
+  const selectedAgentSkills =
+    useAgentStore((state) => state.editedAgent?.skills) ??
+    EMPTY_SELECTED_SKILLS;
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
-  const [tagModalOpen, setTagModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
@@ -296,18 +265,9 @@ export function AgentSkillCapability({
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newSkill")}
-          <ChevronRight size={14} />
+          <ExternalLink size={14} />
         </span>
       </Button>
-      <Button
-        type="text"
-        size="small"
-        icon={<RefreshCw size={14} />}
-        onClick={handleRefreshSkills}
-        loading={isRefreshingSkill}
-        aria-label={t("skillManagement.refresh.button")}
-        className="!size-6 !p-0 !text-[#191919]"
-      />
     </div>
   );
   const addSkillEntry = (
@@ -403,18 +363,17 @@ export function AgentSkillCapability({
           />
         </>
       )}
-      <AddSkillDrawer
+      <SkillDrawer
+        key={currentAgentId ?? "new"}
         open={isSkillSelectOpen}
+        selectedSkills={selectedAgentSkills}
+        onConfirm={(skills) => useAgentStore.getState().updateSkills(skills)}
         onClose={() => setIsSkillSelectOpen(false)}
-        onOpenManageTags={() => setTagModalOpen(true)}
         onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />
-      <SkillTagManagementModal
-        open={tagModalOpen}
-        onClose={() => setTagModalOpen(false)}
-      />
+
       <SkillBuildModal
         isOpen={isSkillModalOpen}
         onCancel={handleCloseSkillModal}

@@ -1,13 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import List
 
-from consts.const import (
-    DEFAULT_EXPECTED_CHUNK_SIZE,
-    DEFAULT_MAXIMUM_CHUNK_SIZE,
-)
-from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import DASHSCOPE_REALTIME_BASE_URL, ProviderEnum
-from database.model_management_db import get_models_by_tenant_factory_type
+from contracts.constants.constants import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from contracts.model import ModelConnectStatusEnum
+from contracts.model import ModelRequest
+from contracts.constants.constants import DASHSCOPE_REALTIME_BASE_URL
+from contracts.model import ProviderEnum
+from management.db.model.repository import get_models_by_tenant_factory_type
 from management.services.model.names import add_repo_to_name, split_repo_name
 from management.services.model.probe import (
     _infer_model_factory,

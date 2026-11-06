@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-AGENT-DETAIL-20261026
+  change_type: bugfix
+  bug_id: CHAT-AGENT-DETAIL-20261026
+  title: Share Agent-chat history restoration detail reads
+  description: Reuse the authenticated Workbench activation loader for Agent-chat metadata, history, scope, route and resume consumers.
+  observed_behavior: Agent-chat restoration independently requests the same detail from multiple consumers.
+  expected_behavior: One detail GET per saved-history activation/reload, zero for active reselection, fresh on re-entry and explicit refresh.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Workbench coalescing tests do not mount Agent chat; Agent deep-link tests replace the runtime and omit aggregate detail counts.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: [CHAT-ROUTE-D4-001]
+    added: [CHAT-DETAIL-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Agent-chat route, actual runtime/history, local restoration and late resume share one pending and completed detail read per activation.
+    - Re-entry/remount and visibility refresh obtain fresh data; knowledge saves invalidate cached detail.
+    - Shared failures, late responses, identity isolation and unsent IDs preserve existing loader guarantees.
+    - Existing Workbench and streaming-resume semantics remain intact.
+    reason: Frontend-only bug; Python UT is irrelevant. Add Agent page wiring proof and reuse loader/resume/Workbench assertions. D4 adds the actual browser HTTP-count and final restoration boundary.
+    test_selectors:
+    - frontend/tests/workbench/AgentChatDetailRequests.test.tsx
+    - frontend/tests/workbench/ConversationDetails.test.ts
+    - frontend/tests/workbench/WorkbenchDetailRequests.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/component/agentChatPageDeepLink.test.tsx
+  notes: SPEC ../nexent-doc/docs/Developing/chat-agent-history-detail/design.md; preserve unrelated working-tree changes and existing formal Cases.

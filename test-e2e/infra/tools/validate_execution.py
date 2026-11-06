@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import yaml
 from jsonschema import Draft202012Validator
 
 from acceptance_integrity import binding_issues, contract_issues
@@ -17,7 +18,7 @@ from test_asset_lib import (
 
 
 FRAMEWORKS = {"pytest", "vitest", "playwright", "custom"}
-EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds", "acceptance_bindings", "profile_selection"}
+EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds", "acceptance_bindings"}
 IMPLEMENTATION_FIELDS = {"framework", "file", "selector", "profiles"}
 # Logical mock-service IDs (legacy schema enum). The suite worker resolves
 # the ext-served subset (knowledge-provider / http-fixture / model-provider)
@@ -43,25 +44,7 @@ def _mock_service_issues(execution_path, raw) -> list[ValidationIssue]:
     return issues
 
 
-def _profile_selection_issues(execution_path, raw) -> list[ValidationIssue]:
-    """Optional machine-config-driven profile selection for multi-profile cases."""
-    key = raw.get("profile_selection")
-    if key is None:
-        return []
-    issues = []
-    if not isinstance(key, str) or not key or not key.replace("-", "").isalnum() or not key[0].isalpha():
-        issues.append(ValidationIssue(execution_path, "profile_selection",
-                                      "profile_selection must be a config key like 'aidp-journey'"))
-        return issues
-    implementations = raw.get("implementations") or []
-    profiles = implementations[0].get("profiles") if implementations and isinstance(implementations[0], dict) else None
-    if not isinstance(profiles, list) or len(profiles) < 2:
-        issues.append(ValidationIssue(execution_path, "profile_selection",
-                                      "profile_selection requires a primary implementation declaring multiple profiles"))
-    return issues
-
-
-def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationIssue], dict]:
+def inspect(root: Path, phase: str = "implementation", *, require_preparation_cases=()) -> tuple[list[ValidationIssue], dict]:
     cases, issues = case_index(discover_documents(root, "cases"))
     entries = {}
     entrypoints: dict[str, str] = {}
@@ -78,7 +61,8 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             record["acceptance"] = case["acceptance"]
         if not execution_path.is_file():
             if phase == "implementation" and case.get("status") == "active" and case.get("automation") == "automated":
-                issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml"))
+                issues.append(ValidationIssue(case_path, case_id, "Active automated case has no execution.yaml",
+                                              "CASE_EXECUTION_MISSING", case_id))
             continue
         raw = __import__("yaml").safe_load(execution_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict) or set(raw) - EXECUTION_FIELDS or raw.get("schema_version") != "1.0":
@@ -87,7 +71,6 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
         if raw.get("case_id") != case_id:
             issues.append(ValidationIssue(execution_path, "case_id", "Execution Case ID differs from its directory"))
         issues.extend(_mock_service_issues(execution_path, raw))
-        issues.extend(_profile_selection_issues(execution_path, raw))
         required_acceptance = phase == "implementation" and case.get("automation") == "automated"
         issues.extend(ValidationIssue(execution_path, "acceptance_bindings", problem)
                       for problem in binding_issues(case, raw.get("acceptance_bindings"), required=required_acceptance))
@@ -96,6 +79,12 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
             issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
+        if (phase == "implementation"
+                and stage != "D1" and case.get("status") == "active"
+                and "preparation" not in raw):
+            issues.append(ValidationIssue(execution_path, "preparation",
+                                          "Active online case requires an explicit preparation declaration",
+                                          "CASE_PREPARATION_MISSING", case_id))
         implementations = raw.get("implementations")
         if not isinstance(implementations, list) or not implementations:
             issues.append(ValidationIssue(execution_path, "implementations", "At least one implementation is required"))
@@ -118,11 +107,13 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Script path escapes its allowed directory"))
                 continue
             if not resolved.is_file():
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Implementation file does not exist"))
+                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Implementation file does not exist",
+                                              "CASE_SCRIPT_MISSING", case_id))
                 continue
             content = resolved.read_text(encoding="utf-8", errors="replace")
             if index == 0 and item["selector"] not in content:
-                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Primary script lacks its selector"))
+                issues.append(ValidationIssue(execution_path, f"implementations/{index}", "Primary script lacks its selector",
+                                              "CASE_SELECTOR_MISSING", case_id))
             relative = resolved.relative_to(root).as_posix()
             if index == 0:
                 previous = entrypoints.setdefault(relative, case_id)
@@ -138,8 +129,6 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 "required_assets": raw.get("required_assets", []),
                 "required_mock_services": raw.get("required_mock_services", []),
             }
-            if "profile_selection" in raw:
-                record["execution"]["profile_selection"] = raw["profile_selection"]
             if "acceptance_bindings" in raw:
                 record["execution"]["acceptance_bindings"] = raw["acceptance_bindings"]
             if isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool) and 1 <= timeout_seconds <= 7200:
@@ -152,6 +141,12 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 else:
                     record["execution"]["preparation"] = raw["preparation"]
     registry = {"schema_version": "1.0", "cases": [entries[key] for key in sorted(entries)]}
+    from deployment_exceptions import CATALOG, catalog
+    try:
+        catalog(root, registry["cases"])
+    except (ValueError, OSError, yaml.YAMLError):
+        issues.append(ValidationIssue(root / CATALOG, "deployment_exceptions",
+                                      "Invalid deployment exception catalog or Case/profile reference"))
     return issues, registry
 
 

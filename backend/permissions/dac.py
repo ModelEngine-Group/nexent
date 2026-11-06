@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Data access control for knowledge base resources.
 
 The DAC is deliberately pure: all database lookups happen in the caller so the
@@ -6,12 +8,7 @@ decision matrix stays easy to unit test.
 
 from typing import List, Optional
 
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
-    PERMISSION_READ,
-)
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
 from permissions.models import Resource, ResourceAccess
 
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, readFileSync } from "node:fs";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -44,16 +46,16 @@ journey("PW-CHAT-02", async (context) => {
     steps: [
       async () => {
         await chat.selectMode("执行");
-        await expect(page.getByPlaceholder("发送消息...")).toBeVisible();
+        await expect(chat.composerInput()).toBeVisible();
         return `opened /newchat with ${agentDisplay} and confirmed Execution mode`;
       },
       async () => {
         const prompt = `必须调用工具 ${toolName}，不要猜测；工具完成后只回复它返回的测试编号。`;
-        await page.getByPlaceholder("发送消息...").fill(prompt);
+        await chat.composerInput().fill(prompt);
         return `entered an explicit ${toolName} request`;
       },
       async () => {
-        const prompt = await page.getByPlaceholder("发送消息...").inputValue();
+        const prompt = await chat.composerText();
         await chat.startMessage(prompt);
         conversationId = chat.currentConversationId();
         return "sent the request and observed the real streaming turn start";
@@ -97,7 +99,7 @@ journey("PW-CHAT-02", async (context) => {
     ],
     assertions: [
       async () => {
-        const composer = page.getByPlaceholder("发送消息...");
+        const composer = chat.composerInput();
         await composer.fill(`COMPOSER-READY-${token}`);
         await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled();
         await composer.fill("");

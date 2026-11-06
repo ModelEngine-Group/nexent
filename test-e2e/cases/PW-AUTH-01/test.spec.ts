@@ -1,7 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
-import { testUser, appPath, runToken } from "../../infra/automation/d4/runner/runtime-config";
+import { testUser, appPath } from "../../infra/automation/d4/runner/runtime-config";
 import { AuthPage } from "../../infra/automation/d4/pages/auth.page";
-import type { BrowserContext } from "playwright/test";
 
 journey("PW-AUTH-01", async ({ page, contract, expect }) => {
   const user = testUser("tenant_a_user");
@@ -32,7 +33,8 @@ journey("PW-AUTH-01", async ({ page, contract, expect }) => {
   await contract.step("STEP-01", async () => {
     await auth.openProtected("/agents");
     await auth.expectLoggedOut();
-    await expect(page.getByText("智能体开发", { exact: true })).toBeHidden();
+    const response = await page.request.get("/api/agent/list");
+    expect([401, 403]).toContain(response.status());
     observed.unauthenticatedProtectedContentHidden = true;
     return "unauthenticated /agents displayed login entry without protected agent content";
   });
@@ -43,7 +45,11 @@ journey("PW-AUTH-01", async ({ page, contract, expect }) => {
   });
   await contract.step("STEP-03", async () => {
     await auth.expectCurrentUser(user);
-    await expect(page.getByText("智能体开发", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录账户" })).toBeHidden();
+    // Authentication must not depend on an optional Workbench feature flag.
+    const response = await page.request.get("/api/agent/list");
+    expect(response.status()).toBe(200);
+    await expect(page.getByRole("navigation").getByRole("button").first()).toBeVisible();
     observed.currentUserVerified = true;
     return `current user ${user.username} and protected navigation are visible`;
   });

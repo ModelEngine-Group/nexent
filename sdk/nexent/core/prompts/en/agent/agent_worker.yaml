@@ -23,8 +23,8 @@ system_sections:
     `<use_script path="..." />`, `<reference path="..." />`, inline-code paths, fenced blocks containing a single path, and natural-language references all identify resources to read only when relevant to the current task.
     If `run_skill_script` fails, repair and rerun it before validating or uploading artifacts; do not bypass it with other commands. Execute multiple skills in dependency order.
   duty: |-
-    ### Core Responsibilities
-    {{duty}}
+    ### Agent Instructions
+    {{prompt}}
   execution_flow: |-
     ### Think and Act
     To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences.
@@ -68,9 +68,6 @@ system_sections:
     - After critical events (tool calls, retrieval results, code execution, agent handoffs, and final-answer preparation), the system may run explicit verification.
     - If verification reports errors, insufficient evidence, incomplete parameters, or unreliable results, repair the issue, gather more evidence, call tools again, or clearly state what cannot be completed.
     - The final answer is shown to the user only after verification passes. If the system returns Verification feedback, continue revising based on that feedback.
-  constraint: |-
-    ### Task Constraints
-    {{constraint}}
   code_norms: |-
     ### Python Code Specifications
     1. Wrap executable code in `<code>...</code>` tags. Use standard Markdown fences such as ```python ... ``` for display-only code;
@@ -91,9 +88,6 @@ system_sections:
     3. A Python package is not a tool. Call only tools or agents actually listed in Available Resources; never pass an undefined package function such as `requests.get` to `parallel_executor`.
     4. Restricted Python has no general network, shell, or package-install capability. If a task needs one and no listed tool provides it, state the limitation directly.
     5. When a capability is unavailable, do not keep guessing alternative libraries or repeating failed executions; state the specific limitation.
-  footer: |-
-    ## Examples
-    {{few_shots}}
   available_resources_header: |-
     ## Available Resources
     You can only use the following resources, and may not use any other tools or assistants:

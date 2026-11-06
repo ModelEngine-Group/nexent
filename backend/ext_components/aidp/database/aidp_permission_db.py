@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CRUD accessors for ``aidp_kb_permission_t``.
 
 Design contract (see aidp-knowledge-permission-implementation-plan-v7.1 §4.4):
@@ -18,8 +20,9 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from database.client import as_dict, get_db_session
-from database.db_models import UserTenant
+from management.utils.orm import as_dict
+from management.db.client import get_db_session
+from management.db.models import UserTenant
 from ext_components.aidp.database.db_models import AidpKbPermission
 
 logger = logging.getLogger("aidp_permission_db")

@@ -1,4 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import i18next from "i18next";
+import {
+  persistModelDrafts,
+  snapshotModelDrafts,
+  acknowledgeModelDrafts,
+} from "@/lib/conversationModelDrafts";
+import type { TurnModelControls } from "@/features/model-controls/turnControls";
+import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 
 import type {
   ChatModelAdapter,
@@ -14,6 +25,8 @@ import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
+import type { SourceAttributes } from "@/types/source";
+import { getSourceAttributes } from "@/lib/source";
 import {
   appendClarificationPart,
   isClarificationFallback,
@@ -27,7 +40,10 @@ import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
-import type { HumanInteractionEvent } from "@/types/clarification";
+import type {
+  ClarificationResponse,
+  HumanInteractionEvent,
+} from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
 
 // Backend SSE chunk format
@@ -127,7 +143,11 @@ export interface Nl2AgentCardAction {
 }
 
 export type Nl2AgentDraftField =
-  "name" | "display_name" | "description" | Nl2aPromptField;
+  | "name"
+  | "display_name"
+  | "description"
+  | "enable_protocol_repair_retry"
+  | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -185,9 +205,7 @@ export interface Nl2aAgentDraftPayload {
   name: string;
   display_name: string;
   description: string;
-  duty_prompt: string;
-  constraint_prompt: string;
-  few_shots_prompt: string | null;
+  prompt: string;
   greeting_message: string;
   example_questions: string[];
 }
@@ -241,11 +259,20 @@ export interface Nl2aInstallableResource {
   default_option_id: string;
 }
 
+export interface Nl2aKnowledgeRecommendation {
+  id: string;
+  binding_value: string;
+  name: string;
+  score: number;
+}
+
 export type Nl2aRecommendedResource =
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "TOOL_CONFIG";
       config: ToolParam[];
     }
@@ -253,16 +280,14 @@ export type Nl2aRecommendedResource =
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "SKILL_CONFIG";
       config: SkillParam[];
     };
 
 export type Nl2aPromptField =
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
-  | "greeting_message"
-  | "example_questions";
+  "prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -278,6 +303,7 @@ export interface Nl2aMessage {
 }
 
 interface NexentRunConfig {
+  modelPreferenceScope?: string;
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
@@ -294,10 +320,12 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
+  getDraftSnapshot?: () => Record<string, unknown>;
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
   persistCreationHistory?: boolean;
+  creationTarget?: import("@/types/conversation").ConversationTarget;
   retry_message_index?: number;
   retry_user_message_id?: number;
   creationWorkbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
@@ -309,6 +337,7 @@ interface NexentRunConfig {
   }) => void | Promise<void>;
   onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
+  turnModelControls?: TurnModelControls;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
@@ -609,6 +638,15 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
   if (!jsonStr) return null;
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (
+      parsed.type === "error" &&
+      parsed.code === "MODEL_SAMPLING_CONFIG_INVALID"
+    ) {
+      parsed.content = i18next.t("workbench.controls.providerRejected", {
+        defaultValue:
+          "The model provider rejected temperature or Top P. Restore defaults or change these settings.",
+      });
+    }
     if (typeof parsed.type === "string") {
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
@@ -813,6 +851,21 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
             typeof resource.is_bound !== "boolean" ||
+            (resource.knowledge_bound_values !== undefined &&
+              (!Array.isArray(resource.knowledge_bound_values) ||
+                resource.knowledge_bound_values.some(
+                  (value) => typeof value !== "string"
+                ))) ||
+            (resource.knowledge_recommendations !== undefined &&
+              (!Array.isArray(resource.knowledge_recommendations) ||
+                resource.knowledge_recommendations.length > 5 ||
+                resource.knowledge_recommendations.some(
+                  (kb) =>
+                    !kb ||
+                    typeof kb.id !== "string" ||
+                    typeof kb.binding_value !== "string" ||
+                    typeof kb.name !== "string"
+                ))) ||
             !Array.isArray(resource.config)
         )
       ) {
@@ -865,9 +918,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       return null;
     }
     const promptFields = new Set<Nl2aPromptField>([
-      "duty_prompt",
-      "constraint_prompt",
-      "few_shots_prompt",
+      "prompt",
       "greeting_message",
       "example_questions",
     ]);
@@ -897,6 +948,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "name",
       "display_name",
       "description",
+      "enable_protocol_repair_retry",
       ...promptFields,
     ]);
     if (
@@ -953,7 +1005,7 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: {
+  item: SourceAttributes & {
     url: string;
     title: string;
     text?: string;
@@ -982,7 +1034,7 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (item.url || item.sourceFile) {
+  if (item.url || item.sourceFile || item.filename || item.title) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -1013,7 +1065,7 @@ function findMostRecentToolCall(
 
 // Global registry for search sources by message ID (used by MarkdownText for [[b1]] rendering)
 // Keyed by messageId (from message.id in the stream), value is SearchSource[]
-export interface SearchSource {
+export interface SearchSource extends SourceAttributes {
   citeIndex: number;
   url: string;
   title: string;
@@ -1369,6 +1421,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    // Freeze the controls before draft creation or other asynchronous work.
+    const creationConfig = custom?.creationWorkbenchConfig
+      ? structuredClone(custom.creationWorkbenchConfig)
+      : undefined;
+    const creatorTurn = custom?.turnModelControls ?? undefined;
+    const preferenceScope = custom?.modelPreferenceScope ?? unstable_threadId;
+    const draftSnapshot = preferenceScope
+      ? snapshotModelDrafts(preferenceScope)
+      : {};
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1469,11 +1530,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: isAgentDebug,
     };
+    const clarificationResponse =
+      lastUserIndex >= 0
+        ? messages[lastUserIndex].metadata?.custom?.clarificationResponse
+        : undefined;
+    if (!isResume && !isNl2Agent && clarificationResponse) {
+      requestBody.clarification_response = clarificationResponse;
+    }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
     if (
-      (!isEphemeralRuntime || custom?.persistCreationHistory) &&
+      (!isEphemeralRuntime || isNl2Agent || isNl2Skill) &&
       hasServerConversationId
     ) {
       requestBody.conversation_id = numericServerThreadId;
@@ -1499,33 +1567,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
-    const reasoningEffort = context.config?.reasoningEffort;
-    const reasoningBudgetTokens = (
-      context.config as { reasoningBudgetTokens?: number } | undefined
-    )?.reasoningBudgetTokens;
-    const reasoningCapability = (
-      context.config as
-        | {
-            reasoningCapability?: {
-              status?: string;
-              controls?: Array<{ type?: string }>;
-              levels?: string[];
-              control?: string;
-            };
-          }
-        | undefined
-    )?.reasoningCapability;
-    const reasoningSupported =
-      reasoningCapability?.status === "supported" &&
-      Boolean(
-        reasoningCapability.controls?.length ||
-        reasoningCapability.levels?.length ||
-        reasoningCapability.control === "toggle"
-      );
-    const hasBudgetSelection =
-      typeof reasoningBudgetTokens === "number" &&
-      Number.isInteger(reasoningBudgetTokens) &&
-      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1535,57 +1576,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      !hasBudgetSelection &&
-      typeof reasoningEffort === "string" &&
-      reasoningEffort &&
-      reasoningEffort !== "auto"
-    ) {
-      requestBody.reasoning_effort = reasoningEffort;
-    }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      hasBudgetSelection &&
-      reasoningBudgetTokens > 0
-    ) {
-      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
-    }
-
-    log.log(
-      "[ChatModelAdapter] Sending agent request through conversation service"
-    );
-    log.log(
-      `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
-    );
-
-    // Workbench v3 owns model selection; legacy composer state is only a projection.
     const workbenchConfig = custom?.workbenchConfig;
-    if (workbenchConfig) {
-      requestBody.model_id = workbenchConfig.model_id ?? undefined;
-      // Workbench generation_config is authoritative for this run. Do not let
-      // the shared selector's ordinary-chat effort/budget override it.
-      delete requestBody.reasoning_effort;
-      delete requestBody.reasoning_budget_tokens;
-    }
-    if (!workbenchConfig && !isEphemeralRuntime) {
-      const modelContext = context.config as
-        { deepThinking?: boolean; reasoningEffort?: string } | undefined;
-      if (modelContext?.deepThinking !== undefined) {
-        requestBody.generation_config = {
-          deep_thinking: modelContext.deepThinking,
-          ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(modelContext.reasoningEffort ?? "")
-            ? { thinking_effort: modelContext.reasoningEffort }
-            : {}),
-        };
+    if (creatorTurn && (isNl2Agent || isNl2Skill))
+      requestBody.model_id = creatorTurn.model_id;
+    if (abortSignal?.aborted) return;
+    if (!isResume && preferenceScope) {
+      if (hasServerConversationId && !isAgentDebug) {
+        await persistModelDrafts(preferenceScope, numericServerThreadId);
+      } else {
+        requestBody.model_parameter_preferences = draftSnapshot;
       }
     }
+    if (abortSignal?.aborted) return;
 
-    let backendConversationId = hasServerConversationId
-      ? numericServerThreadId
+    let backendConversationId = requestBody.conversation_id
+      ? Number(requestBody.conversation_id)
       : null;
     let backendRunId: string | null = null;
     let backendStopPromise: Promise<void> | null = null;
@@ -1646,13 +1651,20 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         {
           ...requestBody,
           query: String(requestBody.query || ""),
+          clarification_response: requestBody.clarification_response as
+            ClarificationResponse | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;
           }>,
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
+          // Older runtimes require agent_id; both fields name the same draft.
           agent_id: requestBody.agent_id as number | undefined,
+          target:
+            isNl2Agent && nl2AgentId != null
+              ? { type: "agent", id: Number(nl2AgentId) }
+              : custom?.creationTarget,
           version_no: custom?.agentVersionNo,
           is_debug: isAgentDebug,
           is_resume: isResume,
@@ -1665,28 +1677,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : isNl2Skill
               ? "nl2skill"
               : undefined,
-          persist_history:
-            isEphemeralRuntime && custom?.persistCreationHistory === true,
+          persist_history: isNl2Agent || isNl2Skill,
           retry_message_index: isEphemeralRuntime
             ? custom?.retry_message_index
             : undefined,
           retry_user_message_id: isEphemeralRuntime
             ? custom?.retry_user_message_id
             : undefined,
-          workbench_config: isEphemeralRuntime
-            ? custom?.creationWorkbenchConfig
+          workbench_config: isEphemeralRuntime ? creationConfig : undefined,
+          draft_snapshot: isNl2Skill
+            ? (custom?.getDraftSnapshot?.() ?? custom?.draftSnapshot)
             : undefined,
-          draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           language: isNl2Skill ? custom?.language : undefined,
-          model_id: isNl2Skill
-            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
-            : (requestBody.model_id as number | undefined),
-          generation_config: requestBody.generation_config as
-            | {
-                deep_thinking: boolean;
-                thinking_effort?: "low" | "medium" | "high";
-              }
-            | undefined,
+          model_id: requestBody.model_id as number | undefined,
+          model_parameter_preferences:
+            requestBody.model_parameter_preferences as
+              Record<string, Record<string, unknown>> | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1696,6 +1702,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
+          if (numericId > 0 && preferenceScope)
+            acknowledgeModelDrafts(preferenceScope, draftSnapshot);
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
             if (userAborted) {
@@ -1703,7 +1711,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               void stopBackendRun(numericId);
             }
           }
-          if (numericId > 0 && onServerConversationId) {
+          if (!userAborted && numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1711,22 +1719,39 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
         },
         (version) => {
-          returnedRuntimeMetadataVersion = version;
+          if (!userAborted) returnedRuntimeMetadataVersion = version;
         },
         (runId) => {
           backendRunId = runId;
-          onRunId?.(runId);
+          if (!userAborted) onRunId?.(runId);
           if (userAborted) {
             void stopBackendRun(runId);
           }
         },
-        (version) => custom?.onWorkbenchConfigVersion?.(version)
+        (version) => {
+          if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        }
       );
+      if (userAborted) {
+        if (!("type" in agentResponse)) await agentResponse.cancel();
+        cleanupAbortHandler();
+        await backendStopPromise;
+        return;
+      }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
     } catch (error: unknown) {
+      if (
+        !userAborted &&
+        error instanceof ApiError &&
+        ["model_not_available", "model_unavailable"].includes(
+          String(error.code)
+        )
+      ) {
+        rejectModelSelection(Number(requestBody.model_id));
+      }
       custom?.onRunRejected?.(error, messages[lastUserIndex]);
       cleanupAbortHandler();
       if (
@@ -2154,6 +2179,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: SearchSource[] = [];
+    const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
@@ -2174,7 +2200,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     const upsertCreatedAgentPart = (completed: boolean) => {
-      if (!isNl2Agent || !custom?.persistCreationHistory) return;
+      if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
       const existing = contentParts.find(
@@ -2216,12 +2242,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       for (const imageUrl of imageUrls) {
         if (!imageUrl) continue;
 
-        const metadata = imageMetadata[searchImagesAccumulator.length];
+        const metadata = imageMetadata.find(
+          (source) =>
+            source.url === imageUrl && !consumedImageMetadata.has(source)
+        );
+        if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
           ...metadata,
           url: imageUrl,
           title: metadata?.title || imageUrl,
           text: metadata?.text,
+          citeIndex: metadata?.citeIndex ?? 0,
+          toolSign: metadata?.toolSign ?? "",
           sourceType: "url",
           isImage: true,
           imageKey:
@@ -2302,6 +2334,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (userAborted || abortSignal.aborted) return;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2473,7 +2506,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
             continue;
@@ -2802,6 +2835,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   });
                 }
                 attachSearchContentToTool(
@@ -2822,6 +2859,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   },
                   chunk.tool_call_id
                 );
@@ -2922,7 +2963,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             }
           } else if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "automation_proposal") {
@@ -3129,6 +3170,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     });
                   }
                   attachSearchContentToTool(
@@ -3149,6 +3194,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     },
                     chunk.tool_call_id
                   );
@@ -3200,13 +3249,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
+      const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
-        const metadata =
-          imageMetadata.find((source) => {
-            if (!source.url) return false;
-            const relativeUrl = source.url.replace(/^\/+/, "");
-            return image.url.endsWith(relativeUrl);
-          }) ?? imageMetadata[index];
+        const metadata = imageMetadata.find((source) => {
+          if (!source.url || matchedImageSources.has(source)) return false;
+          const relativeUrl = source.url.replace(/^\/+/, "");
+          return image.url.endsWith(relativeUrl);
+        });
+        if (metadata) matchedImageSources.add(metadata);
         const imageKey =
           metadata?.imageKey ||
           (metadata?.toolSign && metadata.citeIndex !== undefined
@@ -3274,6 +3324,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             citeIndex: source.citeIndex,
             toolSign: source.toolSign,
             retrievalHighlightTerms: source.retrievalHighlightTerms,
+            searchType: source.searchType,
+            sourceMetadata: source.sourceMetadata,
+            sourceReference: source.sourceReference,
+            publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -3290,6 +3344,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
+          searchType: image.searchType,
+          sourceMetadata: image.sourceMetadata,
+          sourceReference: image.sourceReference,
           messageId,
         });
       }

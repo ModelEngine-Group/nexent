@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the ``agent_evaluation_service`` pure-logic helpers.
 
 Targets
@@ -140,6 +142,7 @@ _MODULE_ROOTS = (
     "management",
     "nexent",
     "openjiuwen",
+    "runtime",
     "services",
     "sqlalchemy",
     "utils",
@@ -231,6 +234,9 @@ def _install_sys_modules_stubs() -> None:
 
     def _mk_mod(name: str, **attrs) -> types.ModuleType:
         m = types.ModuleType(name)
+        if name == "contracts.constants.constants" and name in sys.modules:
+            # Limits and status doubles now share their business module.
+            m.__dict__.update(vars(sys.modules[name]))
         for k, v in attrs.items():
             setattr(m, k, v)
         sys.modules[name] = m
@@ -280,12 +286,12 @@ def _install_sys_modules_stubs() -> None:
         "ErrorCode", (), {"COMMON_VALIDATION_ERROR": "COMMON_VALIDATION_ERROR"}
     )
     _ec_mod = _mk_mod(
-        "consts.error_code",
+        "contracts.errors.codes",
         ErrorCode=_ErrCode,
     )
     _consts_pkg.error_code = _ec_mod
     _el_mod = _mk_mod(
-        "consts.evaluation_limits",
+        "contracts.constants.constants",
         DEFAULT_PASS_THRESHOLD=0.5,
         MAX_CONCURRENT_RUNS=5,
         MAX_EVALUATORS_PER_RUN=5,
@@ -294,7 +300,7 @@ def _install_sys_modules_stubs() -> None:
     )
     _consts_pkg.evaluation_limits = _el_mod
     _es_mod = _mk_mod(
-        "consts.evaluation_status",
+        "contracts.constants.constants",
         EvalCaseStatus=type("ECS", (), {}),
         EvalPassStatus=type("EPS", (), {}),
         EvalRunStatus=type("ERS", (), {}),
@@ -309,18 +315,18 @@ def _install_sys_modules_stubs() -> None:
             self.message = msg
 
     _ex_mod = _mk_mod(
-        "consts.exceptions",
+        "contracts.errors.exceptions",
         AppException=_AppException,
         UnauthorizedError=type("UnauthorizedError", (Exception,), {}),
     )
     _consts_pkg.exceptions = _ex_mod
-    _m_mod = _mk_mod("consts.model", AgentRequest=type("AgentRequest", (), {}))
+    _m_mod = _mk_mod("contracts.agent", AgentRequest=type("AgentRequest", (), {}))
     _consts_pkg.model = _m_mod
 
     # ---- database – every imported name wired as MagicMock -----------------
     _db_pkg = _register_package("database")
     _aedb_mod = _mk_mod(
-        "database.agent_evaluation_db",
+        "management.db.evaluation.runs",
         count_active_runs=MagicMock(),
         count_total_runs=MagicMock(),
         create_agent_evaluation=MagicMock(),
@@ -338,17 +344,17 @@ def _install_sys_modules_stubs() -> None:
     # database/client imports ``as_dict`` in sibling database tests; expose both
     # names so this test's collection-time graph is self-contained as well.
     _dc_mod = _mk_mod(
-        "database.client", get_db_session=MagicMock(), as_dict=MagicMock()
+        "management.db.client", get_db_session=MagicMock(), as_dict=MagicMock()
     )
     _db_pkg.client = _dc_mod
     _dm_mod = _mk_mod(
-        "database.db_models",
+        "management.db.models",
         AgentEvaluation=type("AgentEvaluation", (), {}),
         ModelRecord=type("ModelRecord", (), {}),
     )
     _db_pkg.db_models = _dm_mod
     _esdb_mod = _mk_mod(
-        "database.evaluation_set_db",
+        "management.db.evaluation.sets",
         create_evaluation_set=MagicMock(),
         get_evaluation_set_cases_all=MagicMock(),
         insert_evaluation_set_cases=MagicMock(),
@@ -357,16 +363,16 @@ def _install_sys_modules_stubs() -> None:
     )
     _db_pkg.evaluation_set_db = _esdb_mod
     _evdb_mod = _mk_mod(
-        "database.evaluator_db",
+        "management.db.evaluation.evaluator",
         get_evaluator=MagicMock(),
     )
     _db_pkg.evaluator_db = _evdb_mod
     # The service resolves the deleter's role via user_tenant_db (delete
     # tenant-admin fallback); without this stub the reload pulls the real
-    # module, whose `from database.db_models import TenantGroupInfo` hits the
+    # module, whose `from management.db.models import TenantGroupInfo` hits the
     # two-class db_models stub above and raises ImportError at collection.
     _utdb_mod = _mk_mod(
-        "database.user_tenant_db",
+        "management.db.identity.user_tenant",
         get_user_tenant_by_user_id=MagicMock(
             return_value={"user_role": "USER"}
         ),
@@ -377,13 +383,15 @@ def _install_sys_modules_stubs() -> None:
     _services_pkg = _register_package("services")
     _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
+    # Engine invocation is outside the pure evaluation rules tested here.
+    _mk_mod("runtime.adapters.nexent.runner", agent_run=MagicMock())
     _ess_mod = _mk_mod(
-        "services.evaluation_set_service",
+        "management.services.evaluation.sets",
         resolve_latest_published_version_no=MagicMock(),
     )
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
-        "services.thread_lifecycle_service",
+        "infrastructure.concurrency",
         config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )
@@ -392,7 +400,7 @@ def _install_sys_modules_stubs() -> None:
     _utils_pkg = _register_package("utils")
     _lu_mod = _mk_mod("management.services.model.invocation", call_llm_for_system_prompt=MagicMock())
     _utils_pkg.llm_utils = _lu_mod
-    _ptu_mod = _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
+    _ptu_mod = _mk_mod("management.services.agent.prompt", get_prompt_template=MagicMock())
     _utils_pkg.prompt_template_utils = _ptu_mod
     _tu_mod = _mk_mod("utils.thread_utils", pool=MagicMock())
     _utils_pkg.thread_utils = _tu_mod
@@ -411,7 +419,7 @@ _apply_module_state(_BASE_MODULE_STATE)
 # 4. Fixture – fresh import of the real agent_evaluation_service module
 # ---------------------------------------------------------------------------
 
-SERVICE_PATH = "services.agent_evaluation_service"
+SERVICE_PATH = "management.services.evaluation.runs"
 
 
 @pytest.fixture(scope="module")

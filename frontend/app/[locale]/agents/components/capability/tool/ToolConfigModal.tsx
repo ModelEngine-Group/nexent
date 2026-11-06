@@ -1,18 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { AidpRetrievalParamsForm } from "@/components/tool-config/AidpRetrievalParamsForm";
+import {
+  aidpDefaults,
+  aidpErrors,
+  isAidpTool,
+  mergeAidpConfig,
+  resolveAidpConfig,
+} from "@/lib/aidpRetrievalConfig";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Input,
-  Switch,
-  InputNumber,
-  Tag,
-  Form,
-  Select,
-  Skeleton,
-  App,
-} from "antd";
+import { Input, InputNumber, Tag, Form, Select, Skeleton, App } from "antd";
 import type { FormInstance } from "antd";
 
 // Delay setFieldValue to the next microtask so the form is guaranteed to be mounted.
@@ -26,13 +27,20 @@ function safeSetFieldValue(form: FormInstance, field: string, value: unknown) {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAgentStore } from "@/stores/agentStore";
 import { CloseOutlined } from "@ant-design/icons";
+import { SlidersHorizontal, Wrench } from "lucide-react";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import {
+  ParamDialog,
+  ParamLabel,
+  ParamSwitch,
+  SectionChevron,
+} from "@/components/resource-picker/ParamDialog";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
-import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import KnowledgeSelectorDrawer from "@/components/tool-config/KnowledgeSelectorDrawer";
 import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
@@ -63,6 +71,7 @@ export interface ToolConfigModalProps {
   isOpen: boolean;
   onCancel: () => void;
   onSave?: (params: ToolParam[]) => void;
+  onSaveTool?: (tool: Tool) => void;
   tool: Tool;
   initialParams: ToolParam[];
   selectedTool?: Tool | null;
@@ -174,9 +183,38 @@ function withExtraToolParams(
   params: ToolParam[],
   toolName?: string
 ): ToolParam[] {
+  const complete = [...params];
+  if (isAidpTool(toolName))
+    for (const [name, value] of Object.entries(aidpDefaults)) {
+      if (!complete.some((p) => p.name === name))
+        complete.push({
+          name,
+          value,
+          required: false,
+          type:
+            typeof value === "boolean" || name === "graph_reranking_enable"
+              ? "boolean"
+              : typeof value === "string"
+                ? "string"
+                : "number",
+        });
+    }
   return withAnalyzeToolModelParam(
-    withRerankParams(params, toolName),
+    withRerankParams(complete, toolName),
     toolName
+  );
+}
+
+/** Adapts ParamSwitch to the value/onChange contract injected by Form.Item. */
+function BooleanSwitchInput({
+  value,
+  onChange,
+}: {
+  value?: boolean;
+  onChange?: (value: boolean) => void;
+}) {
+  return (
+    <ParamSwitch checked={!!value} onChange={(next) => onChange?.(next)} />
   );
 }
 
@@ -184,6 +222,7 @@ export default function ToolConfigModal({
   isOpen,
   onCancel,
   onSave,
+  onSaveTool,
   tool,
   initialParams,
   selectedTool,
@@ -198,8 +237,7 @@ export default function ToolConfigModal({
   const updateTools = useAgentStore((state) => state.updateTools);
   const { message } = App.useApp();
 
-  // Tool test panel visibility state
-  const [testPanelVisible, setTestPanelVisible] = useState(false);
+  const [aidpConfigOpen, setAidpConfigOpen] = useState(false);
 
   // Knowledge base selector state
   const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
@@ -349,6 +387,10 @@ export default function ToolConfigModal({
 
   // Reset testPanelKbIds to [] on modal open (before config KB IDs are loaded).
   // This prevents stale test panel KB when switching between tools with different KBs.
+  useEffect(() => {
+    if (isOpen) setAidpConfigOpen(false);
+  }, [isOpen, tool?.id]);
+
   useEffect(() => {
     const wasClosed = !prevIsOpenRef.current;
     prevIsOpenRef.current = isOpen;
@@ -1426,7 +1468,35 @@ export default function ToolConfigModal({
     }
   }, [formValues]);
 
+  const aidpValues = mergeAidpConfig(
+    Object.fromEntries(currentParams.map((p) => [p.name, p.value]))
+  );
+  const aidpInvalid =
+    isAidpTool(tool?.name) && Object.keys(aidpErrors(aidpValues)).length > 0;
+  const aidpResolvedValues = resolveAidpConfig(aidpValues);
+  const aidpDefaultValues = resolveAidpConfig({});
+  const aidpCustomized = Object.keys(aidpDefaultValues).some(
+    (key) => aidpResolvedValues[key] !== aidpDefaultValues[key]
+  );
+  const toolParamLabel = (name: string) =>
+    isAidpTool(tool?.name) &&
+    ["server_url", "api_key", "tenant_id", "kds_list"].includes(name)
+      ? t(`aidpRetrieval.toolParams.${name}`)
+      : name;
+
+  const applyAidpPatch = (patch: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    const updated = currentParams.map((param, index) => {
+      if (!(param.name in patch)) return param;
+      fields[`param_${index}`] = patch[param.name];
+      return { ...param, value: patch[param.name] };
+    });
+    form.setFieldsValue(fields);
+    setCurrentParams(updated);
+  };
+
   const handleSave = async () => {
+    if (aidpInvalid) return;
     // Mark that user has attempted to submit the form
     setHasSubmitted(true);
 
@@ -1530,13 +1600,18 @@ export default function ToolConfigModal({
       if (onSave) {
         onSave(syncedParams);
       }
+
+      // Call onSaveTool with the full tool (including display_names) when
+      // the parent handles the draft commit itself (localOnly mode).
+      if (onSaveTool) {
+        onSaveTool(updatedTool);
+      }
     } catch {
       // Form validation failed, error will be shown by antd Form
     }
   };
 
   const handleClose = () => {
-    setTestPanelVisible(false);
     // Reset user modification tracking state for datamate URL
     setHasUserModifiedDatamateUrl(false);
     // Reset validation tracking so the next open starts with an enabled save button
@@ -1552,16 +1627,6 @@ export default function ToolConfigModal({
     }
 
     onCancel();
-  };
-
-  // Handle tool testing - toggle test panel
-  const handleTestTool = () => {
-    setTestPanelVisible(!testPanelVisible);
-  };
-
-  // Close test panel
-  const handleCloseTestPanel = () => {
-    setTestPanelVisible(false);
   };
 
   // Open knowledge base selector
@@ -2084,7 +2149,7 @@ export default function ToolConfigModal({
           );
 
         case TOOL_PARAM_TYPES.BOOLEAN:
-          return <Switch />;
+          return <BooleanSwitchInput />;
 
         case TOOL_PARAM_TYPES.STRING:
         case TOOL_PARAM_TYPES.ARRAY:
@@ -2171,86 +2236,82 @@ export default function ToolConfigModal({
 
   return (
     <>
-      <Modal
-        mask={true}
-        title={
-          <div className="flex justify-between items-center w-full pr-8">
-            <span>{`${tool?.name}`}</span>
-            <div className="flex items-center gap-2">
-              <Tag
-                color={
-                  tool?.source === "mcp"
-                    ? "blue"
-                    : tool?.source === "langchain"
-                      ? "orange"
-                      : "green"
-                }
-              >
-                {tool?.source === "mcp"
-                  ? t("toolPool.tag.mcp")
-                  : tool?.source === "langchain"
-                    ? t("toolPool.tag.langchain")
-                    : t("toolPool.tag.local")}
-              </Tag>
-            </div>
-          </div>
-        }
+      <ParamDialog
+        variant="tool"
+        splitLayout
+        description={getLocalizedDescription(
+          tool?.description,
+          tool?.description_zh
+        )}
         open={isOpen}
-        onCancel={onCancel}
-        onOk={handleSave}
-        okText={t("common.button.save")}
-        cancelText={t("common.button.cancel")}
-        width={600}
-        confirmLoading={isLoading}
-        className="tool-config-modal-content"
-        wrapProps={{ style: { pointerEvents: "auto" } }}
-        footer={
-          <div className="flex items-center w-full">
-            <div className="flex-1 flex justify-start">
-              <button
-                onClick={handleTestTool}
-                disabled={!tool}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
-              >
-                {testPanelVisible
-                  ? t("toolConfig.button.closeTest")
-                  : t("toolConfig.button.testTool")}
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleClose}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
-              >
-                {t("common.button.cancel")}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={isLoading || hasFormErrors || hasEmptyRequired}
-                className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
-              >
-                {isLoading
-                  ? t("common.button.saving")
-                  : t("common.button.save")}
-              </button>
-            </div>
-          </div>
+        title={
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <Wrench size={20} className="shrink-0 text-[#2673E5]" />
+            <span className="break-all">{tool?.name}</span>
+            <Tag
+              color={
+                tool?.source === "mcp"
+                  ? "blue"
+                  : tool?.source === "langchain"
+                    ? "orange"
+                    : "green"
+              }
+            >
+              {tool?.source === "mcp"
+                ? t("toolPool.tag.mcp")
+                : tool?.source === "langchain"
+                  ? t("toolPool.tag.langchain")
+                  : t("toolPool.tag.local")}
+            </Tag>
+            {Array.from(new Set(tool?.labels ?? [])).map((label) => (
+              <Tag key={label} className="!m-0 !font-normal">
+                {label}
+              </Tag>
+            ))}
+          </span>
+        }
+        onClose={handleClose}
+        onConfirm={handleSave}
+        confirmText={
+          isLoading
+            ? t("common.button.saving")
+            : t("workbench.controls.saveConfig")
+        }
+        cancelText={t("common.cancel")}
+        destroyOnHidden={isAidpTool(tool?.name)}
+        onReset={
+          isAidpTool(tool?.name)
+            ? () => applyAidpPatch({ ...aidpDefaults })
+            : undefined
+        }
+        resetText={
+          isAidpTool(tool?.name) ? t("aidpRetrieval.reset") : undefined
+        }
+        resetDisabled={isLoading}
+        confirmDisabled={
+          isLoading || hasFormErrors || hasEmptyRequired || aidpInvalid
         }
       >
-        <div className="mb-4">
-          <p className="text-sm text-gray-500 mb-4">
-            {getLocalizedDescription(tool?.description, tool?.description_zh)}
-          </p>
-          <div className="text-sm font-medium mb-2">
-            {t("toolConfig.title.paramConfig")}
+        <div data-config-part="config-column">
+          <div
+            data-config-part="section-heading"
+            className="mb-4 flex items-baseline gap-2"
+          >
+            <span
+              data-config-part="section-title"
+              className="text-[14px] font-bold leading-6 text-[#191919]"
+            >
+              <SlidersHorizontal size={16} className="text-[#666]" />
+              {t("toolConfig.title.paramConfig")}
+            </span>
+            <span className="min-w-0 text-[12px] leading-6 text-[#777]">
+              {t("toolConfig.configHint")}
+            </span>
           </div>
-          <div style={{ maxHeight: "500px", overflow: "auto" }}>
+          <div data-config-part="tool-fields">
             <Form
               form={form}
-              layout="horizontal"
-              labelAlign="left"
-              labelCol={{ span: 6 }}
-              wrapperCol={{ span: 18 }}
+              layout="vertical"
               onValuesChange={(changedValues, allValues) => {
                 // Track if user has modified the datamate server_url field
                 if (
@@ -2275,8 +2336,10 @@ export default function ToolConfigModal({
                 );
               }}
             >
-              <div className="pr-2 mt-3">
+              <div className="w-full">
                 {currentParams.map((param, index) => {
+                  if (isAidpTool(tool?.name) && param.name in aidpDefaults)
+                    return null;
                   if (param.name === "rerank_model_name" && !isRerankEnabled) {
                     return null;
                   }
@@ -2470,14 +2533,30 @@ export default function ToolConfigModal({
                   return (
                     <Form.Item
                       key={param.name}
-                      required={param.required}
+                      required={false}
+                      colon={false}
                       label={
-                        <span
-                          className="inline-block w-full truncate"
-                          title={param.name}
-                        >
-                          {param.name}
-                        </span>
+                        <ParamLabel
+                          label={
+                            (tool.origin_name || tool.name) ===
+                              "deepseek_search" &&
+                            param.name === "only_high_quality"
+                              ? t("toolConfig.deepseek.onlyHighQuality")
+                              : toolParamLabel(param.name)
+                          }
+                          required={param.required}
+                          info={Boolean(
+                            getLocalizedDescription(
+                              param.description,
+                              param.description_zh
+                            )
+                          )}
+                          infoText={getLocalizedDescription(
+                            param.description,
+                            param.description_zh
+                          )}
+                          size="md"
+                        />
                       }
                       name={
                         toolRequiresKbSelection &&
@@ -2488,14 +2567,7 @@ export default function ToolConfigModal({
                           : fieldName
                       }
                       rules={rules}
-                      tooltip={{
-                        title: getLocalizedDescription(
-                          param.description,
-                          param.description_zh
-                        ),
-                        placement: "topLeft",
-                        styles: { root: { maxWidth: 400 } },
-                      }}
+                      style={{ marginBottom: 16 }}
                     >
                       {/* For KB selector, use custom display (Form.Item doesn't control value) */}
                       {toolRequiresKbSelection &&
@@ -2507,93 +2579,127 @@ export default function ToolConfigModal({
                     </Form.Item>
                   );
                 })}
+                {isAidpTool(tool?.name) && (
+                  <div className="mt-2 border-t border-[#EEEEEE] pt-2">
+                    <button
+                      type="button"
+                      aria-expanded={aidpConfigOpen}
+                      onClick={() => setAidpConfigOpen((current) => !current)}
+                      className="flex h-8 w-full items-center gap-1.5 border-0 bg-transparent p-0 text-left"
+                    >
+                      <span className="text-[14px] font-bold leading-[22px] text-[#191919]">
+                        {t("aidpRetrieval.toolSection.title")}
+                      </span>
+                      <SectionChevron expanded={aidpConfigOpen} />
+                      <span
+                        className={`ml-auto text-[12px] leading-[18px] ${
+                          aidpInvalid ? "text-[#C83E3E]" : "text-[#777]"
+                        }`}
+                      >
+                        {aidpInvalid
+                          ? t("aidpRetrieval.invalid")
+                          : aidpCustomized
+                            ? t("aidpRetrieval.toolSection.customized")
+                            : t("aidpRetrieval.toolSection.defaults")}
+                      </span>
+                    </button>
+                    {aidpConfigOpen ? (
+                      <div className="pt-4">
+                        <AidpRetrievalParamsForm
+                          values={aidpValues}
+                          disabled={isLoading}
+                          scope="tool"
+                          onChange={applyAidpPatch}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </Form>
           </div>
-          <div>
-            {testPanelVisible && (
-              <ToolTestPanel
-                visible={testPanelVisible}
-                tool={tool}
-                onClose={handleCloseTestPanel}
-                configParams={currentParams}
-                toolRequiresKbSelection={toolRequiresKbSelection}
-                knowledgeBases={knowledgeBases}
-                kbLoading={kbLoading}
-                selectedKbIds={selectedKbIds}
-                selectedKbDisplayNames={selectedKbDisplayNames}
-                onOpenKbSelector={(paramIndex) => {
-                  // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
-                  if (
-                    toolKbType === "aidp_search" ||
-                    toolKbType === "ind_aidp_search" ||
-                    isKnowledgeBaseSearchTool
-                  ) {
-                    setIsTestPanelKbSelection(true);
-                  }
-                  // paramIndex === -1 means the call originates from the test
-                  // panel's KbSelectorDisplay, which doesn't know which slot in
-                  // currentParams holds the KB parameter. Resolve the real
-                  // index here so the KB selection updates the correct param
-                  // (and only the KB param) instead of overwriting param_0
-                  // (top_k for knowledge_base_search).
-                  const kbParamIndex =
-                    paramIndex === -1
-                      ? currentParams.findIndex(
-                          (p) =>
-                            p.name === "index_names" ||
-                            p.name === "dataset_ids" ||
-                            p.name === "kds_list"
-                        )
-                      : paramIndex;
-                  openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
-                }}
-                onKbSelectionChange={(ids, displayNames) => {
-                  // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+        </div>
+        <div data-config-part="test-column">
+          {isOpen && (
+            <ToolTestPanel
+              visible={isOpen}
+              tool={tool}
+              onClose={handleClose}
+              configParams={currentParams}
+              toolRequiresKbSelection={toolRequiresKbSelection}
+              knowledgeBases={knowledgeBases}
+              kbLoading={kbLoading}
+              selectedKbIds={selectedKbIds}
+              selectedKbDisplayNames={selectedKbDisplayNames}
+              onOpenKbSelector={(paramIndex) => {
+                // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
+                if (
+                  toolKbType === "aidp_search" ||
+                  toolKbType === "ind_aidp_search" ||
+                  isKnowledgeBaseSearchTool
+                ) {
+                  setIsTestPanelKbSelection(true);
+                }
+                // paramIndex === -1 means the call originates from the test
+                // panel's KbSelectorDisplay, which doesn't know which slot in
+                // currentParams holds the KB parameter. Resolve the real
+                // index here so the KB selection updates the correct param
+                // (and only the KB param) instead of overwriting param_0
+                // (top_k for knowledge_base_search).
+                const kbParamIndex =
+                  paramIndex === -1
+                    ? currentParams.findIndex(
+                        (p) =>
+                          p.name === "index_names" ||
+                          p.name === "dataset_ids" ||
+                          p.name === "kds_list"
+                      )
+                    : paramIndex;
+                openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
+              }}
+              onKbSelectionChange={(ids, displayNames) => {
+                // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+                if (
+                  toolKbType !== "aidp_search" &&
+                  toolKbType !== "ind_aidp_search" &&
+                  !isKnowledgeBaseSearchTool
+                ) {
+                  setSelectedKbIds(ids);
+                  setSelectedKbDisplayNames(displayNames);
+                }
+              }}
+              onRemoveKb={(index, paramIndex) => {
+                if (paramIndex === -1) {
+                  // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
                   if (
                     toolKbType !== "aidp_search" &&
                     toolKbType !== "ind_aidp_search" &&
                     !isKnowledgeBaseSearchTool
                   ) {
-                    setSelectedKbIds(ids);
-                    setSelectedKbDisplayNames(displayNames);
+                    const newIds = selectedKbIds.filter((_, i) => i !== index);
+                    const newDisplayNames = selectedKbDisplayNames.filter(
+                      (_, i) => i !== index
+                    );
+                    setSelectedKbIds(newIds);
+                    setSelectedKbDisplayNames(newDisplayNames);
                   }
-                }}
-                onRemoveKb={(index, paramIndex) => {
-                  if (paramIndex === -1) {
-                    // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
-                    if (
-                      toolKbType !== "aidp_search" &&
-                      toolKbType !== "ind_aidp_search" &&
-                      !isKnowledgeBaseSearchTool
-                    ) {
-                      const newIds = selectedKbIds.filter(
-                        (_, i) => i !== index
-                      );
-                      const newDisplayNames = selectedKbDisplayNames.filter(
-                        (_, i) => i !== index
-                      );
-                      setSelectedKbIds(newIds);
-                      setSelectedKbDisplayNames(newDisplayNames);
-                    }
-                  } else {
-                    // Called from config panel
-                    removeKbFromSelection(index, paramIndex);
-                  }
-                }}
-                onTestPanelKbSelect={handleTestPanelKbSelect}
-                onTestPanelKbRemove={handleTestPanelKbRemove}
-                onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
-                testPanelKbIds={testPanelKbIds}
-                testPanelKbDisplayNames={testPanelKbDisplayNames}
-                configInvalid={hasFormErrors || hasEmptyRequired}
-                toolKbType={toolKbType}
-                haotianKnowledgeSets={haotianKnowledgeSets}
-              />
-            )}
-          </div>
+                } else {
+                  // Called from config panel
+                  removeKbFromSelection(index, paramIndex);
+                }
+              }}
+              onTestPanelKbSelect={handleTestPanelKbSelect}
+              onTestPanelKbRemove={handleTestPanelKbRemove}
+              onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+              testPanelKbIds={testPanelKbIds}
+              testPanelKbDisplayNames={testPanelKbDisplayNames}
+              configInvalid={hasFormErrors || hasEmptyRequired || aidpInvalid}
+              toolKbType={toolKbType}
+              haotianKnowledgeSets={haotianKnowledgeSets}
+            />
+          )}
         </div>
-      </Modal>
+      </ParamDialog>
 
       {/* Knowledge Base Selector Modal */}
       {toolKbType === "haotian_search" ? (
@@ -2626,7 +2732,7 @@ export default function ToolConfigModal({
           }
         />
       ) : (
-        <KnowledgeBaseSelectorModal
+        <KnowledgeSelectorDrawer
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleKbConfirm}

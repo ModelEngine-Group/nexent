@@ -10,9 +10,11 @@ required_mock_services:
 - model-provider
 preparation:
   families: []
-  anchors: false
+  anchors: true
   special_assets: false
   d4_groups: []
 acceptance_bindings:
   AC-01:
   - TPC-D4-001
+
+notes: TPC uses a run-owned sequenced provider on the controlled HTTP service and creates its own Skills and published Agents.

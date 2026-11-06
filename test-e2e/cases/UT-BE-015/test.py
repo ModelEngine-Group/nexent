@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-015")
 def test_agent_version_availability_and_rollback_target_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services import agent_version_service as service
+    from management.services.agent import versions as service
 
     # Unit boundary: supply the DB-backed system-Agent classification, not the
     # mutation guard itself, so rollback validation still executes normally.
@@ -35,23 +36,3 @@ def test_agent_version_availability_and_rollback_target_validation(monkeypatch: 
     monkeypatch.setattr(service, "search_version_by_version_no", lambda *args: None)
     with pytest.raises(ValueError, match="not found"):
         service.rollback_version_impl(1, "t1", 99)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

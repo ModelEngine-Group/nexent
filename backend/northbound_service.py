@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Executable Gateway launcher retained for deployment command compatibility."""
+
 import logging
 import logging.config
 import warnings
@@ -7,8 +10,8 @@ import uvicorn
 from dotenv import load_dotenv
 
 
-from apps.northbound_base_app import northbound_app
-from utils.logging_utils import get_uvicorn_logging_config
+from gateway.application import northbound_app
+from infrastructure.logging import get_uvicorn_logging_config
 
 
 warnings.filterwarnings("ignore", category=UserWarning)

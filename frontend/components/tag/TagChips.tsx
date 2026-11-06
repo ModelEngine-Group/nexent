@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Popover, Tag, Tooltip } from "antd";
@@ -15,6 +17,8 @@ interface TagChipsProps {
   max?: number;
   singleLine?: boolean;
   overflowLabel?: ReactNode;
+  className?: string;
+  tagClassName?: string;
 }
 
 /**
@@ -26,6 +30,8 @@ export default function TagChips({
   max = 6,
   singleLine = false,
   overflowLabel,
+  className,
+  tagClassName,
 }: TagChipsProps) {
   const { t } = useTranslation("common");
   const visible = assignments.slice(0, max);
@@ -57,8 +63,11 @@ export default function TagChips({
         key={`${assignment.definition_id}:${assignment.value_id}`}
         title={label}
       >
-        <Tag aria-label={label} className="inline-block max-w-[120px] truncate">
-          {chipText}
+        <Tag
+          aria-label={label}
+          className={`inline-flex max-w-[120px] min-w-0 shrink-0 items-center overflow-hidden ${tagClassName ?? ""}`}
+        >
+          <span className="min-w-0 truncate">{chipText}</span>
         </Tag>
       </Tooltip>
     );
@@ -66,7 +75,7 @@ export default function TagChips({
 
   const overflowChip = (
     <Tag
-      className={overflowLabel === undefined ? undefined : "cursor-pointer"}
+      className={`${overflowLabel === undefined ? "" : "cursor-pointer"} ${tagClassName ?? ""}`}
       role={overflowLabel === undefined ? undefined : "button"}
       tabIndex={overflowLabel === undefined ? undefined : 0}
     >
@@ -78,7 +87,7 @@ export default function TagChips({
     <span
       className={`inline-flex items-center gap-1 ${
         singleLine ? "flex-nowrap" : "flex-wrap"
-      }`}
+      } ${className ?? ""}`}
     >
       {visible.map((assignment) => renderTag(assignment))}
       {overflow > 0 &&

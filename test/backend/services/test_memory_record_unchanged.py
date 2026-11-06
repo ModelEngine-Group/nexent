@@ -1,6 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import MagicMock
 
-from backend.services import memory_record_service
+from management.services.memory import records as memory_record_service
 
 
 def test_create_memory_exact_idempotency_match_is_unchanged(monkeypatch):

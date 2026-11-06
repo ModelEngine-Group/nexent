@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Celery worker entry point for data-processing and forwarding tasks.
 
@@ -24,19 +25,7 @@ from celery.signals import (
     worker_shutting_down,
 )
 
-from consts.const import (
-    CELERY_TASK_TIME_LIMIT,
-    CELERY_WORKER_PREFETCH_MULTIPLIER,
-    DP_PARSE_MAX_PROCESSES,
-    DP_PARSE_MAX_TASKS_PER_CHILD,
-    DP_PARSE_MIN_PROCESSES,
-    DP_PARSE_THREADS_PER_PROCESS,
-    DP_PARSER_WORKER_GENERATION,
-    DP_PRELOAD_MODELS,
-    QUEUES,
-    WORKER_CONCURRENCY,
-    WORKER_NAME,
-)
+from contracts.constants.environment import CELERY_TASK_TIME_LIMIT, CELERY_WORKER_PREFETCH_MULTIPLIER, DP_PARSE_MAX_PROCESSES, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PARSE_MIN_PROCESSES, DP_PARSE_THREADS_PER_PROCESS, DP_PARSER_WORKER_GENERATION, DP_PRELOAD_MODELS, QUEUES, WORKER_CONCURRENCY, WORKER_NAME
 
 from .app import app
 
@@ -102,7 +91,7 @@ def setup_worker_process_resources(**kwargs):
     process_id = os.getpid()
     logger.debug("Initialize worker process pid=%s", process_id)
     try:
-        from utils.monitoring import monitoring_manager
+        from infrastructure.observability.bootstrap import monitoring_manager
 
         logger.info(
             "Knowledge telemetry initialized in worker process: enabled=%s",
@@ -185,7 +174,7 @@ def task_failure_handler(sender=None, task_id=None, exception=None, **kwds):
 def start_worker():
     """Start a Celery worker with queue-specific pool settings."""
     try:
-        from utils.monitoring import monitoring_manager
+        from infrastructure.observability.bootstrap import monitoring_manager
 
         logger.info(
             "Knowledge telemetry initialized before worker start: enabled=%s",

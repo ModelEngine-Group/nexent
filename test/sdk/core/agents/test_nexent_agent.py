@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib
 import json
 import os
@@ -220,7 +222,7 @@ mock_sdk_nexent_core_utils_module.__path__ = [
 mock_sdk_nexent_core_utils_observer_module.__path__ = []
 
 mock_prompt_template_utils_module = types.ModuleType(
-    "nexent.core.utils.prompt_template_utils"
+    "nexent.core.management.services.agent.prompt"
 )
 mock_prompt_template_utils_module.get_prompt_template = MagicMock(
     return_value="")
@@ -261,10 +263,12 @@ mock_nexent_core_utils_module.prompt_template_utils = mock_prompt_template_utils
 mock_nexent_core_utils_module.tools_common_message = mock_tools_common_message_module
 
 mock_nexent_core_models_module = types.ModuleType("nexent.core.models")
+mock_nexent_core_models_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "models")]
 mock_nexent_core_models_module.OpenAILongContextModel = MagicMock()
 mock_nexent_core_models_module.OpenAIVLModel = MagicMock()
 
 mock_nexent_core_module = types.ModuleType("nexent.core")
+mock_nexent_core_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_nexent_core_module.utils = mock_nexent_core_utils_module
 mock_nexent_core_module.models = mock_nexent_core_models_module
 mock_nexent_core_module.MessageObserver = _MockMessageObserver
@@ -331,9 +335,10 @@ module_mocks = {
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
     "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
     "sdk.nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
-    "nexent.core.utils.prompt_template_utils": mock_prompt_template_utils_module,
+    "nexent.core.management.services.agent.prompt": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
+    "sdk.nexent.core.models": mock_nexent_core_models_module,
     "nexent.storage": mock_nexent_storage_module,
     "nexent.multi_modal": mock_nexent_multi_modal_module,
     "nexent.multi_modal.load_save_object": mock_nexent_load_save_module,
@@ -666,11 +671,13 @@ def test_nexent_agent_initialization_invalid_observer():
 # Tests for create_model function
 # ----------------------------------------------------------------------------
 
-def test_create_model_success(nexent_agent_with_models, mock_model_config):
+@pytest.mark.parametrize("diagnostic_enabled", [False, True])
+def test_create_model_success(nexent_agent_with_models, mock_model_config, diagnostic_enabled):
     """Test successful model creation with regular model."""
     # Use the existing mock that was set up at the top of the file
     mock_model_instance = MagicMock()
     mock_openai_model_class.return_value = mock_model_instance
+    mock_model_config.diagnostic_chunks_enabled = diagnostic_enabled
 
     # Call the method under test
     result = nexent_agent_with_models.create_model("test_model")
@@ -696,6 +703,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         timeout_seconds=mock_model_config.timeout_seconds,
         prompt_cache=mock_model_config.prompt_cache,
         reasoning_capability=None,
+        diagnostic_chunks_enabled=diagnostic_enabled,
     )
 
     # Verify stop_event was set
@@ -731,6 +739,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
         prompt_cache=mock_deep_thinking_model_config.prompt_cache,
         reasoning_capability=None,
+        diagnostic_chunks_enabled=False,
     )
 
     # Verify stop_event was set
@@ -1507,7 +1516,7 @@ def test_create_tool_invalid_config_type(nexent_agent_instance):
 
 
 def test_create_tool_exception_handling(nexent_agent_instance):
-    """create_tool should handle exceptions and raise ValueError with error message."""
+    """create_tool should propagate the original tool creation exception."""
     tool_config = ToolConfig(
         class_name="DummyTool",
         name="dummy",
@@ -1524,7 +1533,7 @@ def test_create_tool_exception_handling(nexent_agent_instance):
             "create_local_tool",
             side_effect=Exception("Tool creation failed"),
     ):
-        with pytest.raises(ValueError, match="Error in creating tool: Tool creation failed"):
+        with pytest.raises(Exception, match="Tool creation failed"):
             nexent_agent_instance.create_tool(tool_config)
 
 
@@ -2115,6 +2124,26 @@ def test_agent_run_with_observer_rethrows_mcp_timeout(nexent_agent_instance, moc
 
     assert exc_info.value is timeout_error
     mock_core_agent.observer.add_message.assert_not_called()
+
+
+def test_agent_run_with_observer_step_mcp_failure_emits_friendly_error(
+    nexent_agent_instance, mock_core_agent
+):
+    """Classified MCP failures surface a friendly, retryable step error with a code."""
+    nexent_agent_instance.agent = mock_core_agent
+    grouped = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    mock_core_agent.run.side_effect = grouped
+
+    with pytest.raises(ValueError, match="Error in interaction"):
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    kwargs = mock_core_agent.observer.add_message.call_args.kwargs
+    assert kwargs["process_type"] == ProcessType.ERROR
+    assert "MCP tool service connection failed" in kwargs["content"]
+    assert kwargs["error_code"] == "mcp_connection_refused"
+    assert kwargs["retryable"] is True
 
 
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
@@ -2882,7 +2911,7 @@ class TestCreateToolExceptionHandling:
             source="builtin",
         )
 
-        with pytest.raises(ValueError, match=r"Error in creating tool: Unknown builtin tool: UnknownTool"):
+        with pytest.raises(ValueError, match=r"Unknown builtin tool: UnknownTool"):
             nexent_agent_instance.create_tool(tool_config)
 
 

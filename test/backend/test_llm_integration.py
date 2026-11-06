@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Test LLM integration for knowledge base summarization
 """
@@ -11,20 +13,26 @@ from unittest.mock import patch, MagicMock
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 
-# Mock database.client and MinioClient before any imports to avoid MinIO initialization
+# Mock management.db.client and MinioClient before any imports to avoid MinIO initialization
 class _MinioClient:
     pass
 
-if "database.client" not in sys.modules:
-    database_client_mod = types.ModuleType("database.client")
+if "management.db.client" not in sys.modules:
+    database_client_mod = types.ModuleType("management.db.client")
     database_client_mod.MinioClient = _MinioClient
-    sys.modules["database.client"] = database_client_mod
+    sys.modules["management.db.client"] = database_client_mod
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
 
-# Mock backend.database.client as well
-if "backend.database.client" not in sys.modules:
-    backend_db_client_mod = types.ModuleType("backend.database.client")
+# Mock management.db.client as well
+if "management.db.client" not in sys.modules:
+    backend_db_client_mod = types.ModuleType("management.db.client")
     backend_db_client_mod.MinioClient = _MinioClient
-    sys.modules["backend.database.client"] = backend_db_client_mod
+    sys.modules["management.db.client"] = backend_db_client_mod
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
 
 # Ensure database module exists as a package (needs __path__ attribute)
 if "database" not in sys.modules:
@@ -32,26 +40,26 @@ if "database" not in sys.modules:
     database_mod.__path__ = []  # Make it a package
     sys.modules["database"] = database_mod
 
-# Mock database.model_management_db module to avoid MinIO initialization
-if "database.model_management_db" not in sys.modules:
-    model_mgmt_db_mod = types.ModuleType("database.model_management_db")
+# Mock management.db.model.repository module to avoid MinIO initialization
+if "management.db.model.repository" not in sys.modules:
+    model_mgmt_db_mod = types.ModuleType("management.db.model.repository")
     model_mgmt_db_mod.get_model_by_model_id = MagicMock(return_value=None)
-    sys.modules["database.model_management_db"] = model_mgmt_db_mod
+    sys.modules["management.db.model.repository"] = model_mgmt_db_mod
     setattr(sys.modules["database"], "model_management_db", model_mgmt_db_mod)
 
-# Mock database.tenant_config_db to avoid import errors
-if "database.tenant_config_db" not in sys.modules:
-    tenant_config_db_mod = types.ModuleType("database.tenant_config_db")
+# Mock management.db.configuration.tenant to avoid import errors
+if "management.db.configuration.tenant" not in sys.modules:
+    tenant_config_db_mod = types.ModuleType("management.db.configuration.tenant")
     # Mock all functions that config_utils imports
     tenant_config_db_mod.delete_config_by_tenant_config_id = MagicMock()
     tenant_config_db_mod.get_all_configs_by_tenant_id = MagicMock()
     tenant_config_db_mod.get_single_config_info = MagicMock()
     tenant_config_db_mod.insert_config = MagicMock()
     tenant_config_db_mod.update_config_by_tenant_config_id_and_data = MagicMock()
-    sys.modules["database.tenant_config_db"] = tenant_config_db_mod
+    sys.modules["management.db.configuration.tenant"] = tenant_config_db_mod
     setattr(sys.modules["database"], "tenant_config_db", tenant_config_db_mod)
 
-from utils.document_vector_utils import summarize_document, summarize_cluster
+from management.services.knowledge_base.summary import summarize_document, summarize_cluster
 
 
 class TestLLMIntegration:
@@ -76,7 +84,7 @@ class TestLLMIntegration:
         
         # Mock get_model_by_model_id to return None (no config found)
         # Use the already mocked module and just ensure it returns None
-        import database.model_management_db as model_mgmt_db
+        from management.db.model import repository as model_mgmt_db
         model_mgmt_db.get_model_by_model_id = MagicMock(return_value=None)
         
         # Test with model_id and tenant_id but no actual LLM call (will fallback due to missing config)
@@ -114,7 +122,7 @@ class TestLLMIntegration:
         
         # Mock get_model_by_model_id to return None (no config found)
         # Use the already mocked module and just ensure it returns None
-        import database.model_management_db as model_mgmt_db
+        from management.db.model import repository as model_mgmt_db
         model_mgmt_db.get_model_by_model_id = MagicMock(return_value=None)
         
         result = summarize_cluster(

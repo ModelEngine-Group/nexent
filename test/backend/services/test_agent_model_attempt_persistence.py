@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -6,11 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from management.services.agent import run as agent_run_service
-from management.services.agent.run import (
-    _finalize_buffered_unit_fragments,
-    _is_continuation,
-    _rollback_model_attempt_units,
-)
+from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments, is_stream_unit_continuation as _is_continuation, rollback_model_attempt_units as _rollback_model_attempt_units
+from management.services.agent import execution as agent_execution
 
 
 def test_cmsr_003_rollback_removes_only_matching_attempt_units():
@@ -68,6 +67,7 @@ def _agent_request():
 def _agent_run_info(outcome: str = "completed"):
     return SimpleNamespace(
         agent_config=SimpleNamespace(pre_run_tool_events=()),
+        observer=SimpleNamespace(),
         cancellation_scope=None,
         stop_event=asyncio.Event(),
         human_interaction=None,
@@ -78,9 +78,9 @@ def _agent_run_info(outcome: str = "completed"):
 
 
 def _configure_stream_mocks(monkeypatch, persisted_batches):
-    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(agent_execution, "save_message", MagicMock(return_value=4242))
     monkeypatch.setattr(
-        agent_run_service,
+        agent_execution,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
@@ -90,7 +90,7 @@ def _configure_stream_mocks(monkeypatch, persisted_batches):
     monkeypatch.setattr(
         agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock()
     )
-    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
 
     async def run_managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -99,7 +99,7 @@ def _configure_stream_mocks(monkeypatch, persisted_batches):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(agent_run_service.runtime_thread_manager, "run", run_managed)
-    monkeypatch.setattr(agent_run_service, "_poll_runtime_cancel_signal", wait_for_cancel)
+    monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", wait_for_cancel)
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,7 @@ async def test_cmsr_003_stream_rolls_back_failed_attempt_before_persistence(monk
 
     persisted_batches = []
     _configure_stream_mocks(monkeypatch, persisted_batches)
-    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_execution, "agent_run", fake_agent_run)
     channel = SimpleNamespace(publish=AsyncMock())
 
     chunks = [
@@ -151,7 +151,7 @@ async def test_cmsr_004_terminal_error_is_persisted_once_with_failed_status(monk
 
     persisted_batches = []
     _configure_stream_mocks(monkeypatch, persisted_batches)
-    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_execution, "agent_run", fake_agent_run)
     channel = SimpleNamespace(publish=AsyncMock())
 
     chunks = [

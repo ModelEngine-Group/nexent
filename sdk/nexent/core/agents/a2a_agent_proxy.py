@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 External A2A Agent Proxy Tool.
 
@@ -16,9 +18,11 @@ from urllib.parse import urlparse
 
 import httpx
 
+from nexent.core.agent_names import allocate_external_agent_names
+
 from ..concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 
-# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+# Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
@@ -69,9 +73,11 @@ class A2AAgentInfo:
     transport_type: str = "http-streaming"
     protocol_version: str = "1.0"
     protocol_type: str = PROTOCOL_JSONRPC
-    timeout: float = 300.0
+    timeout: float = 900.0
     raw_card: Optional[Dict[str, Any]] = None
     custom_headers: Optional[Dict[str, str]] = None
+    ssl_verify: bool = True
+    invocation_name: Optional[str] = None
 
     def get_protocol_type(self) -> str:
         """Get the protocol type for calling this agent.
@@ -148,6 +154,7 @@ class ExternalA2AAgentProxy:
         # - trust_env=False to ignore proxy env vars
         # - limits configured for connection pool
         self._client = httpx.AsyncClient(
+            verify=self.agent_info.ssl_verify,
             timeout=httpx.Timeout(self.agent_info.timeout),
             http2=False,  # Force HTTP/1.1 like curl
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
@@ -878,7 +885,10 @@ class ExternalA2AAgentWrapper:
                 forwarded to the external agent via message metadata so it
                 can authorize before accessing data.
         """
-        self.name = agent_info.name
+        self.name = agent_info.invocation_name or allocate_external_agent_names(
+            [(agent_info.agent_id, agent_info.name)]
+        )[str(agent_info.agent_id)]
+        self.display_name = agent_info.name
         # Use skills description if available
         self.description = agent_info.get_skills_description()
         self.agent_info = agent_info

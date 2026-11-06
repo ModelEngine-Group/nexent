@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """W2 context-budget contract rename + dispatch boundary (SDK-UT, D1).
 
 Covers the V2 ``context_budget_snapshot`` field rename from the legacy
@@ -79,6 +81,7 @@ def _bare_model():
     model.client = MagicMock()
     model.model_id = "gpt-4o-mini"
     model.capacity_snapshot = None
+    model.explicit_sampling = ()
     return model
 
 

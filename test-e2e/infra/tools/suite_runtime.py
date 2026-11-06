@@ -1,7 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Portable orchestration primitives; runtime state always stays outside Git."""
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -52,6 +56,28 @@ class BatchLock:
     def __exit__(self, *args):
         if self.handle:
             self.handle.close()
+
+
+_DEPLOYMENT_LEASE = ContextVar("suite_deployment_lease", default=None)
+
+
+def deployment_lock_owned(repo):
+    return _DEPLOYMENT_LEASE.get() == (str((repo / ".git/nexent-e2e-deployment.lock").resolve()), os.getpid())
+
+
+@contextmanager
+def deployment_lock(repo):
+    """Hold one checkout lease across synchronization and nested campaign execution."""
+    if deployment_lock_owned(repo):
+        yield
+        return
+    path = repo / ".git/nexent-e2e-deployment.lock"
+    with BatchLock(path):
+        token = _DEPLOYMENT_LEASE.set((str(path.resolve()), os.getpid()))
+        try:
+            yield
+        finally:
+            _DEPLOYMENT_LEASE.reset(token)
 
 
 def terminate_tree(process, group=True):
@@ -164,13 +190,20 @@ def finalize(directory, plan, rows, error=None):
                 row.setdefault(key, record[key])
     incomplete = any(row["result"] in {"NOT_EXECUTED", "INTERRUPTED"} for row in rows)
     failures = any(row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"} for row in rows)
+    validation_path = directory / "asset-validation.json"
+    validation = json.loads(validation_path.read_text(encoding="utf-8")) if validation_path.is_file() else None
+    asset_incomplete = validation is not None and validation.get("status") != "VALID"
     summary = {"schema_version": 1, "finished_at": now(), "planned": len(plan),
                "recorded": len(rows), "counts": summary_counts,
                "execution_complete": not (incomplete or error or duplicates or unexpected),
-               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures else "PASSED",
+               "status": "INCOMPLETE" if incomplete or error or duplicates or unexpected else "FAILED" if failures or asset_incomplete else "PASSED",
                "error": error, "duplicate_case_ids": duplicates, "unexpected_case_ids": unexpected,
                "d6_complete": True,
                "acceptance_counts": dict(Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows))}
+    if validation is not None:
+        summary["asset_validation"] = {"status": validation["status"], "issue_count": len(validation["issues"]),
+                                       "blocked_cases": validation["blocked_cases"]}
+        summary["coverage_integrity"] = "INCOMPLETE" if asset_incomplete else "VALID"
     save(directory / "summary.json", summary)
     (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "checkpoints/results.jsonl").write_text(
@@ -245,6 +278,13 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
                   "- 使用同步包时，明细中的 `cases/…`、`logs/…` 和 `checkpoints/…` 相对于解压目录；包内报告与日志属于同一批次。",
                   "- 共享包只包含脱敏后的白名单文件，Ubuntu 原始证据保持不变。",
                   f"- 未共享的截图／Trace 等二进制证据：{sharing.get('excluded_binary_count', '未统计')} 个；未经隐私确认，保留在 Ubuntu，详见包内 `excluded-evidence.json`。", ""]
+    if provenance.get("deployment_campaign"):
+        lines += ["## 部署切换与 Local 恢复", "",
+                  "- 部署例外和执行分组：`deployment-plan.json`；常规用例不重复计数。",
+                  "- Local 配置恢复及恢复用例验证：" +
+                  ("通过" if state.get("local_restored_and_verified") else "未完成或未通过，不能认为环境已恢复可用"),
+                  "- 恢复记录：`restoration.json`；恢复回归原始证据仅保留在执行机器：`profiles/restore-local/`。",
+                  "- 原始配置备份仅保留在执行机器的私有 runtime 目录，不进入共享日志包。", ""]
     return lines
 
 
@@ -273,6 +313,12 @@ def render_report(directory, plan, rows, summary, *, metadata_directory=None, ev
               "", "| Mapping / execution state | Count |", "| --- | ---: |"]
     acceptance_counts = Counter(row.get("acceptance_status", "UNREVIEWED") for row in rows)
     lines += [f"| {key} | {value} |" for key, value in sorted(acceptance_counts.items())]
+    if summary.get("asset_validation"):
+        validation = summary["asset_validation"]
+        lines += ["", "## Asset validation / coverage integrity", "",
+                  f"Asset validation: {validation['status']}; issues: {validation['issue_count']}.",
+                  "Details: asset-validation.json. Missing traditional UT is not a formal Case failure or a UT pass.",
+                  "Every planned Case remains accounted for; asset warnings prevent an all-green batch."]
     lines += ["", "## Stage summary", "",
               "| Stage | Planned | PASS | Not passed | Retired / policy skipped | Overall pass rate |",
               "| --- | ---: | ---: | ---: | ---: | ---: |"]

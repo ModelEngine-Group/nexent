@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 contracts for tags, HITL, model catalog, logging and sandbox cleanup."""
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-026")
 def test_tag_governance_translates_capacity_conflict_and_usage(monkeypatch) -> None:
-    from consts.exceptions import TagManagementConflictError
-    from services.tag_management_service import TagManagementService
+    from contracts.errors.exceptions import TagManagementConflictError
+    from management.services.tag.library import TagManagementService
 
     for message, scope in [
         ("Tag definition limit exceeded", "definition"),
@@ -29,7 +30,7 @@ def test_tag_governance_translates_capacity_conflict_and_usage(monkeypatch) -> N
         assert caught.value.details["scope"] == scope
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.delete_definition",
+        "management.services.tag.library.TagManagementDB.delete_definition",
         lambda *_args, **_kwargs: {"active_value_count": 1, "active_usage_count": 2},
     )
     with pytest.raises(TagManagementConflictError) as caught:
@@ -39,11 +40,3 @@ def test_tag_governance_translates_capacity_conflict_and_usage(monkeypatch) -> N
         "active_value_count": 1,
         "active_usage_count": 2,
     }
-
-
-
-
-
-
-
-

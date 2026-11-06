@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AUTO-QUOTA-D3-001
+  feature_id: F-126
+  requirement_ids:
+  - CHAT-AUTOMATION-ACTIVITY-20261020
+  - CHAT-ACTIVITY-TIMESTAMP-20261021
+  business_rule_ids:
+  - F-126-RULE-02
+  title: Automation quota and activity through real persistence and list API
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Automation quota and activity through real persistence and list API
+  preconditions:
+  - Repository dependencies and the declared controlled profile are available; fixtures are isolated.
+  test_data:
+    profile: mock
+    identities:
+    - owner
+    - other
+    histories:
+    - ordinary
+    - automation
+    - mixed
+    - deleted
+    - older
+    - newer
+  steps:
+  - order: 1
+    action: Create ordinary and automation user rows through real services in isolated PostgreSQL, reaching the
+      ordinary limit.
+    expected: Automation appends above the ordinary limit; the next ordinary row is rejected; client-supplied source
+      cannot bypass quota.
+  - order: 2
+    action: Persist assistant visible output and compare activity, administrative edits, HTTP list order, cursor
+      and bucket counts.
+    expected: The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients
+      receive consistent pagination and buckets.
+  - order: 3
+    action: Run committed activity, empty-history fallback, tie-break pagination and pinned-history metadata under UTC, Asia/Shanghai and America/New_York database sessions.
+    expected: Stored activity is naive UTC; public epoch values, existing aware cursors, activity order, all-page bucket counts and pin metadata represent the same instants without duplicate rows or timezone offsets.
+  expected_results:
+  - Automation appends above the ordinary limit; the next ordinary row is rejected; client-supplied source cannot
+    bypass quota.
+  - The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients receive
+    consistent pagination and buckets.
+  - UTC storage writes, fallback ordering, cursor boundaries, counts and pin metadata are invariant across database session timezones.
+  forbidden_side_effects:
+  - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
+    to unrelated histories.
+  integration_boundary:
+  - Real automation adapter, conversation persistence, SQLAlchemy/PostgreSQL and FastAPI list router; authentication
+    identity is controlled.
+  observations:
+  - Persisted source/activity, API order and errors, visible browser state or migration output.
+  cleanup:
+  - Dispose only the fixture schema, browser context and temporary test data.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Automation appends above the ordinary limit; the next ordinary row is rejected; client-supplied
+      source cannot bypass quota.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh
+      clients receive consistent pagination and buckets.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: UTC activity storage and public pagination and pin timestamps remain invariant across database timezones.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

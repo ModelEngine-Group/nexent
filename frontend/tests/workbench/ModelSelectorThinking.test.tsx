@@ -1,6 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { ModelSelector } from "@/app/newchat/ui/model-selector";
 
@@ -52,105 +53,49 @@ vi.mock("@/components/ui/command", () => ({
   CommandSeparator: () => null,
 }));
 
-const models = [{ id: "12", name: "Qwen", efforts: true }];
+const profileEditor = vi.hoisted(() => vi.fn());
+vi.mock("@/components/model/ConversationModelParameters", () => ({
+  ConversationModelParameters: (props: Record<string, unknown>) => {
+    profileEditor(props);
+    return <div data-testid="shared-profile-editor" />;
+  },
+}));
 
-it("does not re-register model context when equivalent model objects rerender", () => {
-  register.mockClear();
-  const { rerender } = render(
-    <ModelSelector models={[{ ...models[0] }]} value="12" deepThinking />
-  );
-  const firstRegistrationCount = register.mock.calls.length;
-  rerender(
-    <ModelSelector models={[{ ...models[0] }]} value="12" deepThinking />
-  );
-  expect(register).toHaveBeenCalledTimes(firstRegistrationCount);
-});
+it.each([undefined, 123])(
+  "SU-AC-01 uses the same profile editor for draft and saved Agent conversations (%s)",
+  (conversationId) => {
+    render(
+      <ModelSelector
+        models={[
+          {
+            id: "42",
+            name: "Profile",
+            profileSchemaVersion: 1,
+            agentParameterDefaults: { temperature: 0.4 },
+          },
+        ]}
+        value="42"
+        conversationId={conversationId}
+        parameterSettingsScopeKey="thread-scope"
+      />
+    );
+    expect(screen.getByTestId("shared-profile-editor")).toBeVisible();
+    expect(profileEditor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId,
+        draftScope: "thread-scope",
+        modelId: 42,
+        agentDefaults: { temperature: 0.4 },
+      })
+    );
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+  }
+);
 
-it("shows settings even without a selected model and forwards the first selection", async () => {
-  const user = userEvent.setup();
-  const onValueChange = vi.fn();
-  const { container } = render(
-    <ModelSelector models={models} value="" onValueChange={onValueChange} />
-  );
-
-  expect(
-    container.querySelector('[data-slot="model-selector-value"]')
-  ).not.toHaveTextContent("Qwen");
-  expect(screen.getByRole("switch")).toBeInTheDocument();
-  expect(screen.getByRole("combobox")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Qwen" }));
-  expect(onValueChange).toHaveBeenCalledExactlyOnceWith("12");
-});
-
-it("lets Start Chat toggle deep thinking and choose an effort in the shared selector", async () => {
-  const user = userEvent.setup();
-  render(<ModelSelector models={models} value="12" />);
-  const thinking = screen.getByRole("switch");
-  expect(thinking).toHaveAttribute("aria-checked", "false");
-  await user.click(thinking);
-  expect(thinking).toHaveAttribute("aria-checked", "true");
-  const effort = screen.getByRole("combobox");
-  await user.click(effort);
-  await user.click(screen.getByText("Medium"));
-  expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
-    config: { modelName: "12", deepThinking: true, reasoningEffort: "medium" },
-  });
-});
-
-it("defaults the shared selector to low reasoning effort", async () => {
-  const user = userEvent.setup();
-  render(<ModelSelector models={models} value="12" />);
-  await user.click(screen.getByRole("switch"));
-
-  expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
-    config: { modelName: "12", deepThinking: true, reasoningEffort: "low" },
-  });
-});
-
-it("lets Workbench control the same selector settings", async () => {
-  const user = userEvent.setup();
-  const onDeepThinkingChange = vi.fn();
-  const onEffortChange = vi.fn();
+it("SU-AC-05 does not fabricate a legacy parameter editor for an unresolved outlet", () => {
   render(
-    <ModelSelector
-      models={models}
-      value="12"
-      deepThinking
-      effort="medium"
-      onDeepThinkingChange={onDeepThinkingChange}
-      onEffortChange={onEffortChange}
-    />
+    <ModelSelector models={[{ id: "42", name: "Unresolved" }]} value="42" />
   );
-  await user.click(screen.getByRole("switch"));
-  expect(onDeepThinkingChange).toHaveBeenCalledWith(false);
-  await user.click(screen.getByRole("combobox"));
-  await user.click(screen.getByText("High"));
-  expect(onEffortChange).toHaveBeenCalledWith("high");
-});
-
-it("passes capability metadata without forcing reasoning when deep thinking is off", () => {
-  const capability = {
-    status: "supported" as const,
-    control: "effort" as const,
-    levels: ["low" as const, "high" as const],
-    source: "catalog" as const,
-  };
-  render(
-    <ModelSelector
-      models={[{ ...models[0], reasoningCapability: capability }]}
-      value="12"
-      deepThinking={false}
-    />
-  );
-  const config = (
-    register.mock.lastCall?.[0].getModelContext() as {
-      config: Record<string, unknown>;
-    }
-  ).config;
-  expect(config).toMatchObject({
-    modelName: "12",
-    deepThinking: false,
-    reasoningCapability: capability,
-  });
-  expect(config).not.toHaveProperty("reasoningEffort");
+  expect(screen.queryByTestId("shared-profile-editor")).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });

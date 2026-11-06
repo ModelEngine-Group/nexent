@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { expect, type Locator, type Page } from "playwright/test";
-import { writeFileSync } from "node:fs";
+import { expect, type FileChooser, type Locator, type Page, type Response } from "playwright/test";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { appPath } from "../runner/runtime-config";
 
 /** A path or a full setFiles payload (name/mimeType/buffer). */
@@ -9,6 +10,8 @@ type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 
 export class ChatPage {
   private lastServerConversationId?: number;
+  private stoppedConversationId?: number;
+  private lastRunResponse?: Response;
 
   constructor(readonly page: Page) {}
 
@@ -20,20 +23,36 @@ export class ChatPage {
     return this.page.locator("[data-slot='aui_user-message-root']");
   }
 
+  composerInput(): Locator {
+    return this.page.locator("[data-workbench-composer], .aui-lexical-input");
+  }
+
+  async composerText(): Promise<string> {
+    return this.composerInput().evaluate(element =>
+      element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
+        ? element.value : element.textContent ?? "");
+  }
+
   activeThread(): Locator {
     return this.page.locator("[data-active='true']").filter({ has: this.page.locator("button") }).first();
   }
 
   async currentThreadTitle(): Promise<string> {
-    const active = this.activeThread();
-    await expect(active).toBeVisible();
-    const title = (await active.locator("span.truncate").first().innerText()).trim();
-    if (!title) throw new Error("active conversation has no visible sidebar title");
+    // Resolve the owned server ID before reload; a title refresh can replace
+    // the transient local sidebar item while the same conversation is open.
+    const title = await this.persistedThreadTitle(this.currentConversationId());
+    await expect(this.threadButton(title)).toHaveCount(1);
+    await expect(this.threadButton(title)).toBeVisible();
     return title;
   }
 
   async openAgent(displayName: string): Promise<void> {
     await this.page.goto(appPath("/newchat"), { waitUntil: "domcontentloaded" });
+    // Navigation can restore the previous Agent chat; open discovery explicitly.
+    const search = this.page.getByPlaceholder("搜索智能体名称");
+    const discovery = this.page.getByRole("button", { name: "发现智能体", exact: true });
+    await expect(search.or(discovery)).toBeVisible();
+    if (!(await search.isVisible())) await discovery.click();
     await this.selectAgent(displayName);
   }
 
@@ -53,28 +72,71 @@ export class ChatPage {
     // Landing selection is complete when the discover page is replaced by
     // the conversation view with a usable composer.
     await expect(this.page.getByRole("heading", { name: "发现智能体" })).toBeHidden();
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
-    const button = this.page.getByRole("button", { name: mode, exact: true });
-    await button.click();
-    await expect(button).toHaveClass(/bg-blue-50/);
+    const label = `${mode}模式`;
+    const trigger = this.page.getByRole("button", { name: /^(规划|执行)模式$/, exact: true })
+      .and(this.page.locator('button[aria-haspopup="dialog"]'));
+    await expect(trigger).toBeVisible();
+    if ((await trigger.innerText()).trim() !== label) {
+      await trigger.click();
+      await this.page.getByRole("dialog").getByRole("button", { name: label, exact: true }).click();
+    }
+    await expect(trigger).toHaveText(label);
+  }
+
+  /** Poll the composer until its text matches, for async transcription and streamed input. */
+  async expectComposerText(pattern: string | RegExp, timeout = 30_000): Promise<void> {
+    await expect.poll(async () => this.composerText(), { timeout }).toMatch(pattern);
   }
 
   async startMessage(prompt: string): Promise<Locator> {
     const before = await this.assistantMessages().count();
-    const composer = this.page.getByPlaceholder('输入"/"快速引用技能及指令');
-    await composer.fill(prompt);
-    const runResponse = this.page.waitForResponse(
-      (response) => response.request().method() === "POST"
-        && response.url().includes("/api/agent/run")
-        && response.request().postDataJSON()?.query === prompt
-        && (response.headers()["content-type"] || "").includes("text/event-stream"),
-      { timeout: 120_000 },
-    );
-    await this.page.getByRole("button", { name: "发送", exact: true }).click();
-    const response = await runResponse;
+    const composer = this.composerInput();
+    const started = Date.now();
+    let response: Response;
+    for (let attempt = 1; ; attempt += 1) {
+      await composer.fill(prompt);
+      const runResponse = this.page.waitForResponse(
+        response => response.request().method() === "POST"
+          && response.url().includes("/api/agent/run")
+          && response.request().postDataJSON()?.query === prompt,
+        { timeout: 120_000 },
+      );
+      await this.page.getByRole("button", { name: "发送", exact: true }).click();
+      response = await runResponse;
+      if (response.headers()["x-stream-status"] !== "conflict") break;
+      const recoveringOwnedStop = this.stoppedConversationId !== undefined
+        && Number(response.request().postDataJSON()?.conversation_id) === this.stoppedConversationId;
+      const root = process.env.RESULT_DIR;
+      if (root) {
+        mkdirSync(join(root, "runtime"), { recursive: true });
+        appendFileSync(join(root, "runtime/send-recovery.jsonl"), JSON.stringify({
+          kind: "agent_run_conflict", after_owned_stop: recoveringOwnedStop,
+          conversation_id: this.lastServerConversationId, attempt, elapsed_ms: Date.now() - started,
+        }) + "\n");
+      }
+      // Stop publishes history before the physical worker releases its lease.
+      // Only this explicit pre-admission rejection permits a bounded retry;
+      // an accepted run or any other error is never resubmitted here.
+      if (!recoveringOwnedStop || Date.now() - started >= 60_000) {
+        const error = new Error("Previous owned run did not release its execution lease within the bounded Stop recovery window");
+        error.name = "ProductFailure";
+        throw error;
+      }
+      await expect(this.assistantMessages()).toHaveCount(before);
+      await expect.poll(() => this.composerText()).toBe(prompt);
+      await this.page.waitForTimeout(1000);
+    }
+    this.stoppedConversationId = undefined;
+    if (!response.ok() || !(response.headers()["content-type"] || "").includes("text/event-stream")) {
+      const error = new Error(`Agent run did not return an accepted SSE response: HTTP ${response.status()}`);
+      error.name = "ProductFailure";
+      throw error;
+    }
+    this.lastRunResponse = response;
     const headers = await response.allHeaders();
     let rawConversationId = headers["conversation_id"];
     if (!rawConversationId) {
@@ -122,9 +184,19 @@ export class ChatPage {
   }
 
   async waitForCompletion(timeout = 300_000): Promise<void> {
+    // Wait for the SSE response body to end, not just for an early completion
+    // badge: a new conversation can expose the stop-less placeholder before
+    // the final answer has rendered.
+    const run = this.lastRunResponse;
+    if (run) {
+      const failure = await run.finished();
+      if (failure) throw new Error(`agent run stream failed: ${failure.message}`);
+    }
     const last = this.assistantMessages().last();
     await expect(last).toContainText(/已完成|Completed|失败|Error/i, { timeout });
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout });
+    await expect.poll(async () => (await last.innerText()).trim(), { timeout })
+      .not.toMatch(/Thinking\.\.\.|思考中/);
   }
 
   async sendAndWait(prompt: string, timeout = 300_000): Promise<Locator> {
@@ -147,9 +219,10 @@ export class ChatPage {
     if (!response.ok() || body?.status !== "success") {
       throw new Error("agent stop failed: HTTP " + response.status() + " body=" + JSON.stringify(body));
     }
+    this.stoppedConversationId = this.currentConversationId();
     // A cancelled message is incomplete, so it has no Completed badge.
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 120_000 });
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeEditable();
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeEditable();
     // Stop acknowledgement precedes persistence/worker finalization. Wait for
     // the owned stream's terminal history before continuing or reconnecting.
     await expect.poll(async () => {
@@ -187,7 +260,7 @@ export class ChatPage {
         contains_expected_marker:text.includes(marker), final_contains_expected_marker:final.includes(marker),
         final_is_success:final.trim()==="success", final_length:final.length};
     });
-    writeFileSync(path, JSON.stringify({http_status:response.status(), code:payload.code,
+    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:response.status(), code:payload.code,
       streaming_status:history?.streaming_message?.status || null, messages,
       ui_user_count:await this.userMessages().count(), ui_assistant_count:await this.assistantMessages().count()},null,2)+"\n");
   }
@@ -212,12 +285,14 @@ export class ChatPage {
   }
 
   async renameActiveThread(title: string): Promise<void> {
+    // Resolve the persisted row after a new local thread becomes server-owned.
+    await this.openThread(await this.currentThreadTitle());
     const active = this.activeThread();
     await expect(active).toBeVisible();
     await active.hover();
     await active.locator("button").last().click();
     await this.page.getByRole("menuitem", { name: "重命名", exact: true }).click();
-    const input = active.locator("input[type='text']");
+    const input = active.getByRole("textbox", { name: "重命名", exact: true });
     await expect(input).toBeVisible();
     await input.fill(title);
     const renamed = this.page.waitForResponse(
@@ -239,22 +314,16 @@ export class ChatPage {
   }
 
   async newConversation(displayName: string): Promise<void> {
-    // A history item can also be named New Chat. Only the creation action has Plus.
+    // A history item can also be named New Chat. Scope to the creation icon.
     const create = this.page.getByRole("button", { name: /新建?对话/, exact: true })
-      .filter({ has: this.page.locator("svg.lucide-plus") });
+      .filter({ has: this.page.locator("svg.lucide-square-pen") });
     await expect(create).toHaveCount(1);
     await create.click();
-    const search = this.page.getByPlaceholder("搜索智能体名称");
-    await expect(search).toBeVisible();
-    await search.fill(displayName);
-    // Same precise card scoping as selectAgent: the card's accessible name
-    // mixes name, description and the 更多操作 menu.
-    const card = this.page.locator("div[role='button']").filter({
-      has: this.page.getByText(displayName, { exact: true }),
-    });
-    await expect(card).toHaveCount(1);
-    await card.click();
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
+    // New Chat resets this conversation while retaining the selected Agent.
+    await expect(this.page.getByRole("heading", { name: displayName, exact: true })).toBeVisible();
+    await expect(this.composerInput()).toBeEditable();
+    await expect(this.userMessages()).toHaveCount(0);
+    await expect(this.assistantMessages()).toHaveCount(0);
   }
 
   threadButton(title: string): Locator {
@@ -322,51 +391,41 @@ export class ChatPage {
   }
 
   async selectKnowledge(name: string): Promise<void> {
-    await this.page.getByRole("button", { name: /知识库：/ }).click();
+    await this.page.getByRole("button", { name: "知识库", exact: true }).click();
     const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
     // The current scope modal selects ResourceCards directly, not a mode radio.
-    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
+    await dialog.getByRole("searchbox").fill(name);
     const item = dialog.getByRole("option", { name, exact: true });
     await expect(item).toBeVisible();
     if ((await item.getAttribute("aria-selected")) !== "true") await item.click();
     await expect(item).toHaveAttribute("aria-selected", "true");
-    await dialog.getByRole("button", { name: /^确\s*定$/ }).click();
-    await expect(dialog).toHaveCount(0);
-  }
-
-  async assertKnowledgeSelected(name: string, selected: boolean): Promise<void> {
-    await this.page.getByRole("button", { name: /知识库：/ }).click();
-    const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
-    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
-    await expect(dialog.getByRole("option", { name, exact: true }))
-      .toHaveAttribute("aria-selected", String(selected));
-    // Inspection must not save or change the conversation's scope.
-    await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
+    await dialog.getByRole("button", { name: "确认", exact: true }).click();
     await expect(dialog).toBeHidden();
   }
 
+  async assertKnowledgeSelected(name: string, selected: boolean): Promise<void> {
+    await this.page.getByRole("button", { name: "知识库", exact: true }).click();
+    const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
+    await dialog.getByRole("searchbox").fill(name);
+    await expect(dialog.getByRole("option", { name, exact: true }))
+      .toHaveAttribute("aria-selected", String(selected));
+    // Inspection must not save or change the conversation's scope.
+    await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
+    await expect(dialog).toBeHidden();
+  }
+
+
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
-    // Older composer layouts expose a direct 添加附件 button; the new-chat
-    // design moved the entry behind the toolbar ＋ panel (添加 -> 上传文件,
-    // the file-chooser trigger).
-    const legacy = this.page.getByRole("button", { name: "添加附件", exact: true });
-    if (await legacy.isVisible().catch(() => false)) {
-      const chooser = this.page.waitForEvent("filechooser");
-      await legacy.click();
-      await (await chooser).setFiles(payload);
-      return;
-    }
-    await this.page.locator("[data-composer-action-trigger]").last().click();
+    // The workbench composer exposes the file chooser directly through the
+    // attachment button. Older layouts used 上传附件; the current label is
+    // 添加附件. Both open the native file chooser.
+    const attach = this.page
+      .getByRole("button", { name: /上传附件|添加附件/ })
+      .first();
+    await expect(attach).toBeVisible();
     const chooser = this.page.waitForEvent("filechooser");
-    await this.page.getByRole("button", { name: "上传文件", exact: true }).click();
+    await attach.click();
     await (await chooser).setFiles(payload);
-    // The panel's 上传文件 row does not close the panel itself. An open panel
-    // overlays the composer and intercepts later clicks (the panel closes on
-    // any pointerdown outside it or its trigger), so dismiss it explicitly.
-    const panel = this.page.locator("[data-composer-action-panel]");
-    if (await panel.isVisible().catch(() => false)) {
-      await this.page.mouse.click(8, 8);
-      await expect(panel).toBeHidden();
-    }
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }
 }

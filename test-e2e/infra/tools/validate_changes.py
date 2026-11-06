@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Validate formal Nexent test-asset change records."""
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ CHANGE_DIRECTORIES = {
 }
 
 
-def traditional_ut_issues(root: Path, plan: object, phase: str) -> list[str]:
+def traditional_ut_issues(root: Path, plan: object, phase: str, *, typed_missing=False) -> list:
     """Check UT intent/selectors, not execution or whether an exemption is justified."""
     if not isinstance(plan, dict):
         return ["Current product change requires a traditional_ut responsibility record"]
@@ -54,7 +56,9 @@ def traditional_ut_issues(root: Path, plan: object, phase: str) -> list[str]:
         elif Path(filename).is_absolute() or ":" in filename or "\\" in filename:
             issues.append("UT selectors must use repository-relative forward-slash paths")
         elif phase == "implementation" and not path.is_file():
-            issues.append(f"Traditional UT file does not exist: {filename}")
+            message = f"Traditional UT file does not exist: {filename}"
+            issues.append(ValidationIssue(root / filename, "", message, "UT_REFERENCE_MISSING")
+                          if typed_missing else message)
     return issues
 
 

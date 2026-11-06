@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 import unittest
@@ -6,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from consts.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -17,7 +18,7 @@ class _CasAuthenticationError(Exception):
     pass
 
 
-_MODULES_TO_RESTORE = ["services.cas_service"]
+_MODULES_TO_RESTORE = ["management.services.permission.identity.cas"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
 cas_service_mock = MagicMock()
@@ -55,9 +56,9 @@ cas_service_mock.renew_with_ticket = AsyncMock(
 cas_service_mock.revoke_from_logout_request = MagicMock(
     return_value={"revoked": 1, "cas_user_id": "cas-user-1", "session_index": "ST-1"}
 )
-sys.modules["services.cas_service"] = cas_service_mock
+sys.modules["management.services.permission.identity.cas"] = cas_service_mock
 
-from apps.cas_app import router  # noqa: E402
+from management.api.identity.cas import router
 
 for _name, _module in _ORIGINAL_MODULES.items():
     if _module is None:

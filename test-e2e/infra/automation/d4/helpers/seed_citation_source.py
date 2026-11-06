@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +24,7 @@ def main() -> int:
     from shared.postgres import apply_product_postgres_env
 
     apply_product_postgres_env()
-    from database.conversation_db import create_source_search
+    from management.db.conversation.repository import create_source_search
 
     common = {
         "message_id": args.message_id,

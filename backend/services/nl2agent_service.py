@@ -1,58 +1,58 @@
-"""Business logic for the ephemeral NL2Agent runtime."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Business logic for request-scoped NL2Agent runs."""
 
 import ast
 import asyncio
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 import re
 import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemType,
     ContextManagerConfig,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
+from nexent.core.concurrency import run_blocking
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_context_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import (
-    TOKEN,
-    ENABLE_AIDP_KNOWLEDGE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    MODEL_CONFIG_MAPPING,
-)
-from utils.mcp_url_utils import get_tenant_local_mcp_server
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import (
-    query_all_agent_info_by_tenant_id,
-    update_agent_draft_fields,
-)
-from database.skill_db import query_enabled_skill_instances
-from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    require_agent_draft_edit,
-)
-from services.thread_lifecycle_service import runtime_thread_manager
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.agent.creation import create_nl2agent_agent_config
+from management.services.agent.system import system_agent_provider
+from management.db.agent.repository import search_agent_info_by_agent_id
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from management.services.mcp.addressing import get_tenant_local_mcp_server
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
+from contracts.tool import ToolSourceEnum
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
+from contracts.errors.exceptions import AgentDraftEditError
+from management.services.agent.authorization import require_agent_draft_edit
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
+    KnowledgeBaseRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
@@ -64,10 +64,15 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
-from utils.context_utils import build_authorized_context_input
-from utils.http_client_utils import create_httpx_client
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.agent.context import (
+    build_authorized_context_input,
+)
+from infrastructure.http.client import create_httpx_client
+
+from management.services.knowledge_base.recommendation import (
+    MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +101,8 @@ AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
-    "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
+    "enable_protocol_repair_retry",
+    "prompt",
     "greeting_message",
     "example_questions",
 )
@@ -467,7 +471,7 @@ async def _load_installed_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.skill.service import SkillService
-    from services.tool_configuration_service import list_all_tools
+    from management.services.tool.configuration import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
@@ -604,6 +608,9 @@ def _score_resource_requirement(
             + installed_bonus
             + quality_bonus
         )
+    # Explicit resource hints retain the existing name-matching precedence.
+    if not requirement.resource_name_hint and MANAGED_KNOWLEDGE_NAMES.intersection(resource["names"]):
+        score += 0.02
     return min(1.0, score)
 
 
@@ -650,6 +657,10 @@ def _rank_resource_catalog(
             description=resource["description"],
             requirement_ids=matched_ids,
             score=round(candidate_score, 4),
+            knowledge_queries=list(dict.fromkeys(
+                text for requirement in requirements if requirement.requirement_id in matched_ids
+                for text in [requirement.query, requirement.resource_name_hint, *requirement.search_terms] if text
+            ))[:32] if MANAGED_KNOWLEDGE_NAMES.intersection(resource.get("names", [])) else [],
         )
         scored.append({
             "candidate": candidate,
@@ -800,11 +811,11 @@ async def _load_internal_uninstalled_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.mcp_management_service import list_community_mcp_services
+    from management.services.repository.mcp.service import list_community_mcp_services
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from management.services.skill.service import get_official_skills_with_status
+    from management.services.skill.transfer import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
@@ -1024,6 +1035,7 @@ def _verified_resource_candidate(
         description=actual["description"],
         requirement_ids=supplied.requirement_ids,
         score=supplied.score,
+        knowledge_queries=supplied.knowledge_queries,
     )
 
 
@@ -1096,27 +1108,114 @@ async def recommend_installed_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
+    bound_instances = query_all_enabled_tool_instances(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=0
+    )
     bound_tool_refs = {
         f"tool:{instance['tool_id']}"
-        for instance in query_all_enabled_tool_instances(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=0,
-        )
+        for instance in bound_instances
         if isinstance(instance.get("tool_id"), int)
     }
+    knowledge_catalogs: dict[str, list[dict]] = {}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
         if actual is None:
             raise Nl2AgentResourceError("resource_not_visible")
-        resources.append(_recommended_resource(
+        resource = _recommended_resource(
             actual=actual,
             supplied=supplied,
             recommended_refs=recommended,
             is_bound=supplied.candidate_ref in bound_tool_refs,
-        ))
+        )
+        tool_name = next(
+            (
+                name
+                for name in actual.get("names", [actual["name"]])
+                if name in MANAGED_KNOWLEDGE_NAMES
+            ),
+            None,
+        )
+        if actual["resource_type"] == "tool" and tool_name:
+            try:
+                if tool_name not in knowledge_catalogs:
+                    knowledge_catalogs[tool_name] = await run_blocking(
+                        "nl2agent-visible-knowledge",
+                        load_visible_knowledge,
+                        tool_name,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        lane="control-io",
+                        owner="services.nl2agent_service",
+                    )
+                range_name = "kds_list" if tool_name == "aidp_search" else "index_names"
+                current_params = {}
+                bound_values = []
+                for instance in bound_instances:
+                    bound_actual = by_ref.get(f"tool:{instance.get('tool_id')}", {})
+                    if tool_name not in bound_actual.get(
+                        "names", [bound_actual.get("name")]
+                    ):
+                        continue
+                    params = (
+                        instance.get("params")
+                        if isinstance(instance.get("params"), dict)
+                        else {}
+                    )
+                    current_params.update(params)
+                    bound_values.extend(selection_values(params.get(range_name)))
+                bound_values = list(dict.fromkeys(bound_values))
+                resource.knowledge_bound_values = bound_values
+                queries = supplied.knowledge_queries
+                if not queries:
+                    draft = require_agent_draft_edit(
+                        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+                    )
+                    queries = [str(draft.get("description") or "")]
+                suggestions = rank_knowledge(
+                    knowledge_catalogs[tool_name],
+                    queries,
+                    bound_values,
+                    tool_name=tool_name,
+                    multimodal=current_params.get("multimodal"),
+                )
+                resource.knowledge_recommendations = [
+                    KnowledgeBaseRecommendation(**item) for item in suggestions
+                ]
+                base_config = [
+                    {
+                        **param,
+                        **(
+                            {"value": current_params[param["name"]]}
+                            if param["name"] in current_params
+                            else {}
+                        ),
+                    }
+                    for param in resource.config
+                ]
+                resource.config = merge_selection(
+                    base_config,
+                    tool_name,
+                    list(
+                        dict.fromkeys(
+                            [
+                                *bound_values,
+                                *(item["binding_value"] for item in suggestions),
+                            ]
+                        )
+                    ),
+                )
+                if suggestions or not bound_values:
+                    resource.is_bound = False
+            except Exception as exc:
+                logger.warning(
+                    "NL2Agent knowledge recommendation failed: %s", type(exc).__name__
+                )
+                raise Nl2AgentResourceError(
+                    "knowledge_search_failed", retryable=True
+                ) from exc
+        resources.append(resource)
     return RecommendResourcesOutput(resources=resources)
 
 
@@ -1162,6 +1261,22 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
     return agent_id
+
+
+def _requires_policy_clarification(query: str) -> bool:
+    """Prevent an unspecified retry request from authorizing a policy write."""
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        action = None
+    if isinstance(action, dict) and action.get("type") == "nl2agent_card_action":
+        return False
+    normalized = unicodedata.normalize("NFKC", query).casefold()
+    mentions_retry = "重试" in normalized or "retry" in normalized or "retries" in normalized
+    names_policy = any(term in normalized for term in (
+        "协议", "protocol", "静默修复", "silent repair", "enable_protocol_repair_retry",
+    ))
+    return mentions_retry and not names_policy
 
 
 async def _load_verified_nl2agent_state(
@@ -1243,9 +1358,13 @@ async def _build_verified_bound_resources_context(
         "agent_id": agent_id,
         "draft_fields": (
             {
-                field_name: draft.get(field_name)
+                field_name: (
+                    draft.get(field_name) is True
+                    if field_name == "enable_protocol_repair_retry"
+                    else draft.get(field_name)
+                )
                 for field_name in AGENT_DRAFT_FIELD_ORDER
-                if draft.get(field_name) is not None
+                if field_name == "enable_protocol_repair_retry" or draft.get(field_name) is not None
             }
             if isinstance(draft, dict)
             else {}
@@ -1273,24 +1392,21 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, facts = await _load_verified_nl2agent_state(
+    draft, _facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
     name = draft.get("name")
-    if (
-        not isinstance(name, str)
-        or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,59}", name)
-    ):
-        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"])
+    try:
+        validate_agent_name(name)
+    except ValueError as exc:
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"]) from exc
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
-    required_prompt_fields = ["duty_prompt", "greeting_message"]
-    if facts:
-        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
+    required_prompt_fields = ["prompt", "greeting_message"]
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields
@@ -1325,16 +1441,22 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    user_id, authenticated_tenant_id = get_current_user_id(authorization)
-    if authenticated_tenant_id != tenant_id:
+    if identity.tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    user_id = identity.user_id
+    if not user_id or not tenant_id:
+        raise PermissionError("Authenticated user and tenant are required")
+    preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
         tenant_id=tenant_id,
@@ -1347,7 +1469,12 @@ async def build_nl2agent_run_info(
         language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
-    agent_config = create_nl2agent_agent_config(language)
+    system_ref = system_ref or await run_blocking("load-nl2agent-identity", system_agent_provider.get_nl2agent_main_ref, tenant_id)
+    snapshot = await run_blocking(
+        "load-nl2agent-definition", search_agent_info_by_agent_id,
+        system_ref.agent_id, system_ref.tenant_id, system_ref.version_no,
+    )
+    agent_config = create_nl2agent_agent_config(language, snapshot=snapshot)
     agent_config.context_items = [
         *(agent_config.context_items or []),
         binding_context,
@@ -1356,6 +1483,12 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
+    if request.model_id is not None or request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}):
+        default_model = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            getattr(request, "_runtime_model_parameter_preferences", request.model_parameter_preferences),
+            default_model,
+        )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )
@@ -1403,6 +1536,9 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers[NL2AGENT_POLICY_CLARIFICATION_HEADER] = (
+        "true" if _requires_policy_clarification(request.query) else "false"
+    )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
     mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:
@@ -1410,6 +1546,7 @@ async def build_nl2agent_run_info(
 
     stop_event = threading.Event()
     run_info = AgentRunInfo(
+        tenant_id=tenant_id,
         query=final_query,
         model_config_list=model_config_list,
         observer=_Nl2AgentBoundaryObserver(
@@ -1435,20 +1572,35 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AsyncIterator[str]:
-    """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
+    """Create an SSE-compatible stream for one isolated NL2Agent run."""
 
     run_info = await build_nl2agent_run_info(
         request=request,
         tenant_id=tenant_id,
         language=language,
+        identity=identity,
+        system_ref=system_ref,
         authorization=authorization,
     )
 
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
+            if isinstance(run_info.agent_config.agent_id, int):
+                yield "data: " + json.dumps({
+                    "type": "other",
+                    "content": json.dumps({
+                        "event": "system_agent_run",
+                        "agent_id": run_info.agent_config.agent_id,
+                        "version_no": run_info.agent_config.version_no,
+                        "system_key": "nl2agent_main",
+                    }),
+                }) + "\n\n"
             async for chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,
@@ -1464,10 +1616,12 @@ async def create_nl2agent_stream(
                     boundary_delivered = False
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Agent execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
+            sampling_error = sampling_configuration_error_payload(exc)
             error_payload = json.dumps(
-                {
+                sampling_error or {
                     "type": "error",
                     "content": "NL2Agent execution failed.",
                 },

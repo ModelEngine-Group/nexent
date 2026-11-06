@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -40,27 +41,16 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-006")
 def test_auth_helpers_trust_only_validated_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    from utils import auth_utils
+    import gateway.authentication.auth as auth_utils
+    import gateway.authentication.northbound_auth as northbound_auth
 
-    monkeypatch.setattr(auth_utils, "get_token_by_access_key", lambda key: None)
-    assert auth_utils.validate_bearer_token("Bearer unsigned.payload.claims") == (False, None)
+    monkeypatch.setattr(northbound_auth, "get_token_by_access_key", lambda key: None)
+    assert northbound_auth.validate_bearer_token("Bearer unsigned.payload.claims") == (False, None)
     monkeypatch.setattr(
-        auth_utils,
+        northbound_auth,
         "get_token_by_access_key",
         lambda key: {"user_id": "u1", "delete_flag": "N"} if key == "verified" else None,
     )
-    valid, info = auth_utils.validate_bearer_token("Bearer verified")
+    valid, info = northbound_auth.validate_bearer_token("Bearer verified")
     assert valid is True and info and info["user_id"] == "u1"
     assert auth_utils.resolve_tenant_id_from_user_tenant_record({"tenant_id": "t1"}) == "t1"
-
-
-
-
-
-
-
-
-
-
-
-

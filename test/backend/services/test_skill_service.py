@@ -1,6 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for management.services.skill.service module.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import io
@@ -167,7 +171,7 @@ sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer_mock
 # Set up consts mocks
 consts_mock = types.ModuleType('consts')
 consts_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/consts"))]
-consts_const_mock = types.ModuleType('consts.const')
+consts_const_mock = types.ModuleType('contracts.constants.environment')
 TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp", "skills"))
 consts_const_mock.CONTAINER_SKILLS_PATH = os.path.abspath(os.sep)
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
@@ -178,7 +182,7 @@ consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
 consts_const_mock.PERMISSION_READ = "READ_ONLY"
-consts_exceptions_mock = types.ModuleType('consts.exceptions')
+consts_exceptions_mock = types.ModuleType('contracts.errors.exceptions')
 
 class SkillException(Exception):
     pass
@@ -196,18 +200,19 @@ consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_const_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
 # Skill deletion invokes tag cleanup after the skill record is removed.  Keep
 # this SkillService unit suite isolated from the tag service's separate graph.
-tag_management_service_mock = types.ModuleType('services.tag_management_service')
+tag_management_service_mock = types.ModuleType('management.services.tag.library')
 tag_management_service_mock.TagManagementService = type(
     'TagManagementService',
     (),
     {'cleanup_resource_assignments': staticmethod(lambda *_args, **_kwargs: 0)},
 )
-sys.modules['services.tag_management_service'] = tag_management_service_mock
+sys.modules['management.services.tag.library'] = tag_management_service_mock
 
 # Set up aiofiles mock for async file operations
 import aiofiles
@@ -262,20 +267,17 @@ nexent_skills_skill_manager_mock.SkillManager = MockSkillManager
 # Set up utils mocks
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/utils"))]
-utils_skill_params_utils_mock = types.ModuleType('utils.skill_params_utils')
-utils_skill_params_utils_mock.strip_params_comments_for_db = MagicMock(side_effect=lambda x: x)
-utils_skill_params_utils_mock.params_dict_to_roundtrip_yaml_text = MagicMock(return_value="params: {}")
-utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
+utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
-utils_content_classifier_utils_mock = types.ModuleType('utils.content_classifier_utils')
-utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_content_classifier_utils_mock = types.ModuleType('management.services.skill.classifier')
+utils_str_utils_mock = types.ModuleType('management.utils.serialization')
 utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
 
 # Import generate_available_copy_skill_name before utils is mocked
-from utils.skill_import_utils import generate_available_copy_skill_name  # noqa: E402,F811
-utils_skill_import_utils_mock = types.ModuleType('utils.skill_import_utils')
+from management.services.skill.naming import generate_available_copy_skill_name
+utils_skill_import_utils_mock = types.ModuleType('management.services.skill.naming')
 utils_skill_import_utils_mock.generate_available_copy_skill_name = generate_available_copy_skill_name
 
 class MockContentClassifier:
@@ -284,34 +286,34 @@ class MockContentClassifier:
 
 utils_content_classifier_utils_mock.ContentClassifier = MockContentClassifier
 sys.modules['utils'] = utils_mock
-sys.modules['utils.skill_params_utils'] = utils_skill_params_utils_mock
-sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
-sys.modules['utils.content_classifier_utils'] = utils_content_classifier_utils_mock
-sys.modules['utils.str_utils'] = utils_str_utils_mock
-sys.modules['utils.skill_import_utils'] = utils_skill_import_utils_mock
+
+sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
+sys.modules['management.services.skill.classifier'] = utils_content_classifier_utils_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
+sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
 database_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/database"))]
-database_client_mock = types.ModuleType('database.client')
+database_client_mock = types.ModuleType('management.db.client')
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.as_dict = MagicMock()
 database_client_mock.filter_property = MagicMock()
 
-database_db_models_mock = types.ModuleType('database.db_models')
+database_db_models_mock = types.ModuleType('management.db.models')
 database_db_models_mock.SkillInfo = MagicMock()
 database_db_models_mock.KnowledgeRecord = MagicMock()
 database_db_models_mock.KnowledgeFileLifecycle = MagicMock()
 database_db_models_mock.KnowledgeStorageObject = MagicMock()
-database_group_db_mock = types.ModuleType('database.group_db')
+database_group_db_mock = types.ModuleType('management.db.identity.group')
 database_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
-database_user_tenant_db_mock = types.ModuleType('database.user_tenant_db')
+database_user_tenant_db_mock = types.ModuleType('management.db.identity.user_tenant')
 database_user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(
     return_value={"user_role": "DEV"}
 )
 
 # Create mock skill_db module with functions
-database_skill_db_mock = types.ModuleType('database.skill_db')
+database_skill_db_mock = types.ModuleType('management.db.skill.repository')
 
 def mock_create_or_update_skill_by_skill_info(skill_info, tenant_id, user_id, version_no=0):
     return {"skill_instance_id": 1, "skill_id": 1, "agent_id": 1, "enabled": True}
@@ -395,11 +397,15 @@ database_mock.skill_db = database_skill_db_mock
 database_mock.db_models = database_db_models_mock
 
 sys.modules['database'] = database_mock
-sys.modules['database.client'] = database_client_mock
-sys.modules['database.skill_db'] = database_skill_db_mock
-sys.modules['database.db_models'] = database_db_models_mock
-sys.modules['database.group_db'] = database_group_db_mock
-sys.modules['database.user_tenant_db'] = database_user_tenant_db_mock
+sys.modules['management.db.client'] = database_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.skill.repository'] = database_skill_db_mock
+sys.modules['management.db.models'] = database_db_models_mock
+sys.modules['management.db.identity.group'] = database_group_db_mock
+sys.modules['management.db.identity.user_tenant'] = database_user_tenant_db_mock
 setattr(database_mock, 'skill_db', database_skill_db_mock)
 
 # Mock nexent.core.agents.run_agent for create_skill_from_request
@@ -417,7 +423,13 @@ sys.modules['agents.skill_creation_agent'] = agents_skill_creation_agent_mock
 
 # Now import the service module
 from management.services.skill import service as skill_service
-from management.services.skill import support as skill_support
+from management.services.skill import files as skill_support
+from management.services.skill import params as skill_params
+
+@pytest.fixture(autouse=True)
+def isolate_skill_yaml_writer(mocker):
+    mocker.patch.object(skill_params, "params_dict_to_roundtrip_yaml_text", return_value="params: {}")
+
 from management.services.skill.service import (
     SkillService,
     _normalize_zip_entry_path,
@@ -432,6 +444,10 @@ from management.services.skill.service import (
     _remove_local_skill_config_yaml,
     get_skill_manager,
 )
+from management.services.skill import files as skill_files
+from management.services.skill import permission as skill_permission
+from management.services.skill import params as skill_params
+from management.services.skill import transfer as skill_transfer
 
 # The full suite may import this module before the local ``consts`` stubs above
 # are installed.  Pin the module-level safety root to the test-owned directory
@@ -481,7 +497,7 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "EDIT",
         }
 
-        assert skill_service._to_group_id_set(group_skill["group_ids"]) == {10, 20}
+        assert skill_permission._to_group_id_set(group_skill["group_ids"]) == {10, 20}
         assert skill_service.can_view_skill(
             skill=group_skill,
             user_id="member",
@@ -538,8 +554,8 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "EDIT",
         }
 
-        assert skill_service._to_group_id_set(skill["group_ids"]) == {10, 20}
-        assert skill_service._to_group_id_set(None) == set()
+        assert skill_permission._to_group_id_set(skill["group_ids"]) == {10, 20}
+        assert skill_permission._to_group_id_set(None) == set()
         assert skill_service.can_view_skill(
             skill=skill,
             user_id="outsider",
@@ -559,7 +575,7 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "READ_ONLY",
         }
         query_groups = mocker.patch(
-            "management.services.skill.support.query_group_ids_by_user",
+            'management.services.skill.permission.query_group_ids_by_user',
             return_value=[10],
         )
 
@@ -574,7 +590,7 @@ class TestSkillGroupPermissions:
     def test_default_group_permission_uses_creator_groups(self, mocker):
         skill_data = {}
         mocker.patch(
-            "management.services.skill.support.query_group_ids_by_user",
+            'management.services.skill.permission.query_group_ids_by_user',
             return_value=[10, 20],
         )
 
@@ -587,7 +603,7 @@ class TestSkillGroupPermissions:
 
     def test_default_group_permission_skips_anonymous_user(self, mocker):
         query_groups = mocker.patch(
-            "management.services.skill.support.query_group_ids_by_user",
+            'management.services.skill.permission.query_group_ids_by_user',
         )
 
         skill_data = {}
@@ -603,11 +619,11 @@ class TestSkillGroupPermissions:
             "ingroup_permission": "EDIT",
         }
         mocker.patch(
-            "management.services.skill.support.get_user_tenant_by_user_id",
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
         mocker.patch(
-            "management.services.skill.support.query_group_ids_by_user",
+            'management.services.skill.permission.query_group_ids_by_user',
             return_value=[10],
         )
 
@@ -687,7 +703,7 @@ class TestLocalSkillConfigYamlPath:
 
     def test_basic_path(self, mocker):
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             "/skills",
         )
         result = _local_skill_config_yaml_path("my_skill", "/skills")
@@ -697,7 +713,7 @@ class TestLocalSkillConfigYamlPath:
 
     def test_with_subdir(self, mocker):
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             "/var/lib/skills",
         )
         result = _local_skill_config_yaml_path("test-skill", "/var/lib/skills")
@@ -721,7 +737,7 @@ class TestLocalSkillConfigYamlPath:
     )
     def test_rejects_unsafe_skill_name(self, mocker, unsafe_name):
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             "/skills",
         )
 
@@ -736,7 +752,7 @@ class TestLocalSkillConfigYamlPath:
         allowed_root = tmp_path / "allowed"
         outside_root = tmp_path / "outside"
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(allowed_root),
         )
 
@@ -756,7 +772,7 @@ def _configure_local_dir_mock(mock_manager, local_dir=None):
     resolution. This helper ensures the mock returns a real string path that
     matches CONTAINER_SKILLS_PATH so _resolve_local_skill_path succeeds.
     """
-    path = local_dir if local_dir is not None else skill_service.CONTAINER_SKILLS_PATH
+    path = local_dir if local_dir is not None else skill_files.CONTAINER_SKILLS_PATH
     mock_manager.resolve_tenant_dir.return_value = path
     mock_manager.local_skills_dir = path
     return mock_manager
@@ -847,7 +863,7 @@ class TestSkillServiceListSkills:
             return_value=[10],
         )
         mocker.patch(
-            'management.services.skill.support.get_user_tenant_by_user_id',
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -882,7 +898,7 @@ class TestSkillServiceListSkills:
             return_value=[],
         )
         mocker.patch(
-            'management.services.skill.support.get_user_tenant_by_user_id',
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "ADMIN"},
         )
 
@@ -924,7 +940,7 @@ class TestSkillServiceListSkills:
             return_value=[10],
         )
         mocker.patch(
-            'management.services.skill.support.get_user_tenant_by_user_id',
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -949,7 +965,7 @@ class TestSkillServiceListSkills:
             return_value=[],
         )
         mocker.patch(
-            'management.services.skill.support.get_user_tenant_by_user_id',
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -1188,9 +1204,9 @@ class TestSkillServiceCreateSkillFromFile:
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "md_skill"}
 
         mock_manager = MagicMock()
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.local_skills_dir = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -1213,9 +1229,9 @@ description: A MD skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "str_skill"}
 
         mock_manager = MagicMock()
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.local_skills_dir = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -1238,9 +1254,9 @@ description: A string skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "bio_skill"}
 
         mock_manager = MagicMock()
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.local_skills_dir = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -1263,9 +1279,9 @@ description: A BytesIO skill
         mock_repo.create_skill.return_value = {"skill_id": 1, "name": "explicit_md"}
 
         mock_manager = MagicMock()
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.local_skills_dir = skill_service.CONTAINER_SKILLS_PATH
-        mock_manager.resolve_tenant_dir.return_value = skill_service.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.local_skills_dir = skill_files.CONTAINER_SKILLS_PATH
+        mock_manager.resolve_tenant_dir.return_value = skill_files.CONTAINER_SKILLS_PATH
 
         service = SkillService()
         service.repository = mock_repo
@@ -1357,7 +1373,7 @@ class TestSkillServiceUpdateSkill:
             "management.services.skill.service._can_edit_skill", return_value=True
         )
         mocker.patch(
-            "management.services.skill.support.get_user_tenant_by_user_id",
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -1442,7 +1458,7 @@ class TestSkillServiceDeleteSkill:
             return_value=True,
         )
         cleanup = mocker.patch(
-            'services.tag_management_service.TagManagementService.cleanup_resource_assignments'
+            'management.services.tag.library.TagManagementService.cleanup_resource_assignments'
         )
         service = SkillService(tenant_id="test-tenant")
 
@@ -1546,7 +1562,7 @@ class TestSkillServiceGetEnabledSkillsForAgent:
 
     def test_get_enabled_skills_for_agent_returns_list(self):
         """Test getting enabled skills for agent returns list."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -1572,11 +1588,11 @@ class TestSkillServiceGetEnabledSkillsForAgent:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_get_enabled_skills_for_agent_empty(self):
         """Test getting enabled skills when none exist."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -1591,7 +1607,7 @@ class TestSkillServiceGetEnabledSkillsForAgent:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceBuildSkillsSummary:
@@ -1711,7 +1727,7 @@ class TestSkillServiceSkillInstances:
 
     def test_create_or_update_skill_instance_success(self):
         """Test creating/updating skill instance."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         mock_result = {
@@ -1740,11 +1756,11 @@ class TestSkillServiceSkillInstances:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
             # Skip if real module not available
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_list_skill_instances_returns_list(self):
         """Test listing skill instances returns list."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -1762,11 +1778,11 @@ class TestSkillServiceSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_get_skill_instance_returns_none_when_not_found(self):
         """Test getting skill instance returns None when not found."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instance_by_id', None)
 
         if original_func is not None:
@@ -1782,7 +1798,7 @@ class TestSkillServiceSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instance_by_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceOverlayParams:
@@ -1875,7 +1891,7 @@ class TestWriteSkillParamsToLocalConfigYaml:
     def test_write_success(self, mocker):
         with patch('os.makedirs'):
             with patch('builtins.open', mock_open()):
-                with patch('management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+                with patch('management.services.skill.files._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
                     _write_skill_params_to_local_config_yaml("skill", {"key": "value"}, "/tmp")
 
 
@@ -1886,13 +1902,13 @@ class TestRemoveLocalSkillConfigYaml:
         _remove_local_skill_config_yaml("skill", "")
 
     def test_remove_file_exists(self, mocker):
-        with patch('management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+        with patch('management.services.skill.files._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
             with patch('os.path.isfile', return_value=True):
                 with patch('os.remove'):
                     _remove_local_skill_config_yaml("skill", "/tmp")
 
     def test_remove_file_not_exists(self, mocker):
-        with patch('management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+        with patch('management.services.skill.files._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
             with patch('os.path.isfile', return_value=False):
                 _remove_local_skill_config_yaml("skill", "/tmp")
 
@@ -1986,7 +2002,7 @@ class TestGetSkillManager:
     def test_get_manager_creates_instance(self):
         skill_service._skill_manager = None
 
-        with patch('management.services.skill.support.SkillManager') as mock_manager:
+        with patch('management.services.skill.files.SkillManager') as mock_manager:
             with patch.object(skill_support, 'CONTAINER_SKILLS_PATH', '/tmp'):
                 manager = get_skill_manager()
                 mock_manager.assert_called_once()
@@ -2209,7 +2225,7 @@ class TestParseYamlFallbackPyyamlErrorPaths:
 
     def test_invalid_yaml_raises_skill_exception(self):
         from management.services.skill.service import _parse_yaml_fallback_pyyaml
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _parse_yaml_fallback_pyyaml("invalid: yaml: : :")
             assert False, "Should have raised"
@@ -2229,7 +2245,7 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
 
     def test_json_non_dict_raises_exception(self):
         from management.services.skill.service import _parse_skill_params_from_config_bytes
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _parse_skill_params_from_config_bytes(b'["list", "not", "dict"]')
             assert False, "Should have raised"
@@ -2370,7 +2386,7 @@ allowed-tools:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2429,7 +2445,7 @@ name: existing_skill
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2572,7 +2588,7 @@ description: Updated via ZIP
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2594,7 +2610,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.list_skills(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2611,7 +2627,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2628,7 +2644,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_by_id(1, tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2644,7 +2660,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.load_skill_directory("any_skill")
             assert False, "Should have raised"
@@ -2660,7 +2676,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("any_skill")
             assert False, "Should have raised"
@@ -2677,7 +2693,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_content("any_skill")
             assert False, "Should have raised"
@@ -2694,7 +2710,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.build_skills_summary()
             assert False, "Should have raised"
@@ -2720,7 +2736,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.isfile', return_value=True):
-            from consts.exceptions import SkillException
+            from contracts.errors.exceptions import SkillException
             try:
                 service.create_skill({"name": "local_conflict"})
                 assert False, "Should have raised"
@@ -3051,7 +3067,7 @@ class TestGetEnabledSkillsForAgentEdgeCases:
     """Test get_enabled_skills_for_agent edge cases."""
 
     def test_get_enabled_skills_skill_not_in_repo(self, mocker):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -3075,7 +3091,7 @@ class TestGetEnabledSkillsForAgentEdgeCases:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 # ===== Tooltip Functions Tests =====
@@ -3126,7 +3142,7 @@ class TestWriteSkillParamsWithRealUtils:
     def test_write_params_with_nested_dict(self, mocker):
         with patch('os.makedirs'):
             with patch('builtins.open', mock_open()) as mock_file:
-                with patch('management.services.skill.service._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
+                with patch('management.services.skill.files._local_skill_config_yaml_path', return_value="/tmp/skill/config.yaml"):
                     _write_skill_params_to_local_config_yaml(
                         "skill",
                         {"nested": {"key": "value"}},
@@ -3259,7 +3275,7 @@ class TestGetSkillScripts:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -3274,7 +3290,7 @@ class TestSkillInstanceMethods:
     """Test skill instance methods."""
 
     def test_create_or_update_skill_instance_returns_dict(self):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         if original_func is not None:
@@ -3292,10 +3308,10 @@ class TestSkillInstanceMethods:
             finally:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_list_skill_instances_returns_empty(self):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -3307,7 +3323,7 @@ class TestSkillInstanceMethods:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 # ===== Path Traversal Protection Tests =====
@@ -3851,7 +3867,7 @@ class TestSkillServiceCreateFromMdWithInvalidParse:
         service.skill_manager = mock_manager
 
         content = b"invalid content"
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(content, skill_name=None)
             assert False, "Should have raised"
@@ -4019,7 +4035,7 @@ class TestSkillServiceCreateFromZipWithBadZipFile:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(b"not a zip file", file_type="zip")
             assert False, "Should have raised"
@@ -4057,7 +4073,7 @@ description: Some content
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -4430,7 +4446,7 @@ class TestSkillServiceDeleteError:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.delete_skill("to_delete", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4581,7 +4597,7 @@ class TestSkillServiceGetSkillFileContentError:
 
         with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
-                from consts.exceptions import SkillException
+                from contracts.errors.exceptions import SkillException
                 try:
                     service.get_skill_file_content("test_skill", "file.txt")
                     assert False, "Should have raised"
@@ -4600,7 +4616,7 @@ class TestSkillServiceLoadSkillDirectoryError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.load_skill_directory("test_skill")
             assert False, "Should have raised"
@@ -4636,7 +4652,7 @@ class TestSkillServiceGetSkillScriptsError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -4655,7 +4671,7 @@ class TestSkillServiceGetEnabledSkillsForAgentError:
         )
 
         service = SkillService()
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_enabled_skills_for_agent(agent_id=1, tenant_id="tenant1")
             assert False, "Should have raised"
@@ -4675,7 +4691,7 @@ class TestSkillServiceBuildSkillsSummaryError:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.build_skills_summary(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4695,7 +4711,7 @@ class TestSkillServiceGetSkillContentError:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_content("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4714,7 +4730,7 @@ class TestSkillServiceGetSkillFileTreeError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_file_tree("test_skill")
             assert False, "Should have raised"
@@ -4727,7 +4743,7 @@ class TestSkillServiceListSkillInstances:
 
     def test_list_skill_instances(self):
         """Test listing skill instances."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -4741,7 +4757,7 @@ class TestSkillServiceListSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceGetSkillInstance:
@@ -4749,7 +4765,7 @@ class TestSkillServiceGetSkillInstance:
 
     def test_get_skill_instance_found(self):
         """Test getting skill instance when found."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instance_by_id', None)
 
         if original_func is not None:
@@ -4764,7 +4780,7 @@ class TestSkillServiceGetSkillInstance:
             finally:
                 setattr(skill_db_module, 'query_skill_instance_by_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceCreateOrUpdateSkillInstance:
@@ -4772,7 +4788,7 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
 
     def test_create_or_update_skill_instance(self):
         """Test creating/updating skill instance."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         if original_func is not None:
@@ -4790,7 +4806,7 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
             finally:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestUploadZipFilesWithZipError:
@@ -4820,7 +4836,7 @@ class TestUploadZipFilesWithZipError:
     )
     def test_frontmatter_name_replacement_requires_name_field(self, content, error):
         """Renaming requires frontmatter with a top-level name field."""
-        with pytest.raises(skill_service.SkillException, match=error):
+        with pytest.raises(skill_files.SkillException, match=error):
             skill_service._replace_skill_frontmatter_name(content, "new-skill")
 
     def test_frontmatter_name_replacement_preserves_metadata_and_body(self):
@@ -4990,7 +5006,7 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch("management.services.skill.support.CONTAINER_SKILLS_PATH", str(tmp_path)):
+        with patch('management.services.skill.files.CONTAINER_SKILLS_PATH', str(tmp_path)):
             service._upload_zip_files(
                 zip_buffer.getvalue(),
                 "new-skill copy",
@@ -5018,7 +5034,7 @@ class TestUploadZipFilesWithZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        with patch("management.services.skill.support.CONTAINER_SKILLS_PATH", str(tmp_path)):
+        with patch('management.services.skill.files.CONTAINER_SKILLS_PATH', str(tmp_path)):
             service._upload_zip_files(
                 zip_buffer.getvalue(),
                 "new-skill",
@@ -5144,7 +5160,7 @@ class TestParamsDictToStorableWithInvalidData:
             def __repr__(self):
                 raise ValueError("Cannot serialize")
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _params_dict_to_storable({"key": BadJson()})
             assert False, "Should have raised"
@@ -5215,7 +5231,7 @@ class TestGetSkillManagerWithPath:
         """Test get_skill_manager creates with CONTAINER_SKILLS_PATH."""
         skill_service._skill_manager = None
 
-        with patch('management.services.skill.support.SkillManager') as mock_manager:
+        with patch('management.services.skill.files.SkillManager') as mock_manager:
             with patch.object(skill_support, 'CONTAINER_SKILLS_PATH', '/custom/path'):
                 manager = get_skill_manager()
                 mock_manager.assert_called_once_with(base_skills_dir='/custom/path')
@@ -5245,7 +5261,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=None)
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill({"name": "new_skill"})
             assert False, "Should have raised"
@@ -5264,7 +5280,7 @@ class TestSkillServiceCreateSkillFromFileZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(b"PK\x03\x04not a valid zip content", file_type="zip")
             assert False, "Should have raised"
@@ -5297,7 +5313,7 @@ description: Exists
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -5317,7 +5333,7 @@ class TestSkillServiceUpdateSkillFromFileNotFound:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -5345,7 +5361,7 @@ class TestSkillServiceUpdateFromMdInvalidParse:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service._save_skill_upload(b"invalid content", "existing", kind="md", update=True, tenant_id=None, user_id=None)
             assert False, "Should have raised"
@@ -5373,7 +5389,7 @@ name: skill
 
         service = SkillService()
 
-        from consts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file(
                 "nonexistent",
@@ -5562,7 +5578,7 @@ class TestSkillServiceDeleteSkillRmtreeError:
 
         with patch('os.path.exists', return_value=True):
             with patch('shutil.rmtree', side_effect=Exception("rmtree error")):
-                from consts.exceptions import SkillException
+                from contracts.errors.exceptions import SkillException
                 try:
                     service.delete_skill("to_delete", tenant_id="test-tenant")
                     assert False, "Should have raised"
@@ -5835,9 +5851,9 @@ class TestUpdateSkillListAsync:
         mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
         mock_skill_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
-        with patch('management.services.skill.service.get_skill_manager', return_value=mock_skill_manager), \
-                patch('management.services.skill.support.SkillManager', return_value=mock_skill_manager), \
-                patch('management.services.skill.support.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
+        with patch('management.services.skill.transfer.get_skill_manager', return_value=mock_skill_manager), \
+                patch('management.services.skill.files.SkillManager', return_value=mock_skill_manager), \
+                patch('management.services.skill.files.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('management.services.skill.service.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
@@ -5866,12 +5882,12 @@ class TestUpdateSkillListAsync:
         mock_skill_manager.local_skills_dir = TEST_LOCAL_SKILLS_DIR
         mock_skill_manager.resolve_tenant_dir.return_value = TEST_LOCAL_SKILLS_DIR
 
-        with patch('management.services.skill.service.get_skill_manager', return_value=mock_skill_manager), \
-                patch('management.services.skill.support.SkillManager', return_value=mock_skill_manager), \
-                patch('management.services.skill.support.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
+        with patch('management.services.skill.transfer.get_skill_manager', return_value=mock_skill_manager), \
+                patch('management.services.skill.files.SkillManager', return_value=mock_skill_manager), \
+                patch('management.services.skill.files.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('os.path.isfile', return_value=False), \
                 patch('os.path.isdir', return_value=False), \
-                patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
+                patch('management.db.skill.repository.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
                 user_id="test-user"
@@ -5889,7 +5905,7 @@ class TestInitSkillListForTenantAsync:
         from management.services.skill import service as skill_service
 
         mock_update = mocker.patch(
-            'management.services.skill.service.update_skill_list',
+            'management.services.skill.transfer.update_skill_list',
             return_value=None
         )
 
@@ -5920,7 +5936,7 @@ class TestSkillServiceUpdateById:
         )
         mocker.patch("management.services.skill.service._can_edit_skill", return_value=True)
         mocker.patch(
-            "management.services.skill.support.get_user_tenant_by_user_id",
+            'management.services.skill.permission.get_user_tenant_by_user_id',
             return_value={"user_role": "DEV"},
         )
 
@@ -5958,7 +5974,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         (tmp_path / "Skill A").mkdir()
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
 
@@ -6065,7 +6081,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager.local_skills_dir = str(tmp_path)
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
@@ -6121,7 +6137,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager.local_skills_dir = str(tmp_path)
         service.skill_manager.resolve_tenant_dir.return_value = str(tmp_path)
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
@@ -6170,7 +6186,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
@@ -6223,7 +6239,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
@@ -6285,7 +6301,7 @@ class TestSkillServiceUpdateById:
         service.skill_manager = MagicMock()
         service.skill_manager.local_skills_dir = str(tmp_path)
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
@@ -6306,7 +6322,7 @@ class TestSkillServiceUpdateById:
 
     def test_resolve_local_skill_path_unsafe_candidate(self, mocker, tmp_path):
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         outside = str(tmp_path.parent / "escaped")
@@ -6314,20 +6330,20 @@ class TestSkillServiceUpdateById:
             "os.path.realpath",
             side_effect=lambda p: outside if "escaped" in p else str(tmp_path) if str(tmp_path) in p else p,
         )
-        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+        with pytest.raises(skill_files.ForbiddenError, match="Unsafe local skill path"):
             skill_service._resolve_local_skill_path(str(tmp_path), "escaped_skill")
 
     def test_resolve_local_skill_path_unsafe_local_root(self, mocker, tmp_path):
         outside_dir = str(tmp_path.parent / "outside_dir")
         mocker.patch(
-            "management.services.skill.support.CONTAINER_SKILLS_PATH",
+            'management.services.skill.files.CONTAINER_SKILLS_PATH',
             str(tmp_path),
         )
         mocker.patch(
             "os.path.realpath",
             side_effect=lambda p: outside_dir if p == outside_dir else str(tmp_path),
         )
-        with pytest.raises(skill_service.SkillException, match="Unsafe local skills directory"):
+        with pytest.raises(skill_files.SkillException, match="Unsafe local skills directory"):
             skill_service._resolve_local_skill_path(outside_dir, "skill1")
 
 
@@ -6401,49 +6417,49 @@ class TestAstLiteralEval:
         """Test with Constant node."""
         import ast
         node = ast.Constant(value=42)
-        assert skill_service._ast_literal_eval(node) == 42
+        assert skill_params._ast_literal_eval(node) == 42
 
     def test_string_constant(self):
         """Test with string Constant node."""
         import ast
         node = ast.Constant(value='test')
-        assert skill_service._ast_literal_eval(node) == 'test'
+        assert skill_params._ast_literal_eval(node) == 'test'
 
     def test_none_constant(self):
         """Test with None Constant node."""
         import ast
         node = ast.Constant(value=None)
-        assert skill_service._ast_literal_eval(node) is None
+        assert skill_params._ast_literal_eval(node) is None
 
     def test_name_none(self):
         """Test with Name node for None."""
         import ast
         node = ast.Name(id='None')
-        assert skill_service._ast_literal_eval(node) is None
+        assert skill_params._ast_literal_eval(node) is None
 
     def test_name_true(self):
         """Test with Name node for True."""
         import ast
         node = ast.Name(id='True')
-        assert skill_service._ast_literal_eval(node) is True
+        assert skill_params._ast_literal_eval(node) is True
 
     def test_name_false(self):
         """Test with Name node for False."""
         import ast
         node = ast.Name(id='False')
-        assert skill_service._ast_literal_eval(node) is False
+        assert skill_params._ast_literal_eval(node) is False
 
     def test_list_node(self):
         """Test with List node."""
         import ast
         node = ast.List(elts=[ast.Constant(value=1), ast.Constant(value=2)])
-        assert skill_service._ast_literal_eval(node) == [1, 2]
+        assert skill_params._ast_literal_eval(node) == [1, 2]
 
     def test_tuple_node(self):
         """Test with Tuple node."""
         import ast
         node = ast.Tuple(elts=[ast.Constant(value=1), ast.Constant(value=2)])
-        assert skill_service._ast_literal_eval(node) == (1, 2)
+        assert skill_params._ast_literal_eval(node) == (1, 2)
 
 
 class TestParseYamlFallbackPyyaml:
@@ -6462,7 +6478,7 @@ class TestParseYamlFallbackPyyaml:
 
     def test_invalid_yaml(self):
         """Test parsing invalid YAML raises exception."""
-        with pytest.raises(skill_service.SkillException):
+        with pytest.raises(skill_params.SkillException):
             skill_service._parse_yaml_fallback_pyyaml("invalid: yaml: : :")
 
 
@@ -6553,18 +6569,18 @@ class TestCommentedTreeToPlain:
 
     def test_simple_dict(self):
         """Test converting simple dict."""
-        result = skill_service._commented_tree_to_plain({"key": "value"})
+        result = skill_params._commented_tree_to_plain({"key": "value"})
         assert result == {"key": "value"}
 
     def test_simple_list(self):
         """Test converting simple list."""
-        result = skill_service._commented_tree_to_plain([1, 2, 3])
+        result = skill_params._commented_tree_to_plain([1, 2, 3])
         assert result == [1, 2, 3]
 
     def test_nested_structure(self):
         """Test converting nested structure."""
         data = {"outer": {"inner": [1, 2, 3]}}
-        result = skill_service._commented_tree_to_plain(data)
+        result = skill_params._commented_tree_to_plain(data)
         assert result == data
 
 
@@ -6577,17 +6593,17 @@ class TestRuamelTreeToPlain:
 
     def test_simple_dict(self):
         """Test converting simple dict."""
-        result = skill_service._ruamel_tree_to_plain({"key": "value"})
+        result = skill_params._ruamel_tree_to_plain({"key": "value"})
         assert result == {"key": "value"}
 
     def test_simple_list(self):
         """Test converting simple list."""
-        result = skill_service._ruamel_tree_to_plain([1, 2, 3])
+        result = skill_params._ruamel_tree_to_plain([1, 2, 3])
         assert result == [1, 2, 3]
 
     def test_other_value(self):
         """Test with other value types."""
-        result = skill_service._ruamel_tree_to_plain("string")
+        result = skill_params._ruamel_tree_to_plain("string")
         assert result == "string"
 
 
@@ -6660,7 +6676,7 @@ class TestSkillStreamingAndInstallation:
             "management.services.skill.service.skill_db.check_skill_list_initialized",
             return_value=True,
         )
-        update = mocker.patch("management.services.skill.service.update_skill_list")
+        update = mocker.patch('management.services.skill.transfer.update_skill_list')
 
         result = await skill_service.init_skill_list_for_tenant("tenant-1", "user-1")
 
@@ -6718,7 +6734,7 @@ class TestSkillStreamingAndInstallation:
     def test_get_official_skills_status_covers_installable_and_missing_resources(self, mocker, tmp_path):
         (tmp_path / "alpha.zip").write_bytes(b"zip")
         (tmp_path / "beta.zip").write_bytes(b"zip")
-        mocker.patch("management.services.skill.service.OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch('management.services.skill.transfer.OFFICIAL_SKILLS_ZIP_PATH', str(tmp_path))
         mocker.patch(
             "management.services.skill.service.skill_db.get_skill_by_name",
             side_effect=lambda name, tenant: (
@@ -6736,7 +6752,7 @@ class TestSkillStreamingAndInstallation:
         )
         manager = MagicMock()
         manager.resolve_tenant_dir.return_value = str(tmp_path / "resources")
-        mocker.patch("management.services.skill.service.get_skill_manager", return_value=manager)
+        mocker.patch('management.services.skill.transfer.get_skill_manager', return_value=manager)
         mocker.patch("os.path.isdir", side_effect=lambda path: path == str(tmp_path))
 
         result = skill_service.get_official_skills_with_status("tenant-1")
@@ -6757,7 +6773,7 @@ class TestLocalSkillPathSecurity:
         return SkillService(skill_manager=manager, tenant_id="tenant-1")
 
     def test_resolver_rejects_parent_absolute_drive_and_unc_paths(self, mocker, tmp_path):
-        mocker.patch("management.services.skill.support.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch('management.services.skill.files.CONTAINER_SKILLS_PATH', str(tmp_path))
 
         for unsafe_path in (
             "../secret.txt",
@@ -6765,14 +6781,14 @@ class TestLocalSkillPathSecurity:
             "C:\\temp\\secret.txt",
             "\\\\host\\share\\x",
         ):
-            with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+            with pytest.raises(skill_files.ForbiddenError, match="Unsafe local skill path"):
                 skill_service._resolve_local_skill_path(str(tmp_path), "safe-skill", unsafe_path)
 
     def test_zip_slip_is_rejected_before_any_file_is_written(self, mocker, tmp_path):
         import zipfile
 
         service = self._service_for_path(tmp_path)
-        mocker.patch("management.services.skill.support.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch('management.services.skill.files.CONTAINER_SKILLS_PATH', str(tmp_path))
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as zf:
             zf.writestr("SKILL.md", "---\nname: poczip\ndescription: poc\n---\n")
@@ -6790,7 +6806,7 @@ class TestLocalSkillPathSecurity:
 
     def test_file_read_traversal_is_rejected(self, mocker, tmp_path):
         service = self._service_for_path(tmp_path)
-        mocker.patch("management.services.skill.support.CONTAINER_SKILLS_PATH", str(tmp_path))
+        mocker.patch('management.services.skill.files.CONTAINER_SKILLS_PATH', str(tmp_path))
         outside_file = tmp_path.parent / "secret.txt"
         outside_file.write_text("secret", encoding="utf-8")
 
@@ -6815,11 +6831,11 @@ class TestLocalSkillPathSecurity:
         sibling_file.parent.mkdir()
         sibling_file.write_text("payload", encoding="utf-8")
         mocker.patch(
-            "management.services.skill.support._resolve_local_skill_path",
+            'management.services.skill.files._resolve_local_skill_path',
             side_effect=[str(skill_root), str(sibling_file)],
         )
 
-        with pytest.raises(skill_service.ForbiddenError, match="Unsafe local skill path"):
+        with pytest.raises(skill_files.ForbiddenError, match="Unsafe local skill path"):
             skill_service._skill_file_preview_status(
                 str(tmp_path),
                 "safe-skill",
@@ -6870,7 +6886,7 @@ class TestSkillServicePureHelpers:
             zf.writestr("skill/skill.md", "second")
 
         with zipfile.ZipFile(io.BytesIO(archive.getvalue())) as zf:
-            with pytest.raises(skill_service.SkillException, match="same path"):
+            with pytest.raises(skill_files.SkillException, match="same path"):
                 skill_service._zip_members(zf)
 
 
@@ -6950,7 +6966,7 @@ class TestSkillServiceReportedCoverageGaps:
         ) == "readable"
 
     def test_schema_helpers_cover_empty_and_empty_zip_results(self, mocker):
-        assert skill_service._parse_skill_schema_from_yaml_bytes(b"   ") == []
+        assert skill_params._parse_skill_schema_from_yaml_bytes(b"   ") == []
 
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as zf:
@@ -6969,7 +6985,7 @@ class TestSkillServiceReportedCoverageGaps:
             zf.writestr("demo/scripts/bad.py", b"\x80")
             zf.writestr("demo/scripts/syntax.py", "def broken(")
 
-        mocker.patch.object(skill_service, "decode_skill_text", side_effect=[UnicodeDecodeError(
+        mocker.patch.object(skill_params, "decode_skill_text", side_effect=[UnicodeDecodeError(
             "unknown", b"\x80", 0, 1, "bad encoding"
         ), "def broken("])
         assert skill_service._get_skill_inputs_from_zip(
@@ -7093,14 +7109,14 @@ class TestSkillServiceReportedCoverageGaps:
             {"content": "schema content"},
             {"content": "script content"},
         ]
-        mocker.patch.object(skill_service, "get_skill_manager", return_value=manager)
+        mocker.patch.object(skill_transfer, "get_skill_manager", return_value=manager)
         mocker.patch.object(
-            skill_service,
+            skill_transfer,
             "_get_skill_inputs_from_code",
             return_value=[{"name": "query", "type": "string"}],
         )
         mocker.patch.object(
-            skill_service.aiofiles,
+            skill_transfer.aiofiles,
             "open",
             new=lambda *args, **kwargs: MockAiofilesContextManager(
                 b"query:\n  type: string\n"
@@ -7118,9 +7134,9 @@ class TestSkillServiceReportedCoverageGaps:
         (tmp_path / "official.zip").write_bytes(b"official")
         (tmp_path / "custom.zip").write_bytes(b"custom")
         (tmp_path / "new.zip").write_bytes(b"new")
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
         mocker.patch.object(
-            skill_service.skill_db,
+            skill_transfer.skill_db,
             "get_skill_by_name",
             side_effect=lambda name, tenant: (
                 {"skill_id": 1, "source": "official"}
@@ -7167,8 +7183,8 @@ class TestSkillServiceReportedCoverageGaps:
     def test_install_skills_from_zip_preserves_app_exception(self, mocker, tmp_path):
         """Tenant skill quota errors from ZIP installation must propagate to the caller."""
         (tmp_path / "quota.zip").write_bytes(b"quota")
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
-        mocker.patch.object(skill_service.skill_db, "get_skill_by_name", return_value=None)
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_transfer.skill_db, "get_skill_by_name", return_value=None)
         quota_error = AppException(
             "120104",
             "Tenant skill limit reached",
@@ -7188,9 +7204,9 @@ class TestSkillServiceReportedCoverageGaps:
 
     def test_install_skills_from_zip_reuses_existing_official_alias(self, mocker, tmp_path):
         (tmp_path / "docx.zip").write_bytes(b"docx")
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
         mocker.patch.object(
-            skill_service.skill_db,
+            skill_transfer.skill_db,
             "get_skill_by_name",
             side_effect=lambda name, tenant: {
                 "skill_id": 1 if name == "docx" else 2,
@@ -7219,10 +7235,10 @@ class TestSkillServiceReportedCoverageGaps:
 
     def test_install_skills_from_zip_handles_missing_directory_and_scan_error(self, mocker, tmp_path):
         missing = tmp_path / "missing"
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(missing))
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(missing))
         assert skill_service.install_skills_from_zip_for_tenant(["demo"], "tenant-1") == []
 
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
         mocker.patch("os.scandir", side_effect=OSError("scan failed"))
         assert skill_service.install_skills_from_zip_for_tenant(["demo"], "tenant-1") == []
 
@@ -7233,7 +7249,7 @@ class TestSkillServiceReportedCoverageGaps:
         unsafe_entry = MagicMock(name="unsafe.zip", path=str(outside_dir / "unsafe.zip"))
         unsafe_entry.name = "unsafe.zip"
         unsafe_entry.is_file.return_value = True
-        mocker.patch.object(skill_service, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
+        mocker.patch.object(skill_transfer, "OFFICIAL_SKILLS_ZIP_PATH", str(tmp_path))
 
         with patch("os.scandir", return_value=[regular_entry, unsafe_entry]):
             assert skill_service.install_skills_from_zip_for_tenant(["unsafe"], "tenant-1") == []

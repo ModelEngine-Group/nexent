@@ -21,7 +21,7 @@ case:
       fixture，不读取生产凭据。
   steps:
   - order: 1
-    action: 在本地测试环境直接导入 backend/services/startup_recovery_service.py 的 recover_data_process_tasks 与 backend/database/knowledge_file_lifecycle_db.py
+    action: 在本地测试环境直接导入 backend/management/recovery.py 的 recover_data_process_tasks 与 backend/database/knowledge_file_lifecycle_db.py
       的 fail_interrupted_file_tasks，构造测试数据库并预置 knowledge_file_lifecycle_t 记录；测试代码不得读取生产凭据。
     expected: PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
       或 FORWARD）。

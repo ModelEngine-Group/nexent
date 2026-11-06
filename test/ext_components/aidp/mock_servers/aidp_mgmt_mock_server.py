@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 
@@ -15,7 +17,9 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Channels               (ingestion channels)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Retry  (retry failed docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/OcrAnnotate/{file_uuid}  (preview doc)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
 Document status simulation (drives the "processing status" UI):
@@ -29,17 +33,22 @@ Document status simulation (drives the "processing status" UI):
     non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
   * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
     real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
-  * ``POST .../KnowledgeFiles/History`` is paginated (body ``page``, ten entries
-    per page) and lists files that are still being processed first, so a burst of
-    simultaneous uploads spills onto the next page and the caller has to walk the
-    pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
+  * ``POST .../KnowledgeFiles/History`` returns records from the last 30 days
+    and supports page, page_size, file-name keyword, and numeric status filters.
+    Tune the default page size with ``POST /_mock/history-page-size?size=N``.
+  * ``GET .../OcrAnnotate/{file_uuid}`` serves docx/xlsx/pptx/pdf/txt unchanged
+    and answers every other format with a synthetic PDF - which is what real AIDP
+    does - reporting the name it served in the ``X-File-Name`` header, so a
+    converted document no longer carries its uploaded extension.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
 tests or frontend sessions survive across restarts without re-creation
 (which was otherwise the cause of spurious 404s in list endpoints against
 stale Nexent permission rows). ``POST /_reset`` clears the file and
-rebuilds the seed data. Run with:
+rebuilds the seed data. On startup, the mock upgrades the existing FAQ
+seed to a fully populated Chinese knowledge base with recent file and
+upload-task examples without clearing other persisted state. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
@@ -51,13 +60,14 @@ import os
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from starlette.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
@@ -81,6 +91,10 @@ app.add_middleware(
 # =============================================================================
 EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
+
+# Retrieval channels accepted in ``search_method``; three channels are always
+# expressed as the canonical ``hybrid_search`` value.
+_RETRIEVAL_CHANNELS = ("vector_search", "full_text_search", "graph_search")
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 
@@ -88,7 +102,7 @@ _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 STATUS_PROCESSING = "PROCESSING"
 STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
-_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED}
+_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, 1, 3, 5, "1", "3", "5"}
 
 # One ingestion channel per knowledge base, exposed at the KB-scoped path the
 # real AIDP uses (``.../KnowledgeBases/{kds_id}/Channels``). ``src_dir`` embeds
@@ -106,6 +120,11 @@ _UPLOAD_SECONDS = 0.0
 _FILE_QUERY_SECONDS = 0.0
 _FILE_QUERY_FAIL = False
 _FILE_DELETE_FAIL = False
+# Real AIDP keeps a deleted row visible with file_status=1 for about five
+# seconds before removing it from KnowledgeFiles. History keeps the row as an
+# audit record. Tests can override this to zero when they do not need the
+# transition window.
+_FILE_DELETE_SECONDS = 5.0
 
 # Entries one history page returns. Real AIDP pages the channel directory, so the
 # backend has to walk the pages; keep this small to exercise that locally.
@@ -125,6 +144,13 @@ _STATE_DIR = _STATE_FILE.parent
 # =============================================================================
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+# Uploaded file payloads keyed by ``file_uuid``.
+#
+# Real AIDP hands the original file back on download and preview, which is what
+# lets the frontend render Office formats itself. Payloads therefore have to
+# survive an upload, but they are kept in memory only: ``_save_state`` serializes
+# metadata, and a mock restart legitimately loses the bytes it received.
+_DOCUMENT_PAYLOADS: dict[str, bytes] = {}
 
 # =============================================================================
 # Failure injection counters (used to test retry logic end-to-end)
@@ -170,7 +196,8 @@ def _seed_initial_data() -> None:
         _KNOWLEDGE_BASES[kb["kds_id"]] = kb
         _DOCUMENTS_BY_KB[kb["kds_id"]] = []
 
-    # Seed some documents for the FAQ KB so list_docs is non-empty by default.
+    # Seed completed files and recent tasks for both detail-page tabs.
+    now = int(time.time())
     _DOCUMENTS_BY_KB["aidp-kb-faq"] = [
         {
             "file_uuid": "00000000-0000-4000-8000-000000000001",
@@ -188,7 +215,87 @@ def _seed_initial_data() -> None:
             "file_type": "md",
             "create_time": 1718000500,
         },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000003",
+            "file_ino_no": 1003,
+            "file_name": "向量入库失败示例.docx",
+            "file_size": 3072,
+            "file_type": "docx",
+            "first_upload_time": now - 3600,
+            "update_time": now - 1800,
+            "status": 3,
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1520, "msg": "向量服务暂时不可用，任务未能完成向量入库。"},
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000004",
+            "file_ino_no": 1004,
+            "file_name": "排队中的制度说明.pdf",
+            "file_size": 5120,
+            "file_type": "pdf",
+            "first_upload_time": now - 900,
+            "update_time": now - 600,
+            "status": 4,
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000005",
+            "file_ino_no": 1005,
+            "file_name": "图谱入库失败示例.pdf",
+            "file_size": 8192,
+            "file_type": "pdf",
+            "first_upload_time": now - 7200,
+            "update_time": now - 5400,
+            "status": 5,
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1601, "msg": "图谱任务处理失败，请检查知识图谱配置后重试。"},
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000006",
+            "file_ino_no": 1006,
+            "file_name": "正在提取的服务手册.txt",
+            "file_size": 4096,
+            "file_type": "txt",
+            "first_upload_time": now - 300,
+            "update_time": now - 120,
+            "status": 2,
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000007",
+            "file_ino_no": 1007,
+            "file_name": "删除失败示例.txt",
+            "file_size": 1024,
+            "file_type": "txt",
+            "first_upload_time": now - 7200,
+            "update_time": now - 3600,
+            "status": 1,
+            "file_status": 2,
+        },
     ]
+    _KNOWLEDGE_BASES["aidp-kb-faq"].update({
+        "embedding_model": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+        "vlm_model": "Qwen3-VL-8B-Instruct",
+        "chunk_mode": 0,
+        "chunk_token_num": 512,
+        "chunk_overlap_num": 10,
+        "topk": 10,
+        "similarity": 0.6,
+        "is_exist_graph": True,
+        "llm_model_name": "qwen3_8b",
+        "graph_config": {
+            "domain": "general",
+            "retrieve_subgraph_hop": 2,
+            "no_think_mode": True,
+            "prompt_language": "chinese",
+            "prompt_text": "作为专业知识图谱构建引擎，仅提取文本实体、关系、属性三元组，输出固定 JSON 数组。",
+            "synonym_merge_enable": False,
+            "disambiguation_enable": False,
+            "llm_model_name": "qwen3_8b",
+        },
+    })
 
 
 def _save_state() -> None:
@@ -231,6 +338,9 @@ def _load_state() -> None:
                 raise ValueError("state file payload is not {dict, dict}")
             _KNOWLEDGE_BASES.update(kb_data)
             _DOCUMENTS_BY_KB.update(doc_data)
+            for kb in _KNOWLEDGE_BASES.values():
+                if isinstance(kb, dict):
+                    kb.pop("sensitive_intercept_enalbe", None)
             logger.info(
                 "STATE LOAD  restored %d KBs from %s",
                 len(_KNOWLEDGE_BASES), _STATE_FILE,
@@ -266,40 +376,273 @@ def _ensure_document_uuids() -> None:
 _load_state()
 
 
-def _ensure_chinese_file_demo() -> None:
-    """Backfill one Chinese catalog/file sample without task or detail fixtures."""
-    kb_id = "aidp-kb-faq"
-    kb = _KNOWLEDGE_BASES.get(kb_id)
+def _ensure_detail_demo_tasks() -> None:
+    """Retain the legacy opt-in task fixture for existing local test workflows."""
+    if os.environ.get("AIDP_MOCK_ENABLE_DETAIL_FIXTURES") != "1":
+        return
+    kds_id = "aidp-kb-faq"
+    if kds_id not in _KNOWLEDGE_BASES:
+        return
+    docs = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    known_uuids = {str(doc.get("file_uuid")) for doc in docs if doc.get("file_uuid")}
+    now = int(time.time())
+    fixtures = [
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000003",
+            "file_ino_no": 1003,
+            "file_name": "向量入库失败示例.docx",
+            "file_size": 3072,
+            "file_type": "docx",
+            "first_upload_time": now - 3600,
+            "update_time": now - 1800,
+            "status": 3,
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1520, "msg": "向量服务暂时不可用，任务未能完成向量入库。"},
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000004",
+            "file_ino_no": 1004,
+            "file_name": "排队中的制度说明.pdf",
+            "file_size": 5120,
+            "file_type": "pdf",
+            "first_upload_time": now - 900,
+            "update_time": now - 600,
+            "status": 4,
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000005",
+            "file_ino_no": 1005,
+            "file_name": "图谱入库失败示例.pdf",
+            "file_size": 8192,
+            "file_type": "pdf",
+            "first_upload_time": now - 7200,
+            "update_time": now - 5400,
+            "status": 5,
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1601, "msg": "图谱任务处理失败，请检查知识图谱配置后重试。"},
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000006",
+            "file_ino_no": 1006,
+            "file_name": "正在提取的服务手册.txt",
+            "file_size": 4096,
+            "file_type": "txt",
+            "first_upload_time": now - 300,
+            "update_time": now - 120,
+            "status": 2,
+        },
+    ]
+    additions = [fixture for fixture in fixtures if fixture["file_uuid"] not in known_uuids]
+    if additions:
+        docs.extend(additions)
+        logger.info("DETAIL FIXTURES  added %d sample upload tasks to %s", len(additions), kds_id)
+        _save_state()
+
+
+def _ensure_chinese_demo_data() -> None:
+    """Keep one persisted AIDP sample fully populated for Chinese UI review."""
+    kds_id = "aidp-kb-faq"
+    kb = _KNOWLEDGE_BASES.get(kds_id)
     if kb is None:
         return
-    if kb.get("kds_name") in (None, "", "AIDP FAQ"):
-        kb["kds_name"] = "政务服务与城市治理知识库"
-    if kb.get("description") in (None, "", "Frequently asked questions and troubleshooting notes."):
-        kb["description"] = "汇集政务办事指南、公共服务事项和城市运行制度，供工作人员快速检索与答疑。"
-    docs = _DOCUMENTS_BY_KB.setdefault(kb_id, [])
-    known = {str(doc.get("file_uuid")) for doc in docs}
+
     now = int(time.time())
-    for number, (name, extension, size) in enumerate([
-        ("政务办事指南.pdf", "pdf", 1048576),
-        ("城市运行管理制度.docx", "docx", 3276800),
-        ("公共服务事项清单.xlsx", "xlsx", 917504),
-        ("热线常见问题.md", "md", 58368),
-        ("基层治理工作周报.csv", "csv", 393216),
-        ("应急预案与值班流程.pptx", "pptx", 6815744),
-        ("市民服务大厅导览.png", "png", 2752512),
-        ("城市运行平台使用说明.txt", "txt", 44032),
-    ], 1):
-        fixture_number = (1, 2, 7, 8, 9, 10, 11, 12)[number - 1]
-        file_uuid = f"00000000-0000-4000-8000-{fixture_number:012d}"
-        if file_uuid not in known:
-            docs.append({"file_uuid": file_uuid, "file_ino_no": 1000 + fixture_number,
-                         "file_name": name, "file_type": extension, "file_size": size,
-                         "create_time": now - number * 3600, "update_time": now - number * 1800,
-                         "status": STATUS_COMPLETED})
+    name = "政务服务与城市治理知识库"
+    description = "汇集政务办事指南、公共服务事项、城市运行制度和应急处置资料，供工作人员快速检索与答疑。"
+    if not kb.get("kds_name") or kb.get("kds_name") == "AIDP FAQ":
+        kb["kds_name"] = name
+    if not kb.get("description") or kb.get("description") == "Frequently asked questions and troubleshooting notes.":
+        kb["description"] = description
+
+    defaults = {
+        "state": 4,
+        "create_time": now - 45 * 24 * 60 * 60,
+        "update_time": now - 24 * 60 * 60,
+        "created_by": "王晓明",
+        "user_name": "王晓明",
+        "is_private": 0,
+        "current_cap": 0.84,
+        "document_count": 8,
+        "chunk_count": 286,
+        "embedding_model": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+        "is_multimodal": True,
+        "caption_enable": 1,
+        "vlm_model": "Qwen3-VL-8B-Instruct",
+        "chunk_mode": 0,
+        "chunk_token_num": 1024,
+        "chunk_overlap_num": 128,
+        "topk": 10,
+        "similarity": 0.62,
+        "is_exist_graph": True,
+        "llm_model_name": "qwen3_8b",
+    }
+    if kb.get("create_time") == 1718000300:
+        kb["create_time"] = now - 45 * 24 * 60 * 60
+    if kb.get("update_time") == 1718000300:
+        kb["update_time"] = now - 24 * 60 * 60
+    for key, value in defaults.items():
+        current = kb.get(key)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            kb[key] = value
+
+    graph_defaults = {
+        "domain": "general",
+        "retrieve_subgraph_hop": 2,
+        "no_think_mode": False,
+        "prompt_language": "chinese",
+        "llm_model_name": "qwen3_8b",
+        "prompt_text": (
+            "你是政务服务与城市治理领域的知识图谱构建助手。请从材料中识别办事事项、办理部门、"
+            "申请条件、所需材料、办理流程、办理时限、服务地点、政策依据、城市设施、责任单位和应急事件。"
+            "仅根据原文建立准确的实体与关系；实体名称保持原文，合并明确指向同一对象的别名，"
+            "对简称或同名实体结合上下文消歧。不要补充材料中没有的信息，按接口要求输出结构化 JSON。"
+        ),
+        "synonym_merge_enable": True,
+        "disambiguation_enable": True,
+    }
+    graph_config = kb.get("graph_config")
+    if isinstance(graph_config, str):
+        try:
+            graph_config = json.loads(graph_config)
+        except json.JSONDecodeError:
+            graph_config = {}
+    if not isinstance(graph_config, dict):
+        graph_config = {}
+    for key, value in graph_defaults.items():
+        current = graph_config.get(key)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            graph_config[key] = value
+    kb["graph_config"] = graph_config
+
+    def demo_file(
+        number: int,
+        file_name: str,
+        file_type: str,
+        file_size: int,
+        days_ago: int,
+        status: int,
+        *,
+        hours_since_update: int = 2,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        uploaded_at = now - days_ago * 24 * 60 * 60
+        updated_at = now - hours_since_update * 60 * 60
+        item: dict[str, Any] = {
+            "file_uuid": f"00000000-0000-4000-8000-{number:012d}",
+            "file_ino_no": 1000 + number,
+            "file_name": file_name,
+            "file_size": file_size,
+            "file_type": file_type,
+            "import_mode": "本地上传",
+            "first_upload_time": uploaded_at,
+            "update_time": updated_at,
+            "status": status,
+        }
+        if failure_reason:
+            item["extraction_failure_reason"] = failure_reason
+        return item
+
+    vector_failure = json.dumps(
+        {
+            "error_code": 1520,
+            "msg": "文档解析和分片已完成，但向量索引服务暂时不可用，未能写入向量库。请稍后重新提取。",
+        },
+        ensure_ascii=False,
+    )
+    graph_failure = json.dumps(
+        {
+            "error_code": 1601,
+            "msg": "文件已完成向量化，但实体关系抽取未能完成，图谱数据没有写入。请检查知识图谱配置后重试。",
+        },
+        ensure_ascii=False,
+    )
+    fixtures = [
+        demo_file(1, "政务服务办事指南.pdf", "pdf", 1_835_008, 18, 1, hours_since_update=24),
+        demo_file(2, "城市运行管理制度汇编.docx", "docx", 3_276_800, 16, 1, hours_since_update=12),
+        demo_file(
+            3, "公共服务目录更新.docx", "docx", 482_304, 2, 3,
+            hours_since_update=1, failure_reason=vector_failure,
+        ),
+        demo_file(4, "新市民服务政策手册.pdf", "pdf", 2_146_304, 0, 4, hours_since_update=0),
+        demo_file(
+            5, "城市设施关联关系数据.xlsx", "xlsx", 786_432, 1, 5,
+            hours_since_update=3, failure_reason=graph_failure,
+        ),
+        demo_file(6, "医保异地办理流程说明.txt", "txt", 36_864, 0, 2, hours_since_update=0),
+        demo_file(7, "公共服务事项清单.xlsx", "xlsx", 917_504, 14, 1, hours_since_update=48),
+        demo_file(8, "12345热线常见问题与答复.md", "md", 58_368, 12, 1, hours_since_update=30),
+        demo_file(9, "基层治理工作周报.csv", "csv", 393_216, 10, 1, hours_since_update=20),
+        demo_file(10, "应急预案与值班流程.pptx", "pptx", 6_815_744, 8, 1, hours_since_update=16),
+        demo_file(11, "市民服务大厅导览.png", "png", 2_752_512, 6, 1, hours_since_update=8),
+        demo_file(12, "城市运行平台使用说明.txt", "txt", 44_032, 4, 1, hours_since_update=4),
+    ]
+
+    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    documents_by_uuid = {
+        str(document.get("file_uuid")): document
+        for document in documents
+        if isinstance(document, dict) and document.get("file_uuid")
+    }
+    legacy_names = {
+        "00000000-0000-4000-8000-000000000001": {"常见问题汇总.txt"},
+        "00000000-0000-4000-8000-000000000002": {"troubleshooting.md"},
+        "00000000-0000-4000-8000-000000000003": {"向量入库失败示例.docx"},
+        "00000000-0000-4000-8000-000000000004": {"排队中的制度说明.pdf"},
+        "00000000-0000-4000-8000-000000000005": {"图谱入库失败示例.pdf"},
+        "00000000-0000-4000-8000-000000000006": {"正在提取的服务手册.txt"},
+    }
+    for fixture in fixtures:
+        existing = documents_by_uuid.get(fixture["file_uuid"])
+        if existing is None:
+            documents.append(fixture)
+            documents_by_uuid[fixture["file_uuid"]] = fixture
+        else:
+            if not existing.get("file_name") or existing.get("file_name") in legacy_names.get(
+                fixture["file_uuid"], set()
+            ):
+                existing["file_name"] = fixture["file_name"]
+            if existing.get("status") is None or existing.get("status") == "":
+                existing["status"] = fixture["status"]
+            raw_status = str(existing.get("status", "")).strip().upper()
+            status_aliases = {
+                "COMPLETED": "1",
+                "SUCCESS": "1",
+                "PROCESSING": "2",
+                "EXTRACTING": "2",
+                "FAILED": "3",
+                "VECTOR_INGESTION_FAILED": "3",
+                "UPLOADING": "4",
+                "QUEUED": "4",
+                "GRAPH_INGESTION_FAILED": "5",
+            }
+            status_matches_fixture = (
+                status_aliases.get(raw_status, raw_status) == str(fixture["status"])
+            )
+            for key, value in fixture.items():
+                if key in {"file_name", "status"}:
+                    continue
+                if key in {"error_code", "extraction_failure_reason", "reason"}:
+                    if status_matches_fixture and not existing.get(key):
+                        existing[key] = value
+                    continue
+                current = existing.get(key)
+                if current is None or (isinstance(current, str) and not current.strip()):
+                    existing[key] = value
+
+    logger.info(
+        "DEMO FIXTURE  ensured Chinese knowledge base %s with %d files",
+        kds_id,
+        len(documents),
+    )
     _save_state()
 
 
-_ensure_chinese_file_demo()
+_ensure_detail_demo_tasks()
+_ensure_chinese_demo_data()
 _ensure_document_uuids()
 _save_state()
 
@@ -309,8 +652,103 @@ def _public_document(document: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in document.items() if not key.startswith("_")}
 
 
+def _active_documents(kds_id: str) -> List[Dict[str, Any]]:
+    """Return completed files still visible in KnowledgeFiles.
+
+    A successful Remove marks the row ``file_status=1`` and keeps it visible
+    until ``_deleted_at`` passes; after that the row is hidden here but stays in
+    the history audit log.
+    """
+    now = time.time()
+    return [
+        doc
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+        and not (
+            isinstance(doc.get("_deleted_at"), (int, float))
+            and doc["_deleted_at"] <= now
+        )
+    ]
+
+
+_DERIVED_KB_FIELDS = frozenset(
+    {
+        "document_count",
+        "update_time",
+        "embedding_model",
+        "rerank_model",
+        "chunk_mode",
+        "chunk_token_num",
+        "chunk_overlap_num",
+        "caption_enable",
+        "is_multimodal",
+        "topk",
+        "llm_model_name",
+        "created_by",
+        "creator_name",
+    }
+)
+
+
+def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
+    """Mirror the live AIDP detail response, not the mock's internal record.
+
+    The live service keeps chunking and embedding settings inside
+    ``kms_config_str``, exposes ``top_k`` (with the underscore), nests the graph
+    LLM model inside ``graph_config``, and does not return ``update_time``,
+    ``rerank_model``, ``is_multimodal`` or any ``retrieve_default_topk``.
+    """
+    result = {
+        key: value
+        for key, value in kb.items()
+        if not key.startswith("_") and key not in _DERIVED_KB_FIELDS
+    }
+    result["top_k"] = kb.get("top_k", kb.get("topk", 10))
+    kms_config = kb.get("kms_config_str")
+    if not (isinstance(kms_config, str) and kms_config.strip()):
+        kms_config = {
+            "chunk_token_num": kb.get("chunk_token_num", 512),
+            "chunk_overlap_num": kb.get("chunk_overlap_num", 51),
+            "embedding_model": kb.get(
+                "embedding_model",
+                "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+            ),
+            "caption_enable": kb.get(
+                "caption_enable", 1 if kb.get("vlm_model") else 0
+            ),
+            "chunk_mode": kb.get("chunk_mode", 0),
+        }
+        kms_config = json.dumps(kms_config, ensure_ascii=False)
+    result["kms_config_str"] = kms_config
+
+    graph = kb.get("graph_config")
+    if isinstance(graph, str):
+        try:
+            graph = json.loads(graph)
+        except json.JSONDecodeError:
+            graph = None
+    if isinstance(graph, dict):
+        graph = dict(graph)
+        graph.pop("retrieve_default_topk", None)
+        model_name = kb.get("llm_model_name")
+        if isinstance(model_name, str) and model_name.strip():
+            graph.setdefault("llm_model_name", model_name)
+        result["graph_config"] = json.dumps(graph, ensure_ascii=False)
+    else:
+        result["graph_config"] = ""
+
+    result["vlm_model"] = kb.get("vlm_model", "")
+    result["similarity"] = kb.get("similarity", 0.0)
+    result["is_exist_graph"] = bool(kb.get("is_exist_graph", False))
+    result["is_personal"] = kb.get("is_personal", 0)
+    result["state"] = kb.get("state", 4)
+    result["role"] = kb.get("role", "Owner")
+    result["user_name"] = kb.get("user_name")
+    return result
+
+
 def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
-    return next(
+    found = next(
         (
             document
             for document in _DOCUMENTS_BY_KB.get(kds_id, [])
@@ -318,10 +756,25 @@ def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
         ),
         None,
     )
+    if found is None:
+        return None
+    deleted_at = found.get("_deleted_at")
+    if isinstance(deleted_at, (int, float)) and deleted_at <= time.time():
+        return None
+    return found
 
 
 def _document_content(document: Dict[str, Any]) -> bytes:
-    """Build deterministic mock content for a document download."""
+    """Return the bytes AIDP would serve for a document download.
+
+    Uploaded documents are returned unchanged, mirroring real AIDP. Documents
+    that only exist as metadata (the seeded ones, or anything restored from the
+    state file after a restart) have no payload, so they fall back to
+    deterministic text that keeps the download contract testable.
+    """
+    payload = _DOCUMENT_PAYLOADS.get(str(document.get("file_uuid")))
+    if payload is not None:
+        return payload
     return (
         f"Mock AIDP content for {document.get('file_name', 'download')}\n"
     ).encode("utf-8")
@@ -334,6 +787,77 @@ def _content_disposition(filename: str) -> str:
         for char in filename
     )
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+
+
+# Extensions AIDP can render itself: those are served byte-for-byte, everything
+# else is converted, which is why only these keep their extension in the name
+# reported through ``X-File-Name``.
+_NATIVE_PREVIEW_EXTENSIONS = {"docx", "xlsx", "pptx", "pdf", "txt"}
+
+
+def _synthetic_pdf(text: str) -> bytes:
+    """Build a minimal, valid single-page PDF standing in for a conversion.
+
+    The mock cannot really convert a document, so a converted preview has to be
+    answered with something a PDF viewer accepts. Offsets are computed here so
+    the cross-reference table is correct and the file opens in pdf.js.
+    """
+    stream = f"BT /F1 12 Tf 40 60 Td ({text}) Tj ET".encode("ascii", "replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 120] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+
+    xref_offset = len(pdf)
+    pdf += b"xref\n0 %d\n" % (len(objects) + 1)
+    pdf += b"0000000000 65535 f \n"
+    for offset in offsets:
+        pdf += b"%010d 00000 n \n" % offset
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref_offset,
+    )
+    return bytes(pdf)
+
+
+def _preview_payload(document: Dict[str, Any]) -> tuple[bytes, str]:
+    """Return ``(content, served_file_name)`` for a preview request.
+
+    Mirrors AIDP: docx/xlsx/pptx/pdf/txt come back unchanged, every other format
+    comes back as a PDF whose name replaces the uploaded extension. The served
+    name is what the caller reads from ``X-File-Name``.
+    """
+    filename = str(document.get("file_name") or "document")
+    stem, dot, extension = filename.rpartition(".")
+    if dot and extension.lower() in _NATIVE_PREVIEW_EXTENSIONS:
+        return _document_content(document), filename
+
+    served_name = f"{stem or 'document'}.pdf"
+    return _synthetic_pdf(f"AIDP conversion of {filename}"), served_name
+
+
+def _attach_served_file_name(response: StreamingResponse, file_name: str) -> StreamingResponse:
+    """Attach ``X-File-Name`` the way AIDP does: raw UTF-8 header bytes.
+
+    Starlette encodes header values as latin-1, which a Chinese file name cannot
+    survive, so the header is appended to ``raw_headers`` directly. Real AIDP
+    sends these bytes as-is, and reproducing that is what keeps the proxy's
+    non-ASCII handling covered by local runs.
+    """
+    response.raw_headers.append((b"x-file-name", file_name.encode("utf-8")))
+    return response
 
 
 # =============================================================================
@@ -398,6 +922,28 @@ def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
     return _doc_effective_status(doc) == 1
 
 
+def _document_timestamp(document: Dict[str, Any]) -> float | None:
+    """Return the best available upload timestamp in epoch seconds."""
+    value = (
+        document.get("first_upload_time")
+        or document.get("create_time")
+        or document.get("created_at")
+        or document.get("update_time")
+        or document.get("updated_at")
+    )
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
 # =============================================================================
 # Request Models
 # =============================================================================
@@ -407,12 +953,12 @@ class CreateKbBody(BaseModel):
     embedding_model: Optional[str] = None
     is_multimodal: Optional[bool] = None
     vision_model: Optional[str] = None
-    chunk_token_num: int = 1024
-    chunk_overlap_num: int = 128
+    chunk_token_num: int = 512
+    chunk_overlap_num: int = 51
     chunk_mode: int = 0
     is_personal: int = 0
     topk: int = 10
-    similarity: float = 0.6
+    similarity: float = 0.0
     caption_enable: int = 0
     vlm_model: str = ""
     is_exist_graph: bool = False
@@ -422,6 +968,14 @@ class CreateKbBody(BaseModel):
 class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    chunk_mode: Optional[int] = None
+    chunk_token_num: Optional[int] = None
+    chunk_overlap_num: Optional[int] = None
+    topk: Optional[int] = None
+    caption_enable: Optional[int] = None
+    vlm_model: Optional[str] = None
+    is_exist_graph: Optional[bool] = None
+    graph_config: Optional[str] = None
 
 
 class DocHistoryBody(BaseModel):
@@ -430,6 +984,13 @@ class DocHistoryBody(BaseModel):
     fs_id: Optional[str] = None
     dir_path: Optional[str] = None
     page: int = 1
+    page_size: Optional[int] = Field(default=None, ge=1, le=100)
+    status: Optional[int] = Field(default=None, ge=0, le=5)
+    keyword: Optional[str] = Field(default=None, max_length=200)
+
+
+class RetryDocumentsBody(BaseModel):
+    retry_file_info: List[Dict[str, str]] = Field(..., min_length=1)
 
 
 class DocStatusBody(BaseModel):
@@ -447,22 +1008,101 @@ class MetadataCondition(BaseModel):
     conditions: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class HybridSearchConfig(BaseModel):
+    """Per-channel knobs for the vector/full-text part of a FusionSearch call."""
+
+    vector_candidates: int = Field(default=10, ge=1, le=500)
+    full_text_candidates: int = Field(default=10, ge=1, le=500)
+    hybrid_top_k: int = Field(0, ge=0, le=100)
+    vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+    full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class GraphSearchConfig(BaseModel):
+    """Per-channel knobs for the graph part of a FusionSearch call."""
+
+    graph_top_k: int = Field(0, ge=0, le=100)
+    graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
+    graph_reranking_enable: bool = True
+
+
 class FusionSearchRequest(BaseModel):
+    """FusionSearch request mirroring the current AIDP wire contract.
+
+    ``topk``/``multi_modal_enable`` are the outbound names; the retired
+    ``top_k``/``multi_modal`` aliases are accepted only so historical clients
+    keep working in tests, and are never mixed with the new names in a single
+    payload.
+    """
+
     query: str = Field(min_length=1)
     kds_list: List[str] = Field(min_length=1, max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search"] = "hybrid_search"
+    search_method: str = "vector_search|full_text_search|graph_search"
     reranking_enable: bool = False
-    reranking_mode: Optional[Literal["performance", "high_accuracy"]] = None
+    reranking_mode: Optional[Literal["performance", "high_accuracy", "jargon_coverage"]] = None
     rewrite_enable: bool = False
+    query_expansion_enable: bool = False
     related_search_enable: bool = False
     score_threshold: float = Field(0.0, ge=0.0, le=1.0)
-    top_k: int = Field(10, ge=1, le=100)
-    multi_modal: bool = False
+    topk: int = Field(10, ge=1, le=100)
+    multi_modal_enable: bool = False
+    hybrid_search_config: Optional[HybridSearchConfig] = None
+    graph_search_config: Optional[GraphSearchConfig] = None
     metadata_condition: Optional[MetadataCondition] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_aliases(cls, data: Any) -> Any:
+        """Translate the pre-upgrade names once, rejecting mixed payloads."""
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        for legacy, current in (("top_k", "topk"), ("multi_modal", "multi_modal_enable")):
+            if legacy in payload:
+                if current in payload and payload[current] != payload[legacy]:
+                    raise ValueError(f"{current} and legacy {legacy} disagree")
+                payload.setdefault(current, payload.pop(legacy))
+        return payload
+
+    @model_validator(mode="after")
+    def _validate_method_and_quota(self) -> "FusionSearchRequest":
+        """Validate the method set and the cross-channel quota relations."""
+        channels = set(_RETRIEVAL_CHANNELS if self.search_method == "hybrid_search"
+                       else self.search_method.split("|"))
+        unknown = channels - set(_RETRIEVAL_CHANNELS)
+        if not channels or unknown:
+            raise ValueError(f"search_method must combine {sorted(_RETRIEVAL_CHANNELS)}")
+        hybrid = bool(channels & {"vector_search", "full_text_search"})
+        graph = "graph_search" in channels
+        if hybrid and self.hybrid_search_config is None:
+            raise ValueError("hybrid_search_config is required for vector/full-text retrieval")
+        if graph and self.graph_search_config is None:
+            raise ValueError("graph_search_config is required for graph retrieval")
+        if not hybrid and self.hybrid_search_config is not None:
+            raise ValueError("hybrid_search_config must not be sent for pure graph retrieval")
+        if not graph and self.graph_search_config is not None:
+            raise ValueError("graph_search_config must not be sent without graph retrieval")
+        h = self.hybrid_search_config.hybrid_top_k if self.hybrid_search_config else 0
+        g = self.graph_search_config.graph_top_k if self.graph_search_config else 0
+        if hybrid and h > self.topk:
+            raise ValueError("hybrid_top_k must not exceed topk")
+        if graph and g > self.topk:
+            raise ValueError("graph_top_k must not exceed topk")
+        if hybrid and graph and h > 0 and g > 0 and h + g > self.topk:
+            raise ValueError("hybrid_top_k + graph_top_k must not exceed topk")
+        return self
 
 
 class RemoveFilesBody(BaseModel):
     file_uuids: List[uuid.UUID] = Field(..., min_length=1)
+
+
+class CountFilesBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/Count (all fields optional)."""
+
+    fs_id: Optional[str] = None
+    dir_path: Optional[str] = None
+    keyword: Optional[str] = Field(default=None, max_length=200)
 
 
 class DownloadFileBody(BaseModel):
@@ -680,20 +1320,26 @@ def count_knowledge_bases(
 @app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Count")
 def count_documents(
     kds_id: str,
+    body: Optional[CountFilesBody] = None,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
     """Count documents in a knowledge base.
-    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count with
-    empty body, returning {"count": <int>}.
+
+    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count. The body
+    is optional; when it carries ``keyword`` the count is filtered, matching the
+    live service.
     """
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    # Only ingested files count on the legacy endpoint, matching the list.
-    count = len([
-        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
-        if _visible_in_completed_listing(doc)
-    ])
+    docs = _active_documents(kds_id)
+    keyword = body.keyword.strip().casefold() if body and body.keyword else ""
+    if keyword:
+        docs = [
+            doc for doc in docs
+            if keyword in str(doc.get("file_name") or "").casefold()
+        ]
+    count = len(docs)
     logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
 
@@ -829,8 +1475,9 @@ def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    # Match AIDP's detail response: file counts come from the Count endpoint.
-    result = {key: value for key, value in kb.items() if key != "document_count"}
+    # Match AIDP's detail response: file counts come from the Count endpoint
+    # and configuration fields stay inside kms_config_str / graph_config.
+    result = _public_kb_detail(kb)
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)
@@ -853,6 +1500,47 @@ def update_knowledge_base(
         kb["kds_name"] = body.name
     if body.description is not None:
         kb["description"] = body.description
+    if body.chunk_mode is not None:
+        kb["chunk_mode"] = body.chunk_mode
+    if body.chunk_token_num is not None:
+        kb["chunk_token_num"] = body.chunk_token_num
+    if body.chunk_overlap_num is not None:
+        kb["chunk_overlap_num"] = body.chunk_overlap_num
+    if body.topk is not None:
+        kb["topk"] = body.topk
+    if body.caption_enable is not None:
+        kb["caption_enable"] = body.caption_enable
+    if body.vlm_model is not None:
+        kb["vlm_model"] = body.vlm_model
+    if body.is_exist_graph is not None:
+        # Disabling is permanent: a disabled graph can never be re-enabled.
+        if body.is_exist_graph and not kb.get("is_exist_graph"):
+            raise HTTPException(400, "Knowledge graph cannot be re-enabled once disabled")
+        kb["is_exist_graph"] = body.is_exist_graph
+    if body.graph_config is not None:
+        # Partial update: the backend already validated the edited fields, so
+        # only the key names are checked here. The graph_config JSON string
+        # contains only modifiable fields (non-modifiable template fields like
+        # domain/prompt_language/prompt_text are stripped by the backend).
+        try:
+            graph_update = json.loads(body.graph_config)
+        except ValueError as exc:
+            raise HTTPException(400, "graph_config must be a JSON string") from exc
+        allowed = {p["param_key"] for p in _graph_template("chinese")["value"] if p.get("is_modifiable")} | {"llm_model_name"}
+        if not isinstance(graph_update, dict) or set(graph_update) - allowed:
+            raise HTTPException(400, "Unrecognized graph configuration parameter")
+        current = kb.get("graph_config")
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except ValueError:
+                current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current.update(graph_update)
+        kb["graph_config"] = current
+        if isinstance(current.get("llm_model_name"), str):
+            kb["llm_model_name"] = current["llm_model_name"]
     kb["update_time"] = int(time.time())
 
     logger.info("UPDATE  kds_id=%s name=%r description=%r", kds_id, body.name, body.description)
@@ -919,6 +1607,7 @@ async def upload_documents(
                 "file_size": len(content),
                 "file_type": (f.filename.rsplit(".", 1)[-1] if f.filename and "." in f.filename else "bin"),
                 "create_time": int(time.time()),
+                "update_time": int(time.time()),
                 # Uploaded files enter the ingestion pipeline immediately: the
                 # legacy list endpoint hides them until the timer elapses, while
                 # the history endpoint reports them as PROCESSING.
@@ -926,6 +1615,7 @@ async def upload_documents(
                 "processing_until": time.time() + _PROCESSING_SECONDS,
             }
             _DOCUMENTS_BY_KB.setdefault(kds_id, []).append(doc)
+            _DOCUMENT_PAYLOADS[doc["file_uuid"]] = content
             success_docs.append(doc)
             logger.info("UPLOAD  kds_id=%s file=%s size=%d", kds_id, f.filename, len(content))
         except Exception as e:
@@ -984,10 +1674,7 @@ def list_documents(
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    all_docs = [
-        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
-        if _visible_in_completed_listing(doc)
-    ]
+    all_docs = _active_documents(kds_id)
     normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
     if normalized_keyword:
         all_docs = [
@@ -996,16 +1683,18 @@ def list_documents(
         ]
     start = (page - 1) * page_size
     end = start + page_size
-    items = [_public_document(doc) for doc in all_docs[start:end]]
+    items = [
+        {**_public_document(doc), "file_status": int(doc.get("file_status", 0))}
+        for doc in all_docs[start:end]
+    ]
 
-    # Real AIDP returns `next_link` as the authoritative "more pages exist"
-    # signal. When there are no more docs, next_link is simply absent.
-    # `total_count` mirrors AIDP's page count; next_link signals another page.
-    next_link = None
-    if end < len(all_docs):
-        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
-        if normalized_keyword:
-            next_link += f"&keyword={quote(keyword.strip(), safe='')}"
+    # The live service returns next_link on every page, including the last and
+    # empty ones; callers must use the row count (or Count) to decide whether
+    # another page exists. Keep the shape faithful so local tests do not rely
+    # on next_link being absent at the end.
+    next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+    if normalized_keyword:
+        next_link += f"&keyword={quote(keyword.strip(), safe='')}"
 
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
@@ -1028,26 +1717,38 @@ def remove_documents(
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
     documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
-    remaining = list(documents)
     success_list: List[Dict[str, str]] = []
     failed_list: List[Dict[str, str]] = []
+    now = time.time()
     for raw_file_uuid in body.file_uuids:
         file_uuid = str(raw_file_uuid)
         matched = next(
-            (document for document in remaining if document.get("file_uuid") == file_uuid),
+            (document for document in documents if document.get("file_uuid") == file_uuid),
             None,
         )
-        if matched is None or _FILE_DELETE_FAIL:
+        already_deleted = (
+            matched is not None
+            and isinstance(matched.get("_deleted_at"), (int, float))
+            and matched["_deleted_at"] <= now
+        )
+        if matched is None or already_deleted or _FILE_DELETE_FAIL:
+            if matched is not None and _FILE_DELETE_FAIL:
+                # Deletion failed upstream: keep the row visible and expose the
+                # failed state the detail page renders.
+                matched["file_status"] = 2
             failed_list.append({
                 "file_uuid": file_uuid,
                 **({"code": "130501", "message": "Mock file removal failed"}
                    if _FILE_DELETE_FAIL else {}),
             })
             continue
-        remaining.remove(matched)
+        # Removal is asynchronous in the live service: the row stays in
+        # KnowledgeFiles with file_status=1 for a short window, then disappears.
+        matched["file_status"] = 1
+        matched["_deleted_at"] = now + _FILE_DELETE_SECONDS
         success_list.append({"file_uuid": file_uuid})
 
-    _DOCUMENTS_BY_KB[kds_id] = remaining
+    _DOCUMENTS_BY_KB[kds_id] = documents
     _save_state()
     logger.info(
         "REMOVE DOCS  kds_id=%s total=%d success=%d failed=%d",
@@ -1102,6 +1803,49 @@ def download_document(
     )
 
 
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/OcrAnnotate/{{file_uuid}}")
+def preview_document(
+    kds_id: str,
+    file_uuid: str,
+    authorization: Optional[str] = Header(default=None),
+) -> StreamingResponse:
+    """Serve one document the way AIDP's preview endpoint does.
+
+    The served name travels in ``X-File-Name`` because a converted document is
+    answered with a PDF whose name replaces the uploaded extension; the
+    disposition stays ``attachment`` upstream, so the proxy under test has to
+    build its own ``inline`` header instead of forwarding this one.
+    """
+    _check_auth(authorization)
+
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    document = _find_document(kds_id, str(file_uuid))
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+
+    content, served_name = _preview_payload(document)
+    content_type = mimetypes.guess_type(served_name)[0] or "application/octet-stream"
+    response_headers = {
+        "X-File-Size": str(len(content)),
+        "Content-Disposition": _content_disposition(served_name),
+    }
+
+    async def content_stream():
+        for offset in range(0, len(content), 8 * 1024):
+            yield content[offset : offset + 8 * 1024]
+
+    return _attach_served_file_name(
+        StreamingResponse(
+            content_stream(),
+            media_type=content_type,
+            headers=response_headers,
+        ),
+        served_name,
+    )
+
+
 # =============================================================================
 # Ingestion channels + knowledge-file history
 # =============================================================================
@@ -1146,12 +1890,12 @@ def knowledge_file_history(
     body: DocHistoryBody,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List every file in a channel directory, whatever its processing status.
+    """Return one filtered page of this channel's recent file history.
 
     The endpoint is knowledge-base scoped, like the channel catalog and the
     document list; the body still addresses the request to one channel directory
-    of that KB. Documents that are still PROCESSING are included with their live
-    status, and a directory pointing outside the KB answers with an empty list.
+    of that KB. AIDP retains the last 30 days of history, supports status and
+    file-name filtering, and reports summary counts for the filtered set.
     """
     _check_auth(authorization)
 
@@ -1170,37 +1914,111 @@ def knowledge_file_history(
         )
         return JSONResponse(content={"value": []})
 
-    items = [
+    cutoff = time.time() - 30 * 24 * 60 * 60
+    all_recent_items = [
         {
             **doc,
             "dir_path": _channel_src_dir(kds_id),
             "status": _doc_effective_status(doc),
         }
         for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if (_document_timestamp(doc) is not None
+            and _document_timestamp(doc) >= cutoff)
     ]
     # Real AIDP lists files that are still being processed first and pages the
     # directory, which is what lets more simultaneous uploads than fit in one
     # page spill onto the next. Mirrored here, so a caller that reads only the
     # first page is caught locally instead of in production. The sort is stable,
     # so documents keep their insertion order inside each group.
-    items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    all_recent_items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    items = list(all_recent_items)
+    normalized_keyword = body.keyword.strip().casefold() if isinstance(body.keyword, str) else ""
+    if normalized_keyword:
+        items = [
+            item for item in items
+            if normalized_keyword in str(item.get("file_name") or "").casefold()
+        ]
+    # The live service computes total_record_count after the keyword filter
+    # but before the status filter.
+    keyword_items = list(items)
+    if body.status not in (None, 0):
+        status_aliases = {
+            1: {1, "1", STATUS_COMPLETED, "SUCCESS"},
+            2: {2, "2", "PROCESSING", "EXTRACTING"},
+            3: {3, "3", STATUS_FAILED, "VECTOR_INGESTION_FAILED"},
+            4: {4, "4", "UPLOADING", "QUEUED"},
+            5: {5, "5", "GRAPH_INGESTION_FAILED"},
+        }
+        accepted = status_aliases.get(body.status, set())
+        items = [item for item in items if item["status"] in accepted]
+    stats = {
+        "total_record_count": len(keyword_items),
+        "success_record_count": sum(1 for item in items if item["status"] == 1),
+        "processing_record_count": sum(1 for item in items if item["status"] == 2),
+        "failed_record_count": sum(1 for item in items if item["status"] in (3, 5)),
+        "waiting_record_count": sum(1 for item in items if item["status"] == 4),
+    }
     page = body.page if isinstance(body.page, int) and body.page > 0 else 1
-    start = (page - 1) * _HISTORY_PAGE_SIZE
-    end = start + _HISTORY_PAGE_SIZE
+    page_size = body.page_size or _HISTORY_PAGE_SIZE
+    start = (page - 1) * page_size
+    end = start + page_size
     page_items = items[start:end]
+    # next_link is always present in the live service, including on the last
+    # page, and it does not preserve the status filter.
     next_link = (
         f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
-        if end < len(items)
-        else None
+        f"&page_size={page_size}"
     )
+    if normalized_keyword:
+        next_link += f"&keyword={quote(body.keyword.strip(), safe='')}"
     logger.info(
         "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",
         kds_id, body.fs_id, body.dir_path, page, len(page_items), len(items),
     )
     return JSONResponse(content={
         "value": page_items,
-        "total_count": len(items),
+        "total_count": len(page_items),
         "next_link": next_link,
+        **stats,
+    })
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Retry")
+def retry_documents(
+    kds_id: str,
+    body: RetryDocumentsBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Queue one or more failed files using the AIDP array request shape."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    success_list: List[Dict[str, str]] = []
+    failed_list: List[Dict[str, str]] = []
+    retryable = {3, 5, "3", "5", STATUS_FAILED, "VECTOR_INGESTION_FAILED", "GRAPH_INGESTION_FAILED"}
+    file_uuids = [entry.get("file_uuid") for entry in body.retry_file_info if isinstance(entry, dict)]
+    for file_uuid in dict.fromkeys(file_uuids):
+        doc = _find_document(kds_id, file_uuid)
+        if doc is None or doc.get("status") not in retryable:
+            failed_list.append({"file_uuid": file_uuid, "reason": "File is not in a retryable failed state"})
+            continue
+        doc["status"] = 4
+        doc["update_time"] = int(time.time())
+        doc.pop("error_code", None)
+        doc.pop("extraction_failure_reason", None)
+        doc.pop("reason", None)
+        success_list.append({"file_uuid": file_uuid})
+
+    _save_state()
+    return JSONResponse(content={
+        "summary": {
+            "total": len(success_list) + len(failed_list),
+            "success": len(success_list),
+            "failed": len(failed_list),
+        },
+        "success_list": success_list,
+        "failed_list": failed_list,
     })
 
 
@@ -1215,16 +2033,32 @@ _MOCK_IMAGE_URLS = [
 ]
 
 _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
+    # ``retrieval_sources`` marks which channels can actually reach a chunk.
+    # ``aidp-kb-product`` has no graph, so graph-only retrieval legitimately
+    # returns nothing for it instead of silently falling back to vector.
     "aidp-kb-product": [
         {
             "id": 10001,
             "score": 0.96,
             "title": "AIDP产品介绍.pdf",
             "text": "AIDP Search provides low-latency retrieval across selected enterprise knowledge bases.",
-            "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "overview"},
+            "metadata": {
+                "knowledge_base_id": "aidp-kb-product", "section": "overview",
+                "source": "产品资料", "count": 0, "enabled": False,
+                "tags": ["知识库", "问答"],
+                "standards": {"TEST_STANDARD": {"level_id": "TEST_E", "level_name": "E", "authority": "mock"}},
+            },
             "chunk_type": "text",
             "file_url": "",
             "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search"],
+        },
+        {
+            "id": 10002, "score": 0.94, "title": "AIDP产品介绍.pdf",
+            "text": "AIDP Search keeps each retrieval chunk independent so citations can identify their own metadata snapshot.",
+            "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "citations", "count": 1, "enabled": True},
+            "chunk_type": "text", "file_url": "", "pages": [2],
+            "retrieval_sources": ["vector_search"],
         },
     ],
     "aidp-kb-faq": [
@@ -1237,6 +2071,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "chunk_type": "text",
             "file_url": "",
             "pages": [1],
+            "retrieval_sources": ["vector_search", "full_text_search", "graph_search"],
         },
         {
             "id": 30002,
@@ -1247,6 +2082,7 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "chunk_type": "image",
             "file_url": _MOCK_IMAGE_URLS[0],
             "pages": [6],
+            "retrieval_sources": ["vector_search", "graph_search"],
         },
     ],
 }
@@ -1282,49 +2118,129 @@ def fusion_search(
     request: FusionSearchRequest,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """Handle FusionSearch requests (same as reference mock)."""
+    """Handle FusionSearch requests with the current per-channel contract.
+
+    Channel behaviour mirrors what the real service does for a mixed corpus:
+
+    * A channel only contributes chunks when it is selected. Chunks are tagged
+      with the ``retrieval_sources`` they can be reached through (default
+      ``vector_search``); graph retrieval only returns chunks whose knowledge
+      base actually has a graph, and skips silently otherwise - never falling
+      back to another channel.
+    * Candidates cap each channel's pre-rerank pool, the per-channel thresholds
+      filter that pool, ``score_threshold`` filters the merged result and
+      ``topk`` truncates the final answer. A ``0`` cap means "no separate cap"
+      and is not a zero quota.
+    * ``retrieval_source.methods`` reports the channels that actually produced
+      the hit, which may be fewer than the requested set.
+    """
     _check_auth(authorization)
 
+    channels = set(_RETRIEVAL_CHANNELS if request.search_method == "hybrid_search"
+                   else request.search_method.split("|"))
+    hybrid = request.hybrid_search_config
+    graph = request.graph_search_config
     query_terms = [t.strip().lower() for t in request.query.split() if t.strip()]
-    results: List[Dict[str, Any]] = []
+    hits: List[Dict[str, Any]] = []
 
     for kb_id in request.kds_list:
+        kb = _KNOWLEDGE_BASES.get(kb_id, {})
+        graph_available = bool(kb.get("is_exist_graph"))
         for chunk in _CHUNKS_BY_KB.get(kb_id, []):
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
-            if not request.multi_modal and chunk.get("chunk_type") == "image":
+            if not request.multi_modal_enable and chunk.get("chunk_type") == "image":
                 continue
 
             haystack = f"{chunk.get('title', '')} {chunk.get('text', '')}".lower()
             boost = min(0.05 * sum(1 for t in query_terms if t in haystack), 0.15)
-            score = round(float(chunk.get("score", 0.5)) + boost, 4)
-            if score < request.score_threshold:
+            base_score = round(float(chunk.get("score", 0.5)) + boost, 4)
+            reachable = [source for source in chunk.get("retrieval_sources", ["vector_search"])
+                         if source in channels and (source != "graph_search" or graph_available)]
+            if not reachable:
                 continue
 
-            item = {
-                "id": chunk["id"],
-                "score": score,
-                "title": chunk["title"],
-                "text": chunk["text"],
-                "metadata": {
-                    **chunk.get("metadata", {}),
-                    "_search_config": {
-                        "search_method": request.search_method,
-                        "reranking_enable": request.reranking_enable,
-                    },
+            per_source: List[tuple[str, float]] = []
+            for source in reachable:
+                if source == "vector_search":
+                    threshold = hybrid.vector_score_threshold if hybrid else 0.0
+                elif source == "full_text_search":
+                    threshold = hybrid.full_text_score_threshold if hybrid else 0.0
+                else:
+                    threshold = graph.graph_score_threshold if graph else 0.0
+                if base_score >= threshold:
+                    per_source.append((source, base_score))
+            if not per_source:
+                continue
+            if base_score < request.score_threshold:
+                continue
+
+            hits.append({
+                "chunk": chunk,
+                "score": base_score,
+                "sources": sorted({source for source, _ in per_source}),
+            })
+
+    # Per-channel candidate caps: keep the strongest N per channel, then merge.
+    capped: List[Dict[str, Any]] = []
+    for source in _RETRIEVAL_CHANNELS:
+        limit = None
+        if source == "vector_search" and hybrid:
+            limit = hybrid.vector_candidates
+        elif source == "full_text_search" and hybrid:
+            limit = hybrid.full_text_candidates
+        elif source == "graph_search" and graph:
+            limit = graph.graph_top_k
+        if limit is None:
+            limit = request.topk
+        selected = [hit for hit in hits if source in hit["sources"]]
+        selected.sort(key=lambda hit: hit["score"], reverse=True)
+        capped.extend(selected[:limit])
+
+    merged: Dict[Any, Dict[str, Any]] = {}
+    for hit in capped:
+        key = hit["chunk"]["id"]
+        if key in merged:
+            merged[key]["sources"] = sorted(set(merged[key]["sources"]) | set(hit["sources"]))
+        else:
+            merged[key] = dict(hit)
+    results = sorted(merged.values(), key=lambda hit: hit["score"], reverse=True)
+
+    # Hybrid caps the combined vector+full-text part; graph is capped above.
+    if hybrid and hybrid.hybrid_top_k > 0:
+        hybrid_hits = [hit for hit in results
+                       if {"vector_search", "full_text_search"} & set(hit["sources"])]
+        overflow = {hit["chunk"]["id"] for hit in hybrid_hits[hybrid.hybrid_top_k:]}
+        results = [hit for hit in results if hit["chunk"]["id"] not in overflow]
+
+    final = results[: request.topk]
+    payload = []
+    for hit in final:
+        chunk = hit["chunk"]
+        item = {
+            "id": chunk["id"],
+            "score": hit["score"],
+            "title": chunk["title"],
+            "text": chunk["text"],
+            "metadata": {
+                **chunk.get("metadata", {}),
+                "_search_config": {
+                    "search_method": request.search_method,
+                    "reranking_enable": request.reranking_enable,
+                    "reranking_mode": request.reranking_mode if request.reranking_enable else None,
                 },
-            }
-            if request.multi_modal:
-                item["chunk_type"] = chunk.get("chunk_type", "text")
-                item["file_url"] = chunk.get("file_url", "")
-                item["pages"] = chunk.get("pages", [])
-            results.append(item)
+            },
+            "retrieval_source": {"methods": hit["sources"]},
+        }
+        if request.multi_modal_enable:
+            item["chunk_type"] = chunk.get("chunk_type", "text")
+            item["file_url"] = chunk.get("file_url", "")
+            item["pages"] = chunk.get("pages", [])
+        payload.append(item)
 
-    results.sort(key=lambda x: x["score"], reverse=True)
-    final = results[: request.top_k]
-
-    logger.info("SEARCH  query=%r kds=%r returned=%d", request.query, request.kds_list, len(final))
-    return JSONResponse(content={"result": final, "total_return_count": len(final)})
+    logger.info("SEARCH  query=%r kds=%r method=%s returned=%d",
+                request.query, request.kds_list, request.search_method, len(payload))
+    return JSONResponse(content={"result": payload, "total_return_count": len(payload)})
 
 
 # =============================================================================
@@ -1451,6 +2367,7 @@ def reset_state() -> Dict[str, str]:
     """
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
+    _DOCUMENT_PAYLOADS.clear()
     _seed_initial_data()
     _save_state()
     logger.info("RESET  state restored to seeds, persisted to %s", _STATE_FILE)

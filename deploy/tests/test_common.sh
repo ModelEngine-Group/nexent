@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -7,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/../common/version.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/../k8s/env.sh"
 
 TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
 mkdir -p "$TMP_DIR"
@@ -85,7 +88,6 @@ write_full_config() {
     echo '  - infrastructure'
     echo '  - application'
     echo '  - data-process'
-    echo '  - supabase'
     echo '  - terminal'
     echo 'portPolicy: "development"'
     echo 'imageSource: "local-latest"'
@@ -152,15 +154,16 @@ assert_contains "$(cat /tmp/nexent-image-build-zh-invalid.log)" "未知选项：
 
 APP_VERSION="latest"
 deployment_prepare_config --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and supabase"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and local authentication"
 assert_eq "lightweight" "$DEPLOYMENT_SANDBOX_MODE" "the lightweight Sandbox should be enabled by default"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "default docker services should include data-process"
-assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase-db" "default helm charts should include supabase db"
 deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components should come from CLI"
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "image source should come from CLI"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-web" "application services should include web"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "application services should include ops"
+assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "application selection should include the ops Helm chart"
 DOCKER_SUMMARY="$(deployment_print_summary docker)"
 assert_contains "$DOCKER_SUMMARY" "Deployment components: infrastructure,application" "docker summary should include selected components"
 assert_contains "$DOCKER_SUMMARY" "Port policy: production" "docker summary should include selected port policy"
@@ -172,6 +175,19 @@ if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
 fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "production should expose ops"
+
+OPS_PORT=15016
+assert_contains "$(deployment_compute_docker_ports)" "15016" "production should use the configured ops port"
+DEPLOYMENT_PORT_POLICY=development
+assert_contains "$(deployment_compute_docker_ports)" "15016" "development should use the configured ops port"
+unset OPS_PORT
+assert_contains "$(deployment_compute_docker_ports)" "5016" "development should default to ops port 5016"
+DEPLOYMENT_COMPONENTS=infrastructure
+deployment_compute_selection
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "infrastructure-only should not start ops"
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "infrastructure-only should not select the ops Helm chart"
+assert_not_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "infrastructure-only should not reserve the ops port"
 
 unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
 deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode full --app-version v2.2.0
@@ -218,14 +234,13 @@ deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
 assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
-assert_contains "$PREFIXED_HELM_CONTENT" $'  initImage:\n    repository: "registry.local/nexent/postgres"\n    tag: "15-alpine"\n    pullPolicy: "IfNotPresent"' "helm values should use prefixed supabase auth init image"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
 unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
 
-deployment_prepare_config --components supabase --port-policy development --app-version latest
-assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
+deployment_prepare_config --components infrastructure --port-policy development --app-version latest
+assert_eq "infrastructure" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
 if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-web"* ]]; then
   echo "FAIL: application should not be auto-added"
   exit 1
@@ -248,7 +263,6 @@ DEPLOYMENT_VERSION="full"
 DEPLOYMENT_MODE="development"
 IS_MAINLAND="Y"
 deployment_prepare_config --app-version latest
-assert_contains "$DEPLOYMENT_COMPONENTS" "supabase" "legacy full should include supabase"
 assert_eq "mainland" "$DEPLOYMENT_REGISTRY_PROFILE" "legacy mainland flag should map registry profile"
 assert_eq "mainland" "$DEPLOYMENT_IMAGE_SOURCE" "legacy mainland flag should map image source"
 unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
@@ -271,11 +285,11 @@ assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be a
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
 
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "defaults mode should use built-in image source when local config is absent"
 
 deployment_prepare_config --defaults --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "--defaults should use built-in image source when local config is absent"
 
 deployment_prepare_config --local-config "$FULL_CONFIG" --defaults --image-source general --app-version latest
@@ -417,10 +431,13 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/depl
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_TENANT_ID" "common configmap should expose the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultTenantId: \"tenant_id\"" "common values should preserve the CAS default tenant"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_TENANT_ID" "k8s deploy should render the CAS default tenant from environment configuration"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_ROLE" "common configmap should expose the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultRole: \"USER\"" "common values should preserve the CAS default role"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_ROLE" "k8s deploy should render the CAS default role from environment configuration"
+CAS_ENV_FILE="$TMP_DIR/cas.env"
+printf 'CAS_DEFAULT_TENANT_ID=synthetic-tenant\nCAS_DEFAULT_ROLE=ADMIN\n' > "$CAS_ENV_FILE"
+CAS_ENV_DATA="$(k8s_env_file_data "$CAS_ENV_FILE")"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_TENANT_ID: \"$(printf '%s' synthetic-tenant | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default tenant"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_ROLE: \"$(printf '%s' ADMIN | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default role"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "CAS_DEFAULT_ROLE=USER" "docker environment example should preserve the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_URL" "common configmap should expose the CAS heartbeat URL"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_INTERVAL_SECONDS" "common configmap should expose the CAS heartbeat interval"
@@ -429,15 +446,6 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "hear
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh-image" "openssh deployment should include ssh image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-env" "openssh deployment should include env rollout annotation"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase auth deployment should include supabase secret rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" ".Values.initImage.repository" "supabase auth init container should use configurable image repository"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "image: postgres:15-alpine" "supabase auth init container should not hardcode postgres image"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-env" "supabase auth deployment should not use full env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase db deployment should include supabase secret rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-sql" "supabase db deployment should keep SQL rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-env" "supabase db deployment should not use full env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase kong deployment should include supabase secret rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-env" "supabase kong deployment should not use full env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web:" "web deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh:" "openssh deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
@@ -547,20 +555,9 @@ assert_eq "$MISSING_ENV_CHECKSUM_A" "$MISSING_ENV_CHECKSUM_B" "missing env file 
 K8S_DEPLOY_CHECKSUM_BLOCK="$(awk '/render_runtime_secret_values\(\) {/,/deployment_render_image_rollout_checksums/' "$SCRIPT_DIR/../k8s/deploy.sh")"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'env_checksum="$(deployment_env_values_checksum)"' "k8s deploy should compute rollout checksum from root and monitoring env files"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    env: %s\\n'" "k8s deploy should render the combined env checksum under the env name"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "supabase_secret_checksum" "k8s deploy should compute a dedicated Supabase secret rollout checksum"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    supabaseSecret: %s\\n'" "k8s deploy should render the Supabase secret checksum"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'JWT_SECRET:-' "supabase secret checksum should include JWT secret"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SECRET_KEY_BASE:-' "supabase secret checksum should include secret key base"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'VAULT_ENC_KEY:-' "supabase secret checksum should include vault encryption key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_ANON_KEY:-' "supabase secret checksum should include anon key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_SERVICE_ROLE_KEY:-' "supabase secret checksum should include service role key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'supabase_postgres_password' "supabase secret checksum should include Supabase postgres password"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'gotrue_db_url' "supabase secret checksum should include gotrue DB URL"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    backend:" "k8s deploy should not render the removed backend rollout checksum"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "backend_checksum" "k8s deploy should not compute the removed backend rollout checksum"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'ELASTICSEARCH_API_KEY' "k8s deploy should not enumerate backend env variables in rollout checksum"
-assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'DASHBOARD_USERNAME' "supabase secret checksum should not include direct Supabase env values"
-assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SITE_URL' "supabase secret checksum should not include direct Supabase env values"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    web:" "k8s deploy should not render component-named env checksum keys"
 
 DEPLOYMENT_VERSION="speed"
@@ -958,23 +955,13 @@ fi
 unset NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
 
 DOCKER_SUPER_ADMIN_BLOCK="$(awk '/^create_default_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../docker/deploy.sh")"
-K8S_SUPER_ADMIN_BLOCK="$(awk '/^create_supabase_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
+K8S_SUPER_ADMIN_BLOCK="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "Docker super admin creation should use the shared prompt policy"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "Docker super admin creation should use the shared default password"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$display_password"' "Docker super admin creation should pass the password display policy"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'if bash "$script_path"; then' "Docker should reuse the normal creation path for an existing super admin"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "K8s super admin creation should use the shared prompt policy"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "K8s super admin creation should use the shared default password"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: ${password}"' "K8s should display non-interactive super admin passwords"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: [hidden]"' "K8s should hide interactively entered super admin passwords"
 DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
 K8S_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: ${password}"' "Docker should display non-interactive super admin passwords"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: [hidden]"' "Docker should hide interactively entered super admin passwords"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "Docker should wait for the complete user_tenant_t schema contract"
-assert_contains "$K8S_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "K8s should wait for the complete user_tenant_t schema contract"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "Docker super admin writes should stop on SQL errors"
-assert_contains "$K8S_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "K8s super admin writes should stop on SQL errors"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" 'Error: Super admin user creation failed. Deployment aborted.' "K8s deployment should stop when super admin initialization fails"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
 
@@ -1355,4 +1342,77 @@ assert_contains "$(cat "$HTTPS_HELM_VALUES")" "BEGIN CERTIFICATE" "helm values s
 deployment_prepare_config --components infrastructure,application --port-policy production --app-version latest
 assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should reset to disabled after re-prepare"
 
+
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase" "selected deployment must not start retired auth services"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/secrets.yaml")" ".Values.secrets.jwtSecret" "JWT signing secret must be independent of optional components"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "/opt/backend/account_admin.py bootstrap-su" "K8s bootstrap must use local accounts"
+
+assert_not_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "bootstrap should not print plaintext credentials"
+assert_not_contains "$K8S_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "K8s bootstrap should not print plaintext credentials"
+
+DEPLOYMENT_VERSION=""
+deployment_prepare_config --components infrastructure,supabase --port-policy development --app-version latest
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "legacy authentication component must use application local accounts"
+assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must keep auth enabled"
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
+# The host hook delegates to Shell without looking up any Python interpreter.
+export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
+bash() { printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
+deployment_upgrade_local_accounts docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.sh" "deployment must use the Shell migration coordinator"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete migration before rollout"
+deployment_upgrade_local_accounts kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "kubernetes" "Kubernetes must select its Shell transport"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
+assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "python" "host hook must not invoke Python"
+
+# Guard the real deployment call sites, including HTTPS and bootstrap paths
+# which can start Config and execute SQL indirectly.
+assert_call_before() {
+  local script="$1" first="$2" second="$3"
+  local content before_first before_second
+  content="$(cat "$script")"
+  assert_contains "$content" "$first" "required deployment call is missing"
+  assert_contains "$content" "$second" "required deployment boundary is missing"
+  before_first="${content%%"$first"*}"
+  before_second="${content%%"$second"*}"
+  [ "${#before_first}" -lt "${#before_second}" ] || {
+    echo "FAIL: $first must run before $second"
+    exit 1
+  }
+}
+DOCKER_ACCOUNT_CALL='deployment_upgrade_local_accounts docker || exit 1'
+K8S_ACCOUNT_CALL='deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" '  deploy_infrastructure ||' "$DOCKER_ACCOUNT_CALL"
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_https_nginx ||'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_core_services ||'
+assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" $'\n    render_runtime_secret_values\n'
+if grep -Fq 'deploy_application_release()' "$SCRIPT_DIR/../k8s/deploy.sh"; then
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    if ! deploy_application_release; then'
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" '        helm_upgrade_application_release true ||' '        run_system_agent_bootstrap ||'
+else
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
+fi
+assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
+for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+  eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
+done
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
+assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+
+export AUTH_HOOK_EXIT=17
+if deployment_upgrade_local_accounts docker; then
+  echo "FAIL: a migration error must propagate to the deployment caller"
+  exit 1
+fi
+unset AUTH_HOOK_EXIT
+
 echo "All deployment common tests passed."
+
+unset -f bash
+bash "$SCRIPT_DIR/test_account_migration.sh"

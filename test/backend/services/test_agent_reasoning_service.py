@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import patch
 
-from services.agent_reasoning_service import (
+from management.services.agent.reasoning import (
     _resolve_model_reasoning_capability,
     reasoning_snapshot_from_model,
     snapshot_agent_reasoning_config,
@@ -97,7 +99,7 @@ def test_reasoning_snapshot_from_model_ignores_invalid_budget_values():
 
 def test_reasoning_snapshot_from_model_handles_enabled_unknown_capability():
     with patch(
-        "services.agent_reasoning_service.normalize_reasoning_params",
+        "management.services.agent.reasoning.normalize_reasoning_params",
         return_value={"enable_thinking": True},
     ):
         result = reasoning_snapshot_from_model(
@@ -112,7 +114,7 @@ def test_reasoning_snapshot_from_model_handles_enabled_unknown_capability():
 
 def test_snapshot_agent_reasoning_config_adds_auto_for_effort_control():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {
                 "status": "supported",
@@ -155,7 +157,7 @@ def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_mis
     }
 
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         side_effect=lambda model_id, tenant_id: model_rows.get(model_id),
     ):
         result = snapshot_agent_reasoning_config(
@@ -180,7 +182,7 @@ def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_mis
 
 def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {"status": "supported", "levels": ["low", "high"]}
         },
@@ -197,7 +199,7 @@ def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
 
 def test_snapshot_agent_reasoning_config_preserves_effort_without_toggle():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {"status": "supported", "levels": ["low", "high"]}
         },
@@ -219,7 +221,7 @@ def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitt
         tenant_id="tenant-1",
     ) == existing
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value=None,
     ):
         assert snapshot_agent_reasoning_config(
@@ -228,3 +230,51 @@ def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitt
             existing_overrides=None,
             tenant_id="tenant-1",
         ) == {"7": {"extra_params": {}}}
+
+
+def test_saved_llm_outlets_do_not_generate_new_agent_owned_reasoning_defaults():
+    from management.services.model.profiles import build_outlet_draft
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+    from test.backend.services.test_model_profile_service import draft_request
+
+    profile, _ = build_outlet_draft(draft_request(), "tenant")
+    data = profile.model_dump()
+    data["outlet_id"] = 1
+    data["connection"]["credential_ref"]["model_id"] = 1
+    row = encode_resolved_model_profile(profile.__class__.model_validate(data), registered_references=model_service_references())
+    with patch("management.services.agent.reasoning.get_model_by_model_id",
+               return_value=row), \
+         patch("management.services.agent.reasoning._resolve_model_reasoning_capability") as resolve:
+        assert snapshot_agent_reasoning_config([1], None, None, "tenant") is None
+        explicit = {"1": {"extra_params": {"enable_thinking": False}}}
+        assert snapshot_agent_reasoning_config([1], explicit, None, "tenant") == {"1": {"parameter_values": {"enable_thinking": False}}}
+        resolve.assert_not_called()
+
+
+def test_saving_profile_agent_converts_historical_entry_without_rewriting_input():
+    from copy import deepcopy
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+    from management.services.model.profiles import build_outlet_draft
+    from test.backend.services.test_model_profile_service import draft_request
+    profile, _ = build_outlet_draft(draft_request(), "tenant")
+    data = profile.model_dump()
+    data["outlet_id"] = 1
+    data["connection"]["credential_ref"]["model_id"] = 1
+    row = encode_resolved_model_profile(profile.__class__.model_validate(data), registered_references=model_service_references())
+    historical = {"1": {"temperature": 0, "extra_params": {"enable_thinking": False}}}
+    before = deepcopy(historical)
+    with patch("management.services.agent.reasoning.get_model_by_model_id", return_value=row):
+        saved = snapshot_agent_reasoning_config([1], historical, None, "tenant")
+    assert saved == {"1": {"parameter_values": {"temperature": 0, "enable_thinking": False}}}
+    assert historical == before
+
+
+
+def test_runtime_backfill_does_not_rewrite_published_profile_agent_versions():
+    historical = {"1": {"temperature": 0, "extra_params": {"enable_thinking": False}}}
+    row = {"profile_schema_version": 1, "model_type": "llm"}
+    with patch("management.services.agent.reasoning.get_model_by_model_id", return_value=row):
+        result = snapshot_agent_reasoning_config([1], historical, historical, "tenant", normalize_profiles=False)
+    assert result == historical

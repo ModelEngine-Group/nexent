@@ -7,7 +7,7 @@ A vector search and document management service for Elasticsearch that generates
 1. Install dependencies:
 
 ```bash
-pip install elasticsearch
+uv pip install elasticsearch
 ```
 
 2. Connection credentials are passed in through constructor parameters (the SDK never reads environment variables; the service layer reads them and passes them to the SDK):

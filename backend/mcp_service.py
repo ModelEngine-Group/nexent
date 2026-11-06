@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 import re
@@ -12,20 +13,20 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
-from database.outer_api_tool_db import query_available_openapi_services
-from consts.const import TOKEN
+from management.db.tool.outer_api import query_available_openapi_services
+from contracts.constants.environment import TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from services.thread_lifecycle_service import mcp_thread_manager
+from infrastructure.concurrency import mcp_thread_manager
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from utils.logging_utils import get_uvicorn_logging_config
+from infrastructure.logging import get_uvicorn_logging_config
 
 
 logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))
@@ -461,7 +462,7 @@ class TenantMCPRouter:
             return
         if authorization:
             try:
-                from utils.auth_utils import get_current_user_id
+                from gateway.authentication.auth import get_current_user_id
 
                 _, authenticated_tenant_id = get_current_user_id(authorization.decode())
             except Exception:

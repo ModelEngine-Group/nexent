@@ -1,4 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
 
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
@@ -30,12 +33,8 @@ export interface ChatProps {
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -58,8 +57,6 @@ export interface ChatProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -87,18 +84,14 @@ export const Chat: FC<ChatProps> = ({
   onAgentSelected,
   onBack,
   chatMode = "execution",
-  onChatModeChange = () => undefined,
+  onChatModeChange,
   showModelSelector = true,
   modelSelectionScope = "agent",
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -117,8 +110,6 @@ export const Chat: FC<ChatProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -154,15 +145,11 @@ export const Chat: FC<ChatProps> = ({
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
-          deepThinking={deepThinking}
-          onDeepThinkingChange={onDeepThinkingChange}
-          thinkingEffort={thinkingEffort}
-          onThinkingEffortChange={onThinkingEffortChange}
           showModelSelector={showModelSelector}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
-          isDictationConfigured={isDictationConfigured}
+          composerTools={composerTools}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
           interactionContent={interactionContent}
@@ -171,8 +158,6 @@ export const Chat: FC<ChatProps> = ({
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-          workbenchSkillPopover={workbenchSkillPopover}
-          workbenchKnowledgePopover={workbenchKnowledgePopover}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -203,12 +188,8 @@ export const Chat: FC<ChatProps> = ({
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
-      deepThinking={deepThinking}
-      onDeepThinkingChange={onDeepThinkingChange}
-      thinkingEffort={thinkingEffort}
-      onThinkingEffortChange={onThinkingEffortChange}
       showConversationTitle={showConversationTitle}
-      isDictationConfigured={isDictationConfigured}
+      composerTools={composerTools}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}
@@ -225,8 +206,6 @@ export const Chat: FC<ChatProps> = ({
       workbenchResources={workbenchResources}
       onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-      workbenchSkillPopover={workbenchSkillPopover}
-      workbenchKnowledgePopover={workbenchKnowledgePopover}
     />
   );
 };

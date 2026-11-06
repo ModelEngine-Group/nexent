@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 checks for the two-level Agent prompt outline."""
 
 import re
@@ -42,7 +44,7 @@ def test_ut_sdk_fps_023_layout_order_preserves_priority():
     """UT-SDK-FPS-023: display order is independent from compaction priority."""
     composer = _composer("zh", "manager")
     items = composer.compose_context_inputs(
-        language="zh", is_manager=True, duty="任务", constraint="限制", few_shots="示例",
+        language="zh", is_manager=True, prompt="任务\n限制\n示例",
         tools={"search": {"description": "检索"}},
         skills=[{"name": "writer", "description": "写作"}],
         worker_agents={"researcher": {"description": "研究"}},
@@ -58,12 +60,13 @@ def test_ut_sdk_fps_023_layout_order_preserves_priority():
     ordered = normalize_context_inputs(items)
     ordered.sort(key=lambda item: item.layout_key)
     ids = [item.id for item in ordered]
-    assert ids.index("system:constraint") < ids.index("system:code_norms")
-    assert ids.index("system:footer") < ids.index("system:available_resources_header")
+    assert "system:constraint" not in ids and "system:footer" not in ids
+    assert ids.index("system:duty") < ids.index("system:code_norms")
+    assert ids.index("system:code_norms") < ids.index("system:available_resources_header")
     assert ids.index("system:available_resources_header") < ids.index("tool:search")
     text = _system_text(items)
     headings = re.findall(r"^## .+$", text, flags=re.MULTILINE)
-    assert headings == ["## 身份与目标", "## 执行协议", "## 约束与环境", "## 示例", "## 可用资源"]
+    assert headings == ["## 身份与目标", "## 执行协议", "## 约束与环境", "## 可用资源"]
     assert "### 工具" in text and "### 技能" in text
     assert "### 内部子智能体" in text and "### 外部子智能体" in text
     assert not re.search(r"^\d+\. (?:工具|技能|子智能体)", "\n".join(headings), flags=re.MULTILINE)

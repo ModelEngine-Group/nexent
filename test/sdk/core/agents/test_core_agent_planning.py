@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for the v1.4 planing methods on CoreAgent.
 
 Scope is narrow: only the plan-related instance methods
@@ -220,6 +221,10 @@ prompt_mod.AgentPromptComposer = MagicMock()
 # context budget helper stub
 budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")
 budget_mod.message_role = lambda message: getattr(message, "role", "")
+
+# Execution history is not configured in this planning-only fixture.
+execution_history_mod = _sdk_pkg("sdk.nexent.core.agents.context.execution_history")
+execution_history_mod.ExecutionHistory = type("ExecutionHistory", (), {})
 
 # verification stub
 verification_mod = _sdk_pkg("sdk.nexent.core.agents.verification")

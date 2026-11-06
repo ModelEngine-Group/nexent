@@ -1,11 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contextlib import nullcontext
 
-from database.db_models import ResourceTagAssignment
-from database.tag_management_db import (
-    TagManagementDB,
-    _is_document_assignment_in_knowledge_base,
-)
-from services.tag_resource_adapters import _encode_document_resource_id
+from management.db.models import ResourceTagAssignment
+from management.db.tag.repository import TagManagementDB, _is_document_assignment_in_knowledge_base
+from management.services.tag.resources import _encode_document_resource_id
 
 
 class _Query:
@@ -41,7 +39,7 @@ def test_cleanup_soft_deletes_only_the_requested_tenant_resource(monkeypatch):
     query = _Query(updated_count=2)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: nullcontext(session)
+        "management.db.tag.repository.get_db_session", lambda: nullcontext(session)
     )
 
     updated_count = TagManagementDB.soft_delete_resource_assignments(
@@ -59,7 +57,7 @@ def test_cleanup_reports_zero_when_the_tenant_has_no_matching_assignments(monkey
     query = _Query(updated_count=0)
     session = _Session(query)
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: nullcontext(session)
+        "management.db.tag.repository.get_db_session", lambda: nullcontext(session)
     )
 
     assert TagManagementDB.soft_delete_resource_assignments(

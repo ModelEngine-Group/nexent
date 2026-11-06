@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Synchronize a clean checkout and execute repository-owned Daily under one lock."""
 from __future__ import annotations
 
@@ -11,25 +13,29 @@ import uuid
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
-from suite_runtime import BatchLock, logged, now, save
+from suite_runtime import BatchLock, deployment_lock, logged, now, save
+from daily_git import run_git
+from daily_recovery import prepare_daily_retry
 
 
-def git(repo, *args):
-    return subprocess.check_output(["git", "-C", str(repo), *args], text=True,
-                                   encoding="utf-8", stderr=subprocess.PIPE, timeout=120).strip()
+def git(repo, *args, log_dir=None):
+    return run_git(repo, args, log_dir=log_dir)
 
 
-def sync_checkout(repo, branch):
+def sync_checkout(repo, branch, *, log_dir=None):
     """Never stash, reset, switch a dirty checkout, or merge divergent history."""
-    if git(repo, "status", "--porcelain", "--untracked-files=normal"):
+    def checked(*args):
+        return git(repo, *args, log_dir=log_dir) if log_dir is not None else git(repo, *args)
+
+    if checked("status", "--porcelain", "--untracked-files=normal"):
         raise RuntimeError("Daily requires a clean checkout before synchronization")
-    if git(repo, "branch", "--show-current") != branch:
+    if checked("branch", "--show-current") != branch:
         raise RuntimeError("Checkout branch differs from requested branch; switch it explicitly first")
-    git(repo, "check-ref-format", "--branch", branch)
-    git(repo, "fetch", "origin", f"refs/heads/{branch}")
-    target = git(repo, "rev-parse", "FETCH_HEAD")
-    git(repo, "merge", "--ff-only", target)
-    if git(repo, "rev-parse", "HEAD") != target:
+    checked("check-ref-format", "--branch", branch)
+    checked("fetch", "origin", f"refs/heads/{branch}")
+    target = checked("rev-parse", "FETCH_HEAD")
+    checked("merge", "--ff-only", target)
+    if checked("rev-parse", "HEAD") != target:
         raise RuntimeError("Local commits differ from remote branch; refusing Daily")
     return target
 
@@ -61,35 +67,35 @@ def main(argv=None):
             state = {"branch": args.branch, "started_at": now(), "status": "PREPARING"}
             save(directory / "status.json", state)
             try:
-                if (home / "state/deployment-guard/pending.json").exists():
-                    raise RuntimeError("Pending deployment recovery must be resolved before synchronization")
-                state["head"] = sync_checkout(repo, args.branch)
-                env = os.environ.copy()
-                # Derived output must never silently change tracked Feature navigation.
-                command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
-                           "--phase", "implementation", "--generate"]
-                if logged(command, repo, env, directory / "validate.log", 180):
-                    raise RuntimeError("Formal asset validation failed; inspect local launcher log")
-                if git(repo, "status", "--porcelain", "--untracked-files=normal"):
-                    raise RuntimeError("Derived generation changed tracked assets; repair them on the product branch")
-                # Import only after checkout synchronization; use this exact revision's code.
-                import static_assets
-                import suite
-                static_assets.apply(home, repo / "test-e2e/infra/assets")
-                records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None))
-                problems = suite.doctor(repo, home, records)
-                if problems:
-                    save(directory / "doctor.json", {"ready": False, "problems": problems})
-                    raise RuntimeError("Runtime preflight failed; inspect local doctor.json")
-                settings = suite.config(repo, home)
-                state["status"] = "EXECUTING"
-                save(directory / "status.json", state)
-                # execute() does not acquire another lock; all normal entrypoints use the same lock.
-                code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
-                state["status"] = "PASSED" if code == 0 else "FAILED"
-                return code
+                with deployment_lock(repo), prepare_daily_retry(repo, home, directory):
+                    state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
+                    env = os.environ.copy()
+                    # Daily reports local asset problems without rewriting tracked views.
+                    command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
+                               "--phase", "implementation", "--daily-report", str(directory / "asset-validation.json")]
+                    if logged(command, repo, env, directory / "validate.log", 180):
+                        raise RuntimeError("Formal asset validation failed; inspect local launcher log")
+                    if git(repo, "status", "--porcelain", "--untracked-files=normal", log_dir=directory / "git"):
+                        raise RuntimeError("Derived generation changed tracked assets; repair them on the product branch")
+                    # Import only after checkout synchronization; use this exact revision's code.
+                    import static_assets
+                    import suite
+                    static_assets.apply(home, repo / "test-e2e/infra/assets")
+                    records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
+                    problems = suite.doctor(repo, home, records)
+                    if problems:
+                        save(directory / "doctor.json", {"ready": False, "problems": problems})
+                        raise RuntimeError("Runtime preflight failed; inspect local doctor.json")
+                    settings = suite.config(repo, home)
+                    state["status"] = "EXECUTING"
+                    save(directory / "status.json", state)
+                    code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
+                    state["status"] = "PASSED" if code == 0 else "FAILED"
+                    return code
             except (Exception, KeyboardInterrupt) as exc:
                 state.update(status="INCOMPLETE", error=str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)
+                if isinstance(exc, RuntimeError) and str(exc) == "another daily run is active":
+                    raise
                 return 2
             finally:
                 state["finished_at"] = now()

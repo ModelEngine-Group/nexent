@@ -1,37 +1,41 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, InputNumber, Switch, Row, Col, Tooltip } from "antd";
+import { Checkbox, Form, InputNumber, Switch, Row, Col } from "antd";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
+import { AgentSettingHint } from "./agent-setting-hint";
 
 interface AgentRunPolicyProps {
   highFidelity?: boolean;
 }
 
-export function AgentProtocolRepairOption() {
+function AgentProtocolRepairOption() {
   const { t } = useTranslation("common");
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const isReadOnly = useAgentReadOnly();
 
   return (
-    <Form.Item
+    <AgentSettingHint
       label={t("agent.runPolicy.protocolRepairRetry")}
-      tooltip={t("agent.runPolicy.protocolRepairRetryHint")}
-      className="!mb-0"
+      hint={t("agent.runPolicy.protocolRepairRetryHint")}
     >
-      <Switch
+      <Checkbox
         checked={editedAgent.enable_protocol_repair_retry ?? false}
         disabled={isReadOnly}
-        onChange={(checked) =>
-          updateAgent({ enable_protocol_repair_retry: checked })
+        onChange={(event) =>
+          updateAgent({ enable_protocol_repair_retry: event.target.checked })
         }
-      />
-    </Form.Item>
+      >
+        {t("agent.runPolicy.protocolRepairRetry")}
+      </Checkbox>
+    </AgentSettingHint>
   );
 }
 
@@ -62,25 +66,6 @@ export default function AgentRunPolicy({
             onChange={(val) => updateAgent({ max_step: val ?? 10 })}
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <label htmlFor="agent-requested-output-tokens">
-            {t("agentConfig.layout.outputReserve")}
-          </label>
-          <InputNumber
-            id="agent-requested-output-tokens"
-            min={128}
-            max={32768}
-            step={128}
-            disabled={isReadOnly}
-            controls={false}
-            suffix="tokens"
-            className="!h-8 !w-full !rounded-[4px] !border-[#c9c9c9] [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-suffix]:!ml-[10px]"
-            value={editedAgent.requested_output_tokens ?? 4096}
-            onChange={(val) =>
-              updateAgent({ requested_output_tokens: val ?? 4096 })
-            }
-          />
-        </div>
         <Checkbox
           checked={editedAgent.provide_run_summary}
           disabled={isReadOnly}
@@ -90,7 +75,10 @@ export default function AgentRunPolicy({
         >
           {t("agent.highFidelity.runSummary")}
         </Checkbox>
-        <Tooltip title={t("agent.allowChatMetadata.tooltip")}>
+        <AgentSettingHint
+          label={t("agent.highFidelity.chatMetadata")}
+          hint={t("agent.allowChatMetadata.tooltip")}
+        >
           <Checkbox
             checked={editedAgent.allow_chat_metadata ?? false}
             disabled={isReadOnly}
@@ -100,8 +88,11 @@ export default function AgentRunPolicy({
           >
             {t("agent.highFidelity.chatMetadata")}
           </Checkbox>
-        </Tooltip>
-        <Tooltip title={t("agent.runPolicy.selfValidateHint")}>
+        </AgentSettingHint>
+        <AgentSettingHint
+          label={t("agent.highFidelity.selfValidate")}
+          hint={t("agent.runPolicy.selfValidateHint")}
+        >
           <Checkbox
             checked={editedAgent.verification_config?.enabled ?? false}
             disabled={isReadOnly}
@@ -117,7 +108,8 @@ export default function AgentRunPolicy({
           >
             {t("agent.highFidelity.selfValidate")}
           </Checkbox>
-        </Tooltip>
+        </AgentSettingHint>
+        <AgentProtocolRepairOption />
         <AgentDeploymentOptions highFidelity />
       </div>
     );
@@ -143,27 +135,6 @@ export default function AgentRunPolicy({
             <span className="ant-form-text pl-2">
               {t("agent.runPolicy.maxStepUnit")}
             </span>
-          </Form.Item>
-        </Col>
-
-        {/* Output Reserve */}
-        <Col xs={24} sm={12}>
-          <Form.Item
-            name="requested_output_tokens"
-            label={t("agent.requestedOutputTokens")}
-            className="mb-3"
-          >
-            <InputNumber
-              min={128}
-              max={32768}
-              step={128}
-              className="w-full"
-              value={editedAgent.requested_output_tokens ?? 4096}
-              onChange={(val) =>
-                updateAgent({ requested_output_tokens: val ?? 4096 })
-              }
-            />
-            <span className="ant-form-tex pl-2">tokens</span>
           </Form.Item>
         </Col>
       </Row>

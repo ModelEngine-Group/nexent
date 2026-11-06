@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import re
 import threading
@@ -26,10 +28,10 @@ _ANSI_ESCAPE_PATTERN = re.compile(
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
         "name",
+        "display_name",
         "description",
-        "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
+        "enable_protocol_repair_retry",
+        "prompt",
         "greeting_message",
         "example_questions",
     }
@@ -44,6 +46,7 @@ class ProcessType(Enum):
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
+    EXECUTION_RESULT = "execution_result"  # internal canonical execution record
     EXECUTION_LOGS = "execution_logs"  # code execution result
     AGENT_NEW_RUN = "agent_new_run"  # Agent basic information
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display
@@ -138,6 +141,7 @@ class MessageObserver:
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
         self._message_query_lock = threading.Lock()
+        self._citation_indexes: dict[str, int] = {}
 
         # Control output language
         self.lang = lang
@@ -184,6 +188,13 @@ class MessageObserver:
             "model_attempt_id", default=None
         )
         self._step_outputs: dict[str | None, dict[str, Any]] = {}
+
+    def reserve_citations(self, tool_sign: str, count: int) -> int:
+        """Reserve unique citation indexes across tools sharing this run observer."""
+        with self._message_query_lock:
+            start = self._citation_indexes.get(tool_sign, 1)
+            self._citation_indexes[tool_sign] = start + count
+            return start
 
     def _step_output(self) -> dict[str, Any]:
         active = self._active_subagent()
@@ -618,9 +629,7 @@ class MessageObserver:
                     isinstance(field_name, str)
                     and field_name
                     in {
-                        "duty_prompt",
-                        "constraint_prompt",
-                        "few_shots_prompt",
+                        "prompt",
                         "greeting_message",
                         "example_questions",
                     }

@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { AidpKbColumnKey } from "./types";
+
+export const AIDP_KB_PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
+export const AIDP_KB_DEFAULT_PAGE_SIZE: number = AIDP_KB_PAGE_SIZE_OPTIONS[0];
 
 /** Columns the user cannot hide: the entry point and the row actions. */
 export const AIDP_KB_REQUIRED_COLUMNS: AidpKbColumnKey[] = ["name", "actions"];

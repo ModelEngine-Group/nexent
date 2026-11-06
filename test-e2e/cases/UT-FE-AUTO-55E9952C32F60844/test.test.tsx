@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
@@ -170,3 +172,6 @@ describe("UT-FE-AUTO-55E9952C32F60844 newchat history summaries", () => {
     },
   );
 });
+
+// Document preview is outside this case's component contract.
+vi.mock("@/components/common/rawStreamPreviewViewer", () => ({ RawStreamPreviewViewer: () => null }));

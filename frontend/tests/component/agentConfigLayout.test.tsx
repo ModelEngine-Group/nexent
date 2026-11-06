@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { App } from "antd";
 import {
   fireEvent,
@@ -107,9 +109,10 @@ vi.mock(
 vi.mock(
   "../../app/[locale]/agents/[agentId]/components/agent-run-policy",
   () => ({
-    default: () => <div data-testid="run-strategy-content" />,
-    AgentProtocolRepairOption: () => (
-      <div data-testid="protocol-repair-content" />
+    default: () => (
+      <div data-testid="run-strategy-content">
+        <div data-testid="protocol-repair-content" />
+      </div>
     ),
   })
 );
@@ -135,7 +138,7 @@ vi.mock(
   "../../app/[locale]/agents/[agentId]/components/advanced/GuardrailConfigContent",
   () => ({
     default: () => <div data-testid="guardrail-content" />,
-    GuardrailConfigActions: () => null,
+    GuardrailConfigActions: () => <div data-testid="guardrail-actions" />,
   })
 );
 vi.mock(
@@ -153,13 +156,19 @@ vi.mock("../../app/[locale]/agents/versions/AgentVersionPubulishModal", () => ({
     open ? <div data-testid="publish-modal" /> : null,
 }));
 
-const resourceContents = [
-  "knowledge-base-content",
-  "conversation-guide-content",
-  "skills-content",
-  "tools-content",
-  "collaborative-agents-content",
-];
+const orderedCards = [
+  ["info", "display-info-content"],
+  ["model", "role-model-content"],
+  ["knowledge", "knowledge-base-content"],
+  ["skills", "skills-content"],
+  ["tools", "tools-content"],
+  ["child-agents", "collaborative-agents-content"],
+  ["welcome", "conversation-guide-content"],
+  ["permissions", "publish-attributes-content"],
+  ["guardrail", "guardrail-content"],
+  ["advanced", "run-strategy-content"],
+] as const;
+
 function agentConfigTree() {
   return (
     <App>
@@ -172,9 +181,42 @@ function agentConfigTree() {
   );
 }
 
-describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates", () => {
+describe("configuration resource grouping and preserved workflow gates", () => {
+  it.each([0, 12, 16])(
+    "keeps the visible card spacing at 24px with a %ipx scrollbar",
+    (scrollbarWidth) => {
+      const offsetWidth = vi
+        .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+        .mockReturnValue(400);
+      const clientWidth = vi
+        .spyOn(HTMLElement.prototype, "clientWidth", "get")
+        .mockReturnValue(400 - scrollbarWidth);
+      const view = render(
+        <App>
+          <AgentConfig
+            debugVisible
+            debugPanel={<div data-testid="debug-panel" />}
+            canManualUnlock
+            onManualUnlock={mocks.onManualUnlock}
+            onToggleDebug={mocks.onToggleDebug}
+          />
+        </App>
+      );
+      try {
+        const scrollRegion = screen.getByTestId("agent-config-scroll-region");
+        const layout = scrollRegion.parentElement!;
+        expect(parseFloat(layout.style.columnGap) + scrollbarWidth).toBe(24);
+      } finally {
+        view.unmount();
+        offsetWidth.mockRestore();
+        clientWidth.mockRestore();
+      }
+    }
+  );
+
   beforeEach(() => {
     mocks.readOnly = false;
+    mocks.state.agentId = 42;
     mocks.state.editedAgent.display_name = "Health Assistant";
     mocks.flow.configFocusRequest = null;
     mocks.clearConfigFocusRequest.mockReset();
@@ -185,36 +227,71 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
     vi.mocked(window.HTMLElement.prototype.scrollIntoView).mockClear();
   });
 
-  it("groups the existing field components into four cards and keeps actions outside scrolling", () => {
+  it("groups only the four resources while preserving section order and initial expansion", () => {
     render(agentConfigTree());
     const scrollRegion = screen.getByTestId("agent-config-scroll-region");
-    const cards = ["info", "model", "resources", "advanced"].map((name) =>
-      within(scrollRegion).getByTestId(`agent-config-card-${name}`)
-    );
-    expect(scrollRegion.children).toHaveLength(4);
-    expect(cards[0]).toContainElement(
-      screen.getByTestId("display-info-content")
-    );
-    expect(cards[1]).toContainElement(screen.getByTestId("role-model-content"));
-    const resourceNodes = Array.from(
-      cards[2].querySelectorAll("[data-testid]")
-    ).map((node) => node.getAttribute("data-testid"));
     expect(
-      resourceNodes.filter((value) => resourceContents.includes(value ?? ""))
-    ).toEqual(resourceContents);
-    expect(cards[3]).toContainElement(
-      screen.getByTestId("run-strategy-content")
+      Array.from(
+        scrollRegion.querySelectorAll('[data-testid^="agent-config-card-"]')
+      ).map((card) => card.getAttribute("data-testid"))
+    ).toEqual([
+      "agent-config-card-info",
+      "agent-config-card-model",
+      "agent-config-card-resources",
+      ...orderedCards.slice(2).map(([name]) => `agent-config-card-${name}`),
+    ]);
+    const resources = screen.getByTestId("agent-config-card-resources");
+    orderedCards.slice(2, 6).forEach(([name]) => {
+      expect(resources).toContainElement(
+        screen.getByTestId(`agent-config-card-${name}`)
+      );
+    });
+    expect(resources).not.toContainElement(
+      screen.getByTestId("agent-config-card-welcome")
     );
-    expect(cards[3]).toContainElement(
-      screen.getByTestId("publish-attributes-content")
-    );
-    expect(screen.getByTestId("guardrail-content")).not.toBeVisible();
-    fireEvent.click(
-      screen.getByRole("button", { name: "agent.highFidelity.moreSettings" })
-    );
-    expect(screen.getByRole("dialog")).toContainElement(
-      screen.getByTestId("guardrail-content")
-    );
+    orderedCards.forEach(([name, contentId], index) => {
+      const card = within(scrollRegion).getByTestId(
+        `agent-config-card-${name}`
+      );
+      expect(card).toContainElement(screen.getByTestId(contentId));
+      if (index < 6) expect(screen.getByTestId(contentId)).toBeVisible();
+      expect(
+        within(card).getByRole("button", { expanded: index < 6 })
+      ).toHaveAttribute("aria-expanded", String(index < 6));
+      expect(
+        screen.getByTestId(contentId).closest("[data-slot=collapsible-content]")
+      ).toHaveAttribute("data-state", index < 6 ? "open" : "closed");
+    });
+    const advanced = screen.getByTestId("agent-config-card-advanced");
+    const protocolRepair = screen.getByTestId("protocol-repair-content");
+    expect(advanced).toContainElement(protocolRepair);
+    fireEvent.click(within(advanced).getByRole("button", { expanded: false }));
+    expect(protocolRepair).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen
+        .getByTestId("guardrail-content")
+        .closest("[data-slot=collapsible-content]")
+    ).toHaveAttribute("data-state", "closed");
+    expect(
+      screen.queryByRole("button", { name: "agent.highFidelity.moreSettings" })
+    ).not.toBeInTheDocument();
+    const guardrail = screen.getByTestId("agent-config-card-guardrail");
+    expect(guardrail).toContainElement(screen.getByTestId("guardrail-actions"));
+    expect(advanced).not.toContainElement(guardrail);
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId("guardrail-content")).toBeVisible();
+    expect(screen.getAllByTestId("guardrail-content")).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: true }));
+    expect(
+      screen
+        .getByTestId("guardrail-content")
+        .closest("[data-slot=collapsible-content]")
+    ).toHaveAttribute("data-state", "closed");
+    expect(guardrail).toContainElement(screen.getByTestId("guardrail-actions"));
+    expect(screen.getAllByTestId("protocol-repair-content")).toHaveLength(1);
+    expect(protocolRepair).toBeVisible();
     const header = screen.getByTestId("agent-config-header");
     expect(scrollRegion).not.toContainElement(header);
     expect(header).toContainElement(
@@ -227,6 +304,66 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
       screen.queryByText("agent.config.tab.basic")
     ).not.toBeInTheDocument();
     expect(searchAgentInfo).not.toHaveBeenCalled();
+  });
+
+  it("toggles each secondary card independently without saving or fetching agent data", () => {
+    render(agentConfigTree());
+    orderedCards.slice(2).forEach(([name, contentId], index) => {
+      const initiallyOpen = index < 4;
+      const card = screen.getByTestId(`agent-config-card-${name}`);
+      const toggle = within(card).getByRole("button", {
+        expanded: initiallyOpen,
+      });
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", String(!initiallyOpen));
+      expect(
+        screen.getByTestId(contentId).closest("[data-slot=collapsible-content]")
+      ).toHaveAttribute("data-state", initiallyOpen ? "closed" : "open");
+      orderedCards.slice(2).forEach(([other], otherIndex) => {
+        if (other === name) return;
+        expect(
+          within(screen.getByTestId(`agent-config-card-${other}`)).getByRole(
+            "button",
+            { expanded: otherIndex < 4 }
+          )
+        ).toBeInTheDocument();
+      });
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", String(initiallyOpen));
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(searchAgentInfo).not.toHaveBeenCalled();
+  });
+
+  it("restores initial expansion when switching agents", () => {
+    const view = render(agentConfigTree());
+    fireEvent.click(
+      within(screen.getByTestId("agent-config-card-tools")).getByRole(
+        "button",
+        { expanded: true }
+      )
+    );
+    fireEvent.click(
+      within(screen.getByTestId("agent-config-card-info")).getByRole("button", {
+        expanded: true,
+      })
+    );
+    fireEvent.click(
+      within(screen.getByTestId("agent-config-card-guardrail")).getByRole(
+        "button",
+        { expanded: false }
+      )
+    );
+    mocks.state.agentId = 43;
+    view.rerender(agentConfigTree());
+    orderedCards.forEach(([name], index) => {
+      expect(
+        within(screen.getByTestId(`agent-config-card-${name}`)).getByRole(
+          "button",
+          { expanded: index < 6 }
+        )
+      ).toBeInTheDocument();
+    });
   });
 
   it("keeps unlock, debug, and publication connected to successful guarded callbacks", async () => {
@@ -253,7 +390,12 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
   it("reopens the requested collapsed resource and preserves prompt focus support without a write", async () => {
     const view = render(agentConfigTree());
     fireEvent.click(
-      screen.getByRole("button", { name: /agent\.highFidelity\.toolTitle/ })
+      within(screen.getByTestId("agent-config-card-tools")).getByRole(
+        "button",
+        {
+          expanded: true,
+        }
+      )
     );
     expect(
       screen
@@ -283,7 +425,7 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
     mocks.flow.configFocusRequest = {
       agentId: 42,
       requestId: 2,
-      target: { section: "role_model", promptTab: "constraint" },
+      target: { section: "role_model" },
     };
     view.rerender(agentConfigTree());
     await waitFor(() =>
@@ -343,5 +485,8 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
     expect(
       screen.getByRole("textbox", { name: "display-name-validation-field" })
     ).toBeDisabled();
+    const guardrail = screen.getByTestId("agent-config-card-guardrail");
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId("guardrail-content")).toBeVisible();
   });
 });

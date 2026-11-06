@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 '''D2 contract test for F-131 process health endpoints (/health/live, /health/ready).'''
 
 from __future__ import annotations
@@ -5,7 +7,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.app_factory import create_app
+from management.utils.app_factory import create_app
 
 
 class _ManagerState:

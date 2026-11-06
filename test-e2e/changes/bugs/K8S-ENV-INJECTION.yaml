@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-ENV-INJECTION
+  change_type: bugfix
+  bug_id: K8S-ENV-INJECTION
+  title: Inject complete deployment env files into Kubernetes backend containers
+  description: Replace the fixed-list-only injection boundary with backend-only env file Secrets while preserving production Compose service scope and explicit deployment overrides.
+  observed_behavior: Docker Compose loads the entire deployment .env for five backend services, whereas Kubernetes maps a fixed subset. New business configuration can therefore be silently omitted.
+  expected_behavior: All file-declared variables reach the five backend services; only Config and Runtime load monitoring.env. Final credentials and explicit Kubernetes parameters win; a subsequent deployment updates and removes variables without exposing the new Secrets to Web or infrastructure.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing deploy/tests/test_common.sh asserts selected mappings and rollout checksums, and DEP-AUTO-7177AC18CCE799DD proves sandbox option dispatch. Neither proves complete env file injection through Kubernetes envFrom or removal after an update.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-173]
+    retired: []
+  affected_cases:
+    existing: [DEP-AUTO-7177AC18CCE799DD]
+    added: []
+    modified: []
+    retired: []
+  notes: 'Historical change and execution evidence are retained in the linked design. K8S-ENV-D5-001 was physically removed at user request on 2026-10-23. On 2026-10-29 the user also requested removal of the pytest-based Bash/Helm rendering suite because it verifies deployment behavior rather than backend/sdk Python coverage. Its obsolete active UT selector has been removed; historical results are not current executable coverage. Product Kubernetes code is unchanged. The retained sandbox Case covers Docker/local configuration only.'

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regressions for publication-owned A2A version selection."""
 
 from unittest.mock import AsyncMock, MagicMock
@@ -9,7 +10,7 @@ import pytest
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("version", ["1", "7"])
 async def test_a2a_forwards_published_version_without_chat_persistence(mocker, streaming, version):
-    from backend.services import a2a_server_service as module
+    from management.services.agent.a2a import service as module
 
     service = module.A2AServerService()
     registration = {"agent_id": 7, "tenant_id": "tenant", "version": version, "is_enabled": True}
@@ -41,7 +42,7 @@ async def test_a2a_forwards_published_version_without_chat_persistence(mocker, s
 
 
 def test_explicit_published_version_takes_precedence_over_debug(mocker):
-    from services import knowledge_scope_service
+    from management.services.knowledge_base import scope as knowledge_scope_service
 
     current = mocker.patch.object(knowledge_scope_service, "query_current_version_no", return_value=99)
     assert knowledge_scope_service.resolve_root_version(7, "tenant", 1, True) == 1
@@ -52,7 +53,7 @@ def test_explicit_published_version_takes_precedence_over_debug(mocker):
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("version", [None, "", "0", "-1", "1.0.0", "draft", " 1", "1.5", True, 1, "１"])
 async def test_a2a_invalid_version_never_dispatches_draft(mocker, streaming, version):
-    from backend.services import a2a_server_service as module
+    from management.services.agent.a2a import service as module
 
     service = module.A2AServerService()
     registration = {"agent_id": 7, "tenant_id": "tenant", "version": version, "is_enabled": True}
@@ -74,8 +75,8 @@ async def test_a2a_invalid_version_never_dispatches_draft(mocker, streaming, ver
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("metadata", [None, {}, {"session": "s1"}])
 async def test_a2a_preserves_absent_vs_explicit_metadata(mocker, streaming, metadata):
-    from backend.services import a2a_server_service as module
-    from consts.model import AgentRequest
+    from management.services.agent.a2a import service as module
+    from contracts.agent import AgentRequest
 
     service = module.A2AServerService()
     mocker.patch.object(module.a2a_agent_db, "get_server_agent_by_endpoint", return_value={

@@ -1,10 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit regressions for final-answer ownership and persisted step cleanup."""
 
 from copy import deepcopy
 
 import pytest
 
-from utils.final_answer_projection import remove_answer_only_steps, resolve_answer_completion
+from management.services.agent.stream import (
+    remove_answer_only_steps,
+    resolve_answer_completion,
+)
 
 
 def unit(kind, content, step="current", invocation=None, **fields):

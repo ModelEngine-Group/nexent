@@ -1,4 +1,5 @@
-"""UT for backend/services/evaluation_maintenance.py — background scheduler."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""UT for backend/management/services/evaluation/maintenance.py — background scheduler."""
 
 import importlib.util as _ilu
 import sys
@@ -20,23 +21,27 @@ def _register_package(name):
     return pkg
 
 
-# ---- stub chain: database.agent_evaluation_db / client / db_models ----
+# ---- stub chain: management.db.evaluation.runs / client / db_models ----
 database_pkg = _register_package("database")
-agent_evaluation_db = MagicMock(name="database.agent_evaluation_db")
-client = MagicMock(name="database.client")
-db_models = MagicMock(name="database.db_models")
+agent_evaluation_db = MagicMock(name="management.db.evaluation.runs")
+client = MagicMock(name="management.db.client")
+db_models = MagicMock(name="management.db.models")
 db_models.AgentEvaluation = MagicMock(name="AgentEvaluation")
 database_pkg.agent_evaluation_db = agent_evaluation_db
 database_pkg.client = client
 database_pkg.db_models = db_models
-sys.modules["database.agent_evaluation_db"] = agent_evaluation_db
-sys.modules["database.client"] = client
-sys.modules["database.db_models"] = db_models
+sys.modules["management.db.evaluation.runs"] = agent_evaluation_db
+sys.modules["management.db.client"] = client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = db_models
 
 if "evaluation_maintenance" in sys.modules:
     del sys.modules["evaluation_maintenance"]
 _spec = _ilu.spec_from_file_location(
-    "evaluation_maintenance", str(_BACKEND / "services" / "evaluation_maintenance.py"))
+    "evaluation_maintenance", str(_BACKEND / "management" / "services" / "evaluation" / "maintenance.py"))
 assert _spec is not None and _spec.loader is not None
 em = _ilu.module_from_spec(_spec)
 sys.modules["evaluation_maintenance"] = em
@@ -118,9 +123,9 @@ def test_run_loop_reaps_and_cleans_up(mocker):
 
 def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
     dispatcher = MagicMock()
-    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
 
     em._dispatch_pending_runs(
         [
@@ -140,18 +145,18 @@ def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
 
 
 def test_dispatch_pending_runs_returns_immediately_when_empty(monkeypatch):
-    monkeypatch.delitem(sys.modules, "services.runtime_proxy_service", raising=False)
+    monkeypatch.delitem(sys.modules, "management.services.agent.runtime_client", raising=False)
 
     em._dispatch_pending_runs([])
 
-    assert "services.runtime_proxy_service" not in sys.modules
+    assert "management.services.agent.runtime_client" not in sys.modules
 
 
 def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
     dispatcher = MagicMock()
-    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
     warning = mocker.patch.object(em.logger, "warning")
 
     em._dispatch_pending_runs(
@@ -173,9 +178,9 @@ def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
 
 def test_dispatch_pending_runs_keeps_failed_dispatch_pending(mocker, monkeypatch):
     dispatcher = MagicMock(side_effect=RuntimeError("runtime unavailable"))
-    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
     runtime_proxy.dispatch_agent_evaluation_run = dispatcher
-    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
     warning = mocker.patch.object(em.logger, "warning")
 
     em._dispatch_pending_runs(

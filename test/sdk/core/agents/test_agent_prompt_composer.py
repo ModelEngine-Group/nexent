@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for Agent prompt composition and run-scoped resources."""
 
 import re
@@ -41,9 +43,7 @@ def _template(role: str = "managed") -> dict:
                     "Call run_skill_script(skill_name=\"skill-name\", "
                     "script_path=\"scripts/example.py\", params=\"\", source=\"skill\")."
                 ),
-                "duty": "### Duty\n{{duty}}",
-                "constraint": "### Constraints\n{{constraint}}",
-                "footer": "### Examples\n{{few_shots}}",
+                "duty": "### Duty\n{{prompt}}",
                 "knowledge_guidance_scoped": "Use only scoped knowledge.",
                 "knowledge_guidance_unscoped": "Use available knowledge.",
             },

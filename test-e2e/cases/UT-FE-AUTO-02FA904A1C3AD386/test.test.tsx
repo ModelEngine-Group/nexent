@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @ts-nocheck
 // @vitest-environment jsdom
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { Thread } from '@/app/[locale]/newchat/assistant-ui/thread';
@@ -105,12 +107,14 @@ const mAvailable = (id: number, name: string) => ({
   id,
   name,
   displayName: name,
+  type: 'llm',
   connect_status: 'available',
 });
 const mUnavailable = (id: number, name: string) => ({
   id,
   name,
   displayName: name,
+  type: 'llm',
   connect_status: 'unavailable',
 });
 
@@ -159,7 +163,7 @@ describe(' 线程模型选择器', () => {
     expect(models.some((m: any) => m.id === '2')).toBe(false);
   });
 
-  it('agent 配置模型全部不可用时派生列表为空，选中态回退为 undefined', () => {
+  it('agent 配置模型全部不可用时派生列表为空，选中态为空且不能发送', () => {
     modelList.models = [
       mUnavailable(1, 'm1'),
       mUnavailable(2, 'm2'),
@@ -171,7 +175,8 @@ describe(' 线程模型选择器', () => {
     });
     renderThread(agent);
     expect(composerProps.props.models).toEqual([]);
-    expect(composerProps.props.selectedModelId).toBeUndefined();
+    expect(composerProps.props.selectedModelId).toBe('');
+    expect(composerProps.props.disabled).toBe(true);
   });
 
   it('单模型回退：model_name 对应模型可用时返回单选项，不可用时返回空数组', () => {
@@ -207,7 +212,7 @@ describe(' 线程模型选择器', () => {
     uncontrolledHandler('2');
     expect(composerProps.props.selectedModelId).toBe('1');
 
-    uncontrolledHandler('3');
+    act(() => uncontrolledHandler('3'));
     rerender(<Thread agent={agent} chatMode='planning' onChatModeChange={noop} />);
     expect(composerProps.props.selectedModelId).toBe('3');
   });
@@ -220,7 +225,7 @@ describe(' 线程模型选择器', () => {
       model_names: ['模型A', '模型B', '模型C'],
     });
     const { rerender } = renderThread(agentA);
-    composerProps.props.onModelChange('3');
+    act(() => composerProps.props.onModelChange('3'));
     rerender(<Thread agent={agentA} chatMode='planning' onChatModeChange={noop} />);
     expect(composerProps.props.selectedModelId).toBe('3');
 
@@ -259,3 +264,10 @@ describe(' 线程模型选择器', () => {
     expect(output).not.toMatch(/sk-[A-Za-z0-9]|api[_-]?key|access[_-]?token|password|secret/i);
   });
 });
+
+// Document preview is outside this case's component contract.
+vi.mock("@/components/common/rawStreamPreviewViewer", () => ({ RawStreamPreviewViewer: () => null }));
+
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { id: "component-user", tenantId: "component-tenant" } }),
+}));

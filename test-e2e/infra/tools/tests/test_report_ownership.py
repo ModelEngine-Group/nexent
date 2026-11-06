@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Routing and Git provenance are evidence, not inferred defect attribution."""
 import json
 from pathlib import Path
@@ -37,6 +38,15 @@ class OwnershipTests(unittest.TestCase):
         rules['case_overrides']['TEST-01'] = 'runtime'
         self.assertEqual(route(record, feature, rules)['owner'], '@潘业宏')
 
+    def test_config_lifespan_is_system_management_not_automation_scheduler(self):
+        rules = load_rules(REPO)
+        record = {'case_id': 'REL-AUTO-AF6CA560E762D682',
+                  'feature_id': 'V5-REL-AUTO-AF6CA560E762D682'}
+        result = route(record, {'description': '系统管理 / 配置服务生命周期'}, rules)
+        self.assertEqual(result['status'], 'ASSIGNED')
+        self.assertEqual(result['domain'], '系统管理整体')
+        self.assertEqual(result['owner'], '@武兆福')
+
     def test_unknown_and_ambiguous_are_not_guessed(self):
         rules = load_rules(REPO)
         record = {'case_id': 'TEST-01', 'feature_id': 'UNKNOWN-01', 'title': 'Agent MCP API failure'}
@@ -58,11 +68,20 @@ class OwnershipTests(unittest.TestCase):
             result = route({'case_id': identifier, 'feature_id': 'F-171'}, {}, rules)
             self.assertEqual(result['owner'], expected)
 
-    def test_cross_area_security_cases_remain_unassigned(self):
+    def test_cross_area_security_routes_follow_the_actual_primary_boundary(self):
         rules = load_rules(REPO)
-        for identifier in ['V5-SEC-06', 'V5-SEC-07']:
-            self.assertEqual(route({'case_id': identifier[3:], 'feature_id': identifier}, {}, rules)['status'],
-                             'UNASSIGNED')
+        for identifier, expected in [('V5-SEC-06', 'MCP仓库'), ('V5-SEC-07', 'Skill仓库')]:
+            self.assertEqual(route({'case_id': identifier[3:], 'feature_id': identifier}, {}, rules)['domain'], expected)
+
+    def test_model_workbench_and_kernel_case_exceptions(self):
+        rules = load_rules(REPO)
+        for cid, fid, expected in [('CHAT-MODEL-CONTROLS-D3-001', 'CHAT-MODEL-CONTROLS', '@潘业宏'),
+                                   ('CHAT-MODEL-CONTROLS-D4-001', 'CHAT-MODEL-CONTROLS', '@徐雅琦'),
+                                   ('USER-MODEL-READ-D5-001', 'CHAT-MODEL-CONTROLS', '@武兆福'),
+                                   ('WB-CONTROLS-D4-004', 'WB-CONTROLS', '@曹杰'),
+                                   ('SAI-D3-001', 'SAI-001', '@杜宇骁'), ('SAI-D1-001', 'SAI-001', '@潘业宏')]:
+            with self.subTest(cid=cid):
+                self.assertEqual(route({'case_id': cid, 'feature_id': fid}, {}, rules)['owner'], expected)
 
     def test_git_uses_pinned_case_assets_not_shared_helper_or_current_head(self):
         with tempfile.TemporaryDirectory() as root:

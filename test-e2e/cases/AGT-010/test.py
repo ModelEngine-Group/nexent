@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Invalid section ranges and controlled Provider failures preserve the draft."""
 import time
 
@@ -24,8 +26,8 @@ async def draft_snapshot(identity, agent_id):
     assert_status(response, 200)
     body = response.json().get('data') or response.json()
     assert int(body.get('agent_id') or body.get('id') or 0) == agent_id
-    return {key: body.get(key) for key in ('name', 'description', 'duty_prompt',
-            'constraint_prompt', 'few_shots_prompt', 'model_ids', 'tools', 'skills', 'related_agent_ids')}
+    return {key: body.get(key) for key in ('name', 'description', 'prompt',
+            'model_ids', 'tools', 'skills', 'related_agent_ids')}
 
 
 def assert_rejected(response, before, after):

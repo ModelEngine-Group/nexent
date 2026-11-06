@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { ReactNode } from "react";
 import { Modal } from "antd";
 
@@ -23,6 +25,8 @@ export interface StandardModalProps {
   maxHeight?: number | string;
   bodyClassName?: string;
   footer?: ReactNode | null;
+  /** ESC dismisses the dialog. Opt out only for long forms (WCAG 2.1.2). */
+  closeOnEscape?: boolean;
 }
 
 export function StandardModal({
@@ -41,6 +45,7 @@ export function StandardModal({
   maxHeight,
   bodyClassName,
   footer,
+  closeOnEscape = true,
 }: StandardModalProps) {
   const hasHeightConstraint = height !== undefined || maxHeight !== undefined;
 
@@ -77,7 +82,7 @@ export function StandardModal({
       centered
       closable={false}
       mask={{ closable: false }}
-      keyboard={false}
+      keyboard={closeOnEscape}
       footer={footer === undefined ? defaultFooter : footer}
       onCancel={() => requestClose(onClose)}
       title={

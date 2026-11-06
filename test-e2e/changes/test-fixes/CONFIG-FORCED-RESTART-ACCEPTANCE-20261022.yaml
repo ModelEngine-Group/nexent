@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: CONFIG-FORCED-RESTART-ACCEPTANCE-20261022
+  change_type: test-fix
+  title: Accept forced-process restart for Config startup-failure recovery
+  description: >-
+    The user explicitly accepts recovery through forced restart. Replace the
+    startup-failure same-process cleanup obligation with actual isolated-process
+    failure, old-process termination and healthy replacement verification.
+    Keep error propagation, rejection of failed startup, strict normal shutdown,
+    evidence and final safety cleanup. Do not claim forced recovery is automatic
+    recovery or rewrite historical FAIL receipts. No product source is changed.
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-REL-AUTO-AF6CA560E762D682]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [REL-AUTO-AF6CA560E762D682]
+    retired: []
+  notes: >-
+    Ubuntu isolated-image probes reproduced natural exit and automatic recovery
+    for recovery failure; upload/configuration failures remained alive for 65
+    seconds but recovered after explicit forced restart with the injected fault
+    withdrawn. This authorized acceptance revision supersedes AC-04's earlier
+    requirement to close the manager inside the failed process. Retain the
+    engineering observation without treating it as a failed forced-recovery AC.

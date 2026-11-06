@@ -17,11 +17,11 @@ disjoint, so one port hosts them all):
     /health /_reset /_mock/* /_wire-log               unified control plane
 
 The AIDP protocol family MUST stay at the root (no prefix):
-backend/services/image_service.py reconstructs AIDP image URLs keeping only
+backend/management/services/file/image_proxy.py reconstructs AIDP image URLs keeping only
 scheme+netloc from AIDP_SERVER_URL (dropping any base path) and allowlists
 paths starting with /KnowledgeBase/Tenants/, so a prefixed AIDP base would
 break the image flow entirely. The same applies to the independent-AIDP
-image fetch in backend/services/ind_aidp_service.py — which conveniently
+image fetch in backend/management/services/knowledge_base/providers/aidp.py — which conveniently
 means managed AIDP and ind-AIDP share these root routes, distinguished only
 by credentials (ind-AIDP tests point server_url at this service and reuse
 tenant "aidp" + the AIDP mock key).
@@ -111,6 +111,8 @@ def load_aidp_app():
     spec = importlib.util.spec_from_file_location("ext_knowledge_aidp_mock", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    from aidp_fixture import install
+    install(module)
     logger.info("AIDP MOCK  mounted from %s", path)
     return module.app
 
@@ -187,9 +189,12 @@ class WireLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def create_app() -> FastAPI:
+def create_app(state_dir: Optional[Path] = None) -> FastAPI:
     """Assemble the service: control plane + prefixed route sets + AIDP root."""
-    states = {name: StateStore(name) for name in
+    if state_dir is not None:
+        # Reuse the existing AIDP mock's declared state setting before import.
+        os.environ["AIDP_MOCK_STATE_FILE"] = str(Path(state_dir) / "aidp.json")
+    states = {name: StateStore(name, state_dir=state_dir) for name in
               ("dify", "datamate", "idata", "ragflow", "haotian", "assets")}
     faults = FaultInjector()
     wire_log = WireLog()
@@ -232,13 +237,14 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app() if __name__ != "__main__" else None
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Nexent External Knowledge Mock")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30090, help="Bind port (default 30090)")
+    parser.add_argument("--state-dir", type=Path, help="Private runtime state directory (suite supplies a per-case directory)")
     args = parser.parse_args()
 
     import uvicorn
@@ -255,7 +261,7 @@ def main() -> None:
     print("  POST /_reset to restore all seed state\n")
 
     # State is held in-process; never run with multiple workers.
-    uvicorn.run(app, host=args.host, port=args.port, workers=1)
+    uvicorn.run(create_app(args.state_dir), host=args.host, port=args.port, workers=1)
 
 
 if __name__ == "__main__":

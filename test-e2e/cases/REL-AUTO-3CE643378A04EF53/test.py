@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5 reliability test: data-process restart recovery.
 
 Verifies recover_data_process_tasks fails PROCESSING records and already
@@ -12,11 +13,11 @@ import uuid
 
 import pytest
 
-from database.client import get_db_session
-from database.db_models import KnowledgeFileLifecycle
-from database.knowledge_file_lifecycle_db import delete_file_record, get_file_record
-from services.redis_service import get_redis_service
-from services.startup_recovery_service import recover_data_process_tasks
+from management.db.client import get_db_session
+from management.db.models import KnowledgeFileLifecycle
+from management.db.knowledge_base.file_lifecycle import delete_file_record, get_file_record
+from management.services.knowledge_base.task_state import get_redis_service
+from management.recovery import recover_data_process_tasks
 
 CASE_ID = 'REL-AUTO-3CE643378A04EF53'
 CONTAINER_RESTARTED_MESSAGE = 'Data-process service restarted before the task completed'

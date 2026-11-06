@@ -1,6 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { createContext, useContext, type FC, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type FC,
+  type ReactNode,
+} from "react";
 import type { PanelSourceItem } from "./sources-panel";
 
 /**
@@ -34,7 +44,52 @@ export interface SourcesPanelContextValue {
   close: () => void;
 }
 
-const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(null);
+export function useSourcesPanelState(
+  onOpen?: () => void,
+  closeEpoch = 0
+): SourcesPanelContextValue {
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
+  const [previousCloseEpoch, setPreviousCloseEpoch] = useState(closeEpoch);
+  if (previousCloseEpoch !== closeEpoch) {
+    setPreviousCloseEpoch(closeEpoch);
+    setSelection(null);
+  }
+  const open = useCallback(
+    (payload: SourcesPanelSelection) => {
+      onOpen?.();
+      setSelection(payload);
+    },
+    [onOpen]
+  );
+  const toggle = useCallback(
+    (payload: SourcesPanelSelection) => {
+      const isClosing =
+        selection?.messageId === payload.messageId &&
+        selection?.groupId === payload.groupId;
+      if (!isClosing) onOpen?.();
+      setSelection(isClosing ? null : payload);
+    },
+    [selection, onOpen]
+  );
+  const close = useCallback(() => setSelection(null), []);
+  return useMemo(
+    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
+    [selection, open, toggle, close]
+  );
+}
+
+const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(
+  null
+);
+type SourcesPanelActions = Pick<
+  SourcesPanelContextValue,
+  "open" | "toggle" | "close"
+>;
+const SourcesPanelActionsContext = createContext<SourcesPanelActions | null>(
+  null
+);
 
 export interface SourcesPanelProviderProps {
   value: SourcesPanelContextValue;
@@ -44,11 +99,29 @@ export interface SourcesPanelProviderProps {
 export const SourcesPanelProvider: FC<SourcesPanelProviderProps> = ({
   value,
   children,
-}) => (
-  <SourcesPanelContext.Provider value={value}>
-    {children}
-  </SourcesPanelContext.Provider>
-);
+}) => {
+  const { open, toggle, close } = value;
+  const actions = useMemo(
+    () => ({ open, toggle, close }),
+    [open, toggle, close]
+  );
+  return (
+    <SourcesPanelActionsContext.Provider value={actions}>
+      <SourcesPanelContext.Provider value={value}>
+        {children}
+      </SourcesPanelContext.Provider>
+    </SourcesPanelActionsContext.Provider>
+  );
+};
+
+export function useSourcesPanelActions(): SourcesPanelActions {
+  const actions = useContext(SourcesPanelActionsContext);
+  if (!actions)
+    throw new Error(
+      "useSourcesPanelActions must be used inside <SourcesPanelProvider>."
+    );
+  return actions;
+}
 
 /**
  * Hook used by child components (currently the `group-source` block) to read
@@ -58,7 +131,7 @@ export const useSourcesPanel = (): SourcesPanelContextValue => {
   const ctx = useContext(SourcesPanelContext);
   if (!ctx) {
     throw new Error(
-      "useSourcesPanel must be used inside <SourcesPanelProvider>.",
+      "useSourcesPanel must be used inside <SourcesPanelProvider>."
     );
   }
   return ctx;

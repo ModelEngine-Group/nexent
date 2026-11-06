@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const baseUrl = process.env.NEXENT_E2E_BASE_URL ?? "http://127.0.0.1:3000";
@@ -25,6 +27,9 @@ const json = (route: Route, body: unknown) =>
 
 async function mockAgentListApis(page: Page, listItems = agents) {
   await page.route("**/api/**", (route) => json(route, {}));
+  // The agent management page resolves the default resource tag library before
+  // it renders the list, so the catch-all stub above must be narrowed here.
+  await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/tenant_config/deployment_version", (route) =>
     json(route, {
       deployment_version: "speed",
@@ -82,19 +87,17 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   await mockAgentListApis(page);
   await page.goto(`${baseUrl}/zh/agents`);
 
-  await expect(page.getByRole("heading", { name: "智能体开发" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体配置" })).toBeVisible();
   await expect(page.locator("article")).toHaveCount(8);
-  await expect(page.getByText("我创建的智能体")).toBeVisible();
+  await expect(page.getByTestId("agent-list-tabs")).toHaveCount(0);
   await expect(page.getByText("创建于2026-01-23").first()).toBeVisible();
   await expect(page.getByText("总计：8")).toBeVisible();
   await expect(page.getByText("10条/页")).toBeVisible();
 
   const guide = await page.getByTestId("agent-guide-background").boundingBox();
-  const tabs = await page.getByTestId("agent-list-tabs").boundingBox();
   expect(guide?.width).toBe(1808);
   expect(guide?.height).toBe(353);
-  expect(tabs?.y).toBe(guide!.y + guide!.height + 12);
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
 
   const firstCard = page.locator("article").first();
   await expect(firstCard).toHaveCSS("border-radius", "12px");
@@ -120,7 +123,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   const second = await page.locator("article").nth(1).boundingBox();
   const fifth = await page.locator("article").nth(4).boundingBox();
   const search = await page
-    .getByPlaceholder("按名称或描述搜索")
+    .getByPlaceholder("按名称、描述或标签搜索")
     .locator("..")
     .boundingBox();
   expect(first).not.toBeNull();
@@ -131,7 +134,8 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   expect(first!.height).toBe(148);
   expect(second!.x - first!.x - first!.width).toBeCloseTo(16, 0);
   expect(fifth!.y - first!.y - first!.height).toBeCloseTo(12, 0);
-  expect(search!.width).toBeCloseTo(360, 0);
+  // The tag filter button now shares the 360px toolbar slot with the search box.
+  expect(search!.width).toBeCloseTo(242, 0);
   expect(search!.height).toBeCloseTo(32, 0);
 
   await page.screenshot({
@@ -251,7 +255,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
     .boundingBox();
   const tableContent = await table.boundingBox();
   const tableSearch = await page
-    .getByPlaceholder("按名称或描述搜索")
+    .getByPlaceholder("按名称、描述或标签搜索")
     .locator("..")
     .boundingBox();
   expect(tableBody?.width).toBeCloseTo(1808, 0);
@@ -261,7 +265,8 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   expect(
     Math.abs((tableBody?.height ?? 0) - (tableContent?.height ?? 0))
   ).toBeLessThanOrEqual(2);
-  expect(tableSearch?.width).toBeCloseTo(296, 0);
+  // The tag filter button now shares the 296px list toolbar slot with the search box.
+  expect(tableSearch?.width).toBeCloseTo(178, 0);
   await expect(
     table.getByRole("button", { name: "删除" }).first()
   ).toBeVisible();
@@ -270,7 +275,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
     fullPage: true,
   });
 
-  await page.getByPlaceholder("按名称或描述搜索").fill("健康小助手");
+  await page.getByPlaceholder("按名称、描述或标签搜索").fill("健康小助手");
   await expect(table.locator("tbody tr")).toHaveCount(1);
   const filteredTableBody = await page
     .getByTestId("agent-list-table-scroll")
@@ -349,7 +354,7 @@ test("table body follows rendered content, caps available height, and scrolls in
   );
 });
 
-test("the guide divider is shown only when the agent list is empty", async ({
+test("the guide divider is shown for an empty list while the guide is expanded", async ({
   page,
 }) => {
   await mockAgentListApis(page, []);
@@ -360,6 +365,9 @@ test("the guide divider is shown only when the agent list is empty", async ({
 
   const guide = await page.getByTestId("agent-guide-background").boundingBox();
   expect(guide?.height).toBe(378);
+
+  await page.getByRole("button", { name: "收起教程" }).click();
+  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
 });
 
 test("publish shortcut routes to the existing configuration flow", async ({

@@ -1,10 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Executable Management launcher retained for deployment command compatibility."""
+
 import logging
 import logging.config
 import warnings
 
 import uvicorn
 
-from consts.const import APP_VERSION
+from contracts.constants.environment import APP_VERSION
 
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -14,8 +17,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from apps.config_app import app
-from utils.logging_utils import (
+from management.api.application import app
+from infrastructure.logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )

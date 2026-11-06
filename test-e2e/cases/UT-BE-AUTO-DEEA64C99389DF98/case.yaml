@@ -16,7 +16,7 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部 provider 或模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成；测试基线固定为 develop，执行时另记录实际被测 commit。
-  - backend/services/memory_external_provider_service.py 可导入，PluginLoader 与 MemoryProviderConfigService 可被 mock 替换；所需 fake
+  - backend/management/services/memory/providers/service.py 可导入，PluginLoader 与 MemoryProviderConfigService 可被 mock 替换；所需 fake
     provider 桩可构造。
   test_data:
     legacy_asset_declaration: '- 无外部本地资产；仅测试内 mock PluginLoader / MemoryProviderConfigService 与 fake provider 桩（含 provider_name、provider_config_id、params.plugin.name）。'

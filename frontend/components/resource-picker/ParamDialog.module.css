@@ -1,0 +1,473 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  font-family: inherit;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.body > * {
+  flex-shrink: 0;
+}
+
+.dialog[data-config-variant="tool"] .body {
+  max-height: min(508px, calc(100vh - 224px));
+}
+
+.dialog :global(.ant-input),
+.dialog :global(.ant-input-number),
+.dialog :global(.ant-select),
+.dialog :global(.ant-form) {
+  font-family: inherit !important;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dialog :global(input.ant-input) {
+  height: 28px !important;
+  padding: 0 12px !important;
+  border-radius: 6px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+}
+
+.dialog :global(.ant-input:not(.ant-input-status-error)),
+.dialog :global(.ant-input-number:not(.ant-input-number-status-error)) {
+  border-color: #c9c9c9 !important;
+}
+
+.dialog :global(.ant-input-number) {
+  height: 28px;
+  border-radius: 6px;
+}
+
+.dialog :global(.ant-input-number-input) {
+  height: 26px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.dialog :global(.ant-form-item-label) {
+  padding-bottom: 8px !important;
+}
+
+.dialog :global(.ant-form-item-label > label) {
+  height: auto;
+}
+
+.dialog :global(.ant-form-item:last-child) {
+  margin-bottom: 0 !important;
+}
+
+.dialog [data-config-part="test-result"] :global(textarea.ant-input) {
+  height: 99px !important;
+  min-height: 99px !important;
+  border-radius: 4px;
+  background: #efefef !important;
+}
+
+.resetLink {
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #777;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.resetLink:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancelButton,
+.confirmButton {
+  width: 96px !important;
+  height: 32px !important;
+  padding: 5px 16px !important;
+  border-radius: 6px !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+  letter-spacing: 0;
+  box-shadow: none !important;
+}
+
+.cancelButton {
+  border: 1px solid #c9c9c9 !important;
+  background: #fff !important;
+  color: #191919 !important;
+}
+
+.confirmButton {
+  border: 0 !important;
+  background: #2673e5 !important;
+  color: #fff !important;
+}
+
+.confirmButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Tool descriptions use the design's two-line preview. */
+.dialog[data-config-variant="tool"] [data-config-part="description"] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Align label text to controls and place required marks in the left gutter. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  [data-config-label] {
+  padding-left: 0;
+  font-weight: 400;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  [data-config-required] {
+  position: absolute;
+  left: -10px;
+  top: 0;
+}
+.dialog[data-config-variant="tool"]
+  [data-config-part="test-panel"]
+  [data-config-part="test-run"] {
+  margin-top: 16px;
+  font-family: inherit;
+}
+
+/* Keep the required-mark gutter inside the scroll viewport. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  .body {
+  margin-left: -10px;
+  padding-left: 10px;
+}
+
+/* Apply one horizontal text inset, including nested password inputs. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(textarea.ant-input) {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-affix-wrapper) {
+  padding: 0 12px !important;
+  min-height: 28px;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-affix-wrapper input.ant-input) {
+  padding: 0 !important;
+}
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-number-input) {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
+/* Required marks occupy the gutter outside AntD's label text box. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-form-item-label),
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-form-item-label > label) {
+  overflow: visible !important;
+}
+
+/* AntD number controls must not add a second text inset. */
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  :global(.ant-input-number) {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.dialog[data-config-variant="publish"] :global(.ant-form-item) {
+  margin-bottom: 16px;
+}
+.dialog[data-config-variant="publish"] :global(textarea.ant-input) {
+  min-height: 88px;
+  border-radius: 2px;
+  padding: 8px 12px !important;
+  resize: vertical;
+}
+
+/* The tool editor keeps both configuration and testing visible. */
+.dialog[data-config-layout="split"] {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="heading"] {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="header"] {
+  height: auto;
+  min-height: 24px;
+  align-items: flex-start;
+}
+
+.dialog[data-config-layout="split"] .body {
+  display: grid;
+  grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
+  height: min(568px, calc(100dvh - 240px));
+  max-height: none;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="config-column"],
+.dialog[data-config-layout="split"] [data-config-part="test-column"] {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="config-column"] {
+  padding: 20px 24px;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="test-column"] {
+  border-left: 1px solid #e5e5e5;
+  background: #fafafa;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="test-inputs"] {
+  padding: 20px 24px;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="test-result"] {
+  min-height: 200px;
+  padding: 20px 24px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="footer"] {
+  height: auto;
+  padding: 16px 24px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="section-heading"] {
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 5px 0;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="test-heading"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="section-title"] {
+  position: relative;
+  flex-shrink: 0;
+  padding-left: 22px;
+  white-space: nowrap;
+}
+
+/* Keep the icon outside the text baseline calculation. */
+.dialog[data-config-layout="split"] [data-config-part="section-title"] > svg {
+  position: absolute;
+  top: 4px;
+  left: 0;
+}
+
+.dialog[data-config-layout="split"] [data-config-label] {
+  font-size: 14px;
+  line-height: 22px;
+  font-family: inherit;
+}
+
+/* Keep entered values consistent across all input control variants. */
+.dialog[data-config-layout="split"] input,
+.dialog[data-config-layout="split"] textarea,
+.dialog[data-config-layout="split"] select,
+.dialog[data-config-layout="split"] :global(.ant-input-affix-wrapper),
+.dialog[data-config-layout="split"] :global(.ant-input-number),
+.dialog[data-config-layout="split"] :global(.ant-select),
+.dialog[data-config-layout="split"] :global(.ant-select-content),
+.dialog[data-config-layout="split"] :global(.ant-select-selection-item),
+.dialog[data-config-layout="split"]
+  [data-config-part="tool-fields"]
+  :global(.ant-tag),
+.dialog[data-config-layout="split"]
+  [data-config-part="test-inputs"]
+  :global(.ant-tag) {
+  font-size: 14px !important;
+}
+
+.dialog[data-config-layout="split"] :global(input.ant-input)::placeholder,
+.dialog[data-config-layout="split"] :global(textarea.ant-input)::placeholder,
+.dialog[data-config-layout="split"]
+  :global(.ant-input-number-input)::placeholder,
+.dialog[data-config-layout="split"] :global(.ant-select-selection-placeholder) {
+  font-size: 14px;
+}
+
+.dialog[data-config-layout="split"] button,
+.dialog[data-config-layout="split"] pre {
+  font-family: inherit !important;
+}
+
+/* Place the required mark after the name, before the help icon. */
+.dialog[data-config-layout="split"] [data-config-label] > * {
+  order: 2;
+}
+
+.dialog[data-config-layout="split"] [data-config-label-text] {
+  order: 0;
+}
+
+.dialog[data-config-layout="split"] [data-config-required] {
+  position: static;
+  order: 1;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="input-mode"] {
+  flex-shrink: 0;
+  padding: 3px;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 400;
+  color: #777;
+  border-radius: 6px;
+  background: #f0f2f5;
+}
+
+.dialog[data-config-layout="split"]
+  [data-config-part="input-mode"]
+  :global(.ant-segmented-group) {
+  gap: 4px;
+}
+
+.dialog[data-config-layout="split"]
+  [data-config-part="input-mode"]
+  :global(.ant-segmented-item-label) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.dialog[data-config-layout="split"] [data-config-part="input-mode-option"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  color: inherit;
+}
+
+.dialog[data-config-layout="split"]
+  [data-config-part="input-mode-option"]
+  > svg {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: inherit;
+}
+
+.dialog[data-config-layout="split"]
+  [data-config-part="input-mode"]
+  :global(.ant-segmented-item-selected) {
+  color: #2673e5;
+  font-weight: 400;
+}
+
+@media (max-width: 767px) {
+  .dialog[data-config-layout="split"] [data-config-part="test-heading"] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .dialog[data-config-layout="split"] [data-config-part="input-mode"] {
+    justify-self: start;
+  }
+
+  .dialog[data-config-layout="split"] .body {
+    display: flex;
+    height: auto;
+    max-height: calc(100dvh - 260px);
+    overflow-y: auto;
+  }
+
+  .dialog[data-config-layout="split"] [data-config-part="config-column"],
+  .dialog[data-config-layout="split"] [data-config-part="test-column"] {
+    overflow: visible;
+  }
+
+  .dialog[data-config-layout="split"] [data-config-part="test-column"] {
+    border-left: 0;
+    border-top: 1px solid #e5e5e5;
+  }
+}

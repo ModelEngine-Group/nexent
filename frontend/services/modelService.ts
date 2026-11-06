@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { t as translate } from "i18next";
 
 import { API_ENDPOINTS } from "./api";
 
@@ -33,8 +37,21 @@ import {
   ModelProviderKey,
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
+import { runModelCheck } from "@/lib/modelCheckQueue";
+
+const mapOutletStateFromApi = (model: Record<string, unknown>) => ({
+  profileSchemaVersion: model.profile_schema_version as number | undefined,
+  configRevision: model.config_revision as number | undefined,
+  migrationStatus: model.migration_status as ModelOption["migrationStatus"],
+  migrationReviewRequired: model.migration_review_required as
+    boolean | undefined,
+  migrationDetails: model.migration_details as ModelOption["migrationDetails"],
+  migrationDiagnostic:
+    model.migration_diagnostic as ModelOption["migrationDiagnostic"],
+});
 
 const mapCapacityFieldsFromApi = (model: any) => ({
+  ...mapOutletStateFromApi(model),
   contextWindowTokens: model.context_window_tokens,
   maxInputTokens: model.max_input_tokens,
   maxOutputTokens: model.max_output_tokens,
@@ -132,6 +149,7 @@ const buildInferenceParamsRequestBody = (model: {
 const mapInferenceParamsFromApi = (model: any) => ({
   temperature: model.temperature,
   topP: model.top_p,
+  effectiveSampling: model.effective_sampling,
   extraParams: model.extra_params,
   enableThinking:
     model.extra_params?.enable_thinking === true ||
@@ -456,14 +474,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -499,6 +519,9 @@ export const modelService = {
     type?: ModelType; // v2.6.0: optional — when omitted, backend returns all types and infers per-model
     apiKey: string;
     baseUrl?: string;
+    sslVerify?: boolean;
+    timeoutSeconds?: number;
+    httpHeaders?: Record<string, string>;
   }): Promise<any[]> => {
     try {
       const response = await authedFetch(
@@ -510,6 +533,9 @@ export const modelService = {
             provider: model.provider,
             ...(model.type !== undefined ? { model_type: model.type } : {}),
             api_key: model.apiKey,
+            ssl_verify: model.sslVerify ?? true,
+            timeout_seconds: model.timeoutSeconds ?? 120,
+            http_headers: model.httpHeaders ?? {},
             ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
         }
@@ -519,14 +545,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return result.data || [];
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -554,14 +582,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return response.status;
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -590,7 +620,9 @@ export const modelService = {
       log.log("getProviderSelectedModalList result", result);
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "获取模型列表失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.modelListFailed"),
           response.status
         );
       }
@@ -598,7 +630,7 @@ export const modelService = {
     } catch (error) {
       log.log("getProviderSelectedModalList error", error);
       if (error instanceof ModelError) throw error;
-      throw new ModelError("获取模型列表失败", 500);
+      throw new ModelError(translate("ui.localization.modelListFailed"), 500);
     }
   },
 
@@ -845,13 +877,15 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "删除自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.deleteModelFailed"),
           response.status
         );
       }
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("删除自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.deleteModelFailed"), 500);
     }
   },
 
@@ -861,29 +895,31 @@ export const modelService = {
     modelType: string,
     signal?: AbortSignal
   ): Promise<boolean> => {
-    try {
-      if (!displayName) return false;
-      const response = await authedFetch(
-        API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
-          signal,
+    return runModelCheck(async () => {
+      try {
+        if (!displayName) return false;
+        const response = await authedFetch(
+          API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+            signal,
+          }
+        );
+        const result = await response.json();
+        if (response.status === 200 && result.data) {
+          return result.data.connectivity;
         }
-      );
-      const result = await response.json();
-      if (response.status === 200 && result.data) {
-        return result.data.connectivity;
+        return false;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          log.warn(`验证模型 ${displayName} 连接被取消`);
+          throw error;
+        }
+        log.error(`验证模型 ${displayName} 连接失败:`, error);
+        return false;
       }
-      return false;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        log.warn(`验证模型 ${displayName} 连接被取消`);
-        throw error;
-      }
-      log.error(`验证模型 ${displayName} 连接失败:`, error);
-      return false;
-    }
+    }, signal);
   },
 
   checkManageTenantModelConnectivityDetail: async (
@@ -892,45 +928,47 @@ export const modelService = {
     modelType: string,
     signal?: AbortSignal
   ): Promise<ModelConnectivityResult> => {
-    try {
-      if (!displayName) return { connectivity: false };
-      const response = await authedFetch(
-        API_ENDPOINTS.model.manageModelHealthcheck,
-        {
-          method: "POST",
-          headers: {
-            ...getAuthHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            tenant_id: tenantId,
-            display_name: displayName,
-            model_type: modelType,
-          }),
-          signal,
+    return runModelCheck(async () => {
+      try {
+        if (!displayName) return { connectivity: false };
+        const response = await authedFetch(
+          API_ENDPOINTS.model.manageModelHealthcheck,
+          {
+            method: "POST",
+            headers: {
+              ...getAuthHeaders(),
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              tenant_id: tenantId,
+              display_name: displayName,
+              model_type: modelType,
+            }),
+            signal,
+          }
+        );
+        const result = await response.json();
+        if (response.status === 200 && result.data) {
+          return {
+            connectivity: Boolean(result.data.connectivity),
+            modelName: result.data.model_name,
+            error: result.data.error,
+          };
         }
-      );
-      const result = await response.json();
-      if (response.status === 200 && result.data) {
         return {
-          connectivity: Boolean(result.data.connectivity),
-          modelName: result.data.model_name,
-          error: result.data.error,
+          connectivity: false,
+          error: result.detail || result.message,
+        };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
+        return {
+          connectivity: false,
+          error: error instanceof Error ? error.message : String(error),
         };
       }
-      return {
-        connectivity: false,
-        error: result.detail || result.message,
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw error;
-      }
-      return {
-        connectivity: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+    }, signal);
   },
 
   // Check model connectivity for a specific tenant (admin/manage operation)
@@ -940,37 +978,39 @@ export const modelService = {
     modelType: string,
     signal?: AbortSignal
   ): Promise<boolean> => {
-    try {
-      if (!displayName) return false;
-      const response = await authedFetch(
-        API_ENDPOINTS.model.manageModelHealthcheck,
-        {
-          method: "POST",
-          headers: {
-            ...getAuthHeaders(),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            tenant_id: tenantId,
-            display_name: displayName,
-            model_type: modelType,
-          }),
-          signal,
+    return runModelCheck(async () => {
+      try {
+        if (!displayName) return false;
+        const response = await authedFetch(
+          API_ENDPOINTS.model.manageModelHealthcheck,
+          {
+            method: "POST",
+            headers: {
+              ...getAuthHeaders(),
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              tenant_id: tenantId,
+              display_name: displayName,
+              model_type: modelType,
+            }),
+            signal,
+          }
+        );
+        const result = await response.json();
+        if (response.status === 200 && result.data) {
+          return result.data.connectivity;
         }
-      );
-      const result = await response.json();
-      if (response.status === 200 && result.data) {
-        return result.data.connectivity;
+        return false;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          log.warn(`验证模型 ${displayName} (租户: ${tenantId}) 连接被取消`);
+          throw error;
+        }
+        log.error(`验证模型 ${displayName} (租户: ${tenantId}) 连接失败:`, error);
+        return false;
       }
-      return false;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        log.warn(`验证模型 ${displayName} (租户: ${tenantId}) 连接被取消`);
-        throw error;
-      }
-      log.error(`验证模型 ${displayName} (租户: ${tenantId}) 连接失败:`, error);
-      return false;
-    }
+    }, signal);
   },
 
   // Verify model configuration connectivity before adding it
@@ -996,78 +1036,80 @@ export const modelService = {
     },
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
-    try {
-      const requestBody: any = {
-        model_name: config.modelName || "",
-        model_type: config.modelType,
-        api_key: config.apiKey || "sk-no-api-key",
-        base_url: config.baseUrl || "",
-        ...(config.modelId !== undefined
-          ? { probe_model_id: config.modelId }
-          : {}),
-        ...(config.maxTokens !== undefined
-          ? { max_tokens: config.maxTokens }
-          : {}),
-        embedding_dim: config.embeddingDim || 1024,
-        ...buildInferenceParamsRequestBody(config),
-      };
+    return runModelCheck(async () => {
+      try {
+        const requestBody: any = {
+          model_name: config.modelName || "",
+          model_type: config.modelType,
+          api_key: config.apiKey || "sk-no-api-key",
+          base_url: config.baseUrl || "",
+          ...(config.modelId !== undefined
+            ? { probe_model_id: config.modelId }
+            : {}),
+          ...(config.maxTokens !== undefined
+            ? { max_tokens: config.maxTokens }
+            : {}),
+          embedding_dim: config.embeddingDim || 1024,
+          ...buildInferenceParamsRequestBody(config),
+        };
 
-      // Add STT specific fields if provided
-      if (config.modelFactory) {
-        requestBody.model_factory = config.modelFactory;
-      }
-      if (config.modelAppid) {
-        requestBody.model_appid = config.modelAppid;
-      }
-      if (config.accessToken) {
-        requestBody.access_token = config.accessToken;
-      }
-
-      const response = await authedFetch(
-        API_ENDPOINTS.model.verifyModelConfig,
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
-          body: JSON.stringify(requestBody),
-          signal,
+        // Add STT specific fields if provided
+        if (config.modelFactory) {
+          requestBody.model_factory = config.modelFactory;
         }
-      );
+        if (config.modelAppid) {
+          requestBody.model_appid = config.modelAppid;
+        }
+        if (config.accessToken) {
+          requestBody.access_token = config.accessToken;
+        }
 
-      const result = await response.json();
+        const response = await authedFetch(
+          API_ENDPOINTS.model.verifyModelConfig,
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify(requestBody),
+            signal,
+          }
+        );
 
-      if (response.status === 200 && result.data) {
+        const result = await response.json();
+
+        if (response.status === 200 && result.data) {
+          return {
+            connectivity: result.data.connectivity,
+            model_name: result.data.model_name || "UNKNOWN_MODEL",
+            error: result.data.connectivity
+              ? undefined
+              : result.data.error || result.detail || result.message,
+            capacitySuggestion: mapCapacitySuggestionFromApi(
+              result.data.capacity_suggestion
+            ),
+          };
+        }
+
         return {
-          connectivity: result.data.connectivity,
-          model_name: result.data.model_name || "UNKNOWN_MODEL",
-          error: result.data.connectivity
-            ? undefined
-            : result.data.error || result.detail || result.message,
-          capacitySuggestion: mapCapacitySuggestionFromApi(
-            result.data.capacity_suggestion
-          ),
+          connectivity: false,
+          model_name: result.data?.model_name || "UNKNOWN_MODEL",
+          error:
+            result.detail || result.message || "Connection verification failed",
+          capacitySuggestion: null,
+        };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          log.warn("Model configuration connectivity verification cancelled");
+          throw error;
+        }
+        log.error("Model configuration connectivity verification failed:", error);
+        return {
+          connectivity: false,
+          model_name: "UNKNOWN_MODEL",
+          error: error instanceof Error ? error.message : String(error),
+          capacitySuggestion: null,
         };
       }
-
-      return {
-        connectivity: false,
-        model_name: result.data?.model_name || "UNKNOWN_MODEL",
-        error:
-          result.detail || result.message || "Connection verification failed",
-        capacitySuggestion: null,
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        log.warn("Model configuration connectivity verification cancelled");
-        throw error;
-      }
-      log.error("Model configuration connectivity verification failed:", error);
-      return {
-        connectivity: false,
-        model_name: "UNKNOWN_MODEL",
-        error: error instanceof Error ? error.message : String(error),
-        capacitySuggestion: null,
-      };
-    }
+    }, signal);
   },
 
   suggestCapacity: async (params: {
@@ -1150,6 +1192,7 @@ export const modelService = {
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
+          ...mapOutletStateFromApi(model),
           ...mapInferenceParamsFromApi(model),
           reasoningCapability: model.reasoning_capability ?? undefined,
         }));
@@ -1373,6 +1416,10 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Type change: sent only when the operator re-typed the model. The
+    // backend manage/update request carries model_type through to the
+    // record (multi_embedding pairs deliberately keep their type).
+    type?: ModelType;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -1390,6 +1437,7 @@ export const modelService = {
             ...(params.displayName !== undefined
               ? { display_name: params.displayName }
               : {}),
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
             base_url: params.url,
             ...(params.apiKey?.trim() ? { api_key: params.apiKey } : {}),
             ...(params.maxTokens !== undefined
@@ -1549,6 +1597,9 @@ export const modelService = {
     type?: ModelType; // v2.6.0: optional — when omitted, returns all types
     apiKey: string;
     baseUrl?: string;
+    sslVerify?: boolean;
+    timeoutSeconds?: number;
+    httpHeaders?: Record<string, string>;
   }): Promise<any[]> => {
     try {
       const response = await authedFetch(
@@ -1564,6 +1615,9 @@ export const modelService = {
             provider: params.provider,
             ...(params.type !== undefined ? { model_type: params.type } : {}),
             api_key: params.apiKey,
+            ssl_verify: params.sslVerify ?? true,
+            timeout_seconds: params.timeoutSeconds ?? 120,
+            http_headers: params.httpHeaders ?? {},
             ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
           }),
         }

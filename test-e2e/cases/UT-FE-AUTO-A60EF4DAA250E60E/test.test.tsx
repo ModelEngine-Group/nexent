@@ -1,7 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import { Form } from 'antd';
 import AgentPrompt from '@/app/[locale]/agents/[agentId]/components/agent-prompt';
 import AgentDebugPanel from '@/app/[locale]/agents/[agentId]/components/debug/agent-debug';
@@ -56,7 +58,11 @@ vi.mock('@/stores/agentStore', () => ({
 
 // Keep the real Debug -> Chat -> Thread model derivation. Only replace
 // runtime/network adapters and the unrelated comparison panel.
-vi.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ modelConfig: {} }) }));
+vi.mock('@/hooks/useConfig', () => ({ useConfig: () => ({
+  modelConfig: {},
+  defaultLlmModelConfig: h.agentStore.defaultLlmConfig,
+  isSuccess: true,
+}) }));
 vi.mock('@/app/[locale]/newchat/adapter/attachment-adapter', () => ({ compositeAttachmentAdapter: {} }));
 vi.mock('@/app/[locale]/newchat/adapter/server-dictation-adapter', () => ({ ServerDictationAdapter: class {} }));
 vi.mock('@/app/[locale]/newchat/assistant-ui/agent-landing', () => ({ AgentLandingPage: () => null }));
@@ -87,6 +93,7 @@ vi.mock('@/components/providers/deploymentProvider', () => ({
 }));
 vi.mock('@/contexts/nl2AgentFlow', () => ({
   useNl2AgentFlow: () => ({ configFocusRequest: null }),
+  useNl2AgentFormLock: () => false,
 }));
 vi.mock('@/components/ui/tabs', () => ({
   Tabs: (p: any) => p.children,
@@ -273,9 +280,7 @@ const buildEditedAgent = (overrides: Record<string, any> = {}) => ({
   model_ids: [],
   model: '',
   model_names: [],
-  duty_prompt: '',
-  constraint_prompt: '',
-  few_shots_prompt: '',
+  prompt: '',
   ...overrides,
 });
 
@@ -329,7 +334,9 @@ describe(' 模型可用性过滤与主模型回退', () => {
 
     render(React.createElement(Form, null, React.createElement(AgentPrompt)));
 
-    expect(h.agentStore.updateAgentConfig).not.toHaveBeenCalled();
+    expect(h.agentStore.updateAgentConfig).toHaveBeenCalledExactlyOnceWith({
+      model_ids: [1], model: 'Model A', model_names: ['Model A'],
+    });
   });
 
   it(' AgentPrompt defaultLlmConfig.id 不可用时 selectedModelIds 为空', async () => {
@@ -359,17 +366,18 @@ describe(' 模型可用性过滤与主模型回退', () => {
     expect(h.composerProps.selectedModelId).toBe('1');
   });
 
-  it('Debug Panel 全部不可用时模型列表为空且选中态 undefined', async () => {
+  it('Debug Panel 全部不可用时模型列表为空且禁止发送', async () => {
     h.modelList.models = [model(3, 'Model C', 'unavailable')];
     h.agentStore.agentId = 1;
     h.agentStore.editedAgent = buildEditedAgent({ model_ids: [3] });
     render(<AgentDebugPanel />);
     await waitFor(() => expect(h.composerProps).toBeTruthy());
     expect(h.composerProps.models).toEqual([]);
-    expect(h.composerProps.selectedModelId).toBeUndefined();
+    expect(h.composerProps.selectedModelId).toBe('');
+    expect(h.composerProps.disabled).toBe(true);
   });
 
-  it('Debug Panel 模型列表更新后不保留已失效的选中 ID', async () => {
+  it('Debug Panel 已选模型失效后禁止发送且不静默切换', async () => {
     h.modelList.models = [model(1, 'Model A'), model(2, 'Model B')];
     h.agentStore.agentId = 1;
     h.agentStore.editedAgent = buildEditedAgent({ model_ids: [2, 1], model_names: ['Model B', 'Model A'] });
@@ -377,7 +385,11 @@ describe(' 模型可用性过滤与主模型回退', () => {
     await waitFor(() => expect(h.composerProps.selectedModelId).toBe('2'));
     h.modelList.models = [model(1, 'Model A'), model(2, 'Model B', 'unavailable')];
     view.rerender(<AgentDebugPanel />);
+    await waitFor(() => expect(h.composerProps.selectedModelId).toBe(''));
+    expect(h.composerProps.disabled).toBe(true);
+    act(() => h.composerProps.onModelChange('1'));
     await waitFor(() => expect(h.composerProps.selectedModelId).toBe('1'));
+    expect(h.composerProps.disabled).toBe(false);
     expect(h.composerProps.models.map((m: any) => m.id)).toEqual(['1']);
   });
 
@@ -424,6 +436,7 @@ describe(' 模型可用性过滤与主模型回退', () => {
       expect(h.composerProps).toBeTruthy();
     });
     expect(h.composerProps.models).toEqual([]);
-    expect(h.composerProps.selectedModelId).toBeUndefined();
+    expect(h.composerProps.selectedModelId).toBe('');
+    expect(h.composerProps.disabled).toBe(true);
   });
 });

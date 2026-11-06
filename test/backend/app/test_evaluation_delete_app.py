@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoint tests for agent evaluations and evaluation sets.
 
 The project runner executes each file in a separate process. Service and
@@ -25,14 +26,14 @@ sys.path.insert(0, backend_dir)
 
 # Isolate service and persistence boundaries before loading the real routers.
 _STUB_SYMBOLS = {
-    "services.agent_evaluation_service": (
+    "management.services.evaluation.runs": (
         "create_agent_evaluation_run_impl", "delete_agent_evaluation_run_impl",
         "generate_analysis_report_impl", "get_agent_evaluation_run_impl",
         "get_evaluation_stats_impl", "list_agent_evaluation_cases_impl",
         "list_agent_evaluations_by_agent_impl", "trial_run_evaluator_impl",
     ),
-    "services.evaluation_report_service": ("generate_agent_evaluation_report_impl",),
-    "services.evaluation_set_service": (
+    "management.services.evaluation.reporting.report": ("generate_agent_evaluation_report_impl",),
+    "management.services.evaluation.sets": (
         "_generate_cases_async", "_update_generation_status", "add_evaluation_set_case_impl",
         "batch_delete_evaluation_set_cases_impl", "count_active_runs_using_set",
         "count_evaluation_sets_impl", "create_empty_evaluation_set", "create_evaluation_set_from_cases",
@@ -40,12 +41,12 @@ _STUB_SYMBOLS = {
         "get_evaluation_set_impl", "list_evaluation_set_cases_impl", "list_evaluation_sets_impl",
         "update_evaluation_set_case_impl",
     ),
-    "database.agent_evaluation_db": ("update_annotation_schema_ids",),
-    "utils.auth_utils": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
-    "utils.evaluation_set_excel_utils": (
+    "management.db.evaluation.runs": ("update_annotation_schema_ids",),
+    "gateway.authentication.auth": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
+    "management.services.evaluation.spreadsheet": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
-    "utils.thread_utils": ("pool",),
+    "infrastructure.concurrency": ("config_thread_manager",),
 }
 for _module_name, _symbols in _STUB_SYMBOLS.items():
     _module = types.ModuleType(_module_name)
@@ -72,20 +73,20 @@ for _module_name, _symbols in _STUB_SYMBOLS.items():
 # 12  list_evaluation_sets_impl
 # 13  get_current_user_info          → ("u1", "t1", "zh")
 _PATCH_TARGETS = [
-    "services.agent_evaluation_service.delete_agent_evaluation_run_impl",
-    "services.evaluation_set_service.delete_evaluation_set_impl",
-    "utils.auth_utils.get_current_user_id",
-    "services.agent_evaluation_service.create_agent_evaluation_run_impl",
-    "services.evaluation_report_service.generate_agent_evaluation_report_impl",
-    "services.agent_evaluation_service.get_agent_evaluation_run_impl",
-    "services.agent_evaluation_service.list_agent_evaluation_cases_impl",
-    "services.agent_evaluation_service.list_agent_evaluations_by_agent_impl",
-    "services.evaluation_set_service.create_evaluation_set_from_cases",
-    "services.evaluation_set_service.create_empty_evaluation_set",
-    "services.evaluation_set_service.get_evaluation_set_impl",
-    "services.evaluation_set_service.list_evaluation_set_cases_impl",
-    "services.evaluation_set_service.list_evaluation_sets_impl",
-    "utils.auth_utils.get_current_user_info",
+    "management.services.evaluation.runs.delete_agent_evaluation_run_impl",
+    "management.services.evaluation.sets.delete_evaluation_set_impl",
+    "gateway.authentication.auth.get_current_user_id",
+    "management.services.evaluation.runs.create_agent_evaluation_run_impl",
+    "management.services.evaluation.reporting.report.generate_agent_evaluation_report_impl",
+    "management.services.evaluation.runs.get_agent_evaluation_run_impl",
+    "management.services.evaluation.runs.list_agent_evaluation_cases_impl",
+    "management.services.evaluation.runs.list_agent_evaluations_by_agent_impl",
+    "management.services.evaluation.sets.create_evaluation_set_from_cases",
+    "management.services.evaluation.sets.create_empty_evaluation_set",
+    "management.services.evaluation.sets.get_evaluation_set_impl",
+    "management.services.evaluation.sets.list_evaluation_set_cases_impl",
+    "management.services.evaluation.sets.list_evaluation_sets_impl",
+    "gateway.authentication.auth.get_current_user_info",
 ]
 
 
@@ -98,8 +99,8 @@ def _build_app():
     from middleware.exception_handler import ExceptionHandlerMiddleware
 
     app.add_middleware(ExceptionHandlerMiddleware)
-    from apps.agent_evaluation_app import router as eval_router
-    from apps.evaluation_set_app import router as set_router
+    from management.api.evaluation.agent_evaluation import router as eval_router
+    from management.api.evaluation.evaluation_set import router as set_router
 
     app.include_router(eval_router)
     app.include_router(set_router)
@@ -132,8 +133,8 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         # this the module's ``delete_*_impl`` symbol is still bound to the
         # real function in the imported apps modules' namespaces, and
         # patches appear to be ignored.
-        import services.agent_evaluation_service as _svc_a
-        import services.evaluation_set_service as _svc_b
+        from management.services.evaluation import runs as _svc_a
+        from management.services.evaluation import sets as _svc_b
 
         assert _svc_a.delete_agent_evaluation_run_impl is _DELETE_EVAL_MOCK
         assert _svc_b.delete_evaluation_set_impl is _DELETE_SET_MOCK
@@ -150,8 +151,8 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         # Clear any cached apps modules so the fresh import below re-binds
         # the ``*_impl`` symbols to the (already patched) mock objects.
         for mod in [
-            "apps.agent_evaluation_app",
-            "apps.evaluation_set_app",
+            "management.api.evaluation.agent_evaluation",
+            "management.api.evaluation.evaluation_set",
         ]:
             sys.modules.pop(mod, None)
 
@@ -177,13 +178,13 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
     # ------------------------------------------------------------------
     @staticmethod
     def _exc(error_code, message):
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         return AppException(error_code, message)
 
     @staticmethod
     def _code(name):
-        from consts.error_code import ErrorCode
+        from contracts.errors.codes import ErrorCode
 
         return getattr(ErrorCode, name)
 

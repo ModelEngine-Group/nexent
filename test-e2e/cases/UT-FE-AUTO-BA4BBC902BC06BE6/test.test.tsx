@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -94,10 +96,10 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
       name: "CreatedKnowledge",
       description: "Description",
       embedding_model: "embed-a",
-      chunk_token_num: 1024,
-      chunk_overlap_num: 128,
+      chunk_token_num: 512,
+      chunk_overlap_num: 51,
       topk: 2,
-      similarity: 0.6,
+      similarity: 0,
       is_personal: 0,
       caption_enable: 0,
       vlm_model: "",
@@ -111,7 +113,7 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
     );
     await waitFor(() =>
       expect(identity.push).toHaveBeenCalledWith(
-        "/zh/knowledges?kb=created-kb",
+        "/zh/knowledges/detail?kb=created-kb",
       ),
     );
   });

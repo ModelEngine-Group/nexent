@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -48,7 +50,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-010")
 def test_content_disposition_sanitizes_header_injection_and_unicode() -> None:
-    from apps.file_management_app import build_content_disposition_header
+    from management.utils.file_http import build_content_disposition_header
 
     header = build_content_disposition_header(' report\\"\r\nX-Evil: yes.txt ')
     assert header.startswith("attachment;")

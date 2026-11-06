@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
@@ -57,6 +62,7 @@ import UserList from "./resources/UserList";
 import ApiKeyList from "./resources/ApiKeyList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
+import TagList from "./resources/TagList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
@@ -1015,7 +1021,7 @@ function TenantList({
                 <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
                   <tr>
                     <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
-                      {t("tenantResources.users.email")}
+                      <UserIdentityLabel emailLabelKey="tenantResources.users.email" />
                     </th>
                     <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
                       {t("tenantResources.users.role")}
@@ -1029,7 +1035,10 @@ function TenantList({
                       className="hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
-                        {user.username || "-"}
+                        <UserIdentity
+                          casUsername={user.cas_username}
+                          fallback={user.username || "-"}
+                        />
                       </td>
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
                         {t(`user.role.${user.role?.toLowerCase()}`) || "-"}
@@ -1084,7 +1093,11 @@ export default function UserManageComp() {
     data: tenantData,
     isLoading: tenantsLoading,
     refetch: refetchTenants,
-  } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
+  } = useTenantList({
+    page: currentPage,
+    page_size: DEFAULT_PAGE_SIZE,
+    enabled: isSuperAdmin,
+  });
 
   // For non-super admins, automatically select their own tenant based on user.tenantId
   // This must be declared before useQuery that uses tenantId
@@ -1388,6 +1401,11 @@ export default function UserManageComp() {
                           key: "skills",
                           label: "Skills",
                           children: <SkillList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "tags",
+                          label: t("tenantResources.tabs.tags"),
+                          children: <TagList tenantId={tenantId} />,
                         },
                         {
                           key: "invitations",

@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 
 import pytest
 
-import services.runtime_state_service as rss
-from services.runtime_state_service import RuntimeStateService
+from management.services.agent import run_state as rss
+from management.services.agent.run_state import RuntimeStateService
 
 
 CASE_ID = 'UT-BE-AUTO-2862BAF58D3E695E'
@@ -232,7 +233,7 @@ async def _check_run_managed_routes_through_manager(service, fake_manager):
         call = fake_manager.calls[-1]
         assert call['lane'] == 'control-io'
         assert call['spec'].task_name == task_name
-        assert call['spec'].owner == 'services.runtime_state_service'
+        assert call['spec'].owner == 'management.services.agent.run_state'
         assert call['fn'].__name__ == sync_name
         assert call['fn'].__self__ is service
         assert call['args'] == args
@@ -503,7 +504,7 @@ def _check_client_raises_when_redis_uninstalled(monkeypatch):
 @pytest.mark.stage('D1')
 def _check_no_secrets_in_logs(caplog, service, fake_client):
     fake_client.fail_on('hgetall')
-    with caplog.at_level(logging.WARNING, logger='services.runtime_state_service'):
+    with caplog.at_level(logging.WARNING, logger='management.services.agent.run_state'):
         service.get_run_state(UID, CID)
     text = caplog.text.lower()
     assert text

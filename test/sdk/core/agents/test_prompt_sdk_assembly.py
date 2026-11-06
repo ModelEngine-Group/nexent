@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 cases for SDK-owned main-Agent prompt assembly."""
 
 import pytest
@@ -101,8 +103,7 @@ def test_all_instruction_modules_and_knowledge_are_merged_into_system(language, 
 
     composer = AgentPromptComposer(AgentPromptBundle.from_resource(role=role, language=language))
     inputs = composer.compose_context_inputs(
-        language=language, is_manager=role == "manager", duty="Test duty",
-        constraint="Test constraint", few_shots="Test example",
+        language=language, is_manager=role == "manager", prompt="Test duty\nTest constraint\nTest example",
         enable_planning=True, verification_enabled=True, sandbox_workspace_enabled=True,
         enable_memory_tool_policy=True, enable_automation_tool_policy=True,
         tools={"search": {"name": "search", "description": "Search documents"}},

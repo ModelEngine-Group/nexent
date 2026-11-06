@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -50,7 +52,8 @@ vi.mock('@/lib/auth', () => ({
   fetchWithAuth: vi.fn(),
 }));
 
-vi.mock('@/lib/chat/agentIconUtils', () => ({
+vi.mock('@/lib/chat/agentIconUtils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/chat/agentIconUtils')>()),
   getAgentIcon: () => () => null,
 }));
 

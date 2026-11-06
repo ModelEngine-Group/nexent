@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """TPC-D3-001: deployed parsing, real skill execution, SSE and persistence.
 
-NEXENT_TEST_CREDENTIALS points to a private JSON created by deployment setup.
-The controlled provider replaces only generation; the skill and executor are real.
+The runner creates owned model/Skill/Agent assets by default. An explicit
+NEXENT_TEST_CREDENTIALS file remains supported for manually prepared fixtures.
+Only generation is controlled; the skill and executor are real.
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -10,6 +14,10 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 import requests
+
+from shared.final_answers import final_answer_text, assert_rejected_answer_stream
+from shared.tpc import FixtureConfig, setup
+from shared.cmsr import verify_rejected_history
 
 CODE = '<code>skill_content = read_skill_md(skill_name="tpc-quality-check")\nprint(skill_content)</code>'
 FINAL = 'TPC_SKILL_READ_OK'
@@ -28,7 +36,14 @@ def config():
     schema = json.loads(schema_path.read_text())
     if not Draft202012Validator(schema).is_valid(cfg):
         raise RuntimeError('Private TPC fixture does not match its maintained schema')
-    return cfg
+    return FixtureConfig(cfg)
+
+
+@pytest.fixture(scope='module')
+def tpc_fixture():
+    if os.environ.get('NEXENT_TEST_CREDENTIALS'):
+        return config()
+    return asyncio.run(setup('TPC-D3-001'))
 
 
 def request(cfg, method, path, body=None, *, provider=False):
@@ -41,9 +56,10 @@ def request(cfg, method, path, body=None, *, provider=False):
 
 def run_agent(cfg, conversation_id):
     response = requests.post(cfg['runtime'] + '/agent/run', json={
-        'query': 'Read tpc-quality-check once. After its guide is in observations, finish with exactly '
+        'query': 'Read ' + cfg.get('skill_name', 'tpc-quality-check') + ' once. After its guide is in observations, finish with exactly '
                  '<final_answer>' + FINAL + '</final_answer>. Do not call a final_answer Python function.',
-        'conversation_id': conversation_id, 'history': [], 'agent_id': cfg['agent_id'], 'is_debug': False,
+        'conversation_id': conversation_id, 'history': [], 'agent_id': cfg['agent_id'],
+        'version_no': cfg.get('version_no'), 'is_debug': False,
     }, headers={'Authorization': 'Bearer ' + cfg['token'], 'Accept-Language': 'en'}, timeout=150)
     assert response.status_code == 200
     return [json.loads(line[5:].strip()) for line in response.text.splitlines()
@@ -58,9 +74,10 @@ def units(history):
 @pytest.mark.parametrize('prefix', PREFIXES)
 @pytest.mark.parametrize('repairs', [0, 2])
 @pytest.mark.parametrize('legacy', [False, True])
-def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, legacy, tmp_path):
-    cfg = config()
-    action = '```<run>\n' + CODE.removeprefix('<code>').removesuffix('</code>') + '\n```' if legacy else CODE
+def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, legacy, tmp_path, tpc_fixture):
+    cfg = tpc_fixture.copy()
+    code = CODE.replace('tpc-quality-check', cfg.get('skill_name', 'tpc-quality-check'))
+    action = '```<run>\n' + code.removeprefix('<code>').removesuffix('</code>') + '\n```' if legacy else code
     responses = ['<code>broken(</code>'] * repairs + [prefix + action, '</think><final_answer>' + FINAL + '</final_answer>']
     request(cfg, 'POST', '/__control', {'responses': responses}, provider=True)
     cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC skill execution regression'})['data']['conversation_id']
@@ -69,14 +86,14 @@ def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, leg
         history = request(cfg, 'GET', f'/conversation/{cid}')
         persisted = units(history)
         stats = request(cfg, 'GET', '/__stats', provider=True)
-        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
+        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR') or (Path(os.environ['RESULT_DIR']) / 'runtime/tpc' if os.environ.get('RESULT_DIR') else tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / f'tpc-{PREFIXES.index(prefix)}-{repairs}-{int(legacy)}.json').write_text(json.dumps({
             'case_id': 'TPC-D3-001', 'conversation_id': cid, 'prefix': prefix, 'repairs': repairs, 'legacy': legacy,
             'events': events, 'history': history, 'provider': stats,
-        }, ensure_ascii=False, indent=2))
+        }, ensure_ascii=False, indent=2), encoding='utf-8')
         for sequence in (events, persisted):
-            assert [e['content'] for e in sequence if e.get('type') == 'final_answer'] == [FINAL]
+            assert final_answer_text(sequence) == FINAL
             assert sum(e.get('type') == 'parse' for e in sequence) == 1
             logs = [e for e in sequence if e.get('type') == 'execution_logs' and SKILL_MARKER in str(e.get('content'))]
             assert len(logs) == 1, 'Real skill body must appear in exactly one executed action'
@@ -93,26 +110,31 @@ def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, leg
     ('<final_answer>one</final_answer><final_answer>two</final_answer>', 'stop'),
     ('</think>' + CODE, 'length'),
 ])
-def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(rejected, finish_reason, tmp_path):
-    cfg = config()
+def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(rejected, finish_reason, tmp_path, tpc_fixture):
+    cfg = tpc_fixture.copy()
+    rejected = rejected.replace('tpc-quality-check', cfg.get('skill_name', 'tpc-quality-check'))
     request(cfg, 'POST', '/__control', {'responses': [rejected], 'finish_reason': finish_reason}, provider=True)
     cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC malformed exhaustion regression'})['data']['conversation_id']
     try:
         events = run_agent(cfg, cid)
         history = request(cfg, 'GET', f'/conversation/{cid}')
         stats = request(cfg, 'GET', '/__stats', provider=True)
-        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
+        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR') or (Path(os.environ['RESULT_DIR']) / 'runtime/tpc' if os.environ.get('RESULT_DIR') else tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / f'tpc-rejected-{finish_reason}-{rejected[:16].encode().hex()}.json').write_text(json.dumps({'events': events, 'history': history,
-             'provider': stats, 'conversation_id': cid}, ensure_ascii=False, indent=2))
-        for sequence in (events, units(history)):
+             'provider': stats, 'conversation_id': cid}, ensure_ascii=False, indent=2), encoding='utf-8')
+        # Memory pre-search runs before Step 1 and is not a rejected code
+        # action. Permit only the exact pre-run tool/log prefix observed on
+        # SSE, while rejecting every model output, parse and in-step log.
+        assert_rejected_answer_stream(events)
+        rejected_events = [event for event in events if event.get('type') != 'final_answer']
+        verify_rejected_history(history, rejected_events, cfg.get('nonce', 'tpc'))
+        first_step = next(index for index, event in enumerate(events) if event.get('type') == 'step_count')
+        assert not any(str(event.get('content', '')).strip() not in {'', '[]'}
+                       for event in events[first_step:] if event.get('type') == 'execution_logs')
+        for sequence in (rejected_events, units(history)):
             assert not any(e.get('type') == 'parse' for e in sequence)
-            # The runtime emits an empty log reset before generation. Only
-            # nonempty logs would be evidence of an executed action here.
-            assert all(str(e.get('content', '')).strip() in {'', '[]'}
-                       for e in sequence if e.get('type') == 'execution_logs')
             assert all(e.get('content') == '' for e in sequence if e.get('type') == 'final_answer')
-        assert not any(e.get('type') == 'final_answer' for e in events)
         assert stats['request_count'] == 3
         errors = [e['content'] for e in events if e.get('type') == 'error']
         assert len(errors) == 1 and errors[0], 'Exhausted protocol must report one bounded failure'
@@ -122,22 +144,22 @@ def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(rejected, fini
         request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)
 
 
-def test_tpc_d3_001_real_model_reads_skill(tmp_path):
+def test_tpc_d3_001_real_model_reads_skill(tmp_path, tpc_fixture):
     """Real Smoke: configured live model, separate from injected-prefix assertions."""
-    cfg = config()
+    cfg = tpc_fixture.copy()
     cfg['agent_id'] = cfg['real_agent_id']
+    cfg['version_no'] = cfg.get('real_version_no')
     cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC real model skill smoke'})['data']['conversation_id']
     try:
         events = run_agent(cfg, cid)
         history = request(cfg, 'GET', f'/conversation/{cid}')
-        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
+        evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR') or (Path(os.environ['RESULT_DIR']) / 'runtime/tpc' if os.environ.get('RESULT_DIR') else tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
         (evidence / 'tpc-real-smoke.json').write_text(json.dumps({'profile': 'real_smoke',
             'conversation_id': cid, 'model': cfg['real_model_name'], 'events': events,
-            'history': history}, ensure_ascii=False, indent=2))
+            'history': history}, ensure_ascii=False, indent=2), encoding='utf-8')
         for sequence in (events, units(history)):
-            answers = [e['content'] for e in sequence if e.get('type') == 'final_answer']
-            assert answers == [FINAL], answers
+            assert final_answer_text(sequence) == FINAL
             assert any(e.get('type') == 'parse' and 'read_skill_md' in str(e.get('content')) for e in sequence)
             assert any(e.get('type') == 'execution_logs' and SKILL_MARKER in str(e.get('content')) for e in sequence)
         assert not any(e.get('type') == 'error' for e in events)

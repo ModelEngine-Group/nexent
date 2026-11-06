@@ -16,13 +16,13 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
-  - 测试可直接导入 backend/utils/config_utils.py 的 TenantConfigManager 与 nexent.core.models.capacity_budget 的 CapacityReservePolicy、InvalidReservePolicy。
+  - 测试可直接导入 backend/management/services/configuration/tenant/settings.py 的 TenantConfigManager 与 nexent.core.models.capacity_budget 的 CapacityReservePolicy、InvalidReservePolicy。
   - 被测方法 get_capacity_reserve_policy 依赖的 load_config 通过桩/mock 注入受控租户配置字典，不访问真实数据库。
   test_data:
     legacy_asset_declaration: 无本地 fixture；租户配置通过桩/mock 注入（见详细测试步骤），不读取生产凭据。
   steps:
   - order: 1
-    action: 导入 backend/utils/config_utils.py 的 TenantConfigManager（或 tenant_config_manager 单例），以及 nexent.core.models.capacity_budget
+    action: 导入 backend/management/services/configuration/tenant/settings.py 的 TenantConfigManager（或 tenant_config_manager 单例），以及 nexent.core.models.capacity_budget
       的 CapacityReservePolicy 与 InvalidReservePolicy。
     expected: 场景A：返回 CapacityReservePolicy，compaction_trigger_ratio == 0.8，compaction_trigger_ratio_source == "tenant_config"。
   - order: 2

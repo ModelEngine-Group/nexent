@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from consts.exceptions import McpNotFoundError
+from contracts.errors.exceptions import McpNotFoundError
 from management.services.agent import management as agent_service
 from management.services.skill.service import SkillService
-from services import remote_mcp_service
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import _encode_document_resource_id
+from management.services.mcp import service as remote_mcp_service
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import _encode_document_resource_id
 
 
 @pytest.mark.asyncio
@@ -206,7 +207,7 @@ def test_document_cleanup_uses_the_canonical_provider_identity(monkeypatch):
 def test_knowledge_base_document_cleanup_delegates_to_tenant_scoped_database_operation(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.soft_delete_document_assignments_for_knowledge_base",
+        "management.services.tag.library.TagManagementDB.soft_delete_document_assignments_for_knowledge_base",
         lambda *args: calls.append(args) or 2,
     )
 

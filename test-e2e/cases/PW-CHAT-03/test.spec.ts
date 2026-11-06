@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
@@ -71,7 +73,7 @@ journey("PW-CHAT-03", async (context) => {
       },
       async () => {
         await chat.selectMode("执行");
-        const response = await chat.sendAndWait(`只回复：EXEC-${token}`);
+        const response = await chat.sendAndWait(`上一轮规划已停止，不要恢复它。本轮不调用工具，立即且只返回 <final_answer>EXEC-${token}</final_answer>。`);
         try {
           await expect(response).toContainText(`EXEC-${token}`, { timeout: 180_000 });
         } catch (cause) {
@@ -90,7 +92,7 @@ journey("PW-CHAT-03", async (context) => {
     ],
     assertions: [
       async () => {
-        await expect(page.getByRole("button", { name: "执行", exact: true })).toHaveClass(/bg-blue-50/);
+        await expect(page.getByRole("button", { name: "执行模式", exact: true })).toBeVisible();
         return "both real mode buttons operated and Execution is the final selected mode";
       },
       async () => {

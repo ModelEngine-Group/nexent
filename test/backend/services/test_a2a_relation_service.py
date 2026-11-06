@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Parent authorization for A2A relation mutations."""
 
 import pytest
 
 from test.backend.services import test_agent_service as legacy
-from consts.exceptions import AgentNotFoundError, ForbiddenError
-from services import a2a_relation_service as service
-from services.agent_draft_permission_service import AgentDraftEditError
+from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
+from management.services.agent import authorization as service
+from contracts.errors.exceptions import AgentDraftEditError
 
 
 @pytest.mark.parametrize("code, error", [

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -12,7 +14,7 @@ import { StandardModal } from "@/components/common/StandardModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import {
-  AGENT_NAME_MAX_LENGTH,
+  AGENT_DISPLAY_NAME_MAX_LENGTH,
   createAgentNameConflictValidator,
   isValidAgentDisplayName,
 } from "@/hooks/agent/useSaveGuard";
@@ -162,7 +164,7 @@ export default function CreateAgentModal({
                     : Promise.reject(
                         new Error(
                           t("agent.validation.displayNameMaxLength", {
-                            max: AGENT_NAME_MAX_LENGTH,
+                            max: AGENT_DISPLAY_NAME_MAX_LENGTH,
                           })
                         )
                       ),
@@ -175,7 +177,7 @@ export default function CreateAgentModal({
           >
             <Input
               autoFocus
-              maxLength={AGENT_NAME_MAX_LENGTH}
+              maxLength={AGENT_DISPLAY_NAME_MAX_LENGTH}
               placeholder={t("agentConfig.createModal.namePlaceholder")}
               className="!h-8 !rounded-[4px] !border-[#c9c9c9] !px-3 !py-[5px] !text-[14px] !leading-[22px] ![letter-spacing:0px]"
             />

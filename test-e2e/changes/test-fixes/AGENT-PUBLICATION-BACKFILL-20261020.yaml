@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-PUBLICATION-BACKFILL-20261020
+  change_type: test-fix
+  title: Backfill agent publication page browser acceptance
+  description: Add two publication D4 journeys and strengthen version/A2A journeys. Preserve real external A2A invocation.
+    Add the missing 404 component regression separately. No product behavior changes.
+  affected_features:
+    existing: []
+    added:
+    - AGENT-PUBLICATION
+    modified:
+    - V5-PW-VERSION-01
+    - V5-PW-A2A-PUBLISH-01
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AGENT-PUBLICATION-D4-001
+    - AGENT-PUBLICATION-D4-002
+    modified:
+    - PW-VERSION-01
+    - PW-A2A-PUBLISH-01
+    retired: []
+  notes: Existing component tests assert URLs/target absence but not browser navigation, empty-state integration
+    or post-publish routing. Existing version helper can mask redirects by navigating back. A2A component coverage
+    had disabled=false data but no statusCode=404 variant. Reuse those UT tests, add the 404 variant and D4 journey
+    proof; no new D1/D2/D3/D5 boundary is needed.

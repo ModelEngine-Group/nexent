@@ -1,5 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react';
 import {
   getCitationKey,
   getCitationLabel,
@@ -12,11 +14,15 @@ const h = vi.hoisted(() => ({
   aui: { message: { id: 'msg-1', content: [] as any[] } },
   open: vi.fn(),
   citeMarkerProps: [] as any[],
+  storageDownload: vi.fn(),
+  registered: undefined as any[] | undefined,
 }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
+
+vi.mock('@/lib/logger', () => ({ default: { error: vi.fn(), warn: vi.fn(), log: vi.fn() } }));
 
 vi.mock('@/const/citation', () => ({
   get ENABLE_CITATION_CLICK_HIGHLIGHT() {
@@ -34,7 +40,7 @@ vi.mock('@/services/storageService', () => ({
   extractObjectNameFromUrl: () => null,
   fetchImageBlob: () => Promise.reject(new Error('not-implemented')),
   getLocalFilePreviewUrl: () => undefined,
-  storageService: { downloadFileWithAuth: () => Promise.resolve() },
+  storageService: { downloadFileWithAuth: h.storageDownload },
 }));
 
 vi.mock('@assistant-ui/react-markdown', () => ({
@@ -43,12 +49,13 @@ vi.mock('@assistant-ui/react-markdown', () => ({
   useIsMarkdownCodeBlock: () => false,
 }));
 
-vi.mock('@assistant-ui/react', () => ({
+vi.mock('@assistant-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@assistant-ui/react')>()),
   useAuiState: (selector: (s: any) => any) => selector(h.aui),
 }));
 
 vi.mock('@/app/[locale]/newchat/ui/sources-panel-context', () => ({
-  useSourcesPanel: () => ({ open: h.open }),
+  useSourcesPanelActions: () => ({ open: h.open }),
 }));
 
 vi.mock('@/app/[locale]/newchat/ui/cite-marker', () => ({
@@ -81,7 +88,7 @@ vi.mock('@/app/[locale]/newchat/ui/tooltip-icon-button', () => ({
 vi.mock('@/app/[locale]/newchat/adapter/remote-chat-model-adapter', () => ({
   searchSourcesRegistry: { get: () => undefined },
   searchImagesRegistry: { get: () => undefined },
-  conversationSourcesRegistry: { get: () => undefined },
+  conversationSourcesRegistry: { get: () => h.registered },
 }));
 
 vi.mock('@/components/ui/button', () => ({
@@ -89,7 +96,9 @@ vi.mock('@/components/ui/button', () => ({
 }));
 
 vi.mock('@/components/common/highlightedSourceText', () => ({
-  CiteIndexBadge: () => null,
+  CiteIndexBadge: ({ index }: { index?: number }) => Number.isFinite(index)
+    ? <span data-testid='citation-index-badge'>{index}</span>
+    : null,
   HighlightedChunkText: () => null,
 }));
 
@@ -102,12 +111,24 @@ const Cite = defaultComponents.cite as unknown as (props: {
   citekey?: string;
 }) => any;
 
+function openCurrentMessage(citekey: string) {
+  h.open.mockClear();
+  h.citeMarkerProps.length = 0;
+  const marker = render(<Cite citekey={citekey} />);
+  h.citeMarkerProps.at(-1).onClick(null);
+  marker.unmount();
+  return h.open.mock.calls.at(-1)![0];
+}
+
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   h.citation.enabled = false;
   h.aui.message.id = 'msg-1';
   h.aui.message.content = [];
+  h.registered = undefined;
   h.open.mockClear();
   h.citeMarkerProps.length = 0;
+  h.storageDownload.mockReset().mockResolvedValue(undefined);
 });
 
 describe('getCitationKey combined citation key generation', () => {
@@ -207,6 +228,9 @@ describe('citation click behaviour', () => {
         url: 'https://a.example.com',
         publishedDate: '2026-01-01',
         retrievalHighlightTerms: ['alpha', 'beta'],
+        searchType: 'aidp_search',
+        sourceMetadata: { count: 0, enabled: false, custom: { values: [0, false] } },
+        sourceReference: { chunk_id: 'chunk-a' },
       },
     ];
     render(<Cite citekey='a1' />);
@@ -219,6 +243,9 @@ describe('citation click behaviour', () => {
     expect(payload.citationContext).toBeUndefined();
     expect(payload.sources[0].retrievalHighlightTerms).toEqual(['alpha', 'beta']);
     expect(payload.sources[0].publishedDate).toBe('2026-01-01');
+    expect(payload.sources[0].searchType).toBe('aidp_search');
+    expect(payload.sources[0].sourceMetadata).toEqual({ count: 0, enabled: false, custom: { values: [0, false] } });
+    expect(payload.sources[0].sourceReference).toEqual({ chunk_id: 'chunk-a' });
   });
 
   it('computes the preceding sentence scope as citationContext when highlight is on', () => {
@@ -259,6 +286,69 @@ describe('citation click behaviour', () => {
 });
 
 describe('SourcesPanel selection and passthrough', () => {
+  it('keeps citation, tooltip and panel numbers aligned across source and image tabs', async () => {
+    h.aui.message.content = [
+      { type: 'text', text: 'Text [[a1]], figures [[a3]][[a4]], guideline [[a2]]' },
+      { type: 'source', sourceType: 'document', citeIndex: 2, toolSign: 'a', title: 'Guideline' },
+      { type: 'source', sourceType: 'document', citeIndex: 1, toolSign: 'a', title: 'Text' },
+      { type: 'source', citeIndex: 4, toolSign: 'a', title: 'Second figure', url: 'https://example.com/second.png', isImage: true },
+      { type: 'source', citeIndex: 3, toolSign: 'a', title: 'First figure', url: 'https://example.com/first.png', isImage: true },
+    ];
+    const marker = render(<Cite citekey='a2' />);
+    const markerProps = h.citeMarkerProps.at(-1);
+    expect(markerProps.displayIndex).toBe(4);
+    expect(markerProps.sourceIndex).toBe(2);
+    expect(markerProps.label).toBe('chat.sources.knowledgeBase 4');
+    markerProps.onClick(null);
+    const payload = h.open.mock.calls.at(-1)![0];
+    expect(payload.selectedCitationKey).toBe('a2');
+    expect(payload.sources.map((item: any) => item.citeIndex)).toEqual([1, 2]);
+    const panel = render(<SourcesPanel {...payload} open onClose={() => {}} />);
+    expect(within(panel.container).getAllByTestId('citation-index-badge').map((node) => node.textContent))
+      .toEqual(['1', '4']);
+    expect(screen.getByText('Guideline').closest('li')?.className).toContain('border-[#1677ff]');
+
+    marker.rerender(<Cite citekey='a4' />);
+    const imageMarkerProps = h.citeMarkerProps.at(-1);
+    expect(imageMarkerProps.displayIndex).toBe(3);
+    imageMarkerProps.onClick(null);
+    const imagePayload = h.open.mock.calls.at(-1)![0];
+    panel.rerender(<SourcesPanel {...imagePayload} selectionToken={imagePayload} open onClose={() => {}} />);
+    await waitFor(() => expect(within(panel.container).getAllByTestId('citation-index-badge')
+      .map((node) => node.textContent)).toEqual(['2', '3']));
+    expect(screen.getByText('Second figure').closest('[data-citation-selected="true"]')).toBeTruthy();
+    expect(imagePayload.selectedCitationKey).toBe('a4');
+    marker.unmount();
+    panel.unmount();
+
+    const anchor = { type: 'source', sourceType: 'document', citeIndex: 1, toolSign: 'a', title: 'Anchor' };
+    h.aui.message = { id: 'web-A', content: [anchor, ...Array.from({ length: 3 }, (_, index) => ({ type: 'source', citeIndex: 0, toolSign: '', isImage: true, title: `Web ${index + 1}`, url: `https://example.com/web-${index + 1}.png` }))] };
+    const webPayload = openCurrentMessage('a1');
+    expect(webPayload.images).toHaveLength(3);
+    const web = render(<SourcesPanel {...webPayload} selectionToken={webPayload} open onClose={() => {}} />);
+    fireEvent.click(within(web.container).getByRole('tab', { name: /chat.sources.images/ }));
+    expect(web.container.querySelectorAll('.aui-global-search-image')).toHaveLength(3);
+    h.aui.message = { id: 'web-B', content: [{ type: 'source', citeIndex: 1, toolSign: 'b', isImage: true, title: 'New image', url: 'https://example.com/new.png' }] };
+    const nextPayload = openCurrentMessage('b1');
+    web.rerender(<SourcesPanel {...nextPayload} selectionToken={nextPayload} open onClose={() => {}} />);
+    expect.soft(web.container.querySelectorAll('.aui-global-search-image')).toHaveLength(1);
+    expect.soft(within(web.container).queryByText('Web 1')).toBeNull();
+    expect.soft(within(web.container).queryByText('Web 2')).toBeNull();
+    web.unmount();
+
+    const saved = { type: 'source', isImage: true, title: 'Saved image', url: 'https://example.com/saved.png' };
+    const registryOnly = { ...saved, title: 'Registry image', url: 'https://example.com/registry.png' };
+    h.aui.message = { id: 'history-images', content: [anchor, saved] };
+    h.registered = [saved, { ...saved }, registryOnly];
+    const historyPayload = openCurrentMessage('a1');
+    expect.soft(historyPayload.images).toHaveLength(2);
+    const history = render(<SourcesPanel {...historyPayload} open onClose={() => {}} />);
+    fireEvent.click(within(history.container).getByRole('tab', { name: /chat.sources.images/ }));
+    expect.soft(history.container.querySelectorAll('.aui-global-search-image')).toHaveLength(2);
+    expect.soft(within(history.container).getAllByText('Saved image')).toHaveLength(1);
+    expect(within(history.container).getByText('Registry image')).toBeInTheDocument();
+  });
+
   it('selects and scrolls to the source matching selectedCitationKey and renders publishedDate', () => {
     const original = HTMLElement.prototype.scrollIntoView;
     const scrollSpy = vi.fn();
@@ -297,5 +387,109 @@ describe('SourcesPanel selection and passthrough', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = original;
     }
+  });
+});
+
+describe('per-hit attributes and safe citation downloads', () => {
+  const first = { count: 0, enabled: false, source: 'business source', tags: [0, false, '中文'], standards: { code: { level: 'E' } } };
+  const second = { count: 1, enabled: true };
+  const sources = [
+    { sourceType: 'document' as const, searchType: 'aidp_search', filename: 'same.pdf', title: 'same.pdf', citeIndex: 1, toolSign: 'j', sourceMetadata: first, sourceReference: { chunk_id: 'chunk-first' } },
+    { sourceType: 'document' as const, searchType: 'aidp_search', filename: 'same.pdf', title: 'same.pdf', citeIndex: 2, toolSign: 'j', sourceMetadata: second, sourceReference: { chunk_id: 'chunk-second' } },
+  ];
+
+  it('keeps same-name hit snapshots distinct from citation click through the real panel', async () => {
+    h.aui.message.content = [{ type: 'text', text: 'Answer [[j1]][[j2]]' }, ...sources.map(source => ({ ...source, type: 'source' }))];
+    const marker = render(<Cite citekey='j2' />);
+    h.citeMarkerProps[0].onClick(null);
+    const payload = h.open.mock.calls[0][0];
+    expect(payload.selectedCitationKey).toBe('j2');
+    expect(payload.sources.map((source: any) => source.sourceMetadata)).toEqual([first, second]);
+    expect(payload.sources.map((source: any) => source.sourceReference.chunk_id)).toEqual(['chunk-first', 'chunk-second']);
+    marker.unmount();
+    const preview = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const panel = render(<SourcesPanel sources={payload.sources} images={[]} selectedCitationKey={payload.selectedCitationKey} open onClose={() => {}} />);
+    const triggers = within(panel.container).getAllByRole('button', { name: 'chat.sources.showAttributes' });
+    fireEvent.mouseEnter(triggers[0]);
+    const dialog = await screen.findByRole('dialog', { name: 'chat.sources.attributes' });
+    fireEvent.click(triggers[0]);
+    fireEvent.mouseLeave(triggers[0]);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    expect(triggers[0].getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(within(dialog).getByText('tags'));
+    await waitFor(() => expect(within(dialog).getAllByText('false')).toHaveLength(2));
+    expect(within(dialog).getByText('business source')).toBeTruthy();
+    fireEvent.click(within(dialog).getByText('standards'));
+    fireEvent.click(await within(dialog).findByText('code'));
+    expect(await within(dialog).findByText('E')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'chat.sources.rawJson' }));
+    expect(JSON.parse(dialog.querySelector('pre')!.textContent!)).toEqual(first);
+    expect(within(panel.container).getAllByText('chat.sources.knowledgeBase · AIDP')).toHaveLength(2);
+    expect(preview).not.toHaveBeenCalled();
+    expect(h.storageDownload).not.toHaveBeenCalled();
+    preview.mockRestore();
+  });
+
+  it('omits empty attributes and supports focus access to a complete raw snapshot', async () => {
+    const panel = render(<SourcesPanel sources={[
+      { ...sources[0], sourceMetadata: {} }, { ...sources[1], sourceMetadata: undefined },
+      { ...sources[0], citeIndex: 3 },
+    ]} images={[]} open onClose={() => {}} />);
+    expect(panel.container.querySelectorAll('[data-source-metadata]')).toHaveLength(1);
+    const trigger = within(panel.container).getByRole('button', { name: 'chat.sources.showAttributes' });
+    fireEvent.focus(trigger);
+    const dialog = await screen.findByRole('dialog', { name: 'chat.sources.attributes' });
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'chat.sources.rawJson' }));
+    expect(JSON.parse(dialog.querySelector('pre')!.textContent!)).toEqual(first);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+  });
+
+  it('never enables unsupported AIDP citation downloads', () => {
+    const panel = render(<SourcesPanel sources={[
+      { ...sources[0], url: '/md_image/chunk.png', downloadUrl: 'https://example.com/chunk.pdf', objectName: 'attachments/same.pdf', sourceMetadata: { kds_id: 'kb-business', file_uuid: 'file-id' }, sourceReference: { chunk_id: 'chunk-id' } },
+      { ...sources[1], searchType: 'ind_aidp_search', toolSign: 'l', citeIndex: 3, sourceReference: {} },
+    ]} images={[]} open onClose={() => {}} />);
+    expect(within(panel.container).queryByRole('button', { name: 'chat.sources.download' })).toBeNull();
+    expect(h.storageDownload).not.toHaveBeenCalled();
+  });
+
+  it('preserves local downloads while AIDP citation downloads remain unsupported', async () => {
+    const panel = render(<SourcesPanel sources={[
+      { ...sources[0], downloadUrl: 'https://example.com/aidp.pdf', objectName: 'attachments/aidp.pdf' },
+      { sourceType: 'document', searchType: 'knowledge_base_search', title: 'local.pdf', filename: 'local.pdf', objectName: 'attachments/local.pdf' },
+    ]} images={[]} open onClose={() => {}} />);
+    const buttons = within(panel.container).getAllByRole('button', { name: 'chat.sources.download' });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(h.storageDownload).toHaveBeenCalledWith('attachments/local.pdf', 'local.pdf'));
+    panel.unmount();
+
+    let failFirst!: (reason: Error) => void;
+    h.storageDownload.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { failFirst = reject; }));
+    const firstFile = { sourceType: 'document' as const, searchType: 'knowledge_base_search', citeIndex: 1, toolSign: 'a', title: 'first.pdf', filename: 'first.pdf', objectName: 'attachments/first.pdf' };
+    const secondFile = { ...firstFile, title: 'second.pdf', filename: 'second.pdf', objectName: 'attachments/second.pdf' };
+    const secondProps = { messageId: 'download-B', sources: [secondFile], images: [], selectedCitationKey: 'a1', open: true, onClose: () => {} };
+    const scoped = render(<SourcesPanel {...secondProps} messageId='download-A' sources={[firstFile]} selectionToken={{}} />);
+    const button = () => within(scoped.container).getByRole('button', { name: 'chat.sources.download' });
+    fireEvent.click(button());
+    expect(button()).toBeDisabled();
+    scoped.rerender(<SourcesPanel {...secondProps} selectionToken={{}} />);
+    expect.soft(button()).toBeEnabled();
+    await act(async () => failFirst(new Error('First message download failed')));
+    expect.soft(within(scoped.container).queryByText('chat.sources.downloadError')).toBeNull();
+    expect(button()).toBeEnabled();
+
+    let finishSecond!: () => void;
+    h.storageDownload.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSecond = resolve; }));
+    fireEvent.click(button());
+    const pendingButton = button();
+    expect(pendingButton).toBeDisabled();
+    scoped.rerender(<SourcesPanel {...secondProps} selectionToken={{}} />);
+    expect(button()).toBe(pendingButton);
+    expect(button()).toBeDisabled();
+    await act(async () => finishSecond());
+    expect(button()).toBeEnabled();
+
   });
 });

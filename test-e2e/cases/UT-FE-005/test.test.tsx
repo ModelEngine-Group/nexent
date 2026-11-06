@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useLanguageSwitch } from '@/lib/language';
@@ -41,23 +43,37 @@ describe('UT-FE-005 locale behavior', () => {
     expect(document.cookie).toContain('NEXT_LOCALE=' + (language === 'zh' ? 'en' : 'zh'));
   });
   it('loads unknown locale from English and preserves translation fallback', async () => {
-    const request = vi.fn(async (url: string) => ({ json: async () =>
-      url.endsWith('common.json') ? { 'test.fallback': 'English fallback' } : {} }));
+    // i18n.tsx memoises requests in module singletons; reload for a fresh cache.
+    vi.resetModules();
+    const freshI18n = await import('@/app/[locale]/i18n');
+    const request = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        url.endsWith('common.json') ? { 'test.fallback': 'English fallback' } : {},
+    }));
     vi.stubGlobal('fetch', request);
-    const loaded = await loadLocaleMessages('unsupported');
+    const loaded = await freshI18n.loadLocaleMessages('unsupported');
     expect(request.mock.calls.map(([url]) => url)).toEqual([
       '/portal/locales/en/common.json', '/portal/locales/zh/custom.json', '/portal/locales/en/custom.json',
     ]);
-    i18n.addResourceBundle('en', 'common', loaded.resources.en.common, true, true);
-    await i18n.changeLanguage('zh');
-    expect(i18n.t('test.fallback')).toBe('English fallback');
-    expect(i18n.t('test.notDefined', { defaultValue: 'Safe default' })).toBe('Safe default');
+    // `common` lives on `resources`; `resourcesCustom` only holds the overlay.
+    const freshDefault = freshI18n.default;
+    freshDefault.addResourceBundle('en', 'common', loaded.resources.en.common ?? {}, true, true);
+    await freshDefault.changeLanguage('zh');
+    expect(freshDefault.t('test.fallback')).toBe('English fallback');
+    expect(freshDefault.t('test.notDefined', { defaultValue: 'Safe default' })).toBe('Safe default');
   });
   it('locale load failure preserves already-loaded messages', async () => {
-    i18n.addResourceBundle('en', 'common', { 'test.fallback': 'English fallback' }, true, true);
+    vi.resetModules();
+    const freshI18n = await import('@/app/[locale]/i18n');
+    freshI18n.default.addResourceBundle('en', 'common', { 'test.fallback': 'English fallback' }, true, true);
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline fixture')));
-    const result = await loadLocaleMessages('en');
-    expect(result.resources.en.common).toHaveProperty('test.fallback', 'English fallback');
+    await freshI18n.loadLocaleMessages('en');
+    // A failed load must not clear what i18next already holds.
+    expect(freshI18n.default.hasResourceBundle('en', 'common')).toBe(true);
+    await freshI18n.default.changeLanguage('en');
+    expect(freshI18n.default.t('test.fallback')).toBe('English fallback');
   });
 });

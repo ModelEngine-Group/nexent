@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Focused tests for backend.data_process.utils.
 
@@ -5,7 +6,7 @@ Targets the public async helpers (`get_task_info`, `get_task_details`) and the
 small parsing helpers `_parse_failure_info` / `get_all_task_ids_from_redis`.
 
 The data_process package requires a heavy set of dependencies (celery,
-consts, services.redis_service, etc.), so this module installs minimal stubs
+consts, management.services.knowledge_base.task_state, etc.), so this module installs minimal stubs
 *before* importing backend.data_process.utils. We deliberately do NOT call
 the task module from `test_tasks.py` because that helper reloads
 celery — which fails when sibling tests have already installed MagicMock
@@ -106,13 +107,13 @@ def _ensure_stubs(monkeypatch):
             here, '..', '..', '..', 'backend', 'data_process'))]
         monkeypatch.setitem(sys.modules, "backend.data_process", backend_dp_pkg)
 
-    # services.redis_service: utils.py imports it lazily inside get_task_info
+    # management.services.knowledge_base.task_state: utils.py imports it lazily inside get_task_info
     # to call get_redis_service().get_progress_info(...).
-    fake_redis_service = types.ModuleType("services.redis_service")
+    fake_redis_service = types.ModuleType("management.services.knowledge_base.task_state")
     fake_redis_service.get_redis_service = lambda: types.SimpleNamespace(
         get_progress_info=lambda tid: None,
     )
-    monkeypatch.setitem(sys.modules, "services.redis_service", fake_redis_service)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.task_state", fake_redis_service)
     monkeypatch.setitem(sys.modules, "services", types.ModuleType("services"))
 
     return {
@@ -335,14 +336,14 @@ def test_document_lifecycle_and_delete_fence_helpers(monkeypatch):
     from backend.data_process import utils
 
     transitions = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle = types.ModuleType("management.db.knowledge_base.file_lifecycle")
     lifecycle.get_file_record = lambda **kwargs: (
         {"file_id": "fid", "status": "PROCESSING"}
         if kwargs.get("file_id") == "fid"
         else {"file_id": "source-fid", "status": "PROCESSING"}
     )
     lifecycle.transition_file_record = lambda file_id, **kwargs: transitions.append((file_id, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    monkeypatch.setitem(sys.modules, "management.db.knowledge_base.file_lifecycle", lifecycle)
 
     utils.update_file_lifecycle(
         file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FORWARDING", stage="FORWARD"
@@ -360,7 +361,7 @@ def test_document_lifecycle_and_delete_fence_helpers(monkeypatch):
         file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FAILED", stage="PROCESS"
     )
 
-    redis_service = sys.modules["services.redis_service"]
+    redis_service = sys.modules["management.services.knowledge_base.task_state"]
     monkeypatch.setattr(redis_service, "get_redis_service", lambda: types.SimpleNamespace(
         is_document_delete_requested=lambda **_kwargs: True,
     ))
@@ -498,7 +499,7 @@ def test_get_task_info_redis_progress_overrides_metadata(
     metadata = {"total_chunks": 100, "processed_chunks": 25}
     fake = _FakeAsyncResult(status="STARTED", info=metadata)
 
-    rs = sys.modules["services.redis_service"]
+    rs = sys.modules["management.services.knowledge_base.task_state"]
     original_get = rs.get_redis_service
     rs.get_redis_service = lambda: types.SimpleNamespace(
         get_progress_info=lambda tid: {"processed_chunks": 80, "total_chunks": 100}
@@ -525,7 +526,7 @@ def test_get_task_info_redis_progress_failure_falls_back(
         def get_progress_info(self, task_id):
             raise RuntimeError("redis down")
 
-    rs = sys.modules["services.redis_service"]
+    rs = sys.modules["management.services.knowledge_base.task_state"]
     original_get = rs.get_redis_service
     rs.get_redis_service = lambda: _Boom()
 

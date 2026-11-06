@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import base64
 import json
 import logging
@@ -5,44 +7,22 @@ import math
 import re
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
-from consts.agent_repository import (
-    OWNERSHIP_ALL,
-    OWNERSHIP_CREATED,
-    OWNERSHIP_OTHERS,
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_OWNERSHIP_FILTERS,
-    VALID_REPOSITORY_STATUSES,
-)
-from consts.const import PERMISSION_PRIVATE, PERMISSION_READ
-from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_SKILL_REPOSITORY,
-)
-from database.skill_repository_db import (
-    get_skill_repository_by_id_and_publisher,
-    get_skill_repository_by_skill_id,
-    increment_skill_repository_downloads,
-    insert_skill_repository_record,
-    list_skill_repository_by_skill_ids,
-    list_skill_repository_tag_stats,
-    list_skill_repository_summaries,
-    reset_skill_repository_status,
-    update_skill_repository_by_id,
-    update_skill_repository_status_by_id,
-)
-from database.skill_db import get_skill_by_name
-from database.user_tenant_db import get_user_tenant_by_user_id
-from services.notification_service import (
+from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
+from contracts.constants.constants import PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, SkillException
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
+from management.db.skill.catalog import get_skill_repository_by_id_and_publisher, get_skill_repository_by_skill_id, increment_skill_repository_downloads, insert_skill_repository_record, list_skill_repository_by_skill_ids, list_skill_repository_tag_stats, list_skill_repository_summaries, reset_skill_repository_status, update_skill_repository_by_id, update_skill_repository_status_by_id
+from management.db.skill.repository import get_skill_by_name
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.services.notification.service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
     deactivate_notifications,
 )
 from management.services.skill.service import SkillService
-from utils.skill_import_utils import generate_available_copy_skill_name
+from management.services.skill.naming import generate_available_copy_skill_name
+
+from management.services.permission.identity.display import enrich_repository_identities, repository_identity_fields
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -117,6 +97,7 @@ def _to_summary_item(
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
         "submitted_by": record.get("submitted_by"),
+        **repository_identity_fields(record),
         "name": record.get("name"),
         "description": record.get("description"),
         "source": record.get("source"),
@@ -144,6 +125,8 @@ def _to_detail_item(
     creator_id = str(snapshot.get("created_by") or "").strip()
     creator = get_user_tenant_by_user_id(creator_id) if creator_id else None
     author = str((creator or {}).get("user_email") or "").strip() or None
+    record = {**record, "author": author}
+    enrich_repository_identities([record], "skill")
     detail = {
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
@@ -152,6 +135,7 @@ def _to_detail_item(
         "source": record.get("source"),
         "author": author,
         "submitted_by": record.get("submitted_by"),
+        **repository_identity_fields(record),
         "icon": record.get("icon"),
         "status": record.get("status"),
         "category_id": record.get("category_id"),
@@ -751,6 +735,7 @@ def update_skill_repository_status_impl(
         content=content,
     )
 
+    enrich_repository_identities([updated], "skill")
     return _to_summary_item(updated)
 
 
@@ -990,7 +975,7 @@ def list_my_editable_skills_impl(
         user_id=user_id,
     )
     if tag_predicates:
-        from database.tag_management_db import TagManagementDB
+        from management.db.tag.repository import TagManagementDB
 
         skill_ids = [
             str(skill["skill_id"])
@@ -1034,7 +1019,7 @@ def list_my_editable_skills_impl(
         paged_skills,
         tenant_id,
     )
-    from database.tag_management_db import TagManagementDB
+    from management.db.tag.repository import TagManagementDB
 
     managed_tags_by_skill_id = TagManagementDB.list_resource_assignment_display_values_by_ids(
         tenant_id=tenant_id,
@@ -1106,7 +1091,7 @@ def list_skill_repository_listings_impl(
 
     skill_ids = None
     if tag_predicates:
-        from database.tag_management_db import TagManagementDB
+        from management.db.tag.repository import TagManagementDB
 
         visible_skill_ids = [
             str(skill["skill_id"])
@@ -1137,6 +1122,7 @@ def list_skill_repository_listings_impl(
         sort_by_update_time=sort_by_update_time,
     )
     user_role = _get_user_role(user_id)
+    enrich_repository_identities(result.get("items", []), "skill")
     return {
         "items": [
             _to_summary_item(

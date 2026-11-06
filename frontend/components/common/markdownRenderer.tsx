@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
@@ -923,8 +924,8 @@ const HoverableText = ({
               "--scrollbar-width": "8px",
               "--scrollbar-height": "8px",
               "--scrollbar-track-bg": "transparent",
-              "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-              "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
+              "--scrollbar-thumb-bg": "var(--scrollbar-thumb)",
+              "--scrollbar-thumb-hover-bg": "var(--scrollbar-thumb-hover)",
               "--scrollbar-thumb-radius": "9999px",
               boxSizing: "border-box",
               maxWidth: "min(720px, 50vw)",
@@ -963,14 +964,6 @@ const HoverableText = ({
                 }
                 div::-webkit-scrollbar-thumb:hover {
                   background: var(--scrollbar-thumb-hover-bg);
-                }
-                @media (prefers-color-scheme: dark) {
-                  div::-webkit-scrollbar-thumb {
-                    background: rgb(55, 65, 81);
-                  }
-                  div::-webkit-scrollbar-thumb:hover {
-                    background: rgb(75, 85, 99);
-                  }
                 }
               `}</style>
               {matchedResult ? (
