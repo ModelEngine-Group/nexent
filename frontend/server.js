@@ -692,7 +692,7 @@ app.prepare().then(() => {
     }
   });
 
-  server.listen(PORT, process.env.HOST || "0.0.0.0", (err) => {
+  server.listen(PORT, (err) => {
     if (err) throw err;
     console.log(`> Ready on http://localhost:${PORT}`);
     console.log("> --- Backend URL Configuration ---");
