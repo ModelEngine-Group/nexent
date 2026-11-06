@@ -1,0 +1,31 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-CONTRACTS
+  name: Model profile contract primitives
+  status: planned
+  description: Strict provider-neutral capacity, reasoning and source-reference contracts
+    used by the upcoming catalog and outlet layers.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-CONTRACTS-RULE-01
+    description: Unknown capacity and capability stay distinct from explicit unsupported;
+      known token limits are positive strict integers.
+  - rule_id: SDK-MODEL-PROFILE-CONTRACTS-RULE-02
+    description: Reasoning controls use declared toggle, effort or token-budget domains;
+      duplicates, invalid types, inconsistent support and unknown fields fail validation.
+  - rule_id: SDK-MODEL-PROFILE-CONTRACTS-RULE-03
+    description: Atomic references carry exact source identity and digests with relative
+      source paths; they are traceability, not runtime recomposition instructions.
+  - rule_id: SDK-MODEL-PROFILE-CONTRACTS-RULE-04
+    description: Undeclared reasoning budget bounds remain unknown; explicit zero,
+      numeric bounds and special values are preserved separately.
+  required_test_stages: []
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-CONTRACTS-20261013
+    - MODEL-PROFILE-NORMALIZATION-20261013
+    notes: SPEC AC-01 and AC-02 subset only; the current slice has no catalog, persistence,
+      provider or Agent runtime integration. Traditional UT proves these domain contracts.
+      Later slices supply independent component/API/runtime evidence.

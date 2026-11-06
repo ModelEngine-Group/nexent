@@ -74,6 +74,29 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     pollObserved = true;
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
+    const retained = await page
+      .getByText("Activity control 1", { exact: true })
+      .elementHandle();
+    const sidebar = page.locator('[data-sidebar="content"]').first();
+    const scrollTop = await sidebar.evaluate((element) => {
+      element.scrollTop = 100;
+      return element.scrollTop;
+    });
+    expect(scrollTop).toBeGreaterThan(0);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requests = 0;
+    let reloadPending = false;
+    await page.route("**/api/conversation/list**", async (route) => {
+      // The activity probe returns first; hold the ensuing runtime list reload.
+      if (++requests === 2) {
+        reloadPending = true;
+        await gate;
+      }
+      await route.fallback();
+    });
     const control = histories.find((item) => item.conversation_id === 100)!;
     control.last_activity_time = Date.now() + 1_000;
     histories.splice(histories.indexOf(control), 1);
@@ -82,6 +105,19 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
       window.dispatchEvent(new Event("focus"));
       window.dispatchEvent(new Event("online"));
     });
+    try {
+      await expect.poll(() => reloadPending, { timeout: 15_000 }).toBe(true);
+      await expect(
+        page.locator('[data-slot="aui_thread-list-skeleton"]'),
+      ).toHaveCount(0);
+      expect(await retained!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(
+        await sidebar.evaluate((element) => element.scrollTop),
+        "pending reload retains scroll offset",
+      ).toBe(scrollTop);
+    } finally {
+      release();
+    }
     await expect
       .poll(async () => {
         const controlPosition = await page
@@ -98,6 +134,11 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByText(automated.conversation_title, { exact: true }),
     ).toHaveCount(1);
+    expect(await retained!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(
+      await sidebar.evaluate((element) => element.scrollTop),
+      "completed metadata reorder retains scroll offset",
+    ).toBe(scrollTop);
     await expect(draft).toHaveValue(
       "Keep this draft while automation updates another history",
     );

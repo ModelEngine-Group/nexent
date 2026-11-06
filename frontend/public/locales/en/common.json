@@ -6517,6 +6517,7 @@
   "nl2agent.history.newFailed": "Could not start a new conversation. Please retry.",
   "modelProfile.selectionUnchecked": "Not checked",
   "modelProfile": {
+    "legacyConnectionUnsupported": "Custom headers, skipped TLS verification and modified timeouts are currently supported only by LLM outlets in the current tenant. Model discovery remains available. Deselect other models or restore these connection options to their defaults before checking or adding them, so configuration is not silently lost.",
     "provider": "Model provider",
     "customProvider": "Custom provider",
     "endpoint": "Endpoint",
@@ -6718,5 +6719,11 @@
     "reviewedHint": "An administrator has reviewed this configuration version. The migration source is retained.",
     "failedHint": "This outlet could not be migrated. An administrator must review and resolve its configuration."
   },
-  "modelProfile.selectionCheckFailed": "Check failed"
+  "modelProfile.selectionCheckFailed": "Check failed",
+  "workbench.creationConfirmation.title": "Choose a creation mode",
+  "workbench.creationConfirmation.description": "AI has prepared the requirements from this conversation. Confirm a creation mode or continue chatting.",
+  "workbench.creationConfirmation.hint": "Submit your choice to enter a creation mode or continue this conversation.",
+  "workbench.creationConfirmation.noPermission": "You do not have permission to enter this creation mode.",
+  "workbench.creationConfirmation.saveFailed": "Could not save the confirmation. Please retry.",
+  "workbench.creationConfirmation.originalRequest": "Original user request:"
 }

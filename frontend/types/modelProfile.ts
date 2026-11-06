@@ -108,7 +108,7 @@ export interface ModelProfileDraftResponse {
 }
 
 export interface ModelOutletCreateRequest extends ModelProfileDraftRequest {
-  check_receipt?: string;
+  connect_status?: "available" | "unavailable" | null;
   api_key?: string | null;
 }
 
@@ -176,7 +176,7 @@ export interface ModelOutletPatchRequest {
     provider_profile: ModelProfileSelection | null;
   };
   request_model_id?: string;
-  check_receipt?: string;
+  connect_status?: "available" | "unavailable" | null;
   thinking_control?: ThinkingControlFormat;
   thinking_mode?: ThinkingDegreeMode;
   expected_revision: number;
@@ -205,7 +205,6 @@ export type ModelOutletValidationRequest =
     };
 
 export interface ModelOutletValidationResponse {
-  check_receipt?: string;
   ok: boolean;
   error: {
     category: string;

@@ -150,7 +150,6 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
     11,
     42,
     {
-
       parameter_values: { temperature: 0.31, top_p: 0.72 },
       delete_parameters: [],
     }
@@ -174,7 +173,6 @@ it("UI-SESSION-15 reuses upstream sliders, persists native values and resets by 
     11,
     42,
     {
-
       parameter_values: {},
       delete_parameters: ["temperature", "top_p"],
     }
@@ -241,7 +239,6 @@ it("UI-SESSION-15 resets an effort by deletion and clears inactive reasoning whe
       11,
       42,
       {
-
         parameter_values: {},
         delete_parameters: ["reasoning_effort"],
       }
@@ -260,7 +257,6 @@ it("UI-SESSION-15 resets an effort by deletion and clears inactive reasoning whe
       11,
       42,
       {
-
         parameter_values: { enable_thinking: false },
         delete_parameters: ["reasoning_effort"],
       }

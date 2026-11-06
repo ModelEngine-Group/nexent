@@ -30,8 +30,33 @@ from management.services.conversation.agent_history import (
     list_agent_groups,
 )
 from gateway.authentication.auth import get_current_user_id, get_current_user_info
+from contracts.clarification import ClarificationResponse
+from contracts.errors.exceptions import UnauthorizedError
+from management.services.conversation.creation_mode import confirm_creation_mode
 
 router = APIRouter(prefix="/conversation")
+
+
+@router.post("/{conversation_id}/creation_mode_responses", response_model=ConversationResponse)
+def confirm_creation_mode_endpoint(
+    conversation_id: Annotated[int, Path(gt=0, le=2147483647)],
+    response: "ClarificationResponse",
+    authorization: Optional[str] = Header(None),
+):
+    """Record an owned AI confirmation without running a model or creating resources."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = confirm_creation_mode(conversation_id, response, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=data)
+    except (TokenExpiredError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=401, detail="Please login first") from exc
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Workbench conversation not found") from exc
+    except (ValidationError, AppException) as exc:
+        raise HTTPException(status_code=422, detail="Creation confirmation is invalid or no longer available") from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Failed to record creation confirmation")
+        raise HTTPException(status_code=500, detail="Failed to record creation confirmation") from exc
 
 
 @router.get("/agent_groups", response_model=ConversationResponse)
