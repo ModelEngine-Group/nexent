@@ -10,6 +10,7 @@
 - **ExaSearchTool**: 基于 EXA API 的网络搜索工具
 - **TavilySearchTool**: 基于 Tavily API 的网络搜索工具
 - **LinkupSearchTool**: 基于 Linkup API 的搜索工具
+- **OutcrawlSearchTool**: 基于 Outcrawl API 的网络搜索工具
 - **KnowledgeBaseSearchTool**: 本地知识库搜索工具
 - **RAGFlowSearchTool**: RAGFlow 知识检索
 - **HaotianSearchTool / IndependentAidpSearchTool / AidpSearchTool / DifySearchTool / DataMateSearchTool / IdataSearchTool**: 企业级检索源接入
@@ -126,6 +127,7 @@ class ToolExample(Tool):
   - `e`: DataMate 搜索 (DATAMATE_SEARCH)
   - `f`: 文件操作 (FILE_OPERATION)
   - `g` / `h` / `i` / `j` / `k` / `l`: Dify / iData / Haotian / AIDP / RAGFlow / IndependentAIDP 搜索
+  - `q`: Outcrawl 搜索 (OUTCRAWL_SEARCH, OutcrawlSearchTool)
   - `m` / `n` / `p` / `s` / `t` / `z`: 多模态 / 记忆 / 规划 / 技能 / 终端 / 数据库操作
 
 ## 🏗️ 代码结构模板

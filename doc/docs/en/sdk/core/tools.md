@@ -10,6 +10,7 @@ The current SDK includes the following tool types:
 - **ExaSearchTool**: Web search tool based on EXA API
 - **TavilySearchTool**: Web search tool based on Tavily API  
 - **LinkupSearchTool**: Search tool based on Linkup API
+- **OutcrawlSearchTool**: Web search tool based on Outcrawl API
 - **KnowledgeBaseSearchTool**: Local knowledge base search tool
 - **RAGFlowSearchTool**: RAGFlow knowledge retrieval
 - **HaotianSearchTool / IndependentAidpSearchTool / AidpSearchTool / DifySearchTool / DataMateSearchTool / IdataSearchTool**: Enterprise-grade retrieval source integrations
@@ -126,6 +127,7 @@ class ToolExample(Tool):
   - `e`: DataMate search (DATAMATE_SEARCH)
   - `f`: File operations (FILE_OPERATION)
   - `g` / `h` / `i` / `j` / `k` / `l`: Dify / iData / Haotian / AIDP / RAGFlow / IndependentAIDP search
+  - `q`: Outcrawl search (OUTCRAWL_SEARCH, OutcrawlSearchTool)
   - `m` / `n` / `p` / `s` / `t` / `z`: Multimodal / memory / planning / skills / terminal / database operations
 
 ## 🏗️ Code Structure Templates
