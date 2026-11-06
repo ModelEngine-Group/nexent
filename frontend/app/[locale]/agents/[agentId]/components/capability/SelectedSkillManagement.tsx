@@ -204,7 +204,7 @@ export default function SelectedSkillManagement({
                     {(skill.tags || []).slice(0, 2).map((tag) => (
                       <span
                         key={tag}
-                        className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
+                        className="shrink-0 rounded-[var(--radius-control)] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
                       >
                         {tag}
                       </span>

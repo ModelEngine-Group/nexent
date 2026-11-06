@@ -125,7 +125,7 @@ export function AgentConfigHeader({
         </div>
       </div>
       <div
-        className="flex shrink-0 items-center gap-1 rounded-[6px] bg-[rgba(25,25,25,0.05)] p-[2px] [&_.ant-btn]:!h-7 [&_.ant-btn]:!min-w-[102px] [&_.ant-btn]:!whitespace-nowrap [&_.ant-btn]:!px-4 [&_.ant-btn]:!py-[3px] [&_.ant-btn]:!text-sm [&_.ant-btn]:!font-normal [&_.ant-btn]:!leading-[22px] [&_.ant-btn]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
+        className="flex shrink-0 items-center gap-1 rounded-[var(--radius-control)] bg-[rgba(25,25,25,0.05)] p-[2px] [&_.ant-btn]:!h-7 [&_.ant-btn]:!min-w-[102px] [&_.ant-btn]:!whitespace-nowrap [&_.ant-btn]:!px-4 [&_.ant-btn]:!py-[3px] [&_.ant-btn]:!text-sm [&_.ant-btn]:!font-normal [&_.ant-btn]:!leading-[22px] [&_.ant-btn]:[font-family:'HarmonyOS_Sans_SC',sans-serif]"
         role="group"
         aria-label={t("agent.highFidelity.workflowModes")}
       >
@@ -136,7 +136,7 @@ export function AgentConfigHeader({
           onClick={onConfigure}
           className={
             !debugVisible && !publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -149,7 +149,7 @@ export function AgentConfigHeader({
           onClick={onDebug}
           className={
             debugVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -162,7 +162,7 @@ export function AgentConfigHeader({
           onClick={onPublication}
           className={
             publicationVisible
-              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              ? "!rounded-[4px] !bg-white !text-primary !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
         >
@@ -185,7 +185,6 @@ export function AgentConfigHeader({
           icon={<Send size={16} />}
           disabled={agentId === null || readOnly}
           onClick={onPublish}
-          className="!bg-[#2673e5]"
         >
           {t("agent.config.button.publish")}
         </Button>

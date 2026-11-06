@@ -84,8 +84,6 @@ export function StandardTour(props: TourProps) {
           fontFamily: '"HarmonyOS Sans SC", system-ui, sans-serif',
           colorText: "#191919",
           colorBorder: "#C9C9C9",
-          borderRadius: 4,
-          borderRadiusLG: 6,
           sizePopupArrow: 16,
         },
       }}
@@ -101,7 +99,7 @@ export function StandardTour(props: TourProps) {
           section: {
             padding: 16,
             minHeight: 174,
-            borderRadius: 6,
+            borderRadius: "var(--radius-control)",
             boxShadow: "0 8px 24px 0 rgba(0, 0, 0, 0.16)",
           },
           header: { padding: 0, width: "100%", marginBottom: 8 },

@@ -239,7 +239,7 @@ export default function CreateAgentModal({
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => handleTemplateClick(template.id)}
-                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
+                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[var(--radius-control)] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
                     isSelected
                       ? "!border-[#2673e5]"
                       : "!border-[#c9c9c9] hover:!border-[#2673e5]"

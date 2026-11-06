@@ -41,6 +41,7 @@ ${Object.entries(BRAND_PALETTE)
 --color-brand-border: ${BRAND.border};
 --color-brand-text: ${BRAND.text};
 --radius-control: ${BRAND.radius}px;
+--radius: ${BRAND.radius}px;
 }`;
 
 export const NEXENT_THEME: ThemeConfig = {
@@ -63,6 +64,9 @@ export const NEXENT_THEME: ThemeConfig = {
     colorBorder: BRAND.border,
     colorText: BRAND.text,
     borderRadius: BRAND.radius,
+    borderRadiusLG: BRAND.radius,
+    borderRadiusSM: BRAND.radius,
+    borderRadiusXS: BRAND.radius,
     controlHeight: 32,
     fontSize: 14,
     lineHeight: 22 / 14,
@@ -75,7 +79,7 @@ export const NEXENT_THEME: ThemeConfig = {
       dangerShadow: "none",
     },
     Input: { controlHeight: 28 },
-    Card: { borderRadiusLG: 8 },
+    Card: { borderRadiusLG: BRAND.radius },
     Table: {
       headerBorderRadius: BRAND.radius,
       headerSplitColor: "transparent",
