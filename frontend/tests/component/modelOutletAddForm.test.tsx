@@ -666,18 +666,17 @@ it("edits output capability without adding a request output parameter", async ()
   ).not.toHaveProperty("max_output_tokens");
 }, 15000);
 
-it("retries a failed preview without clearing the requested model", async () => {
-  api.previewModelProfile
-    .mockRejectedValueOnce(new ApiError("request_failed", "Connection error"))
-    .mockResolvedValue(preview);
+it("keeps real preview errors visible without a business revalidation button", async () => {
+  api.previewModelProfile.mockRejectedValue(
+    new ApiError("request_failed", "Connection error")
+  );
   setup();
   fillIdentity("deepseek-v4-pro");
   await screen.findByText("modelProfile.previewFailed");
   expect(saveButton()).toBeDisabled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "modelProfile.retryPreview" })
-  );
-  await waitForSaveReady();
+  expect(
+    screen.queryByRole("button", { name: "modelProfile.retryPreview" })
+  ).not.toBeInTheDocument();
   expect(screen.getByLabelText("modelProfile.requestModel")).toHaveValue(
     "deepseek-v4-pro"
   );
@@ -1404,3 +1403,48 @@ it("FD-05 does not persist an unavailable result for a failed management request
   await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
   expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBeUndefined();
 });
+
+it("includes the implicit thinking toggle when the user selects an effort", async () => {
+  api.previewModelProfile.mockImplementation(async (draft) => ({
+    ...preview,
+    parameter_values: draft.parameter_values ?? {},
+    capabilities: {
+      ...preview.capabilities,
+      reasoning: { status: "supported" },
+    },
+    field_specs: [
+      {
+        key: "enable_thinking",
+        visible: true,
+        editable: true,
+        required: false,
+        allowed_scopes: ["outlet", "conversation"],
+        schema: { type: "boolean" },
+        source: { ref: "custom_provider_thinking_v1" },
+      },
+    ],
+  }));
+  setup();
+  fillIdentity("qwen3.7-max");
+  await waitForSaveReady();
+  expect(
+    screen.getByRole("switch", { name: "modelProfile.thinkingToggle" })
+  ).toBeChecked();
+  fireEvent.mouseDown(
+    screen.getByRole("combobox", { name: "modelProfile.thinkingMode" })
+  );
+  fireEvent.click(
+    await screen.findByText("modelProfile.thinkingModeOption.effort")
+  );
+  fireEvent.mouseDown(
+    await screen.findByRole("combobox", { name: "modelProfile.thinkingDegree" })
+  );
+  fireEvent.click(await screen.findByText("modelProfile.thinkingLevel.low"));
+  await waitFor(
+    () =>
+      expect(
+        api.previewModelProfile.mock.lastCall?.[0].parameter_values
+      ).toMatchObject({ enable_thinking: true, reasoning_effort: "low" }),
+    { timeout: 7000 }
+  );
+}, 15000);

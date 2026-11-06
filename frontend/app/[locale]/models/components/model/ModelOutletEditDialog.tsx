@@ -37,7 +37,8 @@ export function ModelOutletEditDialog({
     !!migration &&
     typeof migration === "object" &&
     (!("reviewed_revision" in migration) ||
-      migration.reviewed_revision !== outlet.data?.config_revision);
+      typeof migration.reviewed_revision !== "number" ||
+      migration.reviewed_revision <= 0);
   const admin = user?.role === "SU" || user?.role === "ADMIN";
   return (
     <Modal

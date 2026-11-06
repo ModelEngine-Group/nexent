@@ -12,6 +12,7 @@ import { ModelOutletForm } from "@/components/model/ModelOutletForm";
 import {
   ModelThinkingSettings,
   thinkingDegreeKeys,
+  thinkingEnabled,
 } from "@/components/model/ModelThinkingSettings";
 import { parseRequestParameters } from "@/components/model/RequestParametersEditor";
 import { ModelRequestSettings } from "@/components/model/ModelRequestSettings";
@@ -628,7 +629,23 @@ export function ModelOutletAddForm({
     },
   });
   const changeValue = (key: string, value: unknown) =>
-    setValues((previous) => ({ ...previous, [key]: value }));
+    setValues((previous) => ({
+      ...previous,
+      // The UI's implicit on-state must be explicit when submitting a dependent value.
+      ...(thinkingDegreeKeys.includes(key) &&
+      value !== undefined &&
+      previous.enable_thinking === undefined &&
+      view?.field_specs.some((rule) => rule.key === "enable_thinking") &&
+      thinkingEnabled(
+        view.field_specs,
+        { ...view.parameter_values, ...previous },
+        (view.capabilities.reasoning as { status?: string } | undefined)
+          ?.status === "supported"
+      )
+        ? { enable_thinking: true }
+        : {}),
+      [key]: value,
+    }));
   const resetValue = (key: string) =>
     setValues((previous) => {
       const next = { ...previous };
@@ -906,16 +923,6 @@ export function ModelOutletAddForm({
                   type="error"
                   showIcon
                   description={previewDiagnostic}
-                  action={
-                    parsedExtras !== null ? (
-                      <StandardButton
-                        loading={preview.isFetching}
-                        onClick={() => preview.refetch()}
-                      >
-                        {t("modelProfile.retryPreview")}
-                      </StandardButton>
-                    ) : undefined
-                  }
                   title={t(
                     parsedExtras === null
                       ? "modelProfile.extrasInvalid"

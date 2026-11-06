@@ -45,7 +45,7 @@ def test_ac010_unmatched_and_nonreasoning_models_do_not_gain_reasoning():
 
 def test_ac009_legacy_outlet_and_conversation_share_the_same_compatible_binding():
     data = make().model_dump(mode="json")
-    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] not in {"enable_thinking", "reasoning_effort"}]
     data["parameter_values"].pop("enable_thinking", None)
     data["capabilities"]["reasoning"]["controls"] = None
     legacy = make().__class__.model_validate(data)
@@ -140,3 +140,38 @@ def test_ac009_untouched_custom_toggle_does_not_force_an_unqualified_upstream_pa
     assert "enable_thinking" not in connectivity_request(profile)[3]
     changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1, reset_parameters=True))
     assert "enable_thinking" not in connectivity_request(changed)[3]
+
+
+@pytest.mark.parametrize("model,levels", [
+    ("qwen3.8-flash", ["low", "medium", "xhigh"]),
+    ("qwen3.8-max", ["low", "medium", "xhigh"]),
+    ("deepseek-v4-flash", ["low", "high", "max"]),
+    ("deepseek-v4-pro", ["low", "high", "max"]),
+    ("deepseek-v4.1-flash", ["low", "high", "max"]),
+    ("glm-5.3", ["low", "high", "max"]),
+])
+def test_model_preferences_supply_compatible_effort_without_provider(model, levels):
+    profile = make(model)
+    before = profile.model_dump()
+    rule = next(rule for rule in profile.parameter_rules if rule["key"] == "reasoning_effort")
+    assert rule["schema"]["enum"] == levels
+    assert rule["allowed_scopes"] == ["outlet", "conversation"]
+    assert rule["api_binding"]["path"] == "/reasoning_effort"
+    values = {"reasoning_effort": levels[0]}
+    if any(rule["key"] == "enable_thinking" for rule in profile.parameter_rules):
+        values["enable_thinking"] = True
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1, parameter_values=values))
+    assert connectivity_request(changed)[3]["reasoning_effort"] == levels[0]
+    assert profile.model_dump() == before
+    with pytest.raises(ModelOutletValidationError):
+        service.apply_outlet_patch(profile, ModelOutletPatchRequest(expected_revision=1,
+            parameter_values={**values, "reasoning_effort": "invalid-effort"}))
+
+
+def test_hosted_provider_replaces_generic_effort_domain_and_binding():
+    catalog = service.get_model_profile_catalog()
+    provider = catalog.providers["alibaba-cn"]
+    profile = make("deepseek-v4-flash", provider_profile={"key": provider.key, "revision": provider.revision})
+    rule = next(rule for rule in profile.parameter_rules if rule["key"] == "reasoning_effort")
+    assert rule["schema"]["enum"] == ["high", "max"]
+    assert rule["source"]["ref"] != "custom_provider_thinking_v1"
