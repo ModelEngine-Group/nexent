@@ -3,6 +3,7 @@
 "use client";
 
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
+import { AgentFieldError } from "./agent-field-error";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
 import {
@@ -377,6 +378,7 @@ export default function AgentPrompt({
   const { isSpeedMode } = useDeployment();
   const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const isPromptEmpty = !editedAgent.prompt?.trim();
   const updateDraft = useAgentStore((state) => state.updateDraft);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const reconcileUnavailableModels = useAgentStore(
@@ -940,25 +942,45 @@ export default function AgentPrompt({
               {t("agent.highFidelity.optimizePrompt")}
             </Button>
           </div>
-          <div className="relative">
-            <HighFidelityTextArea
-              limit={100000}
-              id="agent-primary-prompt"
-              value={editedAgent.prompt ?? ""}
-              placeholder={t("agent.highFidelity.promptPlaceholder")}
-              disabled={isReadOnly}
-              classNames={{
-                textarea:
-                  "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
-                count:
-                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-              }}
-              onChange={(event) => updateDraft({ prompt: event.target.value })}
-            />
-            <div className="absolute right-1 top-2 z-10">
-              {renderExpandButton("prompt")}
+          <Form.Item
+            className="!mb-0"
+            validateStatus={isPromptEmpty ? "error" : undefined}
+            help={
+              isPromptEmpty ? (
+                <AgentFieldError
+                  id="agent-prompt-error"
+                  message={t("agent.validation.promptRequired")}
+                />
+              ) : undefined
+            }
+          >
+            <div className="relative">
+              <HighFidelityTextArea
+                limit={100000}
+                id="agent-primary-prompt"
+                aria-required="true"
+                aria-invalid={isPromptEmpty}
+                aria-describedby={
+                  isPromptEmpty ? "agent-prompt-error" : undefined
+                }
+                value={editedAgent.prompt ?? ""}
+                placeholder={t("agent.highFidelity.promptPlaceholder")}
+                disabled={isReadOnly}
+                classNames={{
+                  textarea:
+                    "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
+                  count:
+                    "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
+                }}
+                onChange={(event) =>
+                  updateDraft({ prompt: event.target.value })
+                }
+              />
+              <div className="absolute right-1 top-2 z-10">
+                {renderExpandButton("prompt")}
+              </div>
             </div>
-          </div>
+          </Form.Item>
           <ModelDrawer
             open={isModelSelectionOpen}
             onClose={() => setIsModelSelectionOpen(false)}

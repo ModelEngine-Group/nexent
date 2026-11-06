@@ -91,6 +91,7 @@ vi.mock("@/components/resource-picker/ModelParamsModal", () => ({
 vi.mock("@/components/common/ExpandEditModal", () => ({ default: () => null }));
 
 beforeEach(() => {
+  mocks.agent.prompt = "Complete prompt with constraints and examples";
   mocks.focus = null;
   mocks.agent.model_ids = [];
   mocks.agent.model_params_override = null;
@@ -135,6 +136,38 @@ function loadModels() {
   }));
   mocks.modelListLoaded = true;
 }
+
+test.each(["", " \n\t "])(
+  "marks a blank prompt invalid and clears the hint after filling: %j",
+  async (prompt) => {
+    mocks.agent.prompt = prompt;
+    const view = renderEditor();
+    const input = screen.getByRole("textbox", {
+      name: /agent.highFidelity.prompt$/,
+    });
+    expect(input).toHaveAttribute("aria-required", "true");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input.closest(".ant-input-textarea-affix-wrapper")).toHaveClass(
+      "ant-input-status-error"
+    );
+    const hint = screen.getByText("agent.validation.promptRequired");
+    expect(hint).toHaveClass("text-xs");
+    expect(hint.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(input).toHaveAttribute("aria-describedby", hint.id);
+    fireEvent.change(input, { target: { value: "A complete prompt" } });
+    expect(mocks.updateDraft).toHaveBeenCalledWith({
+      prompt: "A complete prompt",
+    });
+    mocks.agent.prompt = "A complete prompt";
+    view.refresh();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("agent.validation.promptRequired")
+      ).not.toBeInTheDocument()
+    );
+    expect(input).toHaveAttribute("aria-invalid", "false");
+  }
+);
 
 test("initializes form and autosave from the configured default rather than the first model", async () => {
   loadModels();
