@@ -279,10 +279,8 @@ export default function AgentsPage() {
             </div>
           ) : (
             <>
-              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
-                <div
-                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
-                >
+              <div className="mt-3 flex w-full shrink-0 flex-wrap items-center gap-3 lg:gap-4">
+                <div className="w-full min-w-0 lg:w-1/2 lg:shrink-0">
                   <Input
                     allowClear
                     prefix={<Search className="size-4 text-[#777777]" />}
@@ -294,17 +292,17 @@ export default function AgentsPage() {
                     }}
                     className="!h-8 !w-full"
                   />
-                  <TagFilterPopover
-                    definitions={tagDefinitions ?? []}
-                    value={tagPredicates}
-                    onChange={(value) => {
-                      setTagPredicates(value);
-                      setPage(1);
-                    }}
-                    buttonClassName="!h-8 shrink-0"
-                  />
                 </div>
-                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
+                <TagFilterPopover
+                  definitions={tagDefinitions ?? []}
+                  value={tagPredicates}
+                  onChange={(value) => {
+                    setTagPredicates(value);
+                    setPage(1);
+                  }}
+                  buttonClassName="!h-8 shrink-0"
+                />
+                <div className="ml-auto flex flex-wrap items-center gap-2">
                   <Button
                     icon={<FileInput className="size-4" />}
                     onClick={handleImport}
