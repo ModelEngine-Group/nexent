@@ -568,6 +568,7 @@ class TestImportOpenAPIServiceAPI:
             user_id="user123",
             service_description="Test API",
             headers_template=None,
+            ssl_verify=True,
             force_update=False
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
@@ -623,9 +624,25 @@ class TestImportOpenAPIServiceAPI:
             user_id="user123",
             service_description="Test API",
             headers_template=headers_template,
+            ssl_verify=True,
             force_update=False
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
+
+    def test_import_openapi_service_rejects_non_boolean_ssl_verify(self):
+        """Test ssl_verify must be an explicit boolean when provided."""
+        response = client.post(
+            "/tool/openapi_service",
+            json={
+                "service_name": "test_service",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
+                "ssl_verify": "false",
+            }
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json()["detail"] == "ssl_verify must be a boolean"
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_import_openapi_service_missing_service_name(self, mock_get_user_id):

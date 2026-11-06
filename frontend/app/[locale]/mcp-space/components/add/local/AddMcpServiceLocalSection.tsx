@@ -7,8 +7,11 @@ import {
   Form,
   Input,
   InputNumber,
+  Alert,
+  App,
   Select,
   Space,
+  Switch,
   Tabs,
   Upload,
 } from "antd";
@@ -98,6 +101,7 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
+  sslVerify: true,
   customHeaders: "",
   openApiJson: "",
   containerConfigJson: "",
@@ -122,6 +126,7 @@ export default function AddMcpServiceLocalSection({
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [draft, setDraft] = useState<LocalAddMcpDraft>(() =>
@@ -523,6 +528,22 @@ export default function AddMcpServiceLocalSection({
                       <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
                         {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
                       </span>
+                      <div className="flex items-center gap-2 mt-3">
+                        <Switch
+                          checked={draft.sslVerify !== false}
+                          onChange={(checked) => patchDraft({ sslVerify: checked })}
+                        />
+                        <span>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</span>
+                      </div>
+                      <Alert
+                        type={draft.sslVerify === false ? "warning" : "info"}
+                        showIcon
+                        message={t(
+                          draft.sslVerify === false
+                            ? "mcpConfig.openapiService.form.sslVerifyWarning"
+                            : "mcpConfig.openapiService.form.sslVerifyHint"
+                        )}
+                      />
                     </>
                   ) : null}
 

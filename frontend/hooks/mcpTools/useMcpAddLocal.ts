@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -158,6 +160,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
           custom_headers: customHeaders,
+          ssl_verify: isApi ? draft.sslVerify ?? true : undefined,
           config_json: configJson,
           registry_json: registryJson,
           group_ids: draft.groupIds?.join(",") ?? undefined,
@@ -171,6 +174,10 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
       queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
+      // The agent tool picker reads the persisted catalog through the
+      // shared ["tools"] query. Invalidate it after the backend scan so an
+      // already-open agent configuration page can see newly added API tools.
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
       await refreshToolListWithToast({
         message,
         t,
