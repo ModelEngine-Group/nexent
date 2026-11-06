@@ -17,7 +17,6 @@ import AgentListIndicators from "./agent-list-indicators";
 export interface AgentListCardProps {
   agent: Agent;
   onOpen: (agent: Agent) => void;
-  onPublish: (agentId: number) => void;
   onManageVersions: (agentId: number) => void;
 }
 
@@ -42,7 +41,6 @@ export function formatAgentListDate(agent: Agent): {
 export default function AgentListCard({
   agent,
   onOpen,
-  onPublish,
   onManageVersions,
 }: AgentListCardProps) {
   const { t } = useTranslation("common");
@@ -141,7 +139,6 @@ export default function AgentListCard({
           agentName={title}
           readOnly={agent.permission === "READ_ONLY"}
           variant="menu"
-          onPublish={onPublish}
           onManageVersions={onManageVersions}
         />
       </div>

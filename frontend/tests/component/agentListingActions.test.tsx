@@ -105,7 +105,6 @@ async function openMenu(
   });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const current = { ...agent, ...overrides };
-  const publish = vi.fn();
   render(
     <QueryClientProvider client={client}>
       <App>
@@ -115,7 +114,6 @@ async function openMenu(
           agentName={current.display_name}
           readOnly={current.permission === "READ_ONLY"}
           variant={variant}
-          onPublish={publish}
         />
       </App>
     </QueryClientProvider>
@@ -124,28 +122,23 @@ async function openMenu(
     screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
   );
   await screen.findByRole("menu");
-  return { invalidate, publish };
+  return { invalidate };
 }
 
-test("replaces duplicate configuration with publish, listing and evaluation in order", async () => {
-  const { publish } = await openMenu();
+test("shows listing and evaluation first without configuration or publication shortcuts", async () => {
+  await openMenu();
   expect(
     screen.queryByRole("menuitem", { name: "agentConfig.list.configure" })
   ).toBeNull();
   expect(
     screen
       .getAllByRole("menuitem")
-      .slice(0, 3)
+      .slice(0, 2)
       .map((item) => item.textContent)
-  ).toEqual([
-    "agentConfig.list.publish",
-    "agentConfig.list.listing",
-    "agentRepository.mine.evaluate",
-  ]);
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "agentConfig.list.publish" })
-  );
-  expect(publish).toHaveBeenCalledExactlyOnceWith(42);
+  ).toEqual(["agentConfig.list.listing", "agentRepository.mine.evaluate"]);
+  expect(
+    screen.queryByRole("menuitem", { name: "agentConfig.list.publish" })
+  ).toBeNull();
   expect(mocks.createListing).not.toHaveBeenCalled();
 });
 

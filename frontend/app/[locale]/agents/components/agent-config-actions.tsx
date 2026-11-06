@@ -15,7 +15,6 @@ import {
   GitBranch,
   MoreHorizontal,
   Network,
-  Send,
   Share2,
   LineChart,
   Trash2,
@@ -53,7 +52,6 @@ export default function AgentConfigActions({
   agentName: agentNameProp,
   readOnly,
   variant = "buttons",
-  onPublish,
   onManageVersions,
 }: {
   agent?: Agent;
@@ -61,7 +59,6 @@ export default function AgentConfigActions({
   agentName?: string;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
-  onPublish?: (agentId: number) => void;
   onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -338,17 +335,6 @@ export default function AgentConfigActions({
 
   const disabled = agentId === null;
   const menuItems: NonNullable<MenuProps["items"]> = [];
-  if (onPublish) {
-    menuItems.push({
-      key: "publish",
-      icon: <Send className="size-3.5" />,
-      label: t("agentConfig.list.publish"),
-      disabled: disabled || isReadOnly,
-      onClick: () => {
-        if (agentId !== null) onPublish(agentId);
-      },
-    });
-  }
   if (agent) {
     menuItems.push(
       {
@@ -374,7 +360,7 @@ export default function AgentConfigActions({
       }
     );
   }
-  if (onPublish || agent) menuItems.push({ type: "divider" });
+  if (agent) menuItems.push({ type: "divider" });
   menuItems.push(
     {
       key: "copy",

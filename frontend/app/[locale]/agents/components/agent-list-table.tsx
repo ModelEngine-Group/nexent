@@ -32,7 +32,6 @@ export interface AgentListTableProps {
   onColumnWidthsChange?: (widths: AgentColumnWidths) => void;
   onOpen: (agent: Agent) => void;
   onConfigure: (agentId: number) => void;
-  onPublish: (agentId: number) => void;
   onManageVersions: (agentId: number) => void;
 }
 
@@ -63,7 +62,6 @@ export default function AgentListTable({
   onColumnWidthsChange,
   onOpen,
   onConfigure,
-  onPublish,
   onManageVersions,
 }: AgentListTableProps) {
   const { t } = useTranslation("common");
@@ -208,7 +206,6 @@ export default function AgentListTable({
       fixed: "end",
       render: (_, agent) => {
         const agentId = Number(agent.id);
-        const isOnline = Boolean(agent.current_version_no);
         const agentName = agent.display_name || agent.name;
         return (
           <div className="flex min-w-0 items-center agent-table-actions gap-3 whitespace-nowrap text-[13px] leading-5">
@@ -219,15 +216,6 @@ export default function AgentListTable({
             >
               {t("agentConfig.list.configure")}
             </button>
-            {!isOnline ? (
-              <button
-                type="button"
-                className="text-[#0067d1] hover:text-[#0052a8]"
-                onClick={() => onPublish(agentId)}
-              >
-                {t("agentConfig.list.publish")}
-              </button>
-            ) : null}
             <AgentConfigActions
               agent={agent}
               agentId={agentId}

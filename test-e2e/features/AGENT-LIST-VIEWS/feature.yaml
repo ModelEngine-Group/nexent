@@ -54,8 +54,8 @@ feature:
     description: The Agent list page heading uses the existing localized Agent Configuration
       label in every supported locale.
   - rule_id: AGENT-LIST-RULE-010
-    description: Clicking a card opens configuration. Its more menu omits Configure and orders
-      Publish, Listing and Evaluation before existing actions. Listing requires an editable
+    description: Clicking a card opens configuration. Its more menu omits Configure and Publish, ordering
+      Listing and Evaluation before existing actions. Publication is handled inside the editor. Listing requires an editable
       published version without a current-version repository record; Evaluation requires
       a published version and preselects that Agent. Repository cards retain review operations
       but no longer expose listing applications or evaluation. Existing API and permissions remain unchanged.

@@ -4,7 +4,7 @@ change:
   change_type: requirement
   requirement_id: AGENT-LIST-REQ-003
   title: Move Agent listing and evaluation actions to the configuration list
-  description: Remove duplicate Configure from the card menu, place Listing and Evaluation after Publish, and remove application/evaluation entries from repository cards while retaining review operations.
+  description: Remove duplicate Configure and Publish shortcuts from the list, place Listing and Evaluation first in the card menu, and remove application/evaluation entries from repository cards while retaining review operations.
   affected_features:
     existing: []
     added: []
@@ -13,7 +13,7 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [AGENT-LIST-D1-002, AGENT-LIST-D4-002]
+    modified: [AGENT-LIST-D1-001, AGENT-LIST-D1-002, AGENT-LIST-D4-002]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -23,7 +23,7 @@ change:
       - frontend/tests/component/myAgentMainBadge.test.tsx
       - frontend/tests/component/mineApplyListingModal.test.tsx
     behaviors:
-      - Card menu order and direct configuration navigation remain correct.
+      - Card and table omit publication shortcuts; menu order and direct configuration navigation remain correct.
       - Unpublished, readonly and already-listed versions cannot submit an application.
       - Published readonly agents can navigate to evaluation with the selected ID.
       - Application success, failure, cancellation and repository entry removal are covered.

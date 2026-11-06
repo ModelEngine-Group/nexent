@@ -35,13 +35,9 @@ vi.mock("@/app/[locale]/agents/components/agent-avatar", () => ({
 vi.mock("../../app/[locale]/agents/components/agent-config-actions", () => ({
   default: function MockAgentConfigActions({
     agentId,
-    readOnly,
-    onPublish,
     onManageVersions,
   }: {
     agentId: number;
-    readOnly: boolean;
-    onPublish: (agentId: number) => void;
     onManageVersions: (agentId: number) => void;
   }) {
     const [open, setOpen] = useState(false);
@@ -52,13 +48,6 @@ vi.mock("../../app/[locale]/agents/components/agent-config-actions", () => ({
         </button>
         {open && (
           <>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => onPublish(agentId)}
-            >
-              发布
-            </button>
             <button type="button" onClick={() => onManageVersions(agentId)}>
               版本管理
             </button>
@@ -84,7 +73,6 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={agent}
         onOpen={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -127,7 +115,6 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={{ ...agent, tags: [rawTag] }}
         onOpen={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -139,44 +126,35 @@ describe("AgentListCard", () => {
     }
   });
 
-  it("opens configuration from the card and keeps publish and version actions in the menu", () => {
+  it("opens configuration from the card and keeps version actions in the menu", () => {
     const onOpen = vi.fn();
-    const onPublish = vi.fn();
     const onManageVersions = vi.fn();
     render(
       <AgentListCard
         agent={agent}
         onOpen={onOpen}
-        onPublish={onPublish}
         onManageVersions={onManageVersions}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    fireEvent.click(screen.getByRole("button", { name: "发布" }));
     fireEvent.click(screen.getByRole("button", { name: "版本管理" }));
     expect(onOpen).toHaveBeenCalledWith(agent);
-    expect(onPublish).toHaveBeenCalledWith(42);
     expect(onManageVersions).toHaveBeenCalledWith(42);
   });
 
-  it("keeps publishing disabled for a read-only Agent in the more menu", () => {
-    const onPublish = vi.fn();
+  it("omits publication shortcuts for a read-only Agent", () => {
     render(
       <AgentListCard
         agent={{ ...agent, permission: "READ_ONLY" } as Agent}
         onOpen={vi.fn()}
-        onPublish={onPublish}
         onManageVersions={vi.fn()}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "更多" }));
-    const publish = screen.getByRole("button", { name: "发布" });
-    expect(publish).toBeDisabled();
-    fireEvent.click(publish);
-    expect(onPublish).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
   });
 
   it("prefers an update timestamp without inventing one", () => {
@@ -200,7 +178,6 @@ describe("AgentListCard", () => {
       <AgentListCard
         agent={{ ...agent, tags: "['医疗', '健康']" as unknown as string[] }}
         onOpen={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );

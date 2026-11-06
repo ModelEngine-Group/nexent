@@ -155,7 +155,7 @@ case:
       content/header/expanded-guide and card grid bounding boxes. Inspect representative
       card title/description/footer/status/more glyph computed styles and positions. Hover
       and keyboard-focus an editable card, open the existing more menu and activate its
-      Publish, Listing and Evaluation actions, collapse and expand the guide, then search for
+      Listing and Evaluation actions, collapse and expand the guide, then search for
       a matching Agent. Switch to table view and back to cards, change page size/page,
       and activate an existing creation control.
     expected: Content is 1856px wide with 24px padding and a 48px header; the 1808x378px
@@ -170,7 +170,7 @@ case:
       edge; 8px status dot with 4px text gap and 12px more glyph at top16/right24 match.
       Parent group gap8 is not assigned an unconfirmed child role and footer gap4 remains
       derived. The heading is 智能体配置 in Chinese. Data labels remain truthful. Existing
-      Publish/Listing/Evaluation actions appear in the more menu while Configure is absent with existing permission behavior;
+      Listing/Evaluation actions appear in the more menu while Configure and Publish are absent with existing permission behavior;
       the header toggles between 展开教程 and 收起教程 with matching
       expanded state, search shows the same data-backed collection, and presentation
       interactions cause no business write. Existing table columns/actions/timestamp
