@@ -8,23 +8,23 @@ assets for the original source database.
 
 ## Completion rule and execution order
 
-`nexent.user_account_t` is the only account-migration completion marker. An existing
-table, including an empty one, skips source access and credential import. Application
-versions, SQL checksums, account counts and pending flags do not select migration.
-A target without the legacy `user_tenant_t` relation follows fresh initialization.
-A legacy target without the account table requires the original Supabase source.
+Migration completion depends on account data, not table existence. Every active
+historical member must have usable local credentials, a recognized API-only,
+provider or SPEED identity, an explicitly disabled local account, or per-user
+source-unavailability exclusion evidence. New imports must pass this validation before commit. Existing incomplete tables
+stop deployment and require consistent backup recovery; no automatic repair runs. No historical membership relation
+means fresh initialization. Versions and SQL checksums do not select migration.
 
-**Do not apply account SQL or start the new application before the worker imports
-historical accounts.** Manually applying 001 creates the completion marker without
-copying passwords. Restarting deployment then skips credential import by design.
-Use the automatic entry or the manual importer below, which owns the complete
-schema-and-credential transaction.
+**Run the importer before account SQL or the new application.** If account SQL
+already removed legacy role/email fields and no account holds their canonical
+copies, the importer stops with unresolved IDs and performs no automatic repair. Restore those business profiles
+from the target's pre-upgrade backup; Supabase cannot reconstruct application roles.
 
 | Stage | Docker | Kubernetes |
 | --- | --- | --- |
 | Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
 | Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
-| Target transaction | Recheck table existence under the account-writer lock, run consolidated 001, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
+| Target transaction | Recheck account coverage under the account-writer lock, run consolidated 001, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
 | Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
@@ -38,7 +38,13 @@ The importer keeps source rows in memory. Target schema creation, membership
 email/role transfer and credential import share one transaction. Failure or
 preview rolls back the new account table, its sequence and temporary import data,
 and restores the original membership columns/data. Retry reads the source again.
-There are no persistent credential snapshots, phase files or data checkpoints.
+There are no persistent credential snapshots or phase files. Intentionally
+unavailable source identities get ID/reason/audit-only records in
+`nexent.account_migration_exclusion_t` in the same transaction. These records let
+later deployments distinguish intentional exclusions after source removal.
+An existing incomplete table is not imported into or modified automatically.
+For a new migration, failed validation rolls back the new table, exclusions and
+profile moves before commit. Completed local accounts are preserved on rerun.
 
 `v2.9.0_001_local_user_accounts.sql` creates the final schema directly, without
 `account_status` or pending placeholders. Legacy status columns are converted to
@@ -186,16 +192,17 @@ source-directory deletion. No recovery or migration command needs host Python.
 | Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
 | API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
 | Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. Speed mode retains its existing demo context |
-| Unknown/custom identities | Exclude unrecognized identities from the local account table; retain their original records and never generate replacement IDs |
+| Unknown/custom identities | Unresolved active members stop migration with IDs; recover source/business profiles without generating replacement IDs or roles |
 | CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Preserve original IDs and valid bindings. Provider-only identities stay passwordless; accounts with actual local password credentials retain password login. Import Supabase credentials only where those source identities exist |
 | Audit and refresh data | Do not read/import `auth.audit_log_entries`, Supabase sessions, refresh tokens or recovery/confirmation secrets. No audit archive is created |
 
 Canonical `user_email` and `user_role` move from `user_tenant_t` to the account;
 tenant, group, key and business ownership remain unchanged. Provider metadata
-never supplies an application role. `updated` counts hydrated legacy profiles,
+never supplies an application role. `source` counts rows read from the original source.
+`updated` counts hydrated legacy profiles,
 `inserted` counts source identities absent from those profiles, and
 `disabled_orphans` counts excluded source users without active tenant membership; `excluded_inactive` counts all excluded source identities. Repeat
-imports skip the existing account table and preserve newer credentials/edits.
+imports inspect coverage and preserve newer credentials/edits.
 
 Ordinary login uses signed JWTs without a server session table. The existing
 `session` response envelope stays compatible, with an empty refresh token.
@@ -213,13 +220,14 @@ after confirming a newly created account; existing/error/manual-hidden flows do
 not print them. Re-running deployment cannot recover a password from its hash.
 
 Email reuse is checked after final account eligibility is computed. Soft-deleted,
-banned, anonymous, orphaned or role-missing ordinary identities do not occupy an
+banned, anonymous or orphaned ordinary identities do not occupy an
 email in the new account table. Temporary schema-created unavailable profiles are
 removed in the same transaction, except the recognized SPEED system identity.
 Only final active duplicate emails fail; logs contain the conflicting account IDs
 without email values, hashes or connection details. Docker and Kubernetes preserve
-the same structured conflict through psql error transport. Existing completed
-account tables are still skipped, without retroactive deletion of local accounts.
+the same structured conflict through psql error transport. Complete
+account data skips source import, without retroactive deletion of local accounts.
+Missing roles or ordinary password credentials reject the current transaction.
 Historical associations without an eligible account cannot authenticate and no
 longer block SU preflight merely because the association row remains.
 
@@ -237,12 +245,16 @@ kubectl --namespace nexent exec deployment/nexent-postgresql -- psql -U root -d 
   "SELECT to_regclass('nexent.user_account_t') AS accounts;"
 ```
 
-Use your configured DB/user. A non-null result marks completion even when rows
-were manually deleted; pending rows and SQL history never trigger re-import.
+Use your configured DB/user. Schema presence alone cannot establish completion.
+The Shell entry logs its shared data inspection as counters and unresolved IDs.
+Inspect `[account-migration][preflight]`, `[source]`, `[snapshot]`, `[worker]`,
+`[result]`, `[committed]` and `[cleanup]` to identify the stage and outcome. No credential values
+are logged. A skipped run explicitly says source cleanup was not attempted;
+a remote source requires manual cleanup, while preview and failure retain it.
 
 | Symptom | Checks and recovery |
 | --- | --- |
-| Account table exists but historical passwords were never imported | Check whether 001 or the new application was started manually first. Stop identity writes and restore the target's pre-upgrade backup containing the original membership role/email fields, then run the Shell migration entry before normal deployment. An old incomplete draft is not detected automatically |
+| Account table exists but historical passwords were never imported | Check whether 001 or the new application was started manually first. Stop identity writes and recover a consistent pre-upgrade target backup, including original membership roles/emails, then run migration before application SQL. Reconcile newer local credentials before backup recovery. The script reports unresolved IDs and stops without automatically repairing or deleting existing account data |
 | SU bootstrap reports an existing SU membership or missing account profile | Verify original ID and membership/account consistency. Deleting only account rows leaves tenant ownership behind. Restore the matching target backup; do not replace the owner with a new UUID or delete memberships to bypass preflight |
 | SU can sign in but Gateway returns `Identity lookup rejected` from `/api/internal/identity/resolve` | SU bootstrap intentionally stores an empty physical tenant. The independent Gateway lookup must retain its established default session context. Use the fixed backend revision and rebuild the main image; do not assign a fabricated real tenant or change account data. Ordinary users and API keys still require their own tenant. Verify service signing settings without exposing keys if other accounts also fail |
 | Original Supabase database required / configured source missing | Recover the original stopped/removed container or restore its original data/backup, then use `up`. Verify explicit container name or remote endpoint. Never create an empty source to make migration pass |

@@ -180,6 +180,28 @@ def read_source_users(source) -> list:
     return users
 
 
+def inspection_sql():
+    """Inspect membership coverage and usable credentials without persistent writes."""
+    return (HERE / "inspect_accounts.sql").read_text(encoding="utf-8")
+
+
+def inspect_accounts(target):
+    with target.cursor() as cursor:
+        cursor.execute(inspection_sql())
+        return cursor.fetchone()[0]
+
+
+def account_data_complete(state):
+    """Reject incomplete existing tables; automatic migration never repairs them."""
+    if state["complete"]:
+        return True
+    if state.get("account_table"):
+        raise MigrationSetupError("Existing account data is incomplete; IDs: "
+            + json.dumps(state.get("unresolved_ids", []))
+            + "; restore the consistent pre-upgrade backup before retrying; no automatic repair was attempted")
+    return False
+
+
 def _account_import_sql(source_rows, *, dry_run=False):
     """Build one credential/schema transaction body, shared by host and psql."""
     rows = [map_source_user(row) for row in source_rows]
@@ -191,9 +213,31 @@ def _account_import_sql(source_rows, *, dry_run=False):
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
     schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
-    return "SET LOCAL standard_conforming_strings=on;\nSET LOCAL nexent.account_import='on';\n" + schema + "\n" + r"""
+    return "SET LOCAL standard_conforming_strings=on;\n" + inspection_sql() + r"""
+SET LOCAL nexent.account_import='on';
+""" + schema + "\n" + r"""
+CREATE TABLE IF NOT EXISTS nexent.account_migration_exclusion_t (
+    exclusion_id SERIAL PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL UNIQUE,
+    exclusion_reason VARCHAR(100) NOT NULL,
+    created_by VARCHAR(100) NOT NULL DEFAULT 'auth-migration',
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(100) NOT NULL DEFAULT 'auth-migration',
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delete_flag VARCHAR(1) NOT NULL DEFAULT 'N'
+);
+COMMENT ON TABLE nexent.account_migration_exclusion_t IS 'Per-identity evidence for unavailable historical accounts intentionally excluded from local authentication';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.exclusion_id IS 'Technical exclusion evidence identifier';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.user_id IS 'Original historical user identifier';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.exclusion_reason IS 'Source eligibility decision without credential material';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.created_by IS 'Migration actor that recorded the exclusion';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.create_time IS 'UTC exclusion creation time';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.updated_by IS 'Migration actor that last changed the exclusion';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.update_time IS 'UTC exclusion update time';
+COMMENT ON COLUMN nexent.account_migration_exclusion_t.delete_flag IS 'N for applicable historical exclusion, Y for retired evidence';
+
 CREATE TEMP TABLE account_import ON COMMIT DROP AS
-SELECT s.*, coalesce(p.role_value,a.user_role) AS role_value,
+SELECT s.*, (s.delete_flag='Y') AS source_inactive, coalesce(p.role_value,a.user_role) AS role_value,
        coalesce(p.email_value,a.user_email) AS profile_email,
        (p.user_id IS NOT NULL OR a.user_id IS NOT NULL) AS existing,
        NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u
@@ -244,22 +288,33 @@ BEGIN
     END IF;
 END
 $email_conflicts$;
+INSERT INTO nexent.account_migration_exclusion_t (user_id,exclusion_reason)
+SELECT user_id,'source_unavailable' FROM account_import WHERE source_inactive AND NOT orphan
+ON CONFLICT (user_id) DO NOTHING;
+DO $coverage$
+DECLARE unresolved json := pg_temp.inspect_local_accounts()->'unresolved_ids';
+BEGIN
+    IF json_array_length(unresolved)>0 THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_INCOMPLETE=%',unresolved;
+    END IF;
+END
+$coverage$;
 SET LOCAL nexent.account_import='off';
-SELECT json_build_object('source',count(*),'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
+SELECT json_build_object('source',__SOURCE_COUNT__,'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
                          'updated',count(*) FILTER (WHERE existing AND delete_flag='N'),
                          'skipped',count(*) FILTER (WHERE delete_flag='Y'),
                          'excluded_inactive',count(*) FILTER (WHERE delete_flag='Y'),
                          'disabled_orphans',count(*) FILTER (WHERE orphan),'dry_run',__DRY_RUN__)
 FROM account_import;
-""".replace("__DRY_RUN__", "true" if dry_run else "false").replace("__ROWS__", encoded)
+""".replace("__DRY_RUN__", "true" if dry_run else "false").replace("__SOURCE_COUNT__", str(len(rows))).replace("__ROWS__", encoded)
 
 
 def import_users(target, source_rows: list, *, dry_run: bool = True) -> dict:
-    """Create schema and credentials atomically; an existing table is complete."""
+    """Commit only complete new migrations; existing inconsistent tables require recovery."""
     with target.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
-        cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL")
-        if cursor.fetchone()[0]:
+        state = inspect_accounts(target)
+        if account_data_complete(state):
             return {"skipped": len(source_rows), "complete": True, "dry_run": dry_run}
         cursor.execute("SAVEPOINT account_migration")
         try:
@@ -284,7 +339,16 @@ def _migration_sql(rows, *, dry_run=False):
     return "BEGIN;\n" + r"""
 SET LOCAL standard_conforming_strings=on;
 SELECT pg_advisory_xact_lock(hashtext('account-writers'));
-SELECT to_regclass('nexent.user_account_t') IS NOT NULL AS complete \gset
+""" + inspection_sql() + r"""
+DO $existing$
+DECLARE state json := pg_temp.inspect_local_accounts();
+BEGIN
+    IF (state->>'account_table')::boolean AND NOT (state->>'complete')::boolean THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_INCOMPLETE=%',state->'unresolved_ids';
+    END IF;
+END
+$existing$;
+SELECT (pg_temp.inspect_local_accounts()->>'complete')::boolean AS complete \gset
 \if :complete
 SELECT '{"skipped":true,"complete":true}';
 \else
@@ -446,11 +510,11 @@ def execute(action, values, *, with_auth=False, production=False):
 
 def _migration_conflict(message):
     """Extract only structured account identifiers, never raw database output."""
-    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_CONFLICT=(\[[^\r\n]*\])', message or '', re.M)
+    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_(CONFLICT|INCOMPLETE)=(\[[^\r\n]*\])', message or '', re.M)
     if not match:
         return None
     try:
-        ids = json.loads(match.group(1))
+        ids = json.loads(match.group(2))
         if not isinstance(ids, list) or not ids:
             return None
         if any(not isinstance(value,str) or not 0<len(value)<=100 or any(ord(c)<32 for c in value) for value in ids):
@@ -458,6 +522,9 @@ def _migration_conflict(message):
         ids = sorted(set(ids))
     except (ValueError, TypeError, AttributeError):
         return None
+    if match.group(1) == "INCOMPLETE":
+        return MigrationConflict("Incomplete account migration IDs: " + json.dumps(ids)
+            + "; verify original Supabase coverage and restore missing legacy role/email profiles from backup")
     return MigrationConflict("Account migration conflict IDs: " + json.dumps(ids))
 
 
@@ -623,9 +690,8 @@ except (n["MigrationSetupError"], n["MigrationConflict"]) as error:
 def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
     values = load_settings(args.env_file)
     state = json.loads(_psql(args, args.database_target,
-        "SELECT json_build_object('complete',to_regclass('nexent.user_account_t') IS NOT NULL,"
-        "'legacy',to_regclass('nexent.user_tenant_t') IS NOT NULL);", values))
-    if state["complete"]:
+        inspection_sql(), values))
+    if account_data_complete(state):
         return {"skipped": True, "complete": True}
     if not state["legacy"]:
         return {"skipped": True, "new": True}
@@ -684,9 +750,8 @@ def container_main(argv=None):
             try:
                 with target.cursor() as cursor:
                     cursor.execute("SELECT pg_advisory_xact_lock(hashtext('account-writers'))")
-                    cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL, "
-                                   "to_regclass('nexent.user_tenant_t') IS NOT NULL")
-                    complete, legacy = cursor.fetchone()
+                state = inspect_accounts(target)
+                complete, legacy = account_data_complete(state), state["legacy"]
                 if complete or not legacy:
                     print(json.dumps({"skipped": True, "complete": complete, "new": not legacy}))
                     return 0
@@ -704,6 +769,8 @@ def container_main(argv=None):
                     with source:
                         source.set_session(readonly=True, isolation_level="REPEATABLE READ")
                         rows = read_source_users(source)
+                        print("[account-migration][snapshot] Source rows=" + str(len(rows))
+                              + " rows_with_password=" + str(sum(bool(row.get("encrypted_password")) for row in rows)), file=sys.stderr)
                 finally:
                     source.close()
                 result = import_users(target, rows, dry_run=not args.apply)
@@ -763,8 +830,8 @@ def main(*, upgrade=automatic_upgrade):
         target = psycopg2.connect(**target_params)
         try:
             with target, target.cursor() as cursor:
-                cursor.execute("SELECT to_regclass('nexent.user_account_t') IS NOT NULL")
-                complete = cursor.fetchone()[0]
+                cursor.execute(inspection_sql())
+                complete = account_data_complete(cursor.fetchone()[0])
         finally:
             target.close()
         if complete:

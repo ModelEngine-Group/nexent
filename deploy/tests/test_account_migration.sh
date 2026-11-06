@@ -16,7 +16,7 @@ printf '%s\n' "$*" >> "$MIGRATION_LOG"
 case "$1" in
   exec)
     case "$*" in
-      *psql*) cat >/dev/null; printf '%s\n' "${FAKE_STATE:-legacy}" ;;
+      *psql*) cat >/dev/null; case "${FAKE_STATE:-legacy}" in incomplete) echo '{"complete":false,"legacy":true,"account_table":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; complete) echo '{"complete":true,"legacy":true,"accounts":1,"members":1,"unresolved_ids":[]}' ;; fresh) echo '{"complete":false,"legacy":false,"accounts":0,"members":0,"unresolved_ids":[]}' ;; *) echo '{"complete":false,"legacy":true,"accounts":0,"members":1,"unresolved_ids":["old-user"]}' ;; esac ;;
       *PGPORT*) echo 5432 ;;
       *POSTGRES_PASSWORD*) echo source-original-private ;;
     esac ;;
@@ -69,7 +69,15 @@ for state in fresh complete; do
   assert_absent "$MIGRATION_LOG" 'create '
   assert_absent "$MIGRATION_LOG" 'scale '
 done
+if FAKE_STATE=incomplete run_case --apply; then echo 'FAIL: existing incomplete data was accepted'; exit 1; fi
+assert_has "$temporary/error" 'old-user'
+assert_has "$temporary/error" 'No automatic repair'
+assert_absent "$MIGRATION_LOG" 'create '
+assert_absent "$MIGRATION_LOG" 'scale '
 run_case
+assert_has "$temporary/error" '[account-migration][preflight]'
+assert_has "$temporary/error" 'old-user'
+assert_has "$temporary/error" '[account-migration][worker]'
 assert_has "$MIGRATION_JOB" 'kind: Job'
 assert_has "$MIGRATION_JOB" 'automountServiceAccountToken: false'
 assert_has "$MIGRATION_JOB" 'imagePullSecrets:'

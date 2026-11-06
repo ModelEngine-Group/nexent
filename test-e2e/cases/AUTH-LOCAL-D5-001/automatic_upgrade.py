@@ -66,10 +66,11 @@ def assert_automatic_upgrade(root, temporary):
     with tarfile.open(fileobj=context, mode="w") as archive:
         content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
                    "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
+                   "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
                    "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
                    'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
         info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
-        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql")]:
+        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
             archive.add(source, arcname=destination)
     built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
     assert built.returncode == 0, built.stderr
@@ -157,11 +158,12 @@ def assert_automatic_upgrade(root, temporary):
         assert query(f"SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "retained-tenant"
         assert query("SELECT delete_flag FROM nexent.user_account_t WHERE user_id='api-only'") == 'N'
         assert query("SELECT delete_flag FROM nexent.user_token_info_t WHERE user_id='api-only'") == 'Y'
-        # Completion depends only on table existence, even with empty accounts,
-        # changed history or arbitrary application version settings.
+        # An emptied account table cannot skip migration. Missing source must
+        # stop rollout even when version history has been removed.
         query("DELETE FROM nexent.user_account_t; DROP TABLE nexent.schema_migrations")
         env["APP_VERSION"] = "unreadable"
-        assert phase("prepare")["complete"]
+        rejected = phase("prepare", success=False)
+        assert 'incomplete' in rejected.stderr.lower() and user_id in rejected.stderr
         assert not (temporary / ".migration-state").exists()
 
     finally:

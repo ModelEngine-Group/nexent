@@ -54,6 +54,7 @@ run_migration() {
     [ "$source_name" != "${database##*/}" ] || fail "Source cleanup must not select the target database"
     present="$(platform get deployment "$source_name" --ignore-not-found -o name)"
     [ -n "$present" ] || fail "The original Supabase database is required; restore its original data before retrying"
+    log_stage storage "Preserving original Kubernetes storage definitions and PV retention policy."
     preserve_source_storage
     replicas="$(platform get deployment "$source_name" -o 'jsonpath={.spec.replicas}')"
     if [ "$replicas" = 0 ]; then
@@ -66,6 +67,7 @@ run_migration() {
     source_host="$host"
     case "$host" in localhost|127.0.0.1) fail "A Kubernetes Job needs a source host reachable from the cluster" ;; esac
   fi
+  log_stage source "Original source selected: ${source_name:-remote}; resolving credentials without logging them."
   get_source
   target_host="$(kube_address "$database")"
   local service_port
@@ -117,6 +119,7 @@ YAML
       while IFS= read -r pull_secret; do [ -z "$pull_secret" ] || printf '        - name: %s\n' "$(quote_yaml "$pull_secret")"; done <<< "$pull_secrets"
     fi
   } > "$credential_dir/job.yaml"
+  log_stage worker "Starting isolated migration Job (apply=$apply); source snapshot, import and coverage validation run before commit."
   platform create -f "$(host_file "$credential_dir/job.yaml")" >/dev/null
   job_created=true
   # Secret content is already in Kubernetes; remove host credential files now.
@@ -131,15 +134,23 @@ YAML
     sleep 1
   done
   case "$phase" in 1:*) ;; *) job_diagnostics; fail "Migration Job timed out; inspect image access and database connectivity" ;; esac
+  log_stage result "Migration Job succeeded; checking committed result."
   output="$(platform logs "job/$job_name" -c migration)"
   printf '%s\n' "$output"
-  if worker_flag skipped "$output"; then return; fi
+  log_stage result "Worker result: $output"
+  if worker_flag skipped "$output"; then log_stage skipped "Concurrent inspection found complete data; source cleanup was not attempted."; return; fi
   if [ "$apply" = true ]; then
     worker_flag committed "$output" || fail "Worker did not confirm a committed migration; original source was retained"
+    log_stage committed "Account schema, business profiles and credential coverage committed."
   fi
   if [ "$apply" = true ] && [ -n "$source_name" ]; then
     for key in nexent-supabase-kong nexent-supabase-auth "$source_name"; do
+      log_stage cleanup "Committed migration; removing source workload $key and retaining storage."
       platform delete deployment,service "$key" --ignore-not-found >/dev/null || cleanup_warning
     done
+  elif [ "$apply" = true ]; then
+    log_stage cleanup "Remote source has no managed workloads; manual source cleanup is required."
+  else
+    log_stage preview "Preview rolled back; source workloads were retained."
   fi
 }
