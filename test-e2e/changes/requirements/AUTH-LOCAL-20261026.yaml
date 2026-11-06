@@ -56,7 +56,7 @@ change:
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_cas_app.py
     behaviors:
-    - Account table existence alone marks completion. Shell-only host orchestration runs container Python to atomically create schema and import credentials before application SQL/rollout, with no version or private retry-state selection; local container mode needs no host database packages.
+    - Per-user account/credential coverage selects completion; new imports validate before commit; incomplete existing tables stop without automatic repair. Shell-only host orchestration runs container Python to atomically create schema and import credentials before application SQL/rollout, with no version or private retry-state selection; local container mode needs no host database packages.
     - Failed/preview migration restores legacy profile fields and leaves no account table or persistent credential process data. Consolidated 001 never creates account_status and removes existing legacy status columns; runtime availability uses delete_flag alone.
     - API-only null-email accounts remain passwordless; account/membership/group/key writes share a transaction.
     - Only committed local applies reclaim source DB/Auth/Kong; preview, failure and remote sources retain containers/data.

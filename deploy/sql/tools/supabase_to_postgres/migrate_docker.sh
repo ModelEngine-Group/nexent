@@ -45,6 +45,7 @@ run_migration() {
   else
     source_host="$host"
   fi
+  log_stage source "Original source selected: ${source_name:-remote}; resolving credentials without logging them."
   get_source
   target_network="$(network_of "$database")"
   target_host="$(address_of "$database" "$target_network")"
@@ -68,19 +69,30 @@ run_migration() {
     platform network connect "$source_network" "$container_name" || fail "Cannot connect migration worker to the source network"
   fi
   # Running an image entrypoint directly cannot execute application startup SQL.
+  log_stage worker "Starting isolated database worker (apply=$apply); source snapshot, import and coverage validation run before commit."
   output="$(platform start -a "$container_name")" || fail "Container account migration failed; original source was retained"
   code="$(platform inspect --format '{{.State.ExitCode}}' "$container_name")"
   [ "$code" = 0 ] || fail "Container account migration failed; original source was retained"
   printf '%s\n' "$output"
-  if worker_flag skipped "$output"; then return; fi
+  log_stage result "Worker result: $output"
+  if worker_flag skipped "$output"; then log_stage skipped "Concurrent inspection found complete data; source cleanup was not attempted."; return; fi
   if [ "$apply" = true ]; then
     worker_flag committed "$output" || fail "Worker did not confirm a committed migration; original source was retained"
+    log_stage committed "Account schema, business profiles and credential coverage committed."
   fi
   if [ "$apply" = true ] && [ -n "$source_name" ]; then
+    log_stage cleanup "Committed migration; stopping and removing selected source DB/Auth/Kong containers, retaining data volumes."
     for name in "${SUPABASE_MIGRATION_KONG_CONTAINER:-supabase-kong-mini}" "${SUPABASE_MIGRATION_AUTH_CONTAINER:-supabase-auth-mini}" "$source_name"; do
       if platform inspect "$name" >/dev/null 2>&1; then
+        log_stage cleanup "Removing source container $name."
         platform stop "$name" >/dev/null && platform rm "$name" >/dev/null || cleanup_warning
+      else
+        log_stage cleanup "Configured source container $name is absent; nothing removed."
       fi
     done
+  elif [ "$apply" = true ]; then
+    log_stage cleanup "Remote source has no managed local containers; manual source cleanup is required."
+  else
+    log_stage preview "Preview rolled back; source workloads were retained."
   fi
 }

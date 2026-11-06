@@ -19,7 +19,7 @@ def worker(mocker, monkeypatch):
     target, source = MagicMock(), MagicMock()
     target.__enter__.return_value = target
     source.__enter__.return_value = source
-    target.cursor.return_value.__enter__.return_value.fetchone.return_value = (False, True)
+    target.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
     connect = mocker.patch("psycopg2.connect", side_effect=[target, source])
     mocker.patch.object(migration, "read_source_users", return_value=[{"identity": "original"}])
     importer = mocker.patch.object(migration, "import_users", return_value={"source": 1})
@@ -44,7 +44,7 @@ def test_worker_migrates_with_explicit_container_addresses_and_closes_connection
 @pytest.mark.parametrize("state", [(True, True), (False, False)])
 def test_worker_rechecks_complete_and_fresh_targets_without_accessing_source(worker, capsys, state):
     target, source, connect, importer = worker
-    target.cursor.return_value.__enter__.return_value.fetchone.return_value = state
+    target.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": state[0], "legacy": state[1]},)
     assert migration.container_main(["--container", "--apply"]) == 0
     assert json.loads(capsys.readouterr().out)["skipped"]
     assert connect.call_count == 1
@@ -120,3 +120,15 @@ def test_worker_failed_source_read_closes_both_connections_and_never_imports(wor
     worker[1].close.assert_called_once()
     worker[3].assert_not_called()
     assert "private row" not in capsys.readouterr().err
+
+
+def test_worker_rejects_preexisting_incomplete_table_without_source_or_writes(worker, capsys):
+    target, source, connect, importer = worker
+    target.cursor.return_value.__enter__.return_value.fetchone.return_value = ({
+        "complete": False, "legacy": True, "account_table": True,
+        "unresolved_ids": ["historical-user"],
+    },)
+    assert migration.container_main(["--container", "--apply"]) == 1
+    assert connect.call_count == 1
+    importer.assert_not_called()
+    assert "historical-user" in capsys.readouterr().err

@@ -27,7 +27,9 @@ while [ "$#" -gt 0 ]; do
     *) printf 'Unsupported migration argument: %s\n' "$1" >&2; exit 1 ;;
   esac
 done
-fail() { printf 'Account upgrade rejected: %s\n' "$*" >&2; exit 1; }
+migration_stage=arguments
+log_stage() { migration_stage="$1"; shift; printf '[account-migration][%s] %s\n' "$migration_stage" "$*" >&2; }
+fail() { printf '[account-migration][%s] Failed; source retained and deployment stopped.\n' "$migration_stage" >&2; printf 'Account upgrade rejected: %s\n' "$*" >&2; exit 1; }
 case "$mode" in docker|kubernetes) ;; *) fail "Unsupported deployment mode" ;; esac
 case "$timeout" in ''|*[!0-9]*) fail "Invalid readiness timeout" ;; esac
 [ "$timeout" -ge 1 ] && [ "$timeout" -le 300 ] || fail "Readiness timeout must be between 1 and 300"
@@ -76,7 +78,7 @@ preflight() {
   local encoded
   encoded="$(printf '%s' "$target_password" | base64 | tr -d '\r\n')"
   # Secrets travel over stdin, never argv; suppress raw driver diagnostics.
-  { printf '%s\n' "$encoded"; printf '%s\n' "SELECT CASE WHEN to_regclass('nexent.user_account_t') IS NOT NULL THEN 'complete' WHEN to_regclass('nexent.user_tenant_t') IS NULL THEN 'fresh' ELSE 'legacy' END;"; } |
+  { printf '%s\n' "$encoded"; cat "$SCRIPT_DIR/inspect_accounts.sql"; } |
     inside "$database" sh -c 'IFS= read -r encoded; PGPASSWORD="$(printf "%s" "$encoded" | base64 -d)"; export PGPASSWORD; exec "$@"' migration \
       psql -X -qAt -h 127.0.0.1 -p "$target_port" -U "$target_user" -d "$target_db" -v ON_ERROR_STOP=1 2>/dev/null
 }
@@ -108,14 +110,22 @@ cleanup_warning() { printf 'Account migration committed; source cleanup incomple
 worker_command=(python /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py --container --wait-timeout "$timeout")
 [ "$apply" = false ] || worker_command+=(--apply)
 if [ -n "$legacy_action" ]; then source "$SCRIPT_DIR/legacy.sh"; run_recovery; exit; fi
+log_stage preflight "Inspecting target account coverage (mode=$mode target=$database)."
 get_target
 state="$(preflight)" || fail "Cannot inspect target database; check readiness and credentials"
-case "$state" in
-  complete) printf '%s\n' '{"skipped":true,"complete":true}'; exit 0 ;;
-  fresh) printf '%s\n' '{"skipped":true,"new":true}'; exit 0 ;;
-  legacy) ;;
-  *) fail "Unexpected target preflight result" ;;
-esac
+log_stage preflight "Target account inspection: $state"
+if worker_flag complete "$state"; then
+  log_stage skipped "Account data is complete; source access and cleanup were not attempted."
+  printf '%s\n' '{"skipped":true,"complete":true}'; exit 0
+elif worker_flag account_table "$state"; then
+  fail "Existing account data is incomplete; restore the consistent pre-upgrade backup before retrying. No automatic repair was attempted. See unresolved account IDs above."
+elif [[ "$state" =~ \"legacy\"[[:space:]]*:[[:space:]]*false ]]; then
+  log_stage skipped "No historical membership table; ordinary fresh initialization will run."
+  printf '%s\n' '{"skipped":true,"new":true}'; exit 0
+elif ! worker_flag legacy "$state"; then
+  fail "Unexpected target preflight result"
+fi
+log_stage source "Account data is incomplete; preparing the original Supabase source."
 [ -n "${NEXENT_IMAGE:-}" ] || fail "Set the deployment NEXENT_IMAGE before account migration"
 source "$SCRIPT_DIR/migrate_${mode}.sh"
 run_migration
