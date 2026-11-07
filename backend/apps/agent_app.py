@@ -819,6 +819,9 @@ async def list_all_agent_info_api(
         return await list_all_agent_info_impl(
             tenant_id=tenant_id, user_id=user_id
         )
+    except UnauthorizedError as e:
+        logger.warning(f"Agent list unauthorized: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized.")
     except Exception as e:
         logger.error(f"Agent list error: {str(e)}")
         raise HTTPException(
