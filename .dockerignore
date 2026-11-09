@@ -71,3 +71,5 @@ sdk/uv.lock
 
 # CI toolchain is not application source.
 .ci-python/
+# Task-local development artifacts and connection metadata.
+.runtime/

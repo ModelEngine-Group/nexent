@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "stage": "D4",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "AGENT-NATIVE-D4-001",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001",
+      "NATIVE-RUNTIME-RULE-002"
+    ],
+    "title": "Persisted Agent browser hybrid execution and saved conversation",
+    "type": "E2E",
+    "priority": "P0",
+    "status": "manual",
+    "automation": "manual",
+    "objective": "Verify public intermediate text, actual tools, final response and saved-history order through new chat using the persisted test Agent.",
+    "preconditions": [
+      "Final host deployment is running in toolcalling mode with a configured real model, test tenant administrator and persisted Agent with authorized list_directory."
+    ],
+    "test_data": {
+      "runtime_values": [
+        "codeagent",
+        "toolcalling"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Sign in to the test tenant administrator; open the persisted Agent Definition and its locally published chat preview.",
+        "expected": "Persisted name, prompt and model load without runtime-specific definition edits."
+      },
+      {
+        "order": 2,
+        "action": "Request a workspace directory listing and Python calculation of 17*19.",
+        "expected": "The browser streams progress and displays a final answer based on actual tool results."
+      },
+      {
+        "order": 3,
+        "action": "Expand tool calls and inspect names, arguments and execution results.",
+        "expected": "list_directory and code_execution are visible, with a successful Python 323 observation."
+      },
+      {
+        "order": 4,
+        "action": "Reload chat and reopen the saved conversation; then reload the editor and inspect the persisted name, prompt, models and tool selection.",
+        "expected": "Progress/tool/final ordering survives reopening, with one final answer; semantic Agent configuration remains usable."
+      }
+    ],
+    "expected_results": [
+      "Persisted Agent configuration and chat preview are usable.",
+      "Final answer includes observed results.",
+      "Browser shows actual direct and Python calls and output.",
+      "Reload/reopen retains saved interleaved conversation and semantic Agent configuration."
+    ],
+    "forbidden_side_effects": [
+      "No unauthorized tool execution, destructive definition changes, exposed secrets or uncorrelated tool results."
+    ],
+    "source": {
+      "notes": "Manual built-in browser verification, with expanded tool arguments/results and saved-history reopen. API proof separately checks definition immutability; local test publication is setup, not a runtime mutation. This is not an automated runner pass."
+    },
+    "actor": "Existing test tenant administrator",
+    "journey": [
+      "Persisted Agent -> local chat preview -> hybrid task -> reload saved history -> inspect actual tools -> reload definition."
+    ],
+    "final_business_result": [
+      "An existing definition runs a hybrid task with visible native tool results and final answer."
+    ],
+    "failure_evidence": [
+      "Capture browser failure, response and correlated trace without secrets."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Existing browser definition/chat flow renders hybrid execution, preserves saved output order and retains semantic configuration.",
+        "steps": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "expected_results": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,254 @@
+{
+  "date": "2026-11-09",
+  "unit_tests": {
+    "modules": [
+      {
+        "file": "test/sdk/core/agents/test_native_runtime.py",
+        "exit_code": 0,
+        "tests": 28,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_runtime_harness.py",
+        "exit_code": 0,
+        "tests": 19,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_completion.py",
+        "exit_code": 0,
+        "tests": 23,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_public_text.py",
+        "exit_code": 0,
+        "tests": 2,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_nexent_agent.py",
+        "exit_code": 0,
+        "tests": 248,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_core_agent.py",
+        "exit_code": 0,
+        "tests": 182,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_run_agent.py",
+        "exit_code": 0,
+        "tests": 61,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer.py",
+        "exit_code": 0,
+        "tests": 107,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_final_answers.py",
+        "exit_code": 0,
+        "tests": 19,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_model_attempts.py",
+        "exit_code": 0,
+        "tests": 3,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_nl2agent_protocol.py",
+        "exit_code": 0,
+        "tests": 6,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/utils/test_final_answer_projection.py",
+        "exit_code": 0,
+        "tests": 24,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/services/test_agent_run_final_answers.py",
+        "exit_code": 0,
+        "tests": 4,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_native_service_model.py",
+        "exit_code": 0,
+        "tests": 20,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_native_stream_compatibility.py",
+        "exit_code": 0,
+        "tests": 4,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_openai_chat_adapter.py",
+        "exit_code": 0,
+        "tests": 54,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_openai_stream.py",
+        "exit_code": 0,
+        "tests": 45,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_model_service.py",
+        "exit_code": 0,
+        "tests": 41,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_legacy_chat_model.py",
+        "exit_code": 0,
+        "tests": 25,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_legacy_tool_continuation.py",
+        "exit_code": 0,
+        "tests": 25,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/agents/test_create_agent_info.py",
+        "exit_code": 0,
+        "tests": 253,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/services/test_nl2agent_service.py",
+        "exit_code": 0,
+        "tests": 59,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/services/test_nl2skill_service.py",
+        "exit_code": 0,
+        "tests": 24,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/contracts/test_agent_runtime_config.py",
+        "exit_code": 0,
+        "tests": 6,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/management/test_agent_runtime_boundaries.py",
+        "exit_code": 0,
+        "tests": 7,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/model_service/test_native_service_observability.py",
+        "exit_code": 0,
+        "tests": 2,
+        "failures": 0,
+        "skipped": 0
+      }
+    ],
+    "total_tests": 1291,
+    "failures": 0,
+    "skipped": 0
+  },
+  "frontend_tests": {
+    "node_projection": 5,
+    "vitest_adapter_and_regressions": 17,
+    "typescript": "PASS"
+  },
+  "formal": [
+    {
+      "case_id": "AGENT-NATIVE-D2-001",
+      "run_id": "20261109T111249656201Z-AGENT-NATIVE-D2-001",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "AGENT-NATIVE-D3-001",
+      "run_id": "20261109T110956381299Z-AGENT-NATIVE-D3-001",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "AGENT-NATIVE-D3-002",
+      "run_id": "20261109T111137175271Z-AGENT-NATIVE-D3-002",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "AGENT-NATIVE-D5-001",
+      "run_id": "20261109T111400507017Z-AGENT-NATIVE-D5-001",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    }
+  ],
+  "browser": {
+    "status": "PASS (manual)",
+    "screenshot": "interleaved-browser.png",
+    "tool_detail_screenshot": "interleaved-tools.png",
+    "observations": "Public progress before direct directory call and Python execution; final observed 323. Reload/reopen retained text/tool order and one final answer.",
+    "note": "No invented filename when the new workspace was empty."
+  }
+}

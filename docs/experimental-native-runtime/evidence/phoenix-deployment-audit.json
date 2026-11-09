@@ -1,0 +1,209 @@
+{
+  "project": "nexent-pr4315-host-deployment",
+  "browser_trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+  "observations": [
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "4bde04a1d2a8201f",
+      "kind": "agent",
+      "requested": "toolcalling",
+      "effective": "toolcalling",
+      "fallback_reason": "",
+      "status": "OK"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "0dfb6db05f3e727c",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 1,
+      "calls": [],
+      "tool_schemas": 9,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "49db3479da96e83c559766d04e6dd145",
+      "span_id": "cd1be44998209611",
+      "kind": "agent",
+      "requested": "toolcalling",
+      "effective": "codeagent",
+      "fallback_reason": "tool_capability_not_supported",
+      "status": "OK"
+    },
+    {
+      "trace_id": "49db3479da96e83c559766d04e6dd145",
+      "span_id": "2544a36ffc4ce66a",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": true,
+      "reasoning_parts": 0,
+      "calls": [],
+      "tool_schemas": 0,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "ce2265bc592ca246",
+      "kind": "tool",
+      "name": "agent.tool.code_execution",
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "aa178b93bd5f883e",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "tool_calls",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 1,
+      "calls": [
+        "code_execution"
+      ],
+      "tool_schemas": 9,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "49db3479da96e83c559766d04e6dd145",
+      "span_id": "ea6d5ada45ccc634",
+      "kind": "tool",
+      "name": "agent.tool.python_interpreter",
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "a562cc1e0d59ef22",
+      "kind": "tool",
+      "name": "agent.tool.list_directory",
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "dd7fab364337c7fd",
+      "kind": "tool",
+      "name": "agent.tool.list_directory",
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "3a4bb2252f8d26411df739b5ceb552f7",
+      "span_id": "1b790ed7a1f95396",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "tool_calls",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 1,
+      "calls": [
+        "list_directory"
+      ],
+      "tool_schemas": 9,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "49db3479da96e83c559766d04e6dd145",
+      "span_id": "a73034ba2c06e4cf",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": true,
+      "reasoning_parts": 0,
+      "calls": [],
+      "tool_schemas": 0,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "fe2fa4eda7b78602ec497d27dfa5cbee",
+      "span_id": "2d248687bf0ed1ca",
+      "kind": "agent",
+      "requested": "toolcalling",
+      "effective": "codeagent",
+      "fallback_reason": "tool_capability_not_supported",
+      "status": "OK"
+    },
+    {
+      "trace_id": "fe2fa4eda7b78602ec497d27dfa5cbee",
+      "span_id": "05013dd67c321751",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": true,
+      "reasoning_parts": 0,
+      "calls": [],
+      "tool_schemas": 0,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "2aa4ac829c88bf685751154c82e1eb74",
+      "span_id": "497c8a7006fbe92b",
+      "kind": "agent",
+      "requested": "toolcalling",
+      "effective": "toolcalling",
+      "fallback_reason": "",
+      "status": "OK"
+    },
+    {
+      "trace_id": "2aa4ac829c88bf685751154c82e1eb74",
+      "span_id": "50560038b272925c",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 1,
+      "calls": [],
+      "tool_schemas": 7,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "2aa4ac829c88bf685751154c82e1eb74",
+      "span_id": "39e503fb19cb2f8c",
+      "kind": "tool",
+      "name": "agent.tool.code_execution",
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "2aa4ac829c88bf685751154c82e1eb74",
+      "span_id": "e581f61ba3d910c6",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "tool_calls",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 0,
+      "calls": [
+        "code_execution"
+      ],
+      "tool_schemas": 7,
+      "status": "UNSET"
+    },
+    {
+      "trace_id": "7e676192da12a862c3f7caf3d4a71c37",
+      "span_id": "c891ee976f8554df",
+      "kind": "agent",
+      "requested": "toolcalling",
+      "effective": "toolcalling",
+      "fallback_reason": "",
+      "status": "OK"
+    },
+    {
+      "trace_id": "7e676192da12a862c3f7caf3d4a71c37",
+      "span_id": "ed69598af22e4251",
+      "kind": "model",
+      "model": "qwen3.8-flash",
+      "purpose": "native_agent",
+      "finish": "stop",
+      "no_simulated_thought_instruction": false,
+      "reasoning_parts": 1,
+      "calls": [],
+      "tool_schemas": 7,
+      "status": "UNSET"
+    }
+  ]
+}

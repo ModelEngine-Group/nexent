@@ -461,3 +461,8 @@ NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv
+
+# Agent runtime request; effective mode is selected per resolved model capability.
+NEXENT_AGENT_RUNTIME = os.getenv("NEXENT_AGENT_RUNTIME", "codeagent")
+if NEXENT_AGENT_RUNTIME not in ("codeagent", "toolcalling"):
+    raise ValueError("NEXENT_AGENT_RUNTIME must be codeagent or toolcalling")

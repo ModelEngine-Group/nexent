@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "stage": "D5",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "AGENT-NATIVE-D5-001",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001",
+      "NATIVE-RUNTIME-RULE-002"
+    ],
+    "title": "Branch-built container identity and native configuration",
+    "type": "DEPLOYMENT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Branch-built container identity and native configuration",
+    "preconditions": [
+      "Final branch-built main/web/sandbox/MCP images are available; task application and infrastructure are deployed; real API runs have provisioned a sandbox; expected immutable image IDs are provided by the operator."
+    ],
+    "test_data": {
+      "runtime_values": [
+        "codeagent",
+        "toolcalling"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Inspect running application image IDs, native selection, tracing enablement and absence of backend/SDK source mounts.",
+        "expected": "All application containers use the expected built images and native selection."
+      },
+      {
+        "order": 2,
+        "action": "Hash the installed native runtime inside the application container and compare it with the tested branch source.",
+        "expected": "Hashes match exactly."
+      },
+      {
+        "order": 3,
+        "action": "Check application/auth health and the running sandbox image identity.",
+        "expected": "HTTP health checks pass and the sandbox uses the expected branch-built image."
+      }
+    ],
+    "expected_results": [
+      "Expected branch-built application images run with native selection and tracing; no dev source overlay.",
+      "Installed runtime matches tested source.",
+      "Application, auth and branch sandbox are healthy."
+    ],
+    "forbidden_side_effects": [
+      "No unauthorized tool execution, destructive definition changes, exposed secrets or uncorrelated tool results."
+    ],
+    "source": {
+      "notes": "Fixed container identity/health verification. Actual environment rollback comparison is separate retained real-model evidence, not inferred from these checks."
+    },
+    "risk_type": "DEPLOYMENT",
+    "risk": "Experimental runtime breaks stable default or runs stale code.",
+    "condition": [
+      "Build completed branch images and deploy native runtime."
+    ],
+    "metrics": [
+      "Image and source identity, successful runtime runs and stopped dev processes."
+    ],
+    "thresholds": [
+      "All source/image identities match; application and authentication endpoints return HTTP 200."
+    ],
+    "recovery_expectations": [
+      "Select codeagent and restart application without changing persisted definitions."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Final deployment runs actual branch images without a source overlay.",
+        "steps": [
+          1,
+          2,
+          3
+        ],
+        "expected_results": [
+          1,
+          2,
+          3
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ]
+  }
+}

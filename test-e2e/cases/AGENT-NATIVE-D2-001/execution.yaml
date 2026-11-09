@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "case_id": "AGENT-NATIVE-D2-001",
+  "implementations": [
+    {
+      "framework": "pytest",
+      "file": "test.py",
+      "selector": "AGENT-NATIVE-D2-001"
+    }
+  ],
+  "timeout_seconds": 600,
+  "acceptance_bindings": {
+    "AC-01": [
+      "test_existing_definition_stream_and_immutability"
+    ],
+    "AC-02": [
+      "test_existing_definition_stream_and_immutability"
+    ],
+    "AC-03": [
+      "test_unauthenticated_run_is_denied_before_stream_execution"
+    ],
+    "AC-04": [
+      "test_existing_definition_stream_and_immutability"
+    ]
+  },
+  "preparation": {
+    "families": [],
+    "anchors": true,
+    "special_assets": false,
+    "d4_groups": []
+  },
+  "notes": "Existing task-owned administrator, model and persisted Agent are operator-provisioned anchors. Tests perform runs and read definitions; no definition mutation or cleanup is required."
+}

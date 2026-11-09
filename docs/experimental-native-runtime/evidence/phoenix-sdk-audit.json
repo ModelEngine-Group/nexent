@@ -1,0 +1,1274 @@
+{
+  "project": "nexent-pr4315-host-acceptance",
+  "run": "20261109T110956381299Z-AGENT-NATIVE-D3-001",
+  "review": "All completed native generations have structured message outputs, native tool schemas and correlated call/result history. Provider reasoning is present and replayed where supported; DeepSeek profile returned no reasoning. Cancellation has no terminal generation. Max-step and error recovery are intentional scenarios. Bodies omitted.",
+  "traces": [
+    {
+      "label": "native-docker-code",
+      "trace_id": "47438e3657efa44c99592d656934a356",
+      "span_count": 4,
+      "models": [
+        {
+          "span_id": "f0daf9455fe826b8",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_70143e22a2ee4bc7911e4cb5"
+          ],
+          "input_result_ids": [
+            "call_70143e22a2ee4bc7911e4cb5"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "5898e7f3597ca216",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_70143e22a2ee4bc7911e4cb5",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "e7d636961ddfbf16",
+          "parent_id": "5eb5816370012935",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-local-hybrid",
+      "trace_id": "fe9ba3611493c3ebb5c96e9f80f7ac0b",
+      "span_count": 8,
+      "models": [
+        {
+          "span_id": "c555d1a09cca41dd",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_c9b50d01522e4813949bac45",
+            "call_39d3bf39935d45a8a2dd3558"
+          ],
+          "input_result_ids": [
+            "call_c9b50d01522e4813949bac45",
+            "call_39d3bf39935d45a8a2dd3558"
+          ],
+          "input_reasoning_messages": 2,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "bfdba2f39dbc6453",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_39d3bf39935d45a8a2dd3558",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [
+            "call_c9b50d01522e4813949bac45"
+          ],
+          "input_result_ids": [
+            "call_c9b50d01522e4813949bac45"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "d01690f12d9eb10d",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_c9b50d01522e4813949bac45",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "ae69282fdbd789c4",
+          "parent_id": "eea7aa6b20093a8c",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "803c421353acff8e",
+          "parent_id": "ae69282fdbd789c4",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "8a3a743237319489",
+          "parent_id": "eea7aa6b20093a8c",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "2b72734f69f6371d",
+          "parent_id": "8a3a743237319489",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-stream-cancellation",
+      "trace_id": "dd8f89df983297d5ef131f4b9044f014",
+      "span_count": 2,
+      "models": [
+        {
+          "span_id": "e743d0a3f9910aac",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": null,
+          "status": "UNSET",
+          "tool_schemas": 1,
+          "reasoning_parts": 0,
+          "output_tool_calls": [],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": false,
+          "attempt": null,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        }
+      ],
+      "tools": []
+    },
+    {
+      "label": "native-mcp-session",
+      "trace_id": "0579e98f8e8e7e98a5ae352a4aea1cd8",
+      "span_count": 4,
+      "models": [
+        {
+          "span_id": "6042484072a8c53d",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_df042dc544c9488f854087f6"
+          ],
+          "input_result_ids": [
+            "call_df042dc544c9488f854087f6"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "7c90ce18131a08d9",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_df042dc544c9488f854087f6",
+              "name": "nexent_echo"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "31731c0361a68b8d",
+          "parent_id": "034690f6b4b0349b",
+          "name": "agent.tool.nexent_echo",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "provider-glm-5-3",
+      "trace_id": "e81c2720e376789c5a68ad65246c22f6",
+      "span_count": 6,
+      "models": [
+        {
+          "span_id": "2f1541c8892beb05",
+          "model": "glm-5.3",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_511bc509f51d4b0199dc8d6c",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_080f2a18277c41d183ae456b"
+          ],
+          "input_result_ids": [
+            "call_080f2a18277c41d183ae456b"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        },
+        {
+          "span_id": "5444d0472f860faa",
+          "model": "glm-5.3",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_080f2a18277c41d183ae456b",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "c0b8f09db662da7a",
+          "parent_id": "20c2b13a6560d1b7",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "00e13d3f81b358a4",
+          "parent_id": "20c2b13a6560d1b7",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "510efe6de2605719",
+          "parent_id": "00e13d3f81b358a4",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "provider-qwen3-8-flash",
+      "trace_id": "697d6d76b143e2fd7f7664ec880a6d33",
+      "span_count": 6,
+      "models": [
+        {
+          "span_id": "f52152780d0b940a",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_eb27b3ae5ebd4875899eb393",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_649caee3502a4162855bf1cf"
+          ],
+          "input_result_ids": [
+            "call_649caee3502a4162855bf1cf"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096, \"enable_thinking\": true}"
+        },
+        {
+          "span_id": "e8829d403f57d780",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_649caee3502a4162855bf1cf",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096, \"enable_thinking\": true}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "332d9e9176140394",
+          "parent_id": "ce01f1a4b3293b10",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "9db25a47bac91716",
+          "parent_id": "ce01f1a4b3293b10",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "dcd811c945408f95",
+          "parent_id": "9db25a47bac91716",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "managed-native-child",
+      "trace_id": "f4412cb160d9da3edb2afe37f1323820",
+      "span_count": 8,
+      "models": [
+        {
+          "span_id": "b21cc4f8a0bc573d",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_bc97a68f46f842f5a411195b"
+          ],
+          "input_result_ids": [
+            "call_bc97a68f46f842f5a411195b"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "eef5c0317ca1f21b",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_30efc15a80754d0e8a734322",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_b75220c09a3942c5af36aa6d"
+          ],
+          "input_result_ids": [
+            "call_b75220c09a3942c5af36aa6d"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "9e405cedcc03c5fd",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_b75220c09a3942c5af36aa6d",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "92d621f7b4bced79",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_bc97a68f46f842f5a411195b",
+              "name": "calculator"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "665412f18858e7fe",
+          "parent_id": "b92595d819a04934",
+          "name": "agent.tool.calculator",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "da7ed069a0de1759",
+          "parent_id": "665412f18858e7fe",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "3dbf79c4614615bf",
+          "parent_id": "665412f18858e7fe",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-docker-direct",
+      "trace_id": "31ca09a3c1b83e19bba4d6204176f8f0",
+      "span_count": 5,
+      "models": [
+        {
+          "span_id": "0cb815d289c5bf32",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_457eb9ac4f414819b088acce"
+          ],
+          "input_result_ids": [
+            "call_457eb9ac4f414819b088acce"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "f16b71634b6cc9cc",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_457eb9ac4f414819b088acce",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "cd3749012bd76ff9",
+          "parent_id": "20fc63e87b42b430",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "1145f5b30f6d876d",
+          "parent_id": "cd3749012bd76ff9",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "provider-deepseek-v4-1-flash",
+      "trace_id": "6c2a26434e98312651962a0d3705614f",
+      "span_count": 5,
+      "models": [
+        {
+          "span_id": "e1f39f2e88cc83dc",
+          "model": "deepseek-v4.1-flash",
+          "purpose": "native_agent",
+          "finish": "stop",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 0,
+          "output_tool_calls": [],
+          "input_call_ids": [
+            "call_00_6dl8u66kcnm5hteoyafy93uh"
+          ],
+          "input_result_ids": [
+            "call_00_6dl8u66kcnm5hteoyafy93uh"
+          ],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096, \"enable_thinking\": true}"
+        },
+        {
+          "span_id": "c7b683079f442585",
+          "model": "deepseek-v4.1-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 0,
+          "output_tool_calls": [
+            {
+              "id": "call_00_6dl8u66kcnm5hteoyafy93uh",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096, \"enable_thinking\": true}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "a2b4876495343e54",
+          "parent_id": "011dfcdab75f572d",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "e54c6daf1bb50580",
+          "parent_id": "a2b4876495343e54",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-local-direct",
+      "trace_id": "1ae42de5acd6ddb082438f87bebba24c",
+      "span_count": 6,
+      "models": [
+        {
+          "span_id": "ecd66c737ec9b5c5",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_249e987761334e6686470cff",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_433578d31e584f4f8abaa1ad"
+          ],
+          "input_result_ids": [
+            "call_433578d31e584f4f8abaa1ad"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "e0c4dd343a6dfd52",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_433578d31e584f4f8abaa1ad",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "63e73ba34fc55ed2",
+          "parent_id": "da9a976ae04d7e89",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "667bdec7308b33bf",
+          "parent_id": "da9a976ae04d7e89",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "5bde0de55fce49b6",
+          "parent_id": "667bdec7308b33bf",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-local-programmatic",
+      "trace_id": "41b713081ef8a32f8d11d7a3b4a04326",
+      "span_count": 6,
+      "models": [
+        {
+          "span_id": "89dcaeddca6973d1",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_c5753a1967f34d47bd1f34a7",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_9beb553af79c48d59d5118f3"
+          ],
+          "input_result_ids": [
+            "call_9beb553af79c48d59d5118f3"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "965b5c23019a69f4",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_9beb553af79c48d59d5118f3",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "4a9cd6bcceb1317b",
+          "parent_id": "bf1136a53c3a459b",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "9d46ee1c6474b792",
+          "parent_id": "bf1136a53c3a459b",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "991f937fe85570e9",
+          "parent_id": "9d46ee1c6474b792",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-error-recovery",
+      "trace_id": "6b724b42ef2360e3591d8c5852785e49",
+      "span_count": 7,
+      "models": [
+        {
+          "span_id": "cd718940072a0014",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_b79cd08327d448ab96d25192",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_4701d7fabf1e45158aedd9ae",
+            "call_d9e8b25c4e9e4782969f8db8"
+          ],
+          "input_result_ids": [
+            "call_4701d7fabf1e45158aedd9ae",
+            "call_d9e8b25c4e9e4782969f8db8"
+          ],
+          "input_reasoning_messages": 2,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "e4fe9ecb4e921137",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_d9e8b25c4e9e4782969f8db8",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [
+            "call_4701d7fabf1e45158aedd9ae"
+          ],
+          "input_result_ids": [
+            "call_4701d7fabf1e45158aedd9ae"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "b2ba91bba96232fa",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_4701d7fabf1e45158aedd9ae",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "0a358c28a4e21911",
+          "parent_id": "138dfbe0e9ebe311",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "506af5d17942e06a",
+          "parent_id": "138dfbe0e9ebe311",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "fbd32d16c4460d5d",
+          "parent_id": "138dfbe0e9ebe311",
+          "name": "agent.tool.list_directory",
+          "status": "ERROR"
+        }
+      ]
+    },
+    {
+      "label": "native-docker-hybrid",
+      "trace_id": "9311ebb70b300152c9f1ba371e5960e4",
+      "span_count": 9,
+      "models": [
+        {
+          "span_id": "fac2a2a0aca743c9",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_01d9c8938d8040d59212776d",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_baebeacab5fe4b65a1281493",
+            "call_a4b40cdd46b94f118b92ebe0"
+          ],
+          "input_result_ids": [
+            "call_baebeacab5fe4b65a1281493",
+            "call_a4b40cdd46b94f118b92ebe0"
+          ],
+          "input_reasoning_messages": 2,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "1da27dc90bc4a44a",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_a4b40cdd46b94f118b92ebe0",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [
+            "call_baebeacab5fe4b65a1281493"
+          ],
+          "input_result_ids": [
+            "call_baebeacab5fe4b65a1281493"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "d09f193f0800e790",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_baebeacab5fe4b65a1281493",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "e49d21068248ed0e",
+          "parent_id": "1fa4b94fa042074e",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "2eeb0cf2ed4b1be3",
+          "parent_id": "1fa4b94fa042074e",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "6e7e2330c4f4008d",
+          "parent_id": "2eeb0cf2ed4b1be3",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "f63eca69320843c8",
+          "parent_id": "1fa4b94fa042074e",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "d020a5e52e29acb0",
+          "parent_id": "f63eca69320843c8",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "provider-MiniMax-M3",
+      "trace_id": "10e7b2d4472b48331c500642314244a1",
+      "span_count": 9,
+      "models": [
+        {
+          "span_id": "80af56b98e1346a5",
+          "model": "MiniMax-M3",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 0,
+          "output_tool_calls": [
+            {
+              "id": "call_lAc29pWnRNfX4wb0Dh63fZJl",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_JnXubRxUzipqwtHwjkU8zSyi",
+            "call_EbPIgSacZtMxkEWzvGwmqgX0"
+          ],
+          "input_result_ids": [
+            "call_JnXubRxUzipqwtHwjkU8zSyi",
+            "call_EbPIgSacZtMxkEWzvGwmqgX0"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        },
+        {
+          "span_id": "1edd0e032496dd65",
+          "model": "MiniMax-M3",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_EbPIgSacZtMxkEWzvGwmqgX0",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [
+            "call_JnXubRxUzipqwtHwjkU8zSyi"
+          ],
+          "input_result_ids": [
+            "call_JnXubRxUzipqwtHwjkU8zSyi"
+          ],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        },
+        {
+          "span_id": "7599f856fb910d1b",
+          "model": "MiniMax-M3",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 0,
+          "output_tool_calls": [
+            {
+              "id": "call_JnXubRxUzipqwtHwjkU8zSyi",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 4096}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "3f81e43e4ffd5a92",
+          "parent_id": "97f8cb00a85c5d98",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "afb8bb862dbaea75",
+          "parent_id": "97f8cb00a85c5d98",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "f1b9e9cbf1ac01f6",
+          "parent_id": "afb8bb862dbaea75",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "643d501e715e5be3",
+          "parent_id": "97f8cb00a85c5d98",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "70032d434dcd464a",
+          "parent_id": "643d501e715e5be3",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-docker-programmatic",
+      "trace_id": "46ddd8a06f999c670925715f5a3d34fa",
+      "span_count": 6,
+      "models": [
+        {
+          "span_id": "6b05346d231535d3",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_a7375d55f25b406bab0c0363",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_67a3860473ad4bd6b5b26d93"
+          ],
+          "input_result_ids": [
+            "call_67a3860473ad4bd6b5b26d93"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "11ebf6341bf44d9b",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_67a3860473ad4bd6b5b26d93",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "963e5e617016d9f1",
+          "parent_id": "991636c2a2008eba",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "68e474c4dca1fc1c",
+          "parent_id": "991636c2a2008eba",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "d7649677dd41978c",
+          "parent_id": "68e474c4dca1fc1c",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-local-code",
+      "trace_id": "d7785fb8ba592ef1fd267bcced54ccd0",
+      "span_count": 5,
+      "models": [
+        {
+          "span_id": "653c247e7ead41c5",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_ddf1c09f2e35492d96dc67fc",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_45c60ac287c2464e9f4ba3f3"
+          ],
+          "input_result_ids": [
+            "call_45c60ac287c2464e9f4ba3f3"
+          ],
+          "input_reasoning_messages": 1,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        },
+        {
+          "span_id": "01882b17f2f62080",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 3,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_45c60ac287c2464e9f4ba3f3",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "8fd15a9f8b62ed1f",
+          "parent_id": "490fe7dba03d6926",
+          "name": "agent.tool.final_answer",
+          "status": "UNSET"
+        },
+        {
+          "span_id": "71193f088e98fc7e",
+          "parent_id": "490fe7dba03d6926",
+          "name": "agent.tool.code_execution",
+          "status": "UNSET"
+        }
+      ]
+    },
+    {
+      "label": "native-max-steps",
+      "trace_id": "fbb1963ceadf96b6b1d776a4c3fe2871",
+      "span_count": 3,
+      "models": [
+        {
+          "span_id": "69d7d79fc6cc4e79",
+          "model": "qwen3.8-flash",
+          "purpose": "native_agent",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "tool_schemas": 2,
+          "reasoning_parts": 1,
+          "output_tool_calls": [
+            {
+              "id": "call_3431718a5be0436dbfe5f8b5",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "input_reasoning_messages": 0,
+          "output_structured": true,
+          "attempt": 1,
+          "invocation": "{\"max_output_tokens\": 2048}"
+        }
+      ],
+      "tools": [
+        {
+          "span_id": "362cba65263e95f4",
+          "parent_id": "31f027c014c9a0f9",
+          "name": "agent.tool.list_directory",
+          "status": "UNSET"
+        }
+      ]
+    }
+  ]
+}

@@ -495,3 +495,26 @@ def test_ac003_legacy_empty_sampling_is_not_sent_as_json_null(profile, values):
         else:
             assert body[key] == value
     assert changed.parameter_values.items() >= values.items()
+
+
+@pytest.mark.parametrize("purpose,status,allowed", [
+    ("native_agent", "supported", True),
+    ("agent", "supported", False),
+    ("native_agent", "unsupported", False),
+    ("native_agent", "unknown", False),
+])
+def test_native_reasoning_replay_requires_explicit_mode_and_supported_profile(profile, purpose, status, allowed):
+    values = profile.model_dump()
+    values['capabilities']['reasoning']['status'] = status
+    values['capabilities']['reasoning']['controls'] = []
+    snapshot = type(profile).model_validate(values)
+    req = request(snapshot, purpose=purpose, messages=[ModelMessage(
+        semantic_role='assistant_history', content_parts=[{'type':'text','text':'Checking'}],
+        reasoning_parts=[{'type':'text','text':'continuation fixture'}],
+    )])
+    if allowed:
+        body = json.loads(OpenAIChatAdapter().prepare_http_request(req, snapshot).body_bytes)
+        assert body['messages'][0]['reasoning_content'] == 'continuation fixture'
+    else:
+        with pytest.raises(ModelAdapterError, match='MODEL_REASONING_FORMAT_UNSUPPORTED'):
+            OpenAIChatAdapter().prepare_http_request(req, snapshot)

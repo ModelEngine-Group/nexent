@@ -352,6 +352,7 @@ async def _stream_agent_chunks(
     # Types whose chunks should be merged into the previous unit boundary,
     # matching the legacy batch merge logic.
     _MERGEABLE_TYPES = {
+        ProcessType.MODEL_OUTPUT.value,
         ProcessType.FINAL_ANSWER.value,
         ProcessType.MODEL_OUTPUT_CODE.value,
         ProcessType.MODEL_OUTPUT_THINKING.value,

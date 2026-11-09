@@ -122,9 +122,10 @@ class _Call:
         self.monitoring.set_span_attributes(**{
             "llm.usage." + key: value for key, value in usage.model_dump().items() if value is not None
         }, **{"llm.response.finish_reason": message.finish_reason, "llm.response.attempt": self.attempt})
-        self.monitoring.set_openinference_output("".join(
+        output = message.model_dump(mode="json") if self.request.purpose == "native_agent" else "".join(
             part.get("text", "") for part in message.content_parts if part.get("type") == "text"
-        ))
+        )
+        self.monitoring.set_openinference_output(output)
 
     def failure(self, error):
         if self.scope.cancelled:
@@ -348,6 +349,16 @@ class ModelService:
             **{
                 "input.value": [message.model_dump(mode="json") for message in call.request.messages],
                 "model.request_id": call.request.request_id,
+                "model.request_purpose": call.request.purpose,
+                "llm.invocation_parameters": json.dumps({
+                    key: value for key, value in call.profile.parameter_values.items()
+                    if key in {"temperature", "top_p", "max_tokens", "max_output_tokens",
+                               "reasoning_effort", "enable_thinking", "reasoning_budget_tokens"}
+                }),
+                **{f"llm.tools.{index}.tool.json_schema": json.dumps({
+                    "type": "function", "function": {"name": tool.name, "description": tool.description,
+                    "parameters": tool.input_schema},
+                }) for index, tool in enumerate(call.request.tools)},
                 **({"model.outlet_id": call.profile.outlet_id} if call.profile.outlet_id is not None else {}),
                 "model.config_revision": call.profile.config_revision,
                 "model.provider": call.profile.identity.provider_id,

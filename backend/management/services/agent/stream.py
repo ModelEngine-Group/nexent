@@ -175,7 +175,7 @@ def resolve_answer_completion(
             if (
                 unit.get("invocation_id") == invocation
                 and unit.get("_step_id") == event["step_id"]
-                and unit["type"] in {"model_output_thinking", "model_output_code"}
+                and unit["type"] in {"model_output", "model_output_thinking", "model_output_code"}
             )
         ]
         if original and not event.get("content"):
@@ -206,7 +206,7 @@ def resolve_answer_completion(
             if not (
                 unit.get("invocation_id") == invocation
                 and unit.get("_step_id") == event["step_id"]
-                and unit["type"] in {"model_output_thinking", "model_output_code"}
+                and unit["type"] in {"model_output", "model_output_thinking", "model_output_code"}
             )
         ]
     if event.get("answer_phase") == "complete" and event.get("content"):

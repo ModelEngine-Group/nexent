@@ -177,7 +177,9 @@ class OpenAIChatAdapter:
                 ]
             if message.reasoning_parts:
                 if (
-                    not self._reasoning_replay
+                    not (self._reasoning_replay or (
+                        request.purpose == "native_agent" and profile.capabilities.reasoning.status == "supported"
+                    ))
                     or role != "assistant"
                     or any(
                         part.get("type") != "text" or not isinstance(part.get("text"), str)

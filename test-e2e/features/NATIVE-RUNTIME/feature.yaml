@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "NATIVE-RUNTIME",
+    "name": "Experimental native runtime"
+  },
+  "feature": {
+    "feature_id": "NATIVE-RUNTIME",
+    "name": "Selectable hybrid native tool-calling runtime",
+    "status": "active",
+    "description": "Capability-aware native runtime over the develop model service; CodeAgent is default and capability fallback.",
+    "business_rules": [
+      {
+        "rule_id": "NATIVE-RUNTIME-RULE-001",
+        "description": "Only authorized tools execute through structured native calls and optional restricted code_execution, with valid correlated history and unchanged persisted definitions."
+      },
+      {
+        "rule_id": "NATIVE-RUNTIME-RULE-002",
+        "description": "Default CodeAgent and rollback remain functional; runtime selection rejects invalid configuration."
+      }
+    ],
+    "required_test_stages": [
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ],
+    "source": {
+      "notes": "PR4315; migration from standalone v2.8.4 experiment PR4310. Historical results do not establish develop acceptance."
+    }
+  }
+}

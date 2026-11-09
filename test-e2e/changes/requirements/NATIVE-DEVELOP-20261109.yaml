@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "NATIVE-DEVELOP-20261109",
+    "change_type": "requirement",
+    "requirement_id": "NATIVE-RUNTIME-REQ-001",
+    "title": "Capability-aware native runtime on develop",
+    "description": "Use resolved model service, preserve mixed text/tool execution and validate completion reasons.",
+    "affected_features": {
+      "existing": [],
+      "added": [
+        "NATIVE-RUNTIME"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [],
+      "added": [
+        "AGENT-NATIVE-D2-001",
+        "AGENT-NATIVE-D3-001",
+        "AGENT-NATIVE-D4-001",
+        "AGENT-NATIVE-D5-001",
+        "AGENT-NATIVE-D3-002"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "add",
+      "test_selectors": [
+        "test/sdk/core/agents/test_native_completion.py",
+        "test/sdk/core/agents/test_native_runtime.py",
+        "test/sdk/core/model_service/test_native_service_model.py",
+        "test/sdk/core/model_service/test_openai_chat_adapter.py",
+        "test/sdk/core/agents/test_run_agent.py",
+        "test/sdk/core/agents/test_nexent_agent.py",
+        "test/sdk/core/agents/test_native_runtime_harness.py",
+        "test/sdk/core/agents/test_native_public_text.py",
+        "test/sdk/core/model_service/test_native_stream_compatibility.py",
+        "test/sdk/core/model_service/test_native_service_observability.py",
+        "test/backend/contracts/test_agent_runtime_config.py",
+        "test/backend/utils/test_final_answer_projection.py"
+      ],
+      "behaviors": [
+        "Capability selection per actual parent/child model; model service profile-controlled generation; validated native generation completion and side-effect prevention."
+      ],
+      "reason": "Add native runtime proof, reuse current CodeAgent and model-service tests. Formal API/runtime proofs remain distinct. No duplicate D1."
+    },
+    "notes": "Host verification; VM remains stopped. Old branch is standalone. User approved content-only + stop or standalone final_answer; text accompanying tool calls remains intermediate."
+  }
+}

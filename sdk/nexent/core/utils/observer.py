@@ -39,6 +39,7 @@ _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
 
 
 class ProcessType(Enum):
+    MODEL_OUTPUT = "model_output"  # public assistant text, independent of run completion
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
@@ -272,6 +273,7 @@ class MessageObserver:
         default_transformer = DefaultTransformer()
 
         self.transformers = {
+            ProcessType.MODEL_OUTPUT: default_transformer,
             ProcessType.AGENT_NEW_RUN: default_transformer,
             ProcessType.STEP_COUNT: StepCountTransformer(),
             ProcessType.PARSE: ParseTransformer(),
@@ -346,7 +348,7 @@ class MessageObserver:
             agent_id if explicit_agent_id else (agent_id or active_agent_id)
         )
         resolved_depth = depth if depth is not None else self._current_depth.get()
-        if process_type in {ProcessType.MODEL_OUTPUT_THINKING, ProcessType.MODEL_OUTPUT_CODE}:
+        if process_type in {ProcessType.MODEL_OUTPUT, ProcessType.MODEL_OUTPUT_THINKING, ProcessType.MODEL_OUTPUT_CODE}:
             state = self._step_output()
             state.setdefault("body", []).append(str(content))
         metadata = dict(metadata or {})
@@ -367,6 +369,7 @@ class MessageObserver:
                 attempt_id=(
                     self._model_attempt_id.get()
                     if process_type in {
+                        ProcessType.MODEL_OUTPUT,
                         ProcessType.MODEL_OUTPUT_THINKING,
                         ProcessType.MODEL_OUTPUT_DEEP_THINKING,
                         ProcessType.MODEL_OUTPUT_CODE,
@@ -415,6 +418,11 @@ class MessageObserver:
             metadata={"phase": "commit", "attempt_id": attempt_id, "attempt": attempt},
         )
         self._model_attempt_id.set(None)
+
+    def add_assistant_text_delta(self, text: str) -> None:
+        """Stream public native content without interpreting legacy control tags."""
+        if text:
+            self._emit(ProcessType.MODEL_OUTPUT, text)
 
     def add_model_new_token(self, new_token):
         """Stream safe text immediately while retaining only incomplete protocol tags."""

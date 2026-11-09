@@ -95,6 +95,10 @@ export interface ConversationListPage {
 }
 
 export interface ApiMessageItem {
+  step_id?: string;
+  attempt_id?: string;
+  answer_phase?: "delta" | "complete";
+  reclassify_step?: boolean;
   type: string;
   content: string;
   unit_index?: number;

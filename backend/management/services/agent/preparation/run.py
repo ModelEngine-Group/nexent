@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
+    NEXENT_AGENT_RUNTIME,
     AGENT_WORKSPACE_ROOT,
     MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
@@ -412,6 +413,7 @@ async def create_agent_run_info(
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
     agent_run_info = build_run_info(
+        agent_runtime=NEXENT_AGENT_RUNTIME,
         query=final_query,
         model_config_list=model_list,
         language=language,
