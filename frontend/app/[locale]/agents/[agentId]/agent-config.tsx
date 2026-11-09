@@ -11,13 +11,13 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "next/navigation";
-import { App, Alert, Button, ConfigProvider, Form } from "antd";
+import { App, Alert, Button, ConfigProvider, Form, Card } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { StandardCard } from "@/components/common/StandardCard";
+
 import { useAgentStore } from "@/stores/agentStore";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
@@ -170,7 +170,8 @@ function ConfigSection({
     </div>
   );
   return card ? (
-    <StandardCard
+    <Card
+      variant="borderless"
       data-testid={testId}
       className={`${CONFIG_CARD_SURFACE} group/section shrink-0 !rounded-lg !bg-white !px-6 !py-5`}
       styles={{ body: { padding: 0 } }}
@@ -181,7 +182,7 @@ function ConfigSection({
       }
     >
       {section}
-    </StandardCard>
+    </Card>
   ) : (
     section
   );
@@ -501,7 +502,6 @@ export default function AgentConfig({
             '"Huawei Sans", "HarmonyOS Sans SC", system-ui, sans-serif',
           fontSize: 14,
           lineHeight: 22 / 14,
-          colorPrimary: "#2673E5",
           colorText: "#191919",
           colorTextPlaceholder: "#AEAEAE",
           colorBorder: "#C9C9C9",
@@ -642,7 +642,8 @@ export default function AgentConfig({
                 <AgentPrmopt highFidelity onOptimizePrompt={onOptimizePrompt} />
               </ConfigSection>
             </div>
-            <StandardCard
+            <Card
+              variant="borderless"
               data-agent-guide="resources"
               data-testid="agent-config-card-resources"
               className={`${CONFIG_CARD_SURFACE} shrink-0 !rounded-lg !bg-white !p-0`}
@@ -738,7 +739,7 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-            </StandardCard>
+            </Card>
             <ConfigSection
               testId="agent-config-card-welcome"
               title={t("agent.highFidelity.guideTitle")}

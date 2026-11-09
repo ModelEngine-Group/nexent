@@ -3,11 +3,11 @@
 "use client";
 
 import { useState } from "react";
-import { Alert, Empty, Select, Spin } from "antd";
+import { Alert, Empty, Select, Spin, Button } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import TagDefinitionManagementPanel from "@/components/tag/TagDefinitionManagementPanel";
 import { USER_ROLES } from "@/const/auth";
 import { tagManagementApi } from "@/services/tagManagementService";
@@ -79,9 +79,7 @@ function TenantTagList({
         showIcon
         title={error.message}
         action={
-          <StandardButton onClick={() => void refetch()}>
-            {t("common.retry")}
-          </StandardButton>
+          <Button onClick={() => void refetch()}>{t("common.retry")}</Button>
         }
       />
     );

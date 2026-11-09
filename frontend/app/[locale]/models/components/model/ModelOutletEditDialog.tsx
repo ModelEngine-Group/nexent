@@ -3,10 +3,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Modal, Spin } from "antd";
+import { Alert, Button, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { StandardButton } from "@/components/common/StandardButton";
 import { getModelOutlet } from "@/services/modelProfileService";
 import { ModelOutletAddForm } from "./ModelOutletAddForm";
 
@@ -71,9 +70,9 @@ export function ModelOutletEditDialog({
           type="error"
           title={t("modelProfile.loadFailed")}
           action={
-            <StandardButton onClick={() => void outlet.refetch()}>
+            <Button onClick={() => void outlet.refetch()}>
               {t("common.retry")}
-            </StandardButton>
+            </Button>
           }
         />
       ) : (

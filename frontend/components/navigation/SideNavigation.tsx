@@ -180,7 +180,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
 ];
 
 const RAIL_ITEM_CLASS =
-  "group flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)]";
+  "group flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-none border-0 bg-transparent p-0 pr-2 text-left text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)]";
 const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
 const SELECTED_ITEM_CLASS = "!bg-[var(--navigation-selected)]";
 const ROUTE_PREFETCH_DELAY_MS = 50;
@@ -451,7 +451,7 @@ export function SideNavigation({
         <Link
           href="/"
           aria-label={t("sidebar.homePage")}
-          className={`flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] ${expanded ? "pr-2" : ""}`}
+          className={`flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-none ${expanded ? "pr-2" : ""}`}
         >
           <span
             className={

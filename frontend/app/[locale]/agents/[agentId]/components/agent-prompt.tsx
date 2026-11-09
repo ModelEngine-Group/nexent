@@ -3,11 +3,13 @@
 "use client";
 
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
+import { AgentFieldError } from "./agent-field-error";
 import { useTranslation } from "react-i18next";
 import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
 import {
   GripVertical,
   ListOrdered,
+  LockKeyhole,
   Maximize2,
   Settings2,
   Sparkles,
@@ -219,14 +221,14 @@ function SelectedModelCard({
           </span>
         </Tooltip>
         {contextSize ? (
-          <span className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
+          <span className="shrink-0 rounded-[var(--radius-control)] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
             {contextLabel?.replace("{{count}}", contextSize) ?? contextSize}
           </span>
         ) : null}
         {capabilities.map((capability) => (
           <span
             key={capability}
-            className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
+            className="shrink-0 rounded-[var(--radius-control)] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
           >
             {capability}
           </span>
@@ -377,6 +379,9 @@ export default function AgentPrompt({
   const { isSpeedMode } = useDeployment();
   const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
+  const promptsHidden = useAgentStore((state) => state.promptsHidden);
+  const isPromptEmpty =
+    !promptsHidden && !isReadOnly && !editedAgent.prompt?.trim();
   const updateDraft = useAgentStore((state) => state.updateDraft);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const reconcileUnavailableModels = useAgentStore(
@@ -847,7 +852,28 @@ export default function AgentPrompt({
     </Row>
   );
 
-  const promptEditor = (
+  const confidentialPrompt = (
+    <div
+      role="note"
+      className="flex min-h-[160px] items-center justify-center gap-2 rounded border border-border bg-muted p-4 text-sm text-muted-foreground"
+    >
+      <LockKeyhole size={16} aria-hidden="true" className="shrink-0" />
+      <span>{t("agent.promptVisibility.explanation")}</span>
+    </div>
+  );
+
+  const promptEditor = promptsHidden ? (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-sm">
+        <span>{t("agent.highFidelity.prompt")}</span>
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <LockKeyhole size={12} aria-hidden="true" />
+          {t("agent.promptVisibility.hidden")}
+        </span>
+      </div>
+      {confidentialPrompt}
+    </div>
+  ) : (
     <div>
       <Form.Item className="mb-0">
         <div className="relative">
@@ -925,40 +951,75 @@ export default function AgentPrompt({
             />
           </Form.Item>
           <div className="-mb-2 flex items-center justify-between gap-2 text-sm leading-[22px] tracking-[0px]">
-            <label htmlFor="agent-primary-prompt" className="text-[#191919]">
-              <span className="mr-1 text-[#f5222d]">*</span>
-              {t("agent.highFidelity.prompt")}
-            </label>
-            <Button
-              type="link"
-              autoInsertSpace={false}
-              className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
-              icon={<Sparkles size={14} />}
-              disabled={isReadOnly || !onOptimizePrompt}
-              onClick={onOptimizePrompt}
+            <label
+              htmlFor={promptsHidden ? undefined : "agent-primary-prompt"}
+              className="text-[#191919]"
             >
-              {t("agent.highFidelity.optimizePrompt")}
-            </Button>
+              {!promptsHidden && <span className="mr-1 text-[#f5222d]">*</span>}
+              {t("agent.highFidelity.prompt")}
+              {promptsHidden && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <LockKeyhole size={12} aria-hidden="true" />
+                  {t("agent.promptVisibility.hidden")}
+                </span>
+              )}
+            </label>
+            {!promptsHidden && (
+              <Button
+                type="link"
+                autoInsertSpace={false}
+                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+                icon={<Sparkles size={14} />}
+                disabled={isReadOnly || !onOptimizePrompt}
+                onClick={onOptimizePrompt}
+              >
+                {t("agent.highFidelity.optimizePrompt")}
+              </Button>
+            )}
           </div>
-          <div className="relative">
-            <HighFidelityTextArea
-              limit={100000}
-              id="agent-primary-prompt"
-              value={editedAgent.prompt ?? ""}
-              placeholder={t("agent.highFidelity.promptPlaceholder")}
-              disabled={isReadOnly}
-              classNames={{
-                textarea:
-                  "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
-                count:
-                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-              }}
-              onChange={(event) => updateDraft({ prompt: event.target.value })}
-            />
-            <div className="absolute right-1 top-2 z-10">
-              {renderExpandButton("prompt")}
-            </div>
-          </div>
+          <Form.Item
+            className="!mb-0"
+            validateStatus={isPromptEmpty ? "error" : undefined}
+            help={
+              isPromptEmpty ? (
+                <AgentFieldError
+                  id="agent-prompt-error"
+                  message={t("agent.validation.promptRequired")}
+                />
+              ) : undefined
+            }
+          >
+            {promptsHidden ? (
+              confidentialPrompt
+            ) : (
+              <div className="relative">
+                <HighFidelityTextArea
+                  limit={100000}
+                  id="agent-primary-prompt"
+                  aria-required="true"
+                  aria-invalid={isPromptEmpty}
+                  aria-describedby={
+                    isPromptEmpty ? "agent-prompt-error" : undefined
+                  }
+                  value={editedAgent.prompt ?? ""}
+                  placeholder={t("agent.highFidelity.promptPlaceholder")}
+                  disabled={isReadOnly}
+                  classNames={{
+                    textarea:
+                      "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
+                    count:
+                      "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
+                  }}
+                  onChange={(event) =>
+                    updateDraft({ prompt: event.target.value })
+                  }
+                />
+                <div className="absolute right-1 top-2 z-10">
+                  {renderExpandButton("prompt")}
+                </div>
+              </div>
+            )}
+          </Form.Item>
           <ModelDrawer
             open={isModelSelectionOpen}
             onClose={() => setIsModelSelectionOpen(false)}
@@ -979,7 +1040,8 @@ export default function AgentPrompt({
         </>
       )}
 
-      {expandedPrompt &&
+      {!promptsHidden &&
+        expandedPrompt &&
         (highFidelity && expandedPrompt === "prompt" ? (
           <HighFidelityPromptEditModal
             key={`${agentId}-${expandedPrompt}`}

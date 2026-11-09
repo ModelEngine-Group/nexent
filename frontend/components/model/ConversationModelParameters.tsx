@@ -8,7 +8,7 @@ import {
 } from "@/lib/modelParameterLayers";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Form, Spin } from "antd";
+import { Alert, App, Form, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   ModelParameterPopover,
@@ -22,7 +22,7 @@ import {
   thinkingDegreePrefill,
 } from "./ModelThinkingSettings";
 import { ModelThinkingToggle } from "@/components/chat/ModelThinkingToggle";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import {
   getModelOutlet,
   getConversationModelPreferences,
@@ -462,9 +462,7 @@ function PreferenceEditor({
             type="error"
             title={key}
             action={
-              <StandardButton onClick={() => update(key)}>
-                {t("common.delete")}
-              </StandardButton>
+              <Button onClick={() => update(key)}>{t("common.delete")}</Button>
             }
           />
         ))}

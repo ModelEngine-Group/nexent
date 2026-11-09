@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { BRAND } from "@/const/brand";
 import type { ThemeConfig } from "antd";
 
 /** Text tokens shared by the AIDP list and creation pages. */
@@ -14,8 +17,8 @@ export const aidpKnowledgeTypographyTheme: ThemeConfig = {
 export const aidpKnowledgeVisualTheme: ThemeConfig = {
   token: {
     ...aidpKnowledgeTypographyTheme.token,
-    colorPrimary: "#0067d1",
-    colorBorder: "#c9c9c9",
+    colorPrimary: BRAND.primary,
+    colorBorder: BRAND.border,
     borderRadius: 4,
     controlHeight: 32,
   },
@@ -23,14 +26,14 @@ export const aidpKnowledgeVisualTheme: ThemeConfig = {
     Segmented: {
       trackBg: "rgba(25, 25, 25, 0.05)",
       trackPadding: 2,
-      itemSelectedBg: "#0067d1",
+      itemSelectedBg: BRAND.primary,
       itemSelectedColor: "#ffffff",
       itemColor: "#777777",
     },
     Pagination: {
       itemSize: 32,
-      itemActiveBg: "#e6f2fd",
-      itemActiveColor: "#0067d1",
+      itemActiveBg: BRAND.selection,
+      itemActiveColor: BRAND.primary,
     },
     Table: {
       headerBg: "#f3f3f3",

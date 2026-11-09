@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Form, Modal, Spin } from "antd";
+import { Alert, Form, Modal, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import { getModelOutlet } from "@/services/modelProfileService";
 import {
@@ -21,7 +21,7 @@ import type {
   ModelOutletResponse,
   ThinkingDegreeMode,
 } from "@/types/modelProfile";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import { ModelParameterField } from "./ModelParameterField";
 
 interface Props {
@@ -178,18 +178,18 @@ function Editor({
       )}
       {!disabled &&
         thinkingKeys.some((key) => Object.hasOwn(parameters, key)) && (
-          <StandardButton
+          <Button
             onClick={() => {
               setThinkingMode(undefined);
               change({}, thinkingKeys);
             }}
           >
             {t("modelProfile.useOutletDefault")}
-          </StandardButton>
+          </Button>
         )}
-      <StandardButton variant="primary" htmlType="submit" disabled={disabled}>
+      <Button type="primary" htmlType="submit" disabled={disabled}>
         {t("common.confirm")}
-      </StandardButton>
+      </Button>
     </Form>
   );
 }

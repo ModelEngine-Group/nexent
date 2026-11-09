@@ -14,6 +14,8 @@ import {
   Col,
   Tabs,
   Tooltip,
+  Input,
+  Button,
 } from "antd";
 import { CircleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -25,8 +27,7 @@ import { API_ENDPOINTS, ApiError } from "@/services/api";
 import { publicAsset } from "@/lib/publicAsset";
 import { getHomeLogo } from "@/lib/projectBranding";
 import logger from "@/lib/logger";
-import { StandardInput as Input } from "@/components/common/StandardInput";
-import { StandardButton as Button } from "@/components/common/StandardButton";
+
 import { PlatformQuotaPanel } from "./PlatformQuotaPanel";
 
 interface ProjectConfigTabProps {
@@ -403,7 +404,7 @@ export default function ProjectConfigTab({
           </div>
         </Form.Item>
         <Form.Item>
-          <Button variant="primary" htmlType="submit" loading={loading}>
+          <Button type="primary" htmlType="submit" loading={loading}>
             {t("common.save")}
           </Button>
         </Form.Item>
