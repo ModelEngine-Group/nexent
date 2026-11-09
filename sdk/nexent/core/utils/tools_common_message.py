@@ -27,6 +27,7 @@ class ToolSign(Enum):
     MULTIMODAL_OPERATION = "m"  # Multimodal operation tool identifier
     PLAN_OPERATION = "p"       # Plan / step-state tool identifier (v1.4)
     DATABASE_OPERATION = "z"  # Database operation tool identifier
+    MCP_SEARCH = "q"  # MCP retrieval tool identifier (e.g. data-platform RAG via MCP)
 
 
 # Tool sign mapping for backward compatibility

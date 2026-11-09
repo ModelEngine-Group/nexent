@@ -1,0 +1,221 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Citation annotation wrapper for MCP retrieval tools.
+
+MCP tools (e.g. data-platform RAG search) return plain JSON text without the
+citation metadata Nexent uses for reference marks. This module detects
+retrieval-shaped JSON results returned by an MCP tool, assigns citation
+indexes, reports them through the observer search-content channel and
+rewrites the model-facing payload with reference marks, so citation
+rendering works exactly like built-in search tools without any backend or
+frontend change.
+"""
+
+import functools
+import inspect
+import json
+import logging
+from typing import Any, Dict, List, Optional, Sequence
+
+from ..utils.observer import MessageObserver, ProcessType
+from ..utils.tools_common_message import SearchResultTextMessage, ToolSign
+
+logger = logging.getLogger(__name__)
+
+# Field candidates commonly used by retrieval/RAG MCP tools.
+_TEXT_FIELDS = ("text", "content", "chunk_content", "chunk", "snippet", "segment", "passage", "page_content")
+_TITLE_FIELDS = ("title", "name", "doc_title", "document_name", "document_title")
+_URL_FIELDS = ("url", "link", "source_url", "uri", "web_url")
+_FILENAME_FIELDS = ("filename", "file_name", "doc_name")
+_DATE_FIELDS = ("published_date", "publish_date", "date", "created_at", "create_time")
+_SCORE_FIELDS = ("score", "similarity", "relevance", "similarity_score")
+# Keys under which a retrieval list is typically nested in a JSON object.
+_LIST_KEYS = ("results", "data", "items", "chunks", "documents", "records", "list")
+# Identity fields proving an entry is a document rather than arbitrary text.
+_IDENTITY_FIELDS = _TITLE_FIELDS + _URL_FIELDS + _FILENAME_FIELDS + ("source", "source_name")
+# Minimum characters a text-like field must contain to count as a chunk.
+_MIN_TEXT_LENGTH = 10
+# Minimum share of items that must carry an identity field.
+_IDENTITY_RATIO = 0.5
+
+
+def _first_str(source: Dict[str, Any], fields: Sequence[str]) -> Optional[str]:
+    """Return the first non-empty string value among the candidate fields."""
+    for field in fields:
+        value = source.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _has_value(source: Dict[str, Any], field: str) -> bool:
+    """Check whether a field carries a meaningful (non-empty) value."""
+    value = source.get(field)
+    if value is None:
+        return False
+    return not isinstance(value, str) or bool(value.strip())
+
+
+def _extract_result_items(payload: Any) -> Optional[List[Any]]:
+    """Extract the candidate result list from a parsed JSON payload."""
+    if isinstance(payload, list):
+        return payload if payload else None
+    if isinstance(payload, dict):
+        for key in _LIST_KEYS:
+            value = payload.get(key)
+            if isinstance(value, list) and value:
+                return value
+        if _first_str(payload, _TEXT_FIELDS) is not None:
+            return [payload]
+    return None
+
+
+def _looks_like_retrieval_result(items: List[Any]) -> bool:
+    """Heuristically decide whether the items represent retrieval results.
+
+    Every item must be a mapping with a text-like field long enough to be a
+    chunk, and at least half of the items must carry an identity field
+    (title/url/filename/source-like) so that unrelated JSON tool outputs
+    (e.g. installed-tool listings) are not misdetected.
+    """
+    if not items:
+        return False
+    identity_count = 0
+    for item in items:
+        if not isinstance(item, dict):
+            return False
+        text = _first_str(item, _TEXT_FIELDS)
+        if text is None or len(text.strip()) < _MIN_TEXT_LENGTH:
+            return False
+        if any(_has_value(item, field) for field in _IDENTITY_FIELDS):
+            identity_count += 1
+    return identity_count >= len(items) * _IDENTITY_RATIO
+
+
+def _pick_str(item: Dict[str, Any], metadata: Dict[str, Any], fields: Sequence[str]) -> str:
+    """Pick the first non-empty string field from the item, then metadata."""
+    for source in (item, metadata):
+        value = _first_str(source, fields)
+        if value is not None:
+            return value
+    return ""
+
+
+def _pick_score(item: Dict[str, Any], metadata: Dict[str, Any]) -> str:
+    """Pick a numeric or textual score from the item, then metadata."""
+    for source in (item, metadata):
+        for field in _SCORE_FIELDS:
+            value = source.get(field)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                return str(value)
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
+
+
+def _build_search_result_message(
+    item: Dict[str, Any],
+    cite_index: int,
+    search_type: str,
+    tool_sign: str,
+) -> SearchResultTextMessage:
+    """Map a raw retrieval item onto the unified search result message."""
+    raw_metadata = item.get("metadata")
+    if not isinstance(raw_metadata, dict):
+        raw_metadata = item.get("meta")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+
+    text = _pick_str(item, metadata, _TEXT_FIELDS)
+    title = _pick_str(item, metadata, _TITLE_FIELDS)
+    url = _pick_str(item, metadata, _URL_FIELDS)
+    filename = _pick_str(item, metadata, _FILENAME_FIELDS)
+    published_date = _pick_str(item, metadata, _DATE_FIELDS)
+    score = _pick_score(item, metadata)
+
+    return SearchResultTextMessage(
+        title=title,
+        url=url,
+        text=text,
+        published_date=published_date or None,
+        source_type="url" if url else "file",
+        filename=filename or None,
+        score=score or None,
+        score_details=metadata if metadata else None,
+        cite_index=cite_index,
+        search_type=search_type,
+        tool_sign=tool_sign,
+    )
+
+
+def annotate_mcp_search_results(
+    result_text: Any,
+    observer: Optional[MessageObserver],
+    tool_name: str = "",
+) -> Optional[str]:
+    """Annotate a retrieval-shaped JSON result with citation metadata.
+
+    Returns the rewritten model-facing JSON string, or ``None`` when the
+    result does not look like a retrieval result (callers keep the original
+    output unchanged in that case).
+    """
+    if observer is None or not isinstance(result_text, str) or not result_text.strip():
+        return None
+    try:
+        payload = json.loads(result_text)
+    except (TypeError, ValueError):
+        return None
+
+    items = _extract_result_items(payload)
+    if items is None or not _looks_like_retrieval_result(items):
+        return None
+
+    tool_sign = ToolSign.MCP_SEARCH.value
+    start_index = observer.reserve_citations(tool_sign, len(items))
+    messages = [
+        _build_search_result_message(item, start_index + offset, tool_name, tool_sign)
+        for offset, item in enumerate(items)
+    ]
+    observer.add_message(
+        "",
+        ProcessType.SEARCH_CONTENT,
+        json.dumps([message.to_dict() for message in messages], ensure_ascii=False),
+    )
+    return json.dumps([message.to_model_dict() for message in messages], ensure_ascii=False)
+
+
+def wrap_mcp_tool_with_citation(tool: Any, observer: Optional[MessageObserver]) -> Any:
+    """Wrap an MCP tool forward so retrieval results carry citation marks.
+
+    Non-retrieval outputs pass through unchanged; annotation failures never
+    break the underlying tool call.
+    """
+    if observer is None or getattr(tool, "_nexent_mcp_citation_wrapped", False):
+        return tool
+
+    original_forward = tool.forward
+    tool_name = getattr(tool, "name", "") or ""
+
+    def _annotate(result: Any) -> Any:
+        try:
+            annotated = annotate_mcp_search_results(result, observer, tool_name)
+        except Exception:
+            logger.exception("Failed to annotate MCP search results for tool %s", tool_name)
+            return result
+        return annotated if annotated is not None else result
+
+    if inspect.iscoroutinefunction(original_forward):
+        @functools.wraps(original_forward)
+        async def forward(*args, **kwargs):
+            return _annotate(await original_forward(*args, **kwargs))
+    else:
+        @functools.wraps(original_forward)
+        def forward(*args, **kwargs):
+            return _annotate(original_forward(*args, **kwargs))
+
+    tool.forward = forward
+    try:
+        setattr(tool, "_nexent_mcp_citation_wrapped", True)
+    except (AttributeError, TypeError):
+        pass
+    return tool
