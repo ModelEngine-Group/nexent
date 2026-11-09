@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "NATIVE-REASONING-20261109",
+    "change_type": "bugfix",
+    "bug_id": "NATIVE-REASONING-20261109",
+    "title": "Forward native provider reasoning and preserve response diagnostics",
+    "description": "Repair provider reasoning display and adjacent adapter bookkeeping; explain genuine output-budget truncation.",
+    "observed_behavior": "Native reasoning appears in Phoenix but not chat; response cache/retry diagnostics omitted; length error lacks budget/usage context.",
+    "expected_behavior": "Typed reasoning remains separate from public/final text; standard diagnostics are preserved; truncated generations fail with actionable budget evidence.",
+    "escaped_stage": "D3",
+    "coverage_gap": {
+      "type": "missing_assertion",
+      "description": "Existing controlled mixed-stream case asserted absence of all deep thinking without providing reasoning; add explicit typed provider reasoning input and separation assertions. Original D2 has no typed reasoning assertion and its old test outlets were removed; the new API case uses current read-only operator resources."
+    },
+    "feature_contract_changed": false,
+    "affected_features": {
+      "existing": [
+        "NATIVE-RUNTIME"
+      ],
+      "added": [],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "AGENT-NATIVE-D4-001",
+        "AGENT-NATIVE-D5-001"
+      ],
+      "modified": [
+        "AGENT-NATIVE-D3-002"
+      ],
+      "added": [
+        "AGENT-NATIVE-D2-002"
+      ],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "test_selectors": [
+        "test/sdk/core/agents/test_native_completion.py",
+        "test/sdk/core/agents/test_native_public_text.py",
+        "test/sdk/core/model_service/test_native_service_model.py",
+        "test/sdk/core/model_service/test_native_service_streaming.py"
+      ],
+      "behaviors": [
+        "Typed provider reasoning display, final/public separation, attempt rollback, usage/limit diagnostics."
+      ],
+      "reason": "Existing unit suites own adapters and completion policy; no duplicate D1. Strengthen actual HTTP/SSE case and retain real-model/browser/deployed proof."
+    },
+    "notes": "Existing experimental feature follow-up. Phoenix default routing retained. No silent budget increases or accepting length as final. No credentials/reasoning bodies in retained evidence."
+  }
+}

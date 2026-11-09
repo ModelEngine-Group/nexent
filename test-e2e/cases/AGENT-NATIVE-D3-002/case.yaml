@@ -33,8 +33,8 @@
     "steps": [
       {
         "order": 1,
-        "action": "Start a case-owned loopback streaming provider; run mixed text/tool then text-only stop through the actual model adapter and agent loop.",
-        "expected": "Actual tool executes once, continuation contains correlated result, final answer is accepted."
+        "action": "Start a case-owned loopback streaming provider; run mixed text/tool then text-only stop through the actual model adapter and agent loop. Include distinct provider reasoning deltas alongside public text.",
+        "expected": "Actual tool executes once, continuation contains correlated result, final answer is accepted. Reasoning is streamed with its own event type and never substitutes for public/final text."
       },
       {
         "order": 2,
@@ -53,7 +53,7 @@
       }
     ],
     "expected_results": [
-      "Mixed response content remains in native history; actual tool result is returned and normal stop completes.",
+      "Mixed response content remains in native history; actual tool result is returned and normal stop completes. Provider reasoning remains distinct from public text and final output.",
       "Incomplete or inconsistent tool generations never execute tools.",
       "Incomplete or refused text generations never complete successfully.",
       "Owned network and model resources are released."

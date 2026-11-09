@@ -166,3 +166,105 @@ it("restores separate persisted native messages around tools without merging the
   expect(parts.indexOf(text[0])).toBeLessThan(tool);
   expect(parts.indexOf(text[1])).toBeGreaterThan(tool);
 });
+
+it.each([true, false])(
+  "keeps native provider reasoning separate from the final answer (%s)",
+  async (tail) => {
+    const parts = await run(
+      [
+        {
+          type: "model_attempt_control",
+          content: "",
+          phase: "begin",
+          attempt_id: "native",
+          step_id: "1",
+        },
+        {
+          type: "model_output_deep_thinking",
+          content: "Provider reasoning",
+          attempt_id: "native",
+          step_id: "1",
+        },
+        {
+          type: "model_output",
+          content: "Actual answer",
+          attempt_id: "native",
+          step_id: "1",
+        },
+        {
+          type: "model_attempt_control",
+          content: "",
+          phase: "commit",
+          attempt_id: "native",
+          step_id: "1",
+        },
+        {
+          type: "final_answer",
+          content: "",
+          answer_phase: "complete",
+          reclassify_step: true,
+          step_id: "1",
+        },
+      ],
+      tail
+    );
+    const reasoning = parts.filter((part) => part.type === "reasoning");
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0].text).toContain("Provider reasoning");
+    expect(reasoning[0].status.type).toBe("done");
+    expect(
+      parts.filter((part) => part.type === "text").map((part) => part.text)
+    ).toEqual(["Actual answer"]);
+  }
+);
+
+it("restores native reasoning separately from persisted final text", async () => {
+  const detail = {
+    conversation_id: "42",
+    create_time: 0,
+    message: [
+      {
+        role: "assistant",
+        message_id: 8,
+        message: [
+          {
+            type: "model_output_deep_thinking",
+            content: "Saved provider reasoning",
+            unit_index: 0,
+            step_id: "1",
+          },
+          {
+            type: "model_output",
+            content: "Saved answer",
+            unit_index: 1,
+            step_id: "1",
+          },
+          {
+            type: "final_answer",
+            content: "",
+            unit_index: 2,
+            step_id: "1",
+            answer_phase: "complete",
+            reclassify_step: true,
+          },
+        ],
+      },
+    ],
+  } as unknown as ApiConversationDetail;
+  const adapter = new RemoteConversationHistoryAdapter(
+    () => "42",
+    async () => ({ remoteId: "42", externalId: "42" }),
+    async () => detail
+  );
+  const result = await adapter.load();
+  const parts = result.messages[0].message.content as any[];
+  expect(
+    parts
+      .filter((part) => part.type === "reasoning")
+      .map((part) => part.text)
+      .join("")
+  ).toContain("Saved provider reasoning");
+  expect(
+    parts.filter((part) => part.type === "text").map((part) => part.text)
+  ).toEqual(["Saved answer"]);
+});
