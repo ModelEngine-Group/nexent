@@ -18,7 +18,7 @@ from local_auth_http import native_runtime, runtime, register, bearer  # noqa: F
 
 def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from sqlalchemy import select, func
-    from management.db.client import get_db_session
+    from infrastructure.database.client import get_db_session
     from management.db.identity.token import create_token
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
@@ -183,7 +183,7 @@ def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
         ).status_code
         == 401
     )
-    from management.db.client import get_db_session
+    from infrastructure.database.client import get_db_session
 
     with get_db_session() as session:
         session.execute(
@@ -206,7 +206,7 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
     client, auth, helpers, models = runtime
     data = register(client)
     user_id = data["user"]["id"]
-    from management.db.client import get_db_session
+    from infrastructure.database.client import get_db_session
 
     with get_db_session() as session:
         session.add(
@@ -242,7 +242,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
     from management.cli.account import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
-    from gateway.security.passwords import verify_password
+    from infrastructure.security.passwords import verify_password
     from management.services.permission.identity.cas import (
         CasPrincipal,
         _resolve_project_user,

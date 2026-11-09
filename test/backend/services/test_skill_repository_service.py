@@ -26,7 +26,7 @@ _MOCKED_MODULE_NAMES = [
     "management.db.identity.user_tenant",
     "management.services.skill.service",
     "management.services.notification.service",
-    "management.utils.serialization",
+    "infrastructure.serialization.text",
 ]
 _ORIGINAL_MODULES = {
     name: sys.modules.get(name)
@@ -86,7 +86,7 @@ _group_db_mock = MagicMock()
 _group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
 sys.modules["management.db.identity.group"] = _group_db_mock
 
-_utils_str_utils_mock = types.ModuleType("management.utils.serialization")
+_utils_str_utils_mock = types.ModuleType("infrastructure.serialization.text")
 _utils_str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda value: [
         int(item)
@@ -94,7 +94,7 @@ _utils_str_utils_mock.convert_string_to_list = MagicMock(
         if item.strip().isdigit()
     ]
 )
-sys.modules["management.utils.serialization"] = _utils_str_utils_mock
+sys.modules["infrastructure.serialization.text"] = _utils_str_utils_mock
 
 _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)

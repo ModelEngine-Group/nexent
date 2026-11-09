@@ -11,8 +11,8 @@ from sqlalchemy import exists, func, or_, text
 
 from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.constants.environment import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict
+from infrastructure.database.client import get_db_session
 from management.db.identity.account import set_account_profile
 from management.db.models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant
 from contracts.errors.exceptions import TenantResourceLimitError

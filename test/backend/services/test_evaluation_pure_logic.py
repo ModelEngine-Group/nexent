@@ -344,7 +344,7 @@ def _install_sys_modules_stubs() -> None:
     # database/client imports ``as_dict`` in sibling database tests; expose both
     # names so this test's collection-time graph is self-contained as well.
     _dc_mod = _mk_mod(
-        "management.db.client", get_db_session=MagicMock(), as_dict=MagicMock()
+        "infrastructure.database.client", get_db_session=MagicMock(), as_dict=MagicMock()
     )
     _db_pkg.client = _dc_mod
     _dm_mod = _mk_mod(

@@ -107,14 +107,14 @@ def _install_stubs():
     """Register placeholder modules for every transitive import of the target."""
     _db_pkg = _register_package("database")
 
-    _client = types.ModuleType("management.db.client")
+    _client = types.ModuleType("infrastructure.database.client")
     _client.get_db_session = None  # patched per test
     _db_pkg.client = _client
-    sys.modules["management.db.client"] = _client
+    sys.modules["infrastructure.database.client"] = _client
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
 
     _SchemaCls = _make_orm(
         "EvaluationAnnotationSchema",

@@ -87,16 +87,16 @@ database_oauth_mock.get_oauth_account_by_provider = MagicMock(return_value=None)
 database_oauth_mock.get_soft_deleted_oauth_account = MagicMock(return_value=None)
 sys.modules["management.db.identity.oauth_account"] = database_oauth_mock
 sys.modules["management.db.identity.user_tenant"] = MagicMock()
-sys.modules["management.db.client"] = MagicMock()
+sys.modules["infrastructure.database.client"] = MagicMock()
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules["management.db.models"] = MagicMock()
 sys.modules["backend.database"] = MagicMock()
-sys.modules["management.db.client"] = MagicMock()
+sys.modules["infrastructure.database.client"] = MagicMock()
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules["management.db.models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
@@ -156,9 +156,9 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.MinioClient", return_value=minio_mock).start()
-patch("management.db.client.minio_client", minio_mock).start()
+patch("infrastructure.database.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.database.client.MinioClient", return_value=minio_mock).start()
+patch("infrastructure.database.client.minio_client", minio_mock).start()
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI

@@ -13,7 +13,7 @@ import pytest
 
 from contracts.errors.exceptions import AccountConflictError
 from management.cli import account as cli
-from gateway.security.passwords import verify_password
+from infrastructure.security.passwords import verify_password
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def store(mocker):
     session = MagicMock()
     session.execute.return_value.first.return_value = None
     session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role="SU")]
-    mocker.patch("management.db.client.get_db_session", return_value=nullcontext(session))
+    mocker.patch("infrastructure.database.client.get_db_session", return_value=nullcontext(session))
     lock = mocker.patch("management.db.identity.account.lock_account_keys")
     lookup = mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account", return_value={"user_id": "new-su"})
@@ -103,7 +103,7 @@ def test_container_entry_point_propagates_cli_status(mocker):
 
 def test_cli_module_entry_point_runs_preflight(mocker, capsys):
     mocker.patch("sys.argv", ["account_cli.py", "bootstrap-su", "--check"])
-    mocker.patch("management.db.client.get_db_session", side_effect=RuntimeError("private-dsn"))
+    mocker.patch("infrastructure.database.client.get_db_session", side_effect=RuntimeError("private-dsn"))
     with pytest.raises(SystemExit) as raised:
         runpy.run_module(cli.__name__, run_name="__main__")
     assert raised.value.code == 1

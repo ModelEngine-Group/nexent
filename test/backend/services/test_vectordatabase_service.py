@@ -338,7 +338,7 @@ nexent_multi_modal_module.utils = multi_modal_utils_module
 sys.modules['nexent.multi_modal'] = nexent_multi_modal_module
 sys.modules['nexent.multi_modal.utils'] = multi_modal_utils_module
 
-# Mock psycopg2 before management.db.client is imported
+# Mock psycopg2 before infrastructure.database.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -440,11 +440,11 @@ sys.modules['management.services.file.upload'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
 setattr(sys.modules['backend.utils'], 'file_management_utils', file_management_utils_mock)
 
-str_utils_mock = types.ModuleType('management.utils.serialization')
+str_utils_mock = types.ModuleType('infrastructure.serialization.text')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['management.utils.serialization'] = str_utils_mock
-sys.modules['management.utils.serialization'] = str_utils_mock
+sys.modules['infrastructure.serialization.text'] = str_utils_mock
+sys.modules['infrastructure.serialization.text'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
@@ -485,10 +485,10 @@ backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 # Set backend.utils as attribute so imports like 'from backend.utils.xxx import yyy' work
 setattr(backend_module, 'utils', backend_utils_mock)
-backend_database_client_module = importlib.import_module('management.db.client')
-sys.modules['management.db.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('infrastructure.database.client')
+sys.modules['infrastructure.database.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Storage deletion tests isolate Agent previews and binding persistence.
 # Their actual implementations are covered in focused app/database tests.

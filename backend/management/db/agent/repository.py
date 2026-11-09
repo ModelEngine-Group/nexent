@@ -1,21 +1,21 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from management.utils.orm import as_dict, filter_property
+from infrastructure.database.orm import as_dict, filter_property
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 import logging
 from typing import List, Optional, Sequence, Tuple
 from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
 from sqlalchemy.orm import aliased
 
-from management.db.client import get_db_session
-from management.utils.orm import as_dict, filter_property
+from infrastructure.database.client import get_db_session
+from infrastructure.database.orm import as_dict, filter_property
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
 from management.db.agent.version import query_current_version_no
 from management.db.tool.repository import query_tool_knowledge_references
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import MAX_AGENTS_PER_TENANT
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
-from management.utils.serialization import convert_list_to_string
+from infrastructure.serialization.text import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 

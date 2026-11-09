@@ -5,10 +5,10 @@ Database operations for group management
 
 from typing import Any, Dict, List, Optional, Union
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict
+from infrastructure.database.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
-from management.utils.serialization import convert_string_to_list
+from infrastructure.serialization.text import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
 from contracts.constants.environment import MAX_GROUPS_PER_TENANT
 from sqlalchemy import text

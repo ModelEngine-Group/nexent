@@ -3,7 +3,7 @@
 
 import re
 
-from gateway.security.policy import canonical_path
+from infrastructure.security.policy import canonical_path
 
 
 def is_runtime_service_request(method: str, path: str) -> bool:

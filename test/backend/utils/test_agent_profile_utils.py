@@ -22,7 +22,7 @@ The pattern mirrors ``test_evaluator_db.py``: sys.path injection, idempotent
 ``_register_package`` registration and permanent (never-uninstalled)
 ``sys.modules`` stubs for the module's transitive imports
 (``management.db.agent.repository``, ``management.db.tool.repository``, ``management.services.skill.service`` plus
-the lazy ``management.db.knowledge_base.repository`` / ``management.db.client`` /
+the lazy ``management.db.knowledge_base.repository`` / ``infrastructure.database.client`` /
 ``management.db.models`` imports inside ``_fetch_knowledge_bases``).
 """
 
@@ -99,14 +99,14 @@ def _install_stubs():
     sys.modules["management.db.knowledge_base.repository"] = knowledge_db
     db_pkg.knowledge_db = knowledge_db
 
-    # management.db.client (lazy import inside _fetch_knowledge_bases)
-    client = types.ModuleType("management.db.client")
+    # infrastructure.database.client (lazy import inside _fetch_knowledge_bases)
+    client = types.ModuleType("infrastructure.database.client")
     client.get_db_session = MagicMock()
-    sys.modules["management.db.client"] = client
+    sys.modules["infrastructure.database.client"] = client
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
     db_pkg.client = client
 
     # management.db.models – KnowledgeRecord attribute access must not raise

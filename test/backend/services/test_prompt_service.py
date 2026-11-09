@@ -26,7 +26,7 @@ _MODULE_PATCH_NAMES = [
     'management.db.tool.repository',
     'management.db.model.repository',
     'management.db.knowledge_base.repository',
-    'management.db.client',
+    'infrastructure.database.client',
     'management.db.models',
     'management.services.model.invocation',
     'management.services.agent.prompt',
@@ -191,14 +191,14 @@ sys.modules['management.db.knowledge_base.repository'] = MagicMock()
 mock_database_client = MagicMock()
 mock_database_client.MinioClient.return_value = minio_client_mock
 mock_database_client.minio_client = minio_client_mock
-sys.modules['management.db.client'] = mock_database_client
+sys.modules['infrastructure.database.client'] = mock_database_client
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = mock_database_client
+install_serialization_stub(sys.modules["infrastructure.database.client"])
+sys.modules['infrastructure.database.client'] = mock_database_client
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.models'] = MagicMock()
 
 from jinja2 import StrictUndefined

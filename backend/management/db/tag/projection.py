@@ -6,7 +6,7 @@ from contracts.constants.constants import ACTIVE_DELETE_FLAG, KNOWLEDGE_DOCUMENT
 from datetime import datetime, timezone
 from typing import Any
 
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import DocumentTagProjection, ResourceTagAssignment
 from sqlalchemy import and_, func, or_
 

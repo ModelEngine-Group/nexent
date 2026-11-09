@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 # MOCK external dependencies BEFORE importing modules under test
 # =============================================================================
 
-# Mock psycopg2 before management.db.client is imported
+# Mock psycopg2 before infrastructure.database.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -262,10 +262,10 @@ sys.modules['management.services.knowledge_base.summary'] = document_vector_util
 sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 
-str_utils_mock = types.ModuleType('management.utils.serialization')
+str_utils_mock = types.ModuleType('infrastructure.serialization.text')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['management.utils.serialization'] = str_utils_mock
+sys.modules['infrastructure.serialization.text'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 
 config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
@@ -282,10 +282,10 @@ setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 import importlib
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_client_module = importlib.import_module('management.db.client')
-sys.modules['management.db.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('infrastructure.database.client')
+sys.modules['infrastructure.database.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Mock MinioClient after loading the module
 minio_client_mock = MagicMock()

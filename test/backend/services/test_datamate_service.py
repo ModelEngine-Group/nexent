@@ -71,11 +71,11 @@ sqlalchemy_mock.sql = sqlalchemy_sql_mock
 
 # Set up sys.modules mocks
 sys.modules['management.db.knowledge_base.repository'] = knowledge_db_mock
-sys.modules['management.db.client'] = database_client_mock
+sys.modules['infrastructure.database.client'] = database_client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.models'] = database_models_mock
 sys.modules['management.db.configuration.tenant'] = tenant_config_db_mock
 sys.modules['management.db.model.repository'] = model_management_db_mock

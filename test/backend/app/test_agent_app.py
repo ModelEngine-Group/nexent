@@ -62,15 +62,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Apply patches before importing any app modules (similar to test_config_app.py)
 patches = [
     # Mock database sessions
-    patch('management.db.client.get_db_session', return_value=Mock())
+    patch('infrastructure.database.client.get_db_session', return_value=Mock())
 ]
 
 for p in patches:
@@ -125,11 +125,11 @@ sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
-sys.modules['management.db.client'] = MagicMock()
+sys.modules['infrastructure.database.client'] = MagicMock()
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
@@ -154,7 +154,7 @@ sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from management.utils.app_factory import register_exception_handlers
+from infrastructure.web.app_factory import register_exception_handlers
 
 
 

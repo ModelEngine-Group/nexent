@@ -12,7 +12,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from management.services.model import run_bindings
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
-from management.db import client as client
+from infrastructure.database import client as client
 from management.db import models as db_models
 from model_controls.api import CAPABILITY, BUDGET
 

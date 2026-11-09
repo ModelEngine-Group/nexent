@@ -20,8 +20,8 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict
+from infrastructure.database.client import get_db_session
 from management.db.models import UserTenant
 from ext_components.aidp.database.db_models import AidpKbPermission
 

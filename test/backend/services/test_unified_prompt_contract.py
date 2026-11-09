@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from management.services.agent.creation import build_nl2agent_system_prompt
 from contracts.agent import AgentImportRequest, AgentInfoRequest, ExportAndImportAgentInfo
-from management.utils.orm import as_dict, filter_property
+from infrastructure.database.orm import as_dict, filter_property
 from management.db.agent.models import AgentInfo
 from infrastructure.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 from management.services.repository.agent.listing import _extract_root_agent_from_snapshot

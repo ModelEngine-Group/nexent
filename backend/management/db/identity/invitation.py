@@ -3,13 +3,13 @@
 Database operations for invitation code management
 """
 
-from management.utils.orm import as_dict
+from infrastructure.database.orm import as_dict
 from typing import Any, Dict, List, Optional
 
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict
+from infrastructure.database.client import get_db_session
 from management.db.models import TenantInvitationCode, TenantInvitationRecord
-from management.utils.serialization import convert_list_to_string
+from infrastructure.serialization.text import convert_list_to_string
 
 
 def query_invitation_by_code(invitation_code: str) -> Optional[Dict[str, Any]]:

@@ -27,7 +27,7 @@ sys.modules['boto3'] = boto3_module
 storage_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock).start()
 
 from fastapi.testclient import TestClient
 from http import HTTPStatus

@@ -17,7 +17,7 @@ from management.services.notification.service import (
     deactivate_notifications,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.utils.serialization import convert_list_to_string, convert_string_to_list
+from infrastructure.serialization.text import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
 

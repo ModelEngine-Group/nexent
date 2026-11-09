@@ -20,7 +20,7 @@ if backend_dir not in sys.path:
 import pytest
 from fastapi import Request, HTTPException
 from fastapi.responses import Response
-from backend.middleware.exception_handler import (
+from infrastructure.web.exception_handler import (
     ExceptionHandlerMiddleware,
     _http_status_to_error_code,
     create_error_response,
@@ -64,9 +64,9 @@ for p in critical_patches:
 # Patch MinioClient class to return mock instance when instantiated
 # This prevents real initialization during module import
 patches = [
-    patch('management.db.client.MinioClient', return_value=minio_mock),
-    patch('management.db.client.MinioClient', return_value=minio_mock),
-    patch('management.db.client.minio_client', minio_mock),
+    patch('infrastructure.database.client.MinioClient', return_value=minio_mock),
+    patch('infrastructure.database.client.MinioClient', return_value=minio_mock),
+    patch('infrastructure.database.client.minio_client', minio_mock),
 ]
 
 for p in patches:
@@ -75,10 +75,10 @@ for p in patches:
 # Combine all patches for cleanup
 all_patches = critical_patches + patches
 
-# Now safe to import modules that use management.db.client
+# Now safe to import modules that use infrastructure.database.client
 # After import, we can patch get_db_session if needed
 try:
-    from management.db import client as db_client_module
+    from infrastructure.database import client as db_client_module
     # Patch get_db_session after module is imported
     db_session_patch = patch.object(
         db_client_module, 'get_db_session', return_value=Mock())
@@ -87,7 +87,7 @@ try:
 except ImportError:
     # If import fails, try patching the path directly (may trigger import)
     db_session_patch = patch(
-        'management.db.client.get_db_session', return_value=Mock())
+        'infrastructure.database.client.get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 

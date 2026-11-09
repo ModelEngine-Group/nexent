@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import aliased
 
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import UserTenant, UserTokenInfo, UserTokenUsageLog
 
 

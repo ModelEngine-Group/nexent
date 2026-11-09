@@ -2765,7 +2765,7 @@ class MonitoringRecordBuffer:
             if os.path.exists(backend_path) and backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
 
-            from management.db.client import get_monitoring_db_session
+            from infrastructure.database.client import get_monitoring_db_session
             from management.db.models import ModelMonitoringRecord
         except ImportError as e:
             logger.debug(

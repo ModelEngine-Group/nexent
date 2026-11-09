@@ -81,14 +81,14 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 
 sys.modules['utils'] = utils_mock
 sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
-sys.modules['management.utils.serialization'] = utils_mock.str_utils
+sys.modules['infrastructure.serialization.text'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Mock management.db.client
+# Mock infrastructure.database.client
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -96,14 +96,14 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.database.client"])
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Mock management.db.models
 db_models_mock = MagicMock()

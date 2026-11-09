@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import KnowledgeFileLifecycle
 from management.db.knowledge_base.file_lifecycle import delete_file_record, get_file_record
 from management.services.knowledge_base.task_state import get_redis_service

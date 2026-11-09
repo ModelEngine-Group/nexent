@@ -266,15 +266,15 @@ _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(return_value={"user_
 sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 _db_pkg.user_tenant_db = _user_tenant_db_mock
 
-# management.db.client / management.db.models are imported by both service modules.
+# infrastructure.database.client / management.db.models are imported by both service modules.
 _db_client_module = MagicMock()
 _db_client_module.get_db_session = MagicMock()
 _db_client_module.as_dict = MagicMock()
-sys.modules["management.db.client"] = _db_client_module
+sys.modules["infrastructure.database.client"] = _db_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()

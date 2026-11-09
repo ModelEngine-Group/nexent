@@ -3,7 +3,7 @@
 import logging
 from typing import Dict
 
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import MemoryProviderConfigParam
 
 

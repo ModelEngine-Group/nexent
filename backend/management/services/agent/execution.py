@@ -90,7 +90,7 @@ from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
-from management.services.agent.run_state import (
+from infrastructure.streaming.run_state import (
     runtime_state_service,
 )
 from infrastructure.streaming.channels import (

@@ -4,15 +4,15 @@ import logging
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy import update
 
-from management.db.client import get_db_session
-from management.utils.orm import as_dict
+from infrastructure.database.client import get_db_session
+from infrastructure.database.orm import as_dict
 from management.db.models import AgentInfo, ToolInstance, AgentRelation
 from management.db.agent.version import search_version_by_version_no, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, insert_skill_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, restore_agent_draft, get_next_version_no, delete_version
 from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
 from management.db.model.repository import get_model_by_model_id, get_valid_model_ids
 from management.db.agent.repository import is_system_agent
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.utils.serialization import convert_string_to_list
+from infrastructure.serialization.text import convert_string_to_list
 from contracts.agent import AgentUnavailableReason
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 

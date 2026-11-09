@@ -21,7 +21,7 @@ from contracts.constants.environment import IS_SPEED_MODE
 from contracts.errors.exceptions import AppException, DuplicateError
 from management.db.agent.repository import query_knowledge_binding_agents
 from management.db.file.attachment import get_file_stream
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.conversation.repository import remove_conversation_knowledge_bindings
 from management.db.identity.group import query_group_ids_by_user
 from management.db.knowledge_base.repository import create_knowledge_record, delete_knowledge_record, get_knowledge_info_by_tenant_id, get_knowledge_record, update_embedding_model_by_index_name, update_knowledge_record, update_last_doc_update_time, update_model_name_by_index_name
@@ -70,7 +70,7 @@ from management.services.permission.asset_owner import postprocess_knowledge_vis
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.utils.serialization import convert_list_to_string, convert_string_to_list
+from infrastructure.serialization.text import convert_list_to_string, convert_string_to_list
 
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):

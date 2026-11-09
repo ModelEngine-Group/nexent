@@ -18,7 +18,7 @@ from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError,
 from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
 from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
-from management.db.client import minio_client
+from infrastructure.database.client import minio_client
 from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
 from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service

@@ -9,7 +9,7 @@ import time
 from nexent.core.concurrency import ManagedThreadSpec, ThreadManager
 
 from management.db.evaluation.runs import cleanup_aged_evaluations, list_dispatchable_pending_runs, reap_stale_runs
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import AgentEvaluation
 
 

@@ -30,7 +30,7 @@ from adapters.exception import JiuwenSDKUnavailableError
 from contracts.constants.constants import MAX_CONCURRENT_RUNS, MAX_EVALUATORS_PER_RUN, MAX_TOTAL_RUNS, MAX_TURNS_PER_SESSION
 from contracts.constants.constants import MAX_FAILURE_EXAMPLES
 from management.db.evaluation.runs import count_active_runs, count_total_runs, create_agent_evaluation, create_agent_evaluation_cases, get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent, update_agent_evaluation_analysis_report, update_agent_evaluation_case_result, update_agent_evaluation_status
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator

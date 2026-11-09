@@ -32,7 +32,7 @@ sys.modules.setdefault("management.db.mcp.remote", MagicMock())
 sys.modules.setdefault("management.db.tool.repository", MagicMock())
 sys.modules.setdefault("management.db.identity.group", MagicMock())
 sys.modules.setdefault("management.db.identity.user_tenant", MagicMock())
-sys.modules.setdefault("management.db.client", MagicMock())
+sys.modules.setdefault("infrastructure.database.client", MagicMock())
 
 _consts_model = types.ModuleType("contracts.agent")
 

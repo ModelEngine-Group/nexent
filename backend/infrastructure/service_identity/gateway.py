@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backend configuration adapter for the pure Gateway identity protocol."""
 
-from gateway.security import identity as protocol
-from gateway.security.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
+from infrastructure.security import identity as protocol
+from infrastructure.security.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
 from infrastructure.service_identity.context import identity_context, trusted_identity
 
 

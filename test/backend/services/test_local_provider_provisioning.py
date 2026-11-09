@@ -10,7 +10,7 @@ import pytest
 
 from contracts.errors.exceptions import AccountConflictError, OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
 from management.services.permission.identity import session as gateway
-from gateway.security.passwords import verify_password
+from infrastructure.security.passwords import verify_password
 from management.db.identity import account as accounts
 from management.services.permission.identity import cas, oauth
 
@@ -82,7 +82,7 @@ def test_pending_oauth_token_uses_local_signing_key(mocker):
 def completion(mocker):
     from management.services.permission.identity import invitations, groups
     from management.services.tool import configuration
-    from management.db import client
+    from infrastructure.database import client
 
     session = object()
     transaction = []

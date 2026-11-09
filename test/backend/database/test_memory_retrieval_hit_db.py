@@ -17,18 +17,18 @@ sys.path.insert(
 )
 
 
-# Stub management.db.client
-client_mod = types.ModuleType("management.db.client")
+# Stub infrastructure.database.client
+client_mod = types.ModuleType("infrastructure.database.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = lambda data, _model: dict(data)
-sys.modules["management.db.client"] = client_mod
+sys.modules["infrastructure.database.client"] = client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules["management.db.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.database.client"])
+sys.modules["infrastructure.database.client"] = client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 
 # Stub SQLAlchemy

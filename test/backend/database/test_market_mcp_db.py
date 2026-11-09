@@ -30,7 +30,7 @@ sys.modules['consts'] = consts_mock
 sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
-# Mock management.db.client
+# Mock infrastructure.database.client
 def _as_dict(obj):
     """Convert an object to a dict, handling both real objects and MagicMock."""
     if obj is None:
@@ -44,11 +44,11 @@ client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = _as_dict
 client_mock.filter_property = MagicMock(side_effect=lambda data, model: data)
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Mock Column helper for SQLAlchemy-style model comparisons
 class _MockColumn:

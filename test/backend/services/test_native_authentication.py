@@ -9,7 +9,7 @@ import jwt
 import pytest
 
 from contracts.errors.exceptions import UnauthorizedError, TenantResourceLimitError
-from gateway.security.passwords import hash_password
+from infrastructure.security.passwords import hash_password
 from management.services.permission.identity import authentication as auth
 from management.services.permission.identity import session as helpers
 

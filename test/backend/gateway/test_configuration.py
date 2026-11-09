@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from gateway.configuration import GatewaySettings, load_settings
-from gateway.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
+from infrastructure.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
 
 
 BACKEND = Path(__file__).resolve().parents[3] / "backend"
@@ -77,7 +77,7 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
             for module in modules:
                 assert module and module.split(".")[0] in allowed, (path, module)
                 if module.startswith("infrastructure"):
-                    assert module.startswith("infrastructure.database"), (path, module)
+                    assert module == "infrastructure.database.identity" or module.startswith("infrastructure.security."), (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 
@@ -85,13 +85,19 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
 def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_path):
     shutil.copytree(BACKEND / "gateway", tmp_path / "gateway", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(BACKEND / "gateway_service.py", tmp_path)
+    infrastructure = tmp_path / "infrastructure"
+    (infrastructure / "database").mkdir(parents=True)
+    for file in ("__init__.py", "database/__init__.py", "database/identity.py"):
+        shutil.copy2(BACKEND / "infrastructure" / file, infrastructure / file)
+    shutil.copytree(BACKEND / "infrastructure/security", infrastructure / "security",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     code = """import json,sys
 sys.path.insert(0, sys.argv[1])
 import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
-assert not {'management','runtime','contracts','infrastructure','nexent','dotenv'} & sys.modules.keys()
+assert not {'management','runtime','contracts','infrastructure.database.client','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
 print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()

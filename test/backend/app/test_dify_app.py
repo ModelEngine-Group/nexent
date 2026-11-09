@@ -41,8 +41,8 @@ def _mock_create_storage_client_from_config(config):
 # Apply the mock to the SDK module where create_storage_client_from_config is defined
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
            side_effect=_mock_create_storage_client_from_config):
-    # Also mock the MinIO client initialization in management.db.client
-    with patch('management.db.client.MinioClient') as MockMinioClient:
+    # Also mock the MinIO client initialization in infrastructure.database.client
+    with patch('infrastructure.database.client.MinioClient') as MockMinioClient:
         mock_minio_instance = MagicMock()
         MockMinioClient.return_value = mock_minio_instance
 

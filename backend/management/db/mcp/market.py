@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, or_, text as sa_text
 
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict, filter_property
+from infrastructure.database.client import get_db_session
 from management.db.models import McpMarketRecord
 
 logger = logging.getLogger("market_mcp_db")

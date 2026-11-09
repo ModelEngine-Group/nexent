@@ -270,7 +270,7 @@ utils_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "
 utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('management.services.skill.classifier')
-utils_str_utils_mock = types.ModuleType('management.utils.serialization')
+utils_str_utils_mock = types.ModuleType('infrastructure.serialization.text')
 utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
@@ -289,13 +289,13 @@ sys.modules['utils'] = utils_mock
 
 sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 sys.modules['management.services.skill.classifier'] = utils_content_classifier_utils_mock
-sys.modules['management.utils.serialization'] = utils_str_utils_mock
+sys.modules['infrastructure.serialization.text'] = utils_str_utils_mock
 sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
 database_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/database"))]
-database_client_mock = types.ModuleType('management.db.client')
+database_client_mock = types.ModuleType('infrastructure.database.client')
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.as_dict = MagicMock()
 database_client_mock.filter_property = MagicMock()
@@ -397,11 +397,11 @@ database_mock.skill_db = database_skill_db_mock
 database_mock.db_models = database_db_models_mock
 
 sys.modules['database'] = database_mock
-sys.modules['management.db.client'] = database_client_mock
+sys.modules['infrastructure.database.client'] = database_client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.skill.repository'] = database_skill_db_mock
 sys.modules['management.db.models'] = database_db_models_mock
 sys.modules['management.db.identity.group'] = database_group_db_mock

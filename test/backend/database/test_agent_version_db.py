@@ -57,7 +57,7 @@ db_models_mock.AgentRelation = MagicMock()
 db_models_mock.AgentVersion = MagicMock()
 
 # Create a mock database module to satisfy imports
-# This is needed because agent_version_db.py uses "from management.db.client import ..."
+# This is needed because agent_version_db.py uses "from infrastructure.database.client import ..."
 database_mock = MagicMock()
 database_mock.client = client_mock
 database_mock.db_models = db_models_mock
@@ -65,15 +65,15 @@ database_mock.db_models = db_models_mock
 # Add the mocked modules to sys.modules (order matters!)
 # database module must be added before its submodules
 sys.modules['database'] = database_mock
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['management.db.models'] = db_models_mock
 
 # Now we can safely import the module being tested

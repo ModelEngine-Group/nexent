@@ -12,7 +12,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
-from gateway.security import token_codec
+from infrastructure.security import token_codec
 from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, JWT_SECRET, JWT_ISSUER
 from contracts.authentication import (
     AuthenticatedIdentity,
@@ -38,13 +38,13 @@ from infrastructure.service_identity.internal_tokens import (
     INTERNAL_RUNTIME_JWT_TTL_SECONDS,
     generate_internal_runtime_jwt,
 )
-from gateway.security.signatures import (
+from infrastructure.security.signatures import (
     TIMESTAMP_VALIDITY_WINDOW,
     calculate_hmac_signature,
     validate_timestamp,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.utils.request_context import get_user_language
+from infrastructure.web.request_context import get_user_language
 from permissions.models import CurrentUser
 
 # Module logger

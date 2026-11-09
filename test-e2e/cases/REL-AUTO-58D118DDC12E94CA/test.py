@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select, text, update
 
 from management.db.automation.repository import claim_due_tasks, create_run, create_task, recover_orphaned_runs, release_all_task_locks
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import AgentAutomationRun, AgentAutomationTask
 
 

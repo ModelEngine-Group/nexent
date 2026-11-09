@@ -13,7 +13,7 @@ import logging
 from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
 
 from contracts.constants.environment import RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.streaming.run_state import runtime_state_service
 
 logger = logging.getLogger(__name__)
 

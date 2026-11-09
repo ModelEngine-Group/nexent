@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from management.services.agent import run_state as rss
-from management.services.agent.run_state import RuntimeStateService
+from infrastructure.streaming import run_state as rss
+from infrastructure.streaming.run_state import RuntimeStateService
 
 
 CASE_ID = 'UT-BE-AUTO-2862BAF58D3E695E'
@@ -504,7 +504,7 @@ def _check_client_raises_when_redis_uninstalled(monkeypatch):
 @pytest.mark.stage('D1')
 def _check_no_secrets_in_logs(caplog, service, fake_client):
     fake_client.fail_on('hgetall')
-    with caplog.at_level(logging.WARNING, logger='management.services.agent.run_state'):
+    with caplog.at_level(logging.WARNING, logger='infrastructure.streaming.run_state'):
         service.get_run_state(UID, CID)
     text = caplog.text.lower()
     assert text

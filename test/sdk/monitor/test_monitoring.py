@@ -1378,11 +1378,11 @@ class TestWriteBatchIsolation:
         mock_db_client = MagicMock()
         sys.modules["database"] = MagicMock()
         sys.modules["management.db.models"] = mock_db_models
-        sys.modules["management.db.client"] = mock_db_client
+        sys.modules["infrastructure.database.client"] = mock_db_client
         from test.common.database_stubs import install_serialization_stub
-        install_serialization_stub(sys.modules["management.db.client"])
+        install_serialization_stub(sys.modules["infrastructure.database.client"])
         from test.common.database_stubs import install_serialization_stub
-        install_serialization_stub(sys.modules["management.db.client"])
+        install_serialization_stub(sys.modules["infrastructure.database.client"])
         return (
             mock_db_client.get_monitoring_db_session,
             mock_db_models.ModelMonitoringRecord,

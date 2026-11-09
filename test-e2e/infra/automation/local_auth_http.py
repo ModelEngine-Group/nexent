@@ -30,7 +30,7 @@ def native_runtime():
         }.items():
             patch.setenv(name, value)
         from management.db import models
-        from management.db.client import db_client
+        from infrastructure.database.client import db_client
         from management.services.permission.identity import authentication as auth
         from management.services.permission.identity import session as helpers
         from management.api.identity import user_management as routes
@@ -74,7 +74,7 @@ def native_runtime():
 @pytest.fixture
 def runtime(native_runtime):
     client, auth, helpers, models = native_runtime
-    from management.db.client import get_db_session
+    from infrastructure.database.client import get_db_session
 
     with get_db_session() as session:
         for model in [

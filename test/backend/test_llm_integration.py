@@ -13,26 +13,26 @@ from unittest.mock import patch, MagicMock
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 
-# Mock management.db.client and MinioClient before any imports to avoid MinIO initialization
+# Mock infrastructure.database.client and MinioClient before any imports to avoid MinIO initialization
 class _MinioClient:
     pass
 
-if "management.db.client" not in sys.modules:
-    database_client_mod = types.ModuleType("management.db.client")
+if "infrastructure.database.client" not in sys.modules:
+    database_client_mod = types.ModuleType("infrastructure.database.client")
     database_client_mod.MinioClient = _MinioClient
-    sys.modules["management.db.client"] = database_client_mod
+    sys.modules["infrastructure.database.client"] = database_client_mod
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
 
-# Mock management.db.client as well
-if "management.db.client" not in sys.modules:
-    backend_db_client_mod = types.ModuleType("management.db.client")
+# Mock infrastructure.database.client as well
+if "infrastructure.database.client" not in sys.modules:
+    backend_db_client_mod = types.ModuleType("infrastructure.database.client")
     backend_db_client_mod.MinioClient = _MinioClient
-    sys.modules["management.db.client"] = backend_db_client_mod
+    sys.modules["infrastructure.database.client"] = backend_db_client_mod
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["management.db.client"])
+    install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Ensure database module exists as a package (needs __path__ attribute)
 if "database" not in sys.modules:

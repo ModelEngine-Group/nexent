@@ -27,7 +27,7 @@ from contracts.conversation import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
 from management.db.conversation import repository as db
 from management.db.conversation import pins as pins
-from management.db.client import db_client
+from infrastructure.database.client import db_client
 from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch
 from management.services.automation.conversation import AutomationConversationAdapter
 from management.services.conversation.service import save_message

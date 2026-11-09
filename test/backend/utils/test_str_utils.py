@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from management.services.model.text import remove_think_blocks
-from management.utils.serialization import convert_list_to_string
+from infrastructure.serialization.text import convert_list_to_string
 
 
 class TestStrUtils:

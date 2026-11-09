@@ -18,7 +18,7 @@ from sqlalchemy import text
 from contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_DASHBOARD_ALLOWED_ROLES, MONITORING_DASHBOARD_URL, MONITORING_PROVIDER
 from contracts.conversation import ConversationResponse
 from contracts.errors.exceptions import TokenExpiredError
-from management.db.client import get_monitoring_db_session
+from infrastructure.database.client import get_monitoring_db_session
 from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")

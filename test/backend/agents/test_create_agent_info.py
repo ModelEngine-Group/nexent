@@ -191,11 +191,11 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['management.db.client'] = client_mock
+sys.modules['infrastructure.database.client'] = client_mock
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
-sys.modules['management.db.client'] = _create_stub_module(
-    "management.db.client",
+install_serialization_stub(sys.modules["infrastructure.database.client"])
+sys.modules['infrastructure.database.client'] = _create_stub_module(
+    "infrastructure.database.client",
     minio_client=MagicMock(),
     postgres_client=MagicMock(),
     db_client=MagicMock(),
@@ -203,9 +203,9 @@ sys.modules['management.db.client'] = _create_stub_module(
     as_dict=MagicMock(),
 )
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()

@@ -30,7 +30,7 @@ from gateway.configuration import GatewaySettings
 from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
 from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
 from infrastructure.service_identity.mcp import TenantMCPRouter
-from gateway.security.identity import sign_delegation
+from infrastructure.security.identity import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
 from nexent.core.concurrency import LanePolicy, ThreadManager
 

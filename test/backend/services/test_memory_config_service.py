@@ -62,8 +62,8 @@ agent_model_mod.MemoryUserConfig = MemoryUserConfig
 agent_model_mod.MemoryContext = MemoryContext
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Fake out management.db.client to prevent boto3/MinIO side effects and provide needed APIs
-fake_client = types.ModuleType("management.db.client")
+# Fake out infrastructure.database.client to prevent boto3/MinIO side effects and provide needed APIs
+fake_client = types.ModuleType("infrastructure.database.client")
 
 def _filter_property(data, model_class):
     try:
@@ -106,11 +106,11 @@ def _get_db_session(db_session=None):
 
 fake_client.filter_property = _filter_property
 fake_client.get_db_session = _get_db_session
-sys.modules["management.db.client"] = fake_client
+sys.modules["infrastructure.database.client"] = fake_client
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules['boto3'] = MagicMock()
 
 # Stub management.db.memory.config to avoid importing SQLAlchemy models at import time

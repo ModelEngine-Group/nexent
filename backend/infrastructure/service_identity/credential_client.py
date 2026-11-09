@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
+from infrastructure.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
 from infrastructure.service_identity.gateway import signing_key
 
 

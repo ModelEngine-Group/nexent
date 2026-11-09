@@ -2,7 +2,7 @@
 
 """Bridge local execution ownership to the existing Redis state protocol."""
 
-from management.services.agent.run_state import runtime_state_service
+from infrastructure.streaming.run_state import runtime_state_service
 from runtime.executions import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,

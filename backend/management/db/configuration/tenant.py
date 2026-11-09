@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from management.db.client import get_db_session
+from infrastructure.database.client import get_db_session
 from management.db.models import TenantConfig, TenantGroupInfo
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME

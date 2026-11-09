@@ -3,7 +3,7 @@
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from contracts.knowledge import ProcessParams
 from contracts.constants.constants import CONFIG_SERVICE_NAME
-from management.utils.file_http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
+from infrastructure.web.file_http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
 import base64
 import logging
 import re

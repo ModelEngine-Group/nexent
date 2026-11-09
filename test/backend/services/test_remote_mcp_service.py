@@ -93,27 +93,27 @@ tool_discovery_mod = types.ModuleType("management.services.tool.discovery")
 tool_discovery_mod.get_tool_from_remote_mcp_server = AsyncMock()
 sys.modules[tool_discovery_mod.__name__] = tool_discovery_mod
 
-# Pre-mock management.db.client module
-db_client_mod = types.ModuleType("management.db.client")
+# Pre-mock infrastructure.database.client module
+db_client_mod = types.ModuleType("infrastructure.database.client")
 db_client_mod.MinioClient = MagicMock()
 db_client_mod.minio_client = MagicMock()
 db_client_mod.as_dict = MagicMock()
 db_client_mod.filter_property = MagicMock()
 db_client_mod.get_db_session = MagicMock()
-db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
-sys.modules['management.db.client'] = db_client_mod
+db_client_mod.__spec__ = importlib.machinery.ModuleSpec("infrastructure.database.client", loader=None)
+sys.modules['infrastructure.database.client'] = db_client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 backend_db_client_mod = db_client_mod
 backend_db_client_mod.MinioClient = MagicMock()
 backend_db_client_mod.minio_client = MagicMock()
-backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
-sys.modules['management.db.client'] = backend_db_client_mod
+backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("infrastructure.database.client", loader=None)
+sys.modules['infrastructure.database.client'] = backend_db_client_mod
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 
 # Apply critical patches before importing any modules
 storage_client_mock = MagicMock()
@@ -124,9 +124,9 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes

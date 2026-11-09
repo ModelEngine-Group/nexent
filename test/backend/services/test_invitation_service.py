@@ -49,15 +49,15 @@ setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
 # imports mem0 at module load time.
 
 # Stub database modules used by invitation_service to avoid loading real SQLAlchemy client
-_db_client_stub = types.ModuleType("management.db.client")
+_db_client_stub = types.ModuleType("infrastructure.database.client")
 _db_client_stub.get_db_session = MagicMock()
 _db_client_stub.as_dict = MagicMock()
 _db_client_stub.MinioClient = MagicMock()
-sys.modules["management.db.client"] = _db_client_stub
+sys.modules["infrastructure.database.client"] = _db_client_stub
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.database.client"])
 sys.modules["management.db.identity.invitation"] = MagicMock()
 sys.modules["management.db.identity.user_tenant"] = MagicMock()
 sys.modules["management.db.identity.group"] = MagicMock()

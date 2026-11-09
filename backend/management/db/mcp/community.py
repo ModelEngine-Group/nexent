@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 from sqlalchemy import func, or_
 
-from management.utils.orm import as_dict, filter_property
-from management.db.client import get_db_session
+from infrastructure.database.orm import as_dict, filter_property
+from infrastructure.database.client import get_db_session
 from management.db.models import McpCommunityRecord
 
 logger = logging.getLogger("community_mcp_db")

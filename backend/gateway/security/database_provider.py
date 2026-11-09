@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Gateway identity policy over an infrastructure database snapshot."""
 
-from gateway.security.identity import IdentityError
+from infrastructure.security.identity import IdentityError
 from gateway.security.management_client import IdentityUnavailable
 from infrastructure.database.identity import IdentityRejected, IdentityStoreUnavailable
 
