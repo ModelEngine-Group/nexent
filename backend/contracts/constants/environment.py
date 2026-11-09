@@ -64,6 +64,10 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(os.getenv('AGENT_AUTOMATION_MIN_INTE
 # Timeout in seconds for invoking external A2A agents (runtime sub-agent path and northbound direct calls)
 A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
 
+# Timeout in seconds for invoking external A2A agents (both the runtime
+# sub-agent path and the northbound direct-call path)
+A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
+
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')
 
