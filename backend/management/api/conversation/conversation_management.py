@@ -301,8 +301,13 @@ async def branch_conversation_endpoint(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        target = {
+            key: value
+            for key, value in request.model_dump(include={"source_message_id", "answer_index"}).items()
+            if value is not None
+        }
         branched = branch_conversation_service(
-            request.conversation_id, request.turn_index, user_id
+            request.conversation_id, request.turn_index, user_id, **target
         )
         return ConversationResponse(code=0, message="success", data=branched)
     except ValueError as exc:

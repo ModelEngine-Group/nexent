@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from contracts.conversation import BranchConversationRequest
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ValidationError
 
@@ -893,9 +894,7 @@ async def test_branch_conversation_success(conversation_mocks):
         "user_id", "tenant_id")
     conversation_mocks["branch_conversation"].return_value = dummy_response
 
-    request_obj = MagicMock()
-    request_obj.conversation_id = 7
-    request_obj.turn_index = 2
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
 
     result = await branch_conversation_endpoint(request_obj, authorization=mock_auth_header)
 
@@ -913,9 +912,7 @@ async def test_branch_conversation_invalid_turn(conversation_mocks):
     conversation_mocks["branch_conversation"].side_effect = ValueError(
         "turn_index must be a 1-based turn number")
 
-    request_obj = MagicMock()
-    request_obj.conversation_id = 7
-    request_obj.turn_index = 0
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=0)
 
     with pytest.raises(HTTPException) as exc_info:
         await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
@@ -934,9 +931,7 @@ async def test_branch_conversation_not_found(conversation_mocks):
     conversation_mocks["branch_conversation"].side_effect = ConversationNotFoundError(
         "Conversation does not exist or has been deleted")
 
-    request_obj = MagicMock()
-    request_obj.conversation_id = 7
-    request_obj.turn_index = 2
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
 
     with pytest.raises(HTTPException) as exc_info:
         await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
@@ -952,9 +947,7 @@ async def test_branch_conversation_expired_token(conversation_mocks):
     conversation_mocks["get_current_user_id"].side_effect = TokenExpiredError(
         "expired")
 
-    request_obj = MagicMock()
-    request_obj.conversation_id = 7
-    request_obj.turn_index = 2
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
 
     with pytest.raises(HTTPException) as exc_info:
         await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
@@ -970,9 +963,7 @@ async def test_branch_conversation_failure(conversation_mocks):
     conversation_mocks["branch_conversation"].side_effect = Exception(
         "Database error: SELECT * FROM private_table; connection password=secret")
 
-    request_obj = MagicMock()
-    request_obj.conversation_id = 7
-    request_obj.turn_index = 2
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2)
 
     with pytest.raises(HTTPException) as exc_info:
         await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
@@ -981,3 +972,18 @@ async def test_branch_conversation_failure(conversation_mocks):
     assert exc_info.value.detail == "Failed to branch conversation"
     assert "private_table" not in exc_info.value.detail
     assert "secret" not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [
+    {"source_message_id": 123},
+    {"answer_index": 2},
+    {"source_message_id": 123, "answer_index": 2},
+])
+async def test_branch_conversation_forwards_selected_answer(conversation_mocks, target):
+    conversation_mocks["get_current_user_id"].return_value = ("user_id", "tenant_id")
+    conversation_mocks["branch_conversation"].return_value = {"conversation_id": 42}
+    request_obj = BranchConversationRequest(conversation_id=7, turn_index=2, **target)
+    result = await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
+    assert result.data == {"conversation_id": 42}
+    conversation_mocks["branch_conversation"].assert_called_once_with(7, 2, "user_id", **target)

@@ -11,9 +11,9 @@ export type BranchMessageLike = {
  * A turn is one user message plus its answer(s); the turn number therefore
  * equals the count of user messages from the thread start up to and including
  * the turn of the selected assistant message. The backend resolves the same
- * turn over its active (deduplicated) user rows, so both sides agree even
- * after refresh duplicates or regenerated answers. Returns null when the
- * message is missing from the list or no user message precedes it.
+ * turn over its active (deduplicated) user rows. The selected answer ID/version
+ * is sent separately because a turn can contain regenerated answers. Returns
+ * null when the message is missing or no user message precedes it.
  */
 export function computeBranchTurnIndex(
   messages: readonly BranchMessageLike[],

@@ -447,6 +447,8 @@ def branch_conversation_service(
     conversation_id: int,
     turn_index: int,
     user_id: str,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Branch a conversation into a new one up to and including the given turn
@@ -455,6 +457,8 @@ def branch_conversation_service(
         conversation_id: Source conversation ID
         turn_index: 1-based Q&A turn (inclusive) marking the branch point
         user_id: User ID that must own the source conversation
+        source_message_id: Exact persisted answer in the requested turn
+        answer_index: 1-based runtime answer version when no persisted ID is available
 
     Returns:
         Dict[str, Any]: New conversation data
@@ -465,8 +469,13 @@ def branch_conversation_service(
     if turn_index < 1:
         raise ValueError("turn_index must be a 1-based turn number")
     try:
+        target = {}
+        if source_message_id is not None:
+            target["source_message_id"] = source_message_id
+        if answer_index is not None:
+            target["answer_index"] = answer_index
         conversation_data = branch_conversation(
-            conversation_id, turn_index, user_id=user_id
+            conversation_id, turn_index, user_id=user_id, **target
         )
         if conversation_data is None:
             raise ConversationNotFoundError(

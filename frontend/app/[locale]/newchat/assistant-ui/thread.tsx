@@ -432,7 +432,7 @@ export const Thread: FC<ThreadProps> = ({
   // including the one the selected assistant message answers, then switch to
   // the branched thread. The original conversation stays untouched.
   const branchFromMessage = useCallback(
-    (assistantMessageId: string) => {
+    (assistantMessageId: string, answerIndex: number) => {
       if (!conversationId || branchDisabled) return;
       const turnIndex = computeBranchTurnIndex(messages, assistantMessageId);
       if (turnIndex === null) {
@@ -441,7 +441,7 @@ export const Thread: FC<ThreadProps> = ({
       }
       setIsBranching(true);
       conversationService
-        .branch(conversationId, turnIndex)
+        .branch(conversationId, turnIndex, assistantMessageId, answerIndex)
         .then(async (data) => {
           const newConversationId = Number(data?.conversation_id);
           if (!Number.isInteger(newConversationId) || newConversationId <= 0) {

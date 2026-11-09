@@ -6,5 +6,5 @@ import { createContext } from "react";
 
 export const ConversationBranchContext = createContext<{
   disabled: boolean;
-  branchFromMessage: (assistantMessageId: string) => void;
+  branchFromMessage: (assistantMessageId: string, answerIndex: number) => void;
 } | null>(null);

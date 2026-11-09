@@ -11,7 +11,7 @@ import { ConversationBranchMenuItem } from "@/app/newchat/assistant-ui/conversat
 import { ConversationBranchContext } from "@/app/newchat/assistant-ui/conversation-branch-context";
 
 const auiMocks = vi.hoisted(() => ({
-  getState: vi.fn(() => ({ id: "assistant-2" })),
+  getState: vi.fn(() => ({ id: "assistant-2", branchNumber: 2 })),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -52,7 +52,10 @@ const makeMessage = (id: string, role: string): BranchMessageLike => ({
 const renderMenuItem = (
   contextValue: {
     disabled: boolean;
-    branchFromMessage: (assistantMessageId: string) => void;
+    branchFromMessage: (
+      assistantMessageId: string,
+      answerIndex: number
+    ) => void;
   } | null
 ) =>
   render(
@@ -114,7 +117,15 @@ test("menu item invokes the branch handler with the aui message id", () => {
   fireEvent.click(screen.getByTestId("branch-item"));
 
   expect(branchFromMessage).toHaveBeenCalledTimes(1);
-  expect(branchFromMessage).toHaveBeenCalledWith("assistant-2");
+  expect(branchFromMessage).toHaveBeenCalledWith("assistant-2", 2);
+});
+
+test("menu item reads the selected answer version at click time", () => {
+  const branchFromMessage = vi.fn();
+  renderMenuItem({ disabled: false, branchFromMessage });
+  auiMocks.getState.mockReturnValueOnce({ id: "123", branchNumber: 1 });
+  fireEvent.click(screen.getByTestId("branch-item"));
+  expect(branchFromMessage).toHaveBeenCalledWith("123", 1);
 });
 
 test("menu item surfaces the localized branch label", () => {

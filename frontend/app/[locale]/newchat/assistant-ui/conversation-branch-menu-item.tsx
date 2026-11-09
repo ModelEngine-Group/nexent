@@ -16,7 +16,10 @@ export function ConversationBranchMenuItem() {
   return (
     <ActionBarMorePrimitive.Item
       disabled={branch.disabled}
-      onSelect={() => branch.branchFromMessage(aui.message.getState().id)}
+      onSelect={() => {
+        const selected = aui.message.getState();
+        branch.branchFromMessage(selected.id, selected.branchNumber);
+      }}
       className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none hover:bg-accent focus:bg-accent data-[disabled]:opacity-50"
     >
       <GitBranchIcon className="size-4" />

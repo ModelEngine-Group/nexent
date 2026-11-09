@@ -6,6 +6,8 @@ import sys
 import types
 from unittest.mock import patch
 
+import pytest
+
 # Mock storage client factory and MinIO config before any imports that would initialize MinIO
 from unittest.mock import MagicMock
 storage_client_mock = MagicMock()
@@ -2105,6 +2107,19 @@ def test_branch_conversation_service_wraps_repository_failure():
     ):
         with pytest.raises(Exception, match="database unavailable"):
             branch_conversation_service(7, 2, "user-1")
+
+
+@pytest.mark.parametrize("target", [
+    {"source_message_id": 123},
+    {"answer_index": 2},
+    {"source_message_id": 123, "answer_index": 2},
+])
+def test_branch_conversation_service_forwards_selected_answer(target):
+    with patch(
+        "management.services.conversation.service.branch_conversation", return_value={"conversation_id": 42}
+    ) as repo:
+        assert branch_conversation_service(7, 2, "user-1", **target) == {"conversation_id": 42}
+    repo.assert_called_once_with(7, 2, user_id="user-1", **target)
 
 
 if __name__ == '__main__':

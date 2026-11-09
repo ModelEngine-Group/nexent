@@ -226,6 +226,9 @@ class BranchConversationRequest(BaseModel):
     conversation_id: int
     # 1-based Q&A turn (inclusive) that marks the branch point
     turn_index: int
+    # Persisted answer ID, or the runtime's 1-based answer version before reload.
+    source_message_id: Optional[StrictInt] = Field(default=None, gt=0)
+    answer_index: Optional[StrictInt] = Field(default=None, gt=0)
 
 
 class BatchDeleteConversationRequest(BaseModel):

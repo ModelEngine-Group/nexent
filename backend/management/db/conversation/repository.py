@@ -502,50 +502,58 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
-def _select_active_branch_rows(rows: Sequence[ConversationMessage]) -> List[ConversationMessage]:
-    """Collapse rows sharing a message_index to the newest (active) row.
-
-    Refresh flows may re-insert a user row with the same index and regenerated
-    answers append new assistant rows with the index of the previous attempt;
-    in both cases the row with the highest message_id is the active one.
-    """
-    active_by_index: Dict[int, ConversationMessage] = {}
-    for row in rows:
-        active_by_index[int(row.message_index)] = row
-    return [active_by_index[index] for index in sorted(active_by_index)]
-
-
 def _select_branch_turn_rows(
-    active_rows: Sequence[ConversationMessage],
+    rows: Sequence[ConversationMessage],
     turn_index: int,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
 ) -> List[ConversationMessage]:
-    """Return the active rows up to and including the requested turn's answer.
+    """Select one answer per turn, ending at the explicitly selected version.
 
-    ``turn_index`` is 1-based over the active user rows in message_index order.
-    The copied tail keeps rows that follow the boundary user row until the
-    first assistant row (inclusive), so system/tool rows inside the turn and
-    the current answer are carried over while later turns stay behind.
+    Keep regenerated assistant rows until version selection. Collapsing them
+    by message_index first would lose older answers still visible in the UI.
+    Runtime answer ordinals follow the same message_index/message_id ordering
+    as history loading; a persisted ID takes precedence when available.
     """
-    boundary_position = None
-    user_seen = 0
-    for position, row in enumerate(active_rows):
+    latest_users = {
+        int(row.message_index): row
+        for row in rows
+        if row.message_role == MESSAGE_ROLE["USER"]
+    }
+    turns: List[List[ConversationMessage]] = []
+    preamble: List[ConversationMessage] = []
+    for row in rows:
         if row.message_role == MESSAGE_ROLE["USER"]:
-            user_seen += 1
-            if user_seen == turn_index:
-                boundary_position = position
-                break
-    if boundary_position is None:
-        raise ValueError(
-            f"turn_index {turn_index} exceeds the {user_seen} turns in the conversation"
-        )
+            if row is not latest_users[int(row.message_index)]:
+                continue
+            turns.append([row])
+        elif turns:
+            turns[-1].append(row)
+        else:
+            preamble.append(row)
+    if turn_index < 1 or turn_index > len(turns):
+        raise ValueError(f"turn_index {turn_index} exceeds the {len(turns)} turns in the conversation")
 
-    branch_rows = list(active_rows[: boundary_position + 1])
-    for row in active_rows[boundary_position + 1:]:
-        if row.message_role == MESSAGE_ROLE["USER"]:
-            break
-        branch_rows.append(row)
-        if row.message_role == MESSAGE_ROLE["ASSISTANT"]:
-            break
+    branch_rows = list(preamble)
+    for index, turn in enumerate(turns[:turn_index], start=1):
+        answers = [row for row in turn if row.message_role == MESSAGE_ROLE["ASSISTANT"]]
+        selected = answers[-1] if answers else None
+        if index == turn_index:
+            if source_message_id is not None:
+                selected = next(
+                    (row for row in answers if int(row.message_id) == source_message_id), None
+                )
+                if selected is None:
+                    raise ValueError("source_message_id does not identify an answer in the selected turn")
+            elif answer_index is not None:
+                if not 1 <= answer_index <= len(answers):
+                    raise ValueError("answer_index does not identify an answer in the selected turn")
+                selected = answers[answer_index - 1]
+        for row in turn:
+            if row.message_role != MESSAGE_ROLE["ASSISTANT"] or row is selected:
+                branch_rows.append(row)
+            if row is selected:
+                break
     return branch_rows
 
 
@@ -553,6 +561,8 @@ def branch_conversation(
     conversation_id: int,
     turn_index: int,
     user_id: Optional[str] = None,
+    source_message_id: Optional[int] = None,
+    answer_index: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Branch a conversation into a new one up to and including the given turn.
@@ -567,6 +577,8 @@ def branch_conversation(
         conversation_id: Source conversation ID (integer)
         turn_index: 1-based Q&A turn (inclusive) marking the branch point
         user_id: User that must own the source conversation
+        source_message_id: Exact persisted answer to retain in the final turn
+        answer_index: 1-based answer version for messages with runtime-only IDs
 
     Returns:
         Optional[Dict[str, Any]]: New conversation data, or None when the
@@ -604,8 +616,9 @@ def branch_conversation(
             .with_for_update()
         ).all()
 
-        active_rows = _select_active_branch_rows(message_rows)
-        branch_rows = _select_branch_turn_rows(active_rows, turn_index)
+        branch_rows = _select_branch_turn_rows(
+            message_rows, turn_index, source_message_id=source_message_id, answer_index=answer_index
+        )
 
         # The existing user advisory lock serializes numbering for branches
         # created by the same owner. Other users and deleted rows do not count.
