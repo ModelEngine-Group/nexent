@@ -10,7 +10,7 @@ change:
   escaped_stage: D4
   coverage_gap:
     type: missing_assertion
-    description: Existing transport peer asserted exact bodies but did not cover empty sampling omission. Existing UI tests explicitly required sampling defaults.
+    description: Existing transport peer asserted exact bodies but did not cover empty sampling omission. Existing UI tests explicitly required sampling defaults. Reviewer follow-up found missing regressions for manual thinking path ownership and unsent shutdown restrictions.
   feature_contract_changed: true
   traditional_ut:
     decision: strengthen
@@ -22,6 +22,8 @@ change:
     - Legacy null is never sent to the model service.
     - Supported custom models allow thinking toggles unless an explicit preference prohibits disabling.
     - Known provider bindings and explicit user formats retain their request paths.
+    - Saved manual thinking paths survive fallback completion without reserved-path collisions.
+    - Unsent conversation controls retain model shutdown restrictions without writing forbidden draft values.
     test_selectors:
     - test/backend/services/test_model_optional_sampling.py
     - test/backend/services/test_custom_provider_thinking.py
@@ -30,6 +32,7 @@ change:
     - frontend/tests/component/modelSamplingParameters.test.tsx
     - frontend/tests/component/modelOptionalSampling.test.tsx
     - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
   affected_features:
     existing: [F-032, BE-MODEL-OUTLET-PERSISTENCE, SDK-MODEL-PROFILE-CONTRACTS, SDK-MODEL-PROFILE-PARAMETERS]
     modified: [SDK-MODEL-TRANSPORT, SDK-MODEL-PROFILE-COMPOSITION, CHAT-MODEL-CONTROLS]

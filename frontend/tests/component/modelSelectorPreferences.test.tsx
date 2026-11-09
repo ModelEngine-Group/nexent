@@ -84,7 +84,10 @@ beforeEach(() => {
     }
   );
 });
-function setup(conversationId: number | undefined) {
+function setup(
+  conversationId: number | undefined,
+  draftScope = "fresh-thread"
+) {
   return render(
     <QueryClientProvider
       client={
@@ -94,7 +97,7 @@ function setup(conversationId: number | undefined) {
       <App>
         <ModelSelector
           conversationId={conversationId}
-          parameterSettingsScopeKey="fresh-thread"
+          parameterSettingsScopeKey={draftScope}
           defaultOpen
           models={[
             {
@@ -383,3 +386,36 @@ it("AC-010 keeps a confirmed shutdown restriction in the conversation quick cont
   fireEvent.click(screen.getByRole("switch"));
   expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
 });
+
+it.each([false, true, null])(
+  "first-turn controls preserve can_disable=%s without a forbidden draft",
+  async (canDisable) => {
+    saved.defaults.enable_thinking = true;
+    api.getModelOutlet.mockResolvedValue({
+      config_revision: 7,
+      profile: {
+        parameter_values: saved.defaults,
+        capabilities: {
+          reasoning: { status: "supported", can_disable: canDisable },
+        },
+      },
+      field_specs: saved.field_specs,
+    });
+    const scope = `first-turn-restriction-${canDisable}`;
+    setup(undefined, scope);
+    const toggle = screen.getByRole("switch");
+    await waitFor(() => expect(toggle).toBeChecked());
+    if (canDisable === false) {
+      expect(toggle).toBeDisabled();
+      fireEvent.click(toggle);
+      expect(readModelDraft(scope, 42)).toEqual({});
+    } else {
+      await waitFor(() => expect(toggle).toBeEnabled());
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(readModelDraft(scope, 42)).toEqual({ enable_thinking: false })
+      );
+    }
+    expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+  }
+);

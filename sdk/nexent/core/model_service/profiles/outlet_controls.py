@@ -44,8 +44,12 @@ def ensure_outlet_parameter_rules(profile):
     has_toggle = any(rule["key"] == "enable_thinking" for rule in rules)
     has_effort_off = any(rule["key"] == "reasoning_effort" and
                         "none" in rule["schema"].get("enum", []) for rule in rules)
+    # Saved manual parameters retain ownership of the fallback's wire path.
+    has_extra_toggle = any(extra["path"] == "/enable_thinking" or
+                           extra["path"].startswith("/enable_thinking/")
+                           for extra in data["extra_api_parameters"])
     if (profile.provider_key is None and custom_thinking_allowed(reasoning)
-            and not has_toggle and not has_effort_off):
+            and not has_toggle and not has_effort_off and not has_extra_toggle):
         rules.append(custom_thinking_rule())
         controls = reasoning["controls"] or []
         reasoning["controls"] = [{"mode": "toggle", "parameter_key": "enable_thinking", "values": [False, True]},

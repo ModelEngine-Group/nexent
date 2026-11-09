@@ -60,6 +60,40 @@ def test_ac009_legacy_outlet_and_conversation_share_the_same_compatible_binding(
     assert legacy.model_dump() == original
 
 
+@pytest.mark.parametrize("path,value,wire_value", [
+    ("/enable_thinking", False, False),
+    ("/enable_thinking", True, True),
+    ("/enable_thinking/type", "disabled", {"type": "disabled"}),
+])
+def test_legacy_manual_thinking_parameter_survives_fallback_completion(path, value, wire_value):
+    data = make("qwen3.7-max").model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    data["capabilities"]["reasoning"]["controls"] = None
+    data["extra_api_parameters"] = [{"path": path, "value": value}]
+    legacy = make().__class__.model_validate(data)
+    original = legacy.model_dump()
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert normalized.extra_api_parameters == legacy.extra_api_parameters
+    assert not any(r["key"] == "enable_thinking" for r in normalized.parameter_rules)
+    assert ensure_outlet_parameter_rules(normalized) == normalized
+    assert connectivity_request(normalized)[3]["enable_thinking"] == wire_value
+    edited = service.apply_outlet_patch(legacy, ModelOutletPatchRequest(
+        expected_revision=1, parameter_values={"temperature": 0.4}))
+    assert connectivity_request(edited)[3]["enable_thinking"] == wire_value
+    assert legacy.model_dump() == original
+
+
+def test_nonoverlapping_manual_parameter_does_not_suppress_thinking_fallback():
+    data = make("qwen3.7-max").model_dump(mode="json")
+    data["parameter_rules"] = [r for r in data["parameter_rules"] if r["key"] != "enable_thinking"]
+    data["capabilities"]["reasoning"]["controls"] = None
+    data["extra_api_parameters"] = [{"path": "/enable_thinking_extra", "value": False}]
+    legacy = make().__class__.model_validate(data)
+    normalized = ensure_outlet_parameter_rules(legacy)
+    assert any(r["key"] == "enable_thinking" for r in normalized.parameter_rules)
+    assert connectivity_request(normalized)[3]["enable_thinking_extra"] is False
+
+
 def test_ac010_legacy_limitation_uses_only_the_explicit_shutdown_preference():
     data = make("glm-5.3").model_dump(mode="json")
     data["capabilities"]["reasoning"].pop("can_disable")
