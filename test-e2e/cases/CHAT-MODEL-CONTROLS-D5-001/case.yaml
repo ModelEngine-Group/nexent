@@ -24,11 +24,11 @@ case:
     expected: No row changes on repetition.
   - order: 3
     action: Supply historical settings without a model identity and attempt the upgrade.
-    expected: Upgrade fails explicitly and leaves all original settings unchanged rather than assigning them to an arbitrary model.
+    expected: Upgrade succeeds, discards only unassigned historical model preferences, retains resources and requested output tokens, and preserves resolvable and ordinary rows.
   expected_results:
   - Exact converted values, root selection, mounts and message fixtures survive without two editable parameter stores.
   - Repeated migration is idempotent including audit and revision fields.
-  - Missing identity does not discard historical configuration.
+  - Missing identity discards only historical model preferences as explicitly approved; unrelated configuration survives.
   forbidden_side_effects:
   - No production database, provider request or credential in evidence.
   - No modification of published Agents, existing messages or unrelated resources.
@@ -37,7 +37,7 @@ case:
   condition: [Actual PostgreSQL with representative historical Workbench settings]
   metrics: [Value mismatch count, Unrelated-state mismatch count, Repeat-update count]
   thresholds: [All mismatch counts are zero, Repeat-update count is zero]
-  recovery_expectations: [Ambiguous identity fails without mutating the historical settings]
+  recovery_expectations: [Ambiguous identity does not block upgrade; unrelated state remains intact]
   acceptance:
   - id: AC-01
     description: Historical settings convert exactly without changing unrelated state.
@@ -45,7 +45,7 @@ case:
     expected_results: [1]
     forbidden_side_effects: [1, 2]
   - id: AC-02
-    description: Repetition is idempotent and ambiguous identity cannot cause data loss.
+    description: Repetition is idempotent and missing identity clears only model preferences without blocking upgrade.
     steps: [2, 3]
     expected_results: [2, 3]
     forbidden_side_effects: [1, 2]

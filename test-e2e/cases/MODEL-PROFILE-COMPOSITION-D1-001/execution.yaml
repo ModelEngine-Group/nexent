@@ -8,6 +8,7 @@ implementations:
   - mock
 acceptance_bindings:
   AC-01:
+  - test_explicit_shutdown_preferences_do_not_mutate_source_inventory
   - test_complete_supplemented_policy_and_source_trace
   - test_experience_layers_follow_source_baseline
   AC-02:

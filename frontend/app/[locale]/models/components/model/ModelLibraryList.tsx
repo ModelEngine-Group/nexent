@@ -36,7 +36,6 @@ import { cn } from "@/lib/utils";
 import { MODEL_SOURCES } from "@/const/modelConfig";
 import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
 import { Can } from "@/components/permission/Can";
-import { ModelMigrationBadge } from "./ModelMigrationBadge";
 import {
   STATUS_DOT_CLASS,
   TYPE_BADGE_CLASS,
@@ -393,7 +392,6 @@ function ModelRow({
             <span className="truncate font-medium text-foreground">
               {model.displayName || model.name}
             </span>
-            <ModelMigrationBadge model={model} />
             {isDefault && (
               <Badge
                 variant="secondary"
