@@ -99,8 +99,10 @@ def main():
             cloned = export_agent(config, state["agent_id"])
             clone = cloned["agent_info"][str(state["agent_id"])]
             assert clone["agent_core"] == "jiuwen", "Owned target must use Jiuwen"
-            for key in ["model_ids", "prompt", "skill_names"]:
+            for key in ["model_ids", "prompt"]:
                 assert clone[key] == entry[key], "Clone mismatch: " + key
+            # Skill bindings have no priority order; retain exact membership and duplicate checks.
+            assert sorted(clone["skill_names"]) == sorted(entry["skill_names"]), "Clone mismatch: skill_names"
             left = [{k: v for k, v in t.items() if k != "agent_id"} for t in entry["tools"]]
             right = [{k: v for k, v in t.items() if k != "agent_id"} for t in clone["tools"]]
             assert sorted(left, key=str) == sorted(right, key=str), "Clone tool mismatch"
