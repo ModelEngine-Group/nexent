@@ -196,11 +196,12 @@ sys.modules["ext_components.aidp.services.aidp_service"] = _aidp_service_stub
 
 _db_pkg = _register_package("database")
 _db_client_module = MagicMock()
-sys.modules["infrastructure.database.client"] = _db_client_module
+sys.modules["infrastructure.rdb.client"] = _db_client_module
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()
@@ -275,11 +276,12 @@ def service_module(monkeypatch):
     # service module reads at call time.
     db_client_mock = MagicMock()
     db_client_mock.get_db_session = MagicMock(return_value=_SessionCtx())
-    sys.modules["infrastructure.database.client"] = db_client_mock
+    sys.modules["infrastructure.rdb.client"] = db_client_mock
+    sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     _db_pkg.client = db_client_mock
 
     from management.services.evaluation import sets as evaluation_set_service

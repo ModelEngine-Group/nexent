@@ -31,7 +31,7 @@ import importlib
 import sys
 importlib.import_module('contracts.constants.constants')
 assert 'contracts.constants.environment' not in sys.modules
-assert 'infrastructure.database.client' not in sys.modules
+assert 'infrastructure.rdb.client' not in sys.modules
 assert 'nexent.core.models.capacity_resolver' not in sys.modules
 """
     environment = os.environ.copy()

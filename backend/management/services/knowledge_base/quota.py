@@ -77,7 +77,7 @@ class QuotaService(
 
     def get_kb_soft_quota(self, knowledge_id: int) -> Optional[int]:
         """Get per-KB soft quota in bytes. Returns None if not set."""
-        from infrastructure.database.client import get_db_session
+        from infrastructure.rdb.client import get_db_session
         from management.db.models import KnowledgeRecord
 
         with get_db_session() as session:

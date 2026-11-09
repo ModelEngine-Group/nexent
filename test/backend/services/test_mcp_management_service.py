@@ -23,14 +23,16 @@ db_client_mock.as_dict = MagicMock()
 db_client_mock.filter_property = MagicMock()
 db_client_mock.MinioClient = MagicMock()
 
-sys.modules['infrastructure.database.client'] = db_client_mock
+sys.modules['infrastructure.rdb.client'] = db_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-sys.modules['infrastructure.database.client'] = db_client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = db_client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock database submodules
 sys.modules['management.db.mcp.market'] = MagicMock()

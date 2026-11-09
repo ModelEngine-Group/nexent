@@ -61,7 +61,7 @@ sys.modules["management.db.tag.repository"] = _tag_management_db_mock
 # repository_import_precheck → skill_service, which depends on these modules.
 sys.modules.setdefault("management.db.skill.repository", MagicMock())
 sys.modules.setdefault("management.db.identity.group", MagicMock())
-sys.modules.setdefault("infrastructure.database.client", MagicMock())
+sys.modules.setdefault("infrastructure.rdb.client", MagicMock())
 sys.modules.setdefault("management.db.knowledge_base.repository", MagicMock())
 sys.modules.setdefault("management.db.model.repository", MagicMock())
 sys.modules.setdefault("management.db.mcp.remote", MagicMock())

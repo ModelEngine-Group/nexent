@@ -69,7 +69,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.engine import URL
     from sqlalchemy.orm import sessionmaker
-    from infrastructure.database.client import db_client
+    from infrastructure.rdb.client import db_client
     from management.db import models
     from management.services.permission.identity import northbound as northbound_auth
 
@@ -267,7 +267,7 @@ def test_all_inactive_email_reuse_creates_no_accounts(target):
 def test_banned_account_excluded_with_original_active_association_and_su_preflight(target, monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from infrastructure.database.client import db_client
+    from infrastructure.rdb.client import db_client
     from management.cli.account import bootstrap_super_admin
 
     old, new = historical_user(), historical_user()

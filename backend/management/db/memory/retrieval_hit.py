@@ -15,8 +15,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import Integer, func
 
-from infrastructure.database.orm import filter_property
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import MemoryRetrievalHit
 
 

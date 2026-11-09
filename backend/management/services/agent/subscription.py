@@ -85,7 +85,7 @@ from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
-from infrastructure.streaming.run_state import (
+from infrastructure.redis.run_state import (
     runtime_state_service,
 )
 from infrastructure.streaming.channels import (

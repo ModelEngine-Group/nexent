@@ -11,11 +11,11 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
-# Mock consts module before patching infrastructure.database.client to avoid ImportError
-# infrastructure.database.client imports from contracts.constants.environment, so we need to mock it first
+# Mock consts module before patching infrastructure.rdb.client to avoid ImportError
+# infrastructure.rdb.client imports from contracts.constants.environment, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that infrastructure.database.client might use
+# Set required constants that infrastructure.rdb.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -52,7 +52,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 from management.services.knowledge_base.summary import merge_cluster_summaries
 

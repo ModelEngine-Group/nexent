@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 # MOCK external dependencies BEFORE importing modules under test
 # =============================================================================
 
-# Mock psycopg2 before infrastructure.database.client is imported
+# Mock psycopg2 before infrastructure.rdb.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -282,15 +282,10 @@ setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 import importlib
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_client_module = importlib.import_module('infrastructure.database.client')
-sys.modules['infrastructure.database.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('infrastructure.rdb.client')
+sys.modules['infrastructure.rdb.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-
-# Mock MinioClient after loading the module
-minio_client_mock = MagicMock()
-with patch.object(backend_database_client_module, 'MinioClient', minio_client_mock):
-    pass
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # =============================================================================
 # Import modules under test

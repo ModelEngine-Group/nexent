@@ -19,7 +19,8 @@ for _key, _value in _secret_env.items():
     os.environ.setdefault(_key, _value)
 
 from contracts.constants.constants import CONFIG_SERVICE_NAME
-from infrastructure.database.client import get_db_session, minio_client
+from infrastructure.rdb.client import get_db_session
+from infrastructure.object_storage.client import minio_client
 from management.db.models import KnowledgeFileLifecycle
 from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record, get_file_record, list_uploading_files_created_before
 from management import recovery as startup_recovery_service

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
-from infrastructure.database.client import minio_client
+from infrastructure.object_storage.client import minio_client
 from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote

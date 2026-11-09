@@ -38,8 +38,8 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
-patch('infrastructure.database.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 

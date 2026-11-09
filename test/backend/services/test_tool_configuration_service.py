@@ -192,7 +192,7 @@ def _create_package_mock(name):
 nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
 
-# Mock psycopg2 before infrastructure.database.client is imported
+# Mock psycopg2 before infrastructure.rdb.client is imported
 psycopg2_mock = MagicMock()
 sys.modules['psycopg2'] = psycopg2_mock
 sys.modules['psycopg2.pool'] = MagicMock()
@@ -483,10 +483,11 @@ import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 backend_database_client_module = importlib.import_module(
-    'infrastructure.database.client')
-sys.modules['infrastructure.database.client'] = backend_database_client_module
+    'infrastructure.rdb.client')
+sys.modules['infrastructure.rdb.client'] = backend_database_client_module
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 backend_services_module = importlib.import_module(
     'management.services.tool.configuration')
 # Ensure services package can resolve tool_configuration_service for patching
@@ -587,7 +588,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('infrastructure.database.client.MinioClient',
+patch('infrastructure.object_storage.client.MinioClient',
       return_value=minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 

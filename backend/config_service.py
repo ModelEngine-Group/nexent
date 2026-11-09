@@ -7,6 +7,10 @@ import warnings
 
 import uvicorn
 
+from _repository_path import add_repository_root
+
+add_repository_root()
+
 from contracts.constants.environment import APP_VERSION
 
 

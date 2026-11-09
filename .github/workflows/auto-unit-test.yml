@@ -30,6 +30,7 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
+      - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/common/**'
       - 'deploy/tests/**'
@@ -42,6 +43,7 @@ on:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
       - 'backend/**'
+      - 'infrastructure/**'
       - 'sdk/**'
       - 'deploy/common/**'
       - 'deploy/tests/**'

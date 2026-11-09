@@ -247,20 +247,22 @@ sys.modules["management.db.models"] = MagicMock()
 sys.modules["management.db.conversation.repository"] = MagicMock()
 sys.modules["management.db.models"] = MagicMock()
 
-# Stub infrastructure.database.client early so real DB modules are not loaded during import
+# Stub infrastructure.rdb.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
 _mock_db_client.as_dict = MagicMock()
 _mock_db_client.MinioClient = MagicMock()
 _mock_db_client.db_client = MagicMock()
-sys.modules["infrastructure.database.client"] = _mock_db_client
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-sys.modules["infrastructure.database.client"] = _mock_db_client
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = _mock_db_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -274,7 +276,7 @@ tag_management_service_module.TagManagementService = MagicMock()
 sys.modules["management.services.tag.library"] = tag_management_service_module
 setattr(services_module, "tag_management_service", tag_management_service_module)
 
-runtime_state_service_module = types.ModuleType("infrastructure.streaming.run_state")
+runtime_state_service_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_service_mock = MagicMock()
 runtime_state_service_mock.enabled = False
 runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
@@ -284,7 +286,7 @@ runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value
 runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
 runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
 runtime_state_service_module.runtime_state_service = runtime_state_service_mock
-sys.modules["infrastructure.streaming.run_state"] = runtime_state_service_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
@@ -492,7 +494,7 @@ def mock_convert_list_to_string(items):
     from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
-    from infrastructure.database import client as db_client_module
+    from infrastructure.rdb import client as db_client_module
 
     db_client_module.db_client = mock_postgres_client
 
@@ -644,9 +646,10 @@ mock_backend_database_client.PostgresClient = MagicMock(
 mock_backend_database_client.get_db_session = mock_get_db_session
 mock_backend_database_client.MinioClient = MagicMock(return_value=minio_client_mock)
 mock_backend_database_client.db_client = mock_postgres_client
-sys.modules["infrastructure.database.client"] = mock_backend_database_client
+sys.modules["infrastructure.rdb.client"] = mock_backend_database_client
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock storage client factory
 sys.modules[

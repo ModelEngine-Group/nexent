@@ -18,8 +18,8 @@ from contracts.errors.exceptions import AppException, ConversationNotFoundError,
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import db_client, get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.models import (
     ConversationMessage,
     ConversationMessageUnit,

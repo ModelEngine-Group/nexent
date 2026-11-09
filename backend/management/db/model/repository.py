@@ -7,8 +7,8 @@ from sqlalchemy import and_, desc, func, insert, select, update
 
 from contracts.constants.constants import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
 from contracts.model import filter_extra_params
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import db_client, get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import db_client, get_db_session
 from management.db.models import ModelRecord
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 

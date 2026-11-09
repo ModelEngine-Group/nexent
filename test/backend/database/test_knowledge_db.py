@@ -54,7 +54,7 @@ minio_config_mock.validate = MagicMock()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock), \
+with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from management.db.knowledge_base.repository import _lock_and_check_knowledge_name, create_knowledge_record, update_knowledge_record, delete_knowledge_record, get_knowledge_record, get_knowledge_info_by_knowledge_ids, get_knowledge_ids_by_index_names, get_knowledge_info_by_tenant_id, update_model_name_by_index_name, get_index_name_by_knowledge_name, get_knowledge_info_by_tenant_and_source, get_knowledge_info_by_ids_and_tenant, upsert_knowledge_record, _generate_index_name, get_knowledge_name_map_by_index_names, update_summary_frequency, update_last_summary_time, update_last_doc_update_time, get_knowledge_bases_for_auto_summary
 
@@ -96,11 +96,12 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['infrastructure.database.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock utils module
 utils_mock = MagicMock()

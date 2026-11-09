@@ -23,7 +23,7 @@ def _inspect(container):
 @contextmanager
 def configured_product_storage():
     """Resolve the test host endpoint; never assume container DNS works on host."""
-    from infrastructure.database import client as product
+    from infrastructure.object_storage import client as product
     required = ('MINIO_ENDPOINT','MINIO_ACCESS_KEY','MINIO_SECRET_KEY','MINIO_DEFAULT_BUCKET')
     values = {key: os.environ.get(key, '') for key in (*required, 'MINIO_REGION')}
     if not all(values[key] for key in required):

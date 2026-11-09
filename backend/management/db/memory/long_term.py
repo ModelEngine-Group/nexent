@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
 
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import MemoryLongTermVersion
 
 

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from infrastructure.database.orm import filter_property, as_dict
+from infrastructure.rdb.orm import filter_property, as_dict
 from contracts.tool import ToolSourceEnum
 from contracts.constants.constants import BUILTIN_LABEL_MAP
 import json
@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 from contracts.tool import ToolSourceEnum
 from contracts.constants.constants import BUILTIN_LABEL_MAP
-from infrastructure.database.orm import as_dict, filter_property
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ToolInfo, ToolInstance
 from management.services.tool.catalog import get_local_tools_description_zh
 

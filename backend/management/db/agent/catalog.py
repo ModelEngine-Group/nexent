@@ -6,8 +6,8 @@ from sqlalchemy import and_, case, false, func, or_, true, update
 
 from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
-from infrastructure.database.orm import as_dict, filter_property
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict, filter_property
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentInfo, AgentRepository, AgentVersion
 from management.db.identity.group import query_group_ids_by_user
 

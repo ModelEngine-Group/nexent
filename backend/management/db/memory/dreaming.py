@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from sqlalchemy import func, text
 
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import (
     MemoryDreamingAudit,
     MemoryDreamingDecision,

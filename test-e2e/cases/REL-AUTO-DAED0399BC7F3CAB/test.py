@@ -31,7 +31,7 @@ def _apply_db_environment():
 _apply_db_environment()
 
 from management.db.evaluation.runs import reap_stale_runs
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, AgentEvaluationCase
 
 

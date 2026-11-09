@@ -26,7 +26,7 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from infrastructure.concurrency import runtime_thread_manager
-from infrastructure.streaming.run_state import runtime_state_service
+from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 

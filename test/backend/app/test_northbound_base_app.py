@@ -231,9 +231,9 @@ thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
 thread_lifecycle_module.config_thread_manager = _NorthboundThreadManager()
 sys.modules["infrastructure.concurrency"] = thread_lifecycle_module
 
-runtime_state_module = types.ModuleType("infrastructure.streaming.run_state")
+runtime_state_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_module.runtime_state_service = MagicMock()
-sys.modules["infrastructure.streaming.run_state"] = runtime_state_module
+sys.modules["infrastructure.redis.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app

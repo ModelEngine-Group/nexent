@@ -20,13 +20,12 @@ from typing import Any, Optional
 from contracts.constants.constants import DATAMATE_URL
 from contracts.constants.environment import ES_API_KEY, ES_HOST
 from contracts.knowledge import VectorDatabaseType
+from infrastructure.vdb.client import create_datamate_core, create_elasticsearch_core
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.model.resolver import (
     get_embedding_model_by_id,
 )
 from nexent.vector_database.base import VectorDatabaseCore
-from nexent.vector_database.datamate_core import DataMateCore
-from nexent.vector_database.elasticsearch_core import ElasticSearchCore
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.configuration.tenant.settings import tenant_config_manager
 
@@ -206,12 +205,7 @@ def get_vector_db_core(
         ValueError: If the requested database type is not supported.
     """
     if db_type == VectorDatabaseType.ELASTICSEARCH:
-        return ElasticSearchCore(
-            host=ES_HOST,
-            api_key=ES_API_KEY,
-            verify_certs=False,
-            ssl_show_warn=False,
-        )
+        return create_elasticsearch_core(host=ES_HOST, api_key=ES_API_KEY)
 
     if db_type == VectorDatabaseType.DATAMATE:
         if tenant_id:
@@ -220,7 +214,7 @@ def get_vector_db_core(
             )
             if not datamate_url:
                 raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
-            return DataMateCore(base_url=datamate_url)
+            return create_datamate_core(base_url=datamate_url)
         else:
             raise ValueError("tenant_id must be provided for DataMate")
 

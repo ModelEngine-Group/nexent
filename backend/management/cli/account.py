@@ -10,7 +10,7 @@ from contracts.errors.exceptions import AccountConflictError
 
 
 def bootstrap_super_admin(email: str, password: str, *, check_only=False):
-    from infrastructure.database.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.account import (
         create_account,
         get_account_by_email,

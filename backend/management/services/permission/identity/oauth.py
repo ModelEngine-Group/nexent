@@ -369,7 +369,7 @@ async def complete_pending_oauth_account(
 
     from management.db.identity.account import create_account
     from infrastructure.security.passwords import hash_password
-    from infrastructure.database.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.services.permission.identity.authentication import validate_password_strength
 
     if not validate_password_strength(password):

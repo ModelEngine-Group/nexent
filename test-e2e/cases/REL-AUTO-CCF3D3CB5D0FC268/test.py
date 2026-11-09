@@ -9,7 +9,7 @@ import pytest
 
 from contracts.evaluation import EvalRunStatus
 from management.db.evaluation.runs import claim_agent_evaluation_run, list_dispatchable_pending_runs
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation
 from management.services.evaluation import maintenance as evaluation_maintenance
 from management.services.agent import runtime_client as runtime_proxy_service

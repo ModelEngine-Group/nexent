@@ -275,7 +275,7 @@ services:
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
-      PYTHONPATH: "/opt/backend"
+      PYTHONPATH: "/opt:/opt/backend"
       skip_proxy: "true"
     env_file:
       - ../../env/.env

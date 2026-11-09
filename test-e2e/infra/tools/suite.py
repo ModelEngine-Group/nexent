@@ -205,7 +205,7 @@ def worker(repo, home, record, directory, settings):
     # Keep all descendants in the worker group so the controller can terminate it.
     run_logged = partial(logged, new_session=False)
     automation = repo / "test-e2e/infra/automation"
-    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
+    env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
     bind_result_directory(env, directory)
     if (home / "runtime/playwright-browsers").is_dir():
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "runtime/playwright-browsers")

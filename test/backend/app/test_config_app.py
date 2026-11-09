@@ -240,7 +240,7 @@ class TestConfigAppRouterConfiguration:
         )
 
         runtime_state = MagicMock()
-        monkeypatch.setitem(sys.modules, "infrastructure.streaming.run_state",
+        monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
                             types.SimpleNamespace(runtime_state_service=runtime_state))
         component_path = Path(backend_dir) / "management/api/northbound_application.py"
         component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)

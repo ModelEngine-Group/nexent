@@ -45,7 +45,7 @@ sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
 # Patch storage client factory before imports
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.database.client.MinioClient', return_value=MagicMock()).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=MagicMock()).start()
 
 # Mock database functions before importing the service
 patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()

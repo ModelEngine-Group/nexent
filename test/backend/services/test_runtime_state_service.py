@@ -3,8 +3,8 @@ import asyncio
 
 import pytest
 
-from infrastructure.streaming import run_state as runtime_state_module
-from infrastructure.streaming.run_state import RuntimeStateService
+from infrastructure.redis import run_state as runtime_state_module
+from infrastructure.redis.run_state import RuntimeStateService
 
 
 class FakeRedisClient:

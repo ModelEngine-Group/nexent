@@ -8,7 +8,7 @@ from types import ModuleType
 
 def install_serialization_stub(client_module):
     """Reuse configured helper doubles at their canonical utility lookup site."""
-    module = ModuleType("infrastructure.database.orm")
+    module = ModuleType("infrastructure.rdb.orm")
     for name in ("as_dict", "filter_property"):
         if hasattr(client_module, name):
             setattr(module, name, getattr(client_module, name))

@@ -4,7 +4,7 @@ Gateway listens on 5013 and handles both ordinary backend forwarding to Manageme
 
 ## Authentication and source boundary
 
-External session JWTs and API keys are verified in Gateway. `security/credentials.py` parses credentials and enforces their purpose; `security/database_provider.py` applies identity policy to a snapshot read by `infrastructure/database/identity.py`. The default provider queries PostgreSQL directly and never falls back to Management HTTP lookup. The older signed Management identity endpoint remains for explicit compatibility callers and regression tests.
+External session JWTs and API keys are verified in Gateway. `security/credentials.py` parses credentials and enforces their purpose; `security/database_provider.py` applies identity policy to a snapshot read by `infrastructure/rdb/identity.py`. The default provider queries PostgreSQL directly and never falls back to Management HTTP lookup. The older signed Management identity endpoint remains for explicit compatibility callers and regression tests.
 
 The repository selects only user identity, canonical account role/email, token version, active membership, API-key ownership and CAS status/expiry/ownership. Existing SU and ASSET_OWNER session defaults are preserved. Membership selection preserves the established first-active-relation behavior, ordered by its primary key. Missing or ambiguous accounts and revoked credentials fail before business execution. Database faults return a sanitized503; invalid credentials return401. Logout keeps its idempotent anonymous failure behavior. MCP credential delegation uses the same database provider.
 

@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, ValidationError
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.identity.account import create_account
 from management.db.identity.group import add_user_to_group, query_groups
 from management.db.identity.token import create_token, generate_access_key, list_active_tokens_by_tenant, soft_delete_tokens_by_user

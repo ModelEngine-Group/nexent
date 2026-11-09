@@ -107,7 +107,7 @@ def _fetch_knowledge_bases(
     if not kb_index_names:
         return []
     try:
-        from infrastructure.database.client import get_db_session
+        from infrastructure.rdb.client import get_db_session
         from management.db.models import KnowledgeRecord
         from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 

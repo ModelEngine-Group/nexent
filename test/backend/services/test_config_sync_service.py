@@ -30,18 +30,19 @@ minio_config_mock.validate = MagicMock()
 if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
     sys.modules.pop('consts', None)
 
-database_client_module = types.ModuleType('infrastructure.database.client')
+database_client_module = types.ModuleType('infrastructure.rdb.client')
 database_client_module.MinioClient = MagicMock()
 database_client_module.minio_client = minio_client_mock
 database_client_module.as_dict = MagicMock(side_effect=lambda value: value)
 database_client_module.db_client = MagicMock()
 database_client_module.db_client.clean_string_values = MagicMock(side_effect=lambda value: value)
 database_client_module.get_db_session = MagicMock()
-sys.modules['infrastructure.database.client'] = database_client_module
+sys.modules['infrastructure.rdb.client'] = database_client_module
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 database_package = importlib.import_module('management.db')
 setattr(database_package, 'client', database_client_module)
 database_model_management_module = types.ModuleType('management.db.model.repository')
@@ -49,7 +50,7 @@ database_model_management_module.get_model_by_model_id = MagicMock()
 database_model_management_module.get_model_id_by_display_name = MagicMock()
 database_model_management_module.get_model_records = MagicMock(return_value=[])
 sys.modules['management.db.model.repository'] = database_model_management_module
-backend_database_client_module = sys.modules.get('infrastructure.database.client')
+backend_database_client_module = sys.modules.get('infrastructure.rdb.client')
 if backend_database_client_module is not None and not hasattr(backend_database_client_module, 'minio_client'):
     backend_database_client_module.minio_client = minio_client_mock
 
@@ -57,15 +58,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig',
       return_value=minio_config_mock).start()
-patch('infrastructure.database.client.MinioClient',
+patch('infrastructure.object_storage.client.MinioClient',
       return_value=minio_client_mock).start()
-patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock).start()
-patch('infrastructure.database.client.minio_client', minio_client_mock, create=True).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_client_mock, create=True).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import backend modules after all patches are applied
 # Use additional context manager to ensure MinioClient is properly mocked during import
-with patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock), \
+with patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
     from management.services.configuration.tenant.service import (
         handle_model_config,

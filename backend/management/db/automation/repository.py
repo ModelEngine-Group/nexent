@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, func, insert, select, text, update
 
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
 

@@ -21,8 +21,8 @@ import pytest
 # CRITICAL: Set up mocks BEFORE any imports to prevent side effects
 # This must be done before importing management.services.model.provider
 # to avoid triggering MinioClient initialization during test collection.
-# The mock for infrastructure.database.client MUST be set up BEFORE any import that might
-# trigger the import chain leading to infrastructure.database.client.MiniClient() being called.
+# The mock for infrastructure.rdb.client MUST be set up BEFORE any import that might
+# trigger the import chain leading to infrastructure.object_storage.client.MiniClient() being called.
 # ============================================================================
 
 # First, mock the SDK modules that have side effects at import time
@@ -39,7 +39,7 @@ for module_path in sdk_modules_to_mock:
 
 # Create a mock MinioStorageClient class that returns itself when instantiated
 # This is CRITICAL to prevent _ensure_bucket_exists from being called
-# during import of infrastructure.database.client.MiniClient
+# during import of infrastructure.object_storage.client.MiniClient
 
 
 class MockMinioStorageClient(mock.MagicMock):
@@ -59,7 +59,7 @@ class MockMinioStorageClient(mock.MagicMock):
 
 
 # Set the mock class in the module BEFORE any imports that might trigger
-# infrastructure.database.client.MiniClient() instantiation
+# infrastructure.object_storage.client.MiniClient() instantiation
 sys.modules["nexent.storage.minio"].MinioStorageClient = MockMinioStorageClient
 
 # Also mock the storage client factory function BEFORE import
@@ -74,16 +74,16 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
 )
 
 # ============================================================================
-# CRITICAL: Mock infrastructure.database.client module BEFORE any import that might trigger it
-# The problem is that when infrastructure.database.client is imported, it immediately runs
+# CRITICAL: Mock infrastructure.rdb.client module BEFORE any import that might trigger it
+# The problem is that when infrastructure.rdb.client is imported, it immediately runs
 # `minio_client = MinioClient()` which tries to connect to MinIO.
 #
 # To fix this, we need to:
 # 1. Create a mock MinioClient class that returns itself when instantiated
-# 2. Replace MinioClient in the infrastructure.database.client module namespace
+# 2. Replace MinioClient in the infrastructure.rdb.client module namespace
 # 3. Replace minio_client instance with a mock
 #
-# This must happen BEFORE infrastructure.database.client is imported by any module.
+# This must happen BEFORE infrastructure.rdb.client is imported by any module.
 # ============================================================================
 
 # Create mock MinioClient class that returns itself to prevent singleton instantiation
@@ -107,19 +107,20 @@ class MockMinioClientClass(mock.MagicMock):
 # Create mock instance that will be used as minio_client
 mock_minio_client_instance = MockMinioClientClass()
 
-# Pre-create the infrastructure.database.client mock module and set it in sys.modules
-# BEFORE any import can trigger the real infrastructure.database.client import
+# Pre-create the infrastructure.rdb.client mock module and set it in sys.modules
+# BEFORE any import can trigger the real infrastructure.rdb.client import
 mock_database_client_module = mock.MagicMock()
 mock_database_client_module.MinioClient = MockMinioClientClass
 mock_database_client_module.minio_client = mock_minio_client_instance
 mock_database_client_module.as_dict = mock.MagicMock()
 mock_database_client_module.db_client = mock.MagicMock()
 mock_database_client_module.get_db_session = mock.MagicMock()
-sys.modules["infrastructure.database.client"] = mock_database_client_module
+sys.modules["infrastructure.rdb.client"] = mock_database_client_module
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Also mock the database package and model_management_db module
 mock_database_module = mock.MagicMock()

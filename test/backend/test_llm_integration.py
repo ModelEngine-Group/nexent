@@ -13,26 +13,28 @@ from unittest.mock import patch, MagicMock
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 
-# Mock infrastructure.database.client and MinioClient before any imports to avoid MinIO initialization
+# Mock infrastructure.rdb.client and MinioClient before any imports to avoid MinIO initialization
 class _MinioClient:
     pass
 
-if "infrastructure.database.client" not in sys.modules:
-    database_client_mod = types.ModuleType("infrastructure.database.client")
+if "infrastructure.rdb.client" not in sys.modules:
+    database_client_mod = types.ModuleType("infrastructure.rdb.client")
     database_client_mod.MinioClient = _MinioClient
-    sys.modules["infrastructure.database.client"] = database_client_mod
+    sys.modules["infrastructure.rdb.client"] = database_client_mod
+    sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
-# Mock infrastructure.database.client as well
-if "infrastructure.database.client" not in sys.modules:
-    backend_db_client_mod = types.ModuleType("infrastructure.database.client")
+# Mock infrastructure.rdb.client as well
+if "infrastructure.rdb.client" not in sys.modules:
+    backend_db_client_mod = types.ModuleType("infrastructure.rdb.client")
     backend_db_client_mod.MinioClient = _MinioClient
-    sys.modules["infrastructure.database.client"] = backend_db_client_mod
+    sys.modules["infrastructure.rdb.client"] = backend_db_client_mod
+    sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Ensure database module exists as a package (needs __path__ attribute)
 if "database" not in sys.modules:

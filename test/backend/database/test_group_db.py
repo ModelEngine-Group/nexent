@@ -68,14 +68,16 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['infrastructure.database.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-sys.modules['infrastructure.database.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()

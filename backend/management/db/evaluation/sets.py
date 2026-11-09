@@ -7,8 +7,8 @@ from sqlalchemy import or_
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase
 
 

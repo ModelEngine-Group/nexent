@@ -77,19 +77,21 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
             for module in modules:
                 assert module and module.split(".")[0] in allowed, (path, module)
                 if module.startswith("infrastructure"):
-                    assert module == "infrastructure.database.identity" or module.startswith("infrastructure.security."), (path, module)
+                    assert module == "infrastructure.rdb.identity" or module.startswith("infrastructure.security."), (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 
 
 def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_path):
-    shutil.copytree(BACKEND / "gateway", tmp_path / "gateway", ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy2(BACKEND / "gateway_service.py", tmp_path)
+    shutil.copytree(BACKEND / "gateway", tmp_path / "backend/gateway", ignore=shutil.ignore_patterns("__pycache__"))
+    backend = tmp_path / "backend"
+    for file in ("gateway_service.py", "_repository_path.py"):
+        shutil.copy2(BACKEND / file, backend / file)
     infrastructure = tmp_path / "infrastructure"
-    (infrastructure / "database").mkdir(parents=True)
-    for file in ("__init__.py", "database/__init__.py", "database/identity.py"):
-        shutil.copy2(BACKEND / "infrastructure" / file, infrastructure / file)
-    shutil.copytree(BACKEND / "infrastructure/security", infrastructure / "security",
+    (infrastructure / "rdb").mkdir(parents=True)
+    for file in ("__init__.py", "rdb/__init__.py", "rdb/identity.py"):
+        shutil.copy2(BACKEND.parent / "infrastructure" / file, infrastructure / file)
+    shutil.copytree(BACKEND.parent / "infrastructure/security", infrastructure / "security",
                     ignore=shutil.ignore_patterns("__pycache__"))
     code = """import json,sys
 sys.path.insert(0, sys.argv[1])
@@ -97,12 +99,12 @@ import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
-assert not {'management','runtime','contracts','infrastructure.database.client','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
+assert not {'management','runtime','contracts','infrastructure.rdb.client','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
 print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()
     env["MAX_KNOWLEDGE_FILE_SIZE_MB"] = "invalid-business-setting"
-    result = subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path)], cwd=tmp_path,
+    result = subprocess.run([sys.executable, "-I", "-c", code, str(backend)], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["imported"] is True

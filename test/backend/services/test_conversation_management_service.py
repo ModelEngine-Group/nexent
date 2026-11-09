@@ -12,7 +12,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-# Note: infrastructure.database.client.MinioClient patch is handled later with full module stubs
+# Note: infrastructure.object_storage.client.MinioClient patch is handled later with full module stubs
 # Skipping the direct patch here since we stub the entire backend.database module
 
 # Mock boto3 before any imports
@@ -134,8 +134,8 @@ class HistoryItem:
 
 consts_model_mod.HistoryItem = HistoryItem
 
-# Stub infrastructure.database.client to avoid import-time DB helpers
-db_client_stub = types.ModuleType("infrastructure.database.client")
+# Stub infrastructure.rdb.client to avoid import-time DB helpers
+db_client_stub = types.ModuleType("infrastructure.rdb.client")
 db_client_stub.as_dict = lambda obj: {}
 
 # Minimal dummy db_client with clean_string_values and session_maker to satisfy imports.
@@ -160,11 +160,12 @@ class _DummySessionCM:
         return False
 
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
-sys.modules["infrastructure.database.client"] = db_client_stub
+sys.modules["infrastructure.rdb.client"] = db_client_stub
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Stub management.services.agent.prompt to avoid requiring PyYAML
 prompt_mod = types.ModuleType("management.services.agent.prompt")
@@ -182,15 +183,16 @@ class _DummyMinIOStorageConfig:
 minio_config_mod.MinIOStorageConfig = _DummyMinIOStorageConfig
 sys.modules["nexent.storage.minio_config"] = minio_config_mod
 
-# Stub backend.database module so patch can find infrastructure.database.client
+# Stub backend.database module so patch can find infrastructure.rdb.client
 backend_database_mod = types.ModuleType("backend.database")
 
-# Create infrastructure.database.client stub
+# Create infrastructure.rdb.client stub
 backend_database_client_mod = db_client_stub
 backend_database_client_mod.MinioClient = lambda *a, **k: minio_client_mock
-sys.modules["infrastructure.database.client"] = backend_database_client_mod
+sys.modules["infrastructure.rdb.client"] = backend_database_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 # Add 'client' attribute to backend.database module
 backend_database_mod.client = backend_database_client_mod
 

@@ -40,13 +40,14 @@ db_models_mock = MagicMock()
 db_models_mock.PartnerMappingId = _PartnerMappingId
 sys.modules['management.db.models'] = db_models_mock
 
-# 2) Stub for `infrastructure.database.client` so that the module under test can import it.
+# 2) Stub for `infrastructure.rdb.client` so that the module under test can import it.
 client_mock = MagicMock()
-sys.modules['infrastructure.database.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # 3) Provide a dummy SQLAlchemyError so that the except clause in the module
 #    works without having to install SQLAlchemy in the CI environment.

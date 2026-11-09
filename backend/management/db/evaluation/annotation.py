@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import tuple_
 
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluationCase, EvaluationAnnotation, EvaluationAnnotationSchema
 
 

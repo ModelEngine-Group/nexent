@@ -11,18 +11,20 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 
-# Stub infrastructure.database.client
-client_mod = types.ModuleType("infrastructure.database.client")
+# Stub infrastructure.rdb.client
+client_mod = types.ModuleType("infrastructure.rdb.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = MagicMock(name="filter_property")
-sys.modules["infrastructure.database.client"] = client_mod
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-sys.modules["infrastructure.database.client"] = client_mod
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules["infrastructure.rdb.client"] = client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 
 # Stub db_models

@@ -13,6 +13,10 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
+from _repository_path import add_repository_root
+
+add_repository_root()
+
 from management.db.tool.outer_api import query_available_openapi_services
 from contracts.constants.environment import TOKEN
 from mcp.types import Tool as MCPTool

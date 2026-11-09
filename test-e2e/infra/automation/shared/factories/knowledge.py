@@ -36,7 +36,7 @@ def register_partial_knowledge(identity, name, *, owner, role):
     # arbitrary error strings as IDs or enumerate unrelated tenant resources.
     from shared.factories.sharing import product_db
     product_db()
-    from infrastructure.database.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import KnowledgeRecord
     from sqlalchemy import select
     with get_db_session() as session:

@@ -95,7 +95,7 @@ assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
 assert models.ModelMonitoringRecord.__module__ == 'management.db.monitoring.models'
 assert all(value.metadata is TableBase.metadata or value.metadata is SimpleTableBase.metadata
            for value in classes)
-assert 'infrastructure.database.client' not in sys.modules
+assert 'infrastructure.rdb.client' not in sys.modules
 print(json.dumps({'tables': len(classes), 'client_loaded': False}))
 """
     environment = os.environ.copy()

@@ -17,15 +17,15 @@ from shared.http import client, assert_status
 
 def product_db():
     apply_product_postgres_env()
-    for directory in (repo_root()/'backend', repo_root()/'sdk'):
+    for directory in (repo_root(), repo_root()/'backend', repo_root()/'sdk'):
         if str(directory) not in sys.path: sys.path.insert(0,str(directory))
 
 
 def revoke_owned_share(token, identity):
     product_db()
     from management.db.conversation.share import revoke_conversation_share
-    from infrastructure.database.orm import as_dict
-    from infrastructure.database.client import get_db_session
+    from infrastructure.rdb.orm import as_dict
+    from infrastructure.rdb.client import get_db_session
     from management.db.models import ConversationShare
     from sqlalchemy import select
     # Ownership validation must not depend on the public expiry filter. A share

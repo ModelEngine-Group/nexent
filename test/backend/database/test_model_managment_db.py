@@ -53,9 +53,10 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Register mocked client module in sys.modules
-sys.modules['infrastructure.database.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 """Now that dependencies are mocked, import the module under test.
 Access functions via the module object to avoid direct function imports.
@@ -181,7 +182,7 @@ def test_create_model_record(monkeypatch):
     # Patch the class attribute: ``db_client`` is an instance and the helper is a
     # @staticmethod, so patching the instance does not shadow it on every pytest.
     monkeypatch.setattr(
-        "infrastructure.database.client.PostgresClient.clean_string_values", lambda x: x
+        "infrastructure.rdb.client.PostgresClient.clean_string_values", lambda x: x
     )
     monkeypatch.setattr("management.db.model.repository.add_creation_tracking", lambda x, uid: x)
     monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
@@ -217,7 +218,7 @@ def test_update_model_record(monkeypatch):
     # Patch the class attribute: ``db_client`` is an instance and the helper is a
     # @staticmethod, so patching the instance does not shadow it on every pytest.
     monkeypatch.setattr(
-        "infrastructure.database.client.PostgresClient.clean_string_values", lambda x: x
+        "infrastructure.rdb.client.PostgresClient.clean_string_values", lambda x: x
     )
     monkeypatch.setattr("management.db.model.repository.add_update_tracking", lambda x, uid: x)
     monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())

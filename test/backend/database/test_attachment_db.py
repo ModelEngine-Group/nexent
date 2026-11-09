@@ -53,7 +53,7 @@ sys.modules['nexent'] = nexent_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_factory_mock
 
-# Mock infrastructure.database.client
+# Mock infrastructure.rdb.client
 minio_client_mock = MagicMock()
 minio_client_mock.storage_config = MagicMock()
 minio_client_mock.storage_config.default_bucket = 'test-bucket'
@@ -62,14 +62,16 @@ minio_client_mock.default_bucket = 'test-bucket'
 client_mock = MagicMock()
 client_mock.minio_client = minio_client_mock
 sys.modules['database'] = MagicMock()
-sys.modules['infrastructure.database.client'] = client_mock
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
-sys.modules['infrastructure.database.client'] = client_mock
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
+sys.modules['infrastructure.rdb.client'] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["infrastructure.database.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Patch minio_client before importing
 with patch('management.db.file.attachment.minio_client', minio_client_mock):

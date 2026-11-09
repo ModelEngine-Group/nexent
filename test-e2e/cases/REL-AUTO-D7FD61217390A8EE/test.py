@@ -8,7 +8,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import delete, insert, select
 
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.model.repository import fail_detecting_models_on_startup
 

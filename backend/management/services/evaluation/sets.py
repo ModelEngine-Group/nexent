@@ -14,7 +14,7 @@ from contracts.constants.constants import MAX_CASES_PER_SET
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 from management.db.agent.version import query_version_list
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase, KnowledgeRecord
 from management.db.evaluation.sets import batch_delete_evaluation_set_cases, count_evaluation_set_cases, count_evaluation_sets, create_evaluation_set, get_cases_by_ids, get_evaluation_set, get_evaluation_set_cases_all, hard_delete_evaluation_set, insert_evaluation_set_cases, list_case_turn_orders_by_session, list_evaluation_set_cases, list_evaluation_sets, update_evaluation_set_case_count
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name

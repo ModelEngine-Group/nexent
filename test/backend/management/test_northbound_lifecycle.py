@@ -32,7 +32,7 @@ def lifecycle(monkeypatch):
                                schedule_interrupted_upload_cleanup=AsyncMock())
     monkeypatch.setitem(sys.modules, "infrastructure.concurrency", SimpleNamespace(config_thread_manager=manager))
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
-    monkeypatch.setitem(sys.modules, "infrastructure.streaming.run_state", SimpleNamespace(runtime_state_service=state))
+    monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(runtime_state_service=state))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))
     monkeypatch.setitem(sys.modules, "infrastructure.web.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)

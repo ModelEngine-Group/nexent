@@ -12,7 +12,7 @@ from contracts.constants.constants import CONFIG_SERVICE_NAME
 @pytest.mark.stage('D5')
 def test_interrupted_upload_delete_failure_degrades_to_recovery(monkeypatch):
     from management.db.file import attachment as attachment_db
-    from infrastructure.database import client as client_db
+    from infrastructure.rdb import client as client_db
     from management.db.knowledge_base import file_lifecycle as lifecycle_db
     from management.db.models import KnowledgeFileLifecycle
     from management.recovery import (

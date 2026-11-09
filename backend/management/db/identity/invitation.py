@@ -3,11 +3,11 @@
 Database operations for invitation code management
 """
 
-from infrastructure.database.orm import as_dict
+from infrastructure.rdb.orm import as_dict
 from typing import Any, Dict, List, Optional
 
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantInvitationCode, TenantInvitationRecord
 from infrastructure.serialization.text import convert_list_to_string
 

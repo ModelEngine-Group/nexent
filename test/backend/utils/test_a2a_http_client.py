@@ -2,7 +2,7 @@
 """
 Unit tests for A2A HTTP client utilities.
 
-Tests the A2AHttpClient class and helper functions in backend/infrastructure/http/a2a.py.
+Tests the A2AHttpClient class and helper functions in infrastructure/http/a2a.py.
 """
 import pytest
 import asyncio

@@ -300,7 +300,7 @@ services:
       NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
-      PYTHONPATH: "/opt/backend"
+      PYTHONPATH: "/opt:/opt/backend"
       skip_proxy: "true"
     env_file:
       - ../../env/.env

@@ -27,7 +27,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('infrastructure.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 @pytest.fixture(scope="function")
@@ -36,7 +36,7 @@ def client(mocker):
     # Mock boto3 and MinioClient before importing
     mocker.patch('boto3.client')
     # Patch MinioClient at both possible import paths
-    mocker.patch('infrastructure.database.client.MinioClient')
+    mocker.patch('infrastructure.object_storage.client.MinioClient')
     # Stub management.services.knowledge_base.service to avoid real VDB initialization
     import types
     import sys as _sys

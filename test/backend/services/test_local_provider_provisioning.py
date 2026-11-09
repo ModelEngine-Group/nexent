@@ -82,7 +82,7 @@ def test_pending_oauth_token_uses_local_signing_key(mocker):
 def completion(mocker):
     from management.services.permission.identity import invitations, groups
     from management.services.tool import configuration
-    from infrastructure.database import client
+    from infrastructure.rdb import client
 
     session = object()
     transaction = []

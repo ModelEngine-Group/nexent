@@ -25,9 +25,12 @@ _optional_sdk_stubs: dict = {}
 # Add backend and sdk directories to sys.path so that modules can be imported
 # as `from backend.xxx import ...` and `from sdk.xxx import ...`
 _test_root = os.path.dirname(os.path.abspath(__file__))
+_repo_dir = os.path.dirname(_test_root)
 _backend_dir = os.path.abspath(os.path.join(_test_root, "..", "backend"))
 _sdk_dir = os.path.abspath(os.path.join(_test_root, "..", "sdk"))
 
+if _repo_dir not in sys.path:
+    sys.path.insert(0, _repo_dir)
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
@@ -35,7 +38,7 @@ if _sdk_dir not in sys.path:
 
 _canonical_backend_packages = {}
 for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway"):
-    _namespace_path = Path(_backend_dir) / _namespace
+    _namespace_path = Path(_repo_dir if _namespace == "infrastructure" else _backend_dir) / _namespace
     _canonical_backend_packages[_namespace] = str(_namespace_path)
     for _initializer in _namespace_path.rglob("__init__.py"):
         _relative = _initializer.parent.relative_to(_namespace_path)

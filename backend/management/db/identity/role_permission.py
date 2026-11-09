@@ -6,8 +6,8 @@ Database operations for role permission management
 
 from typing import Any, Dict, List, Optional
 
-from infrastructure.database.orm import as_dict
-from infrastructure.database.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import RolePermission
 
 

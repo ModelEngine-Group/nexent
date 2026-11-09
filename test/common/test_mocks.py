@@ -55,7 +55,7 @@ def bootstrap_test_env() -> Dict[str, Any]:
     sys.modules.setdefault("boto3", boto3_mock)
 
     client_module = _create_module(
-        "infrastructure.database.client",
+        "infrastructure.rdb.client",
         MinioClient=MagicMock(),
         PostgresClient=MagicMock(),
         db_client=MagicMock(),
@@ -64,11 +64,12 @@ def bootstrap_test_env() -> Dict[str, Any]:
         minio_client=MagicMock(),
         postgres_client=MagicMock(),
     )
-    sys.modules["infrastructure.database.client"] = client_module
+    sys.modules["infrastructure.rdb.client"] = client_module
+    sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     from test.common.database_stubs import install_serialization_stub
-    install_serialization_stub(sys.modules["infrastructure.database.client"])
+    install_serialization_stub(sys.modules["infrastructure.rdb.client"])
     if "database" not in sys.modules:
         _create_module("database")
 
