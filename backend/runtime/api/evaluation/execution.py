@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 from management.db.evaluation.runs import claim_agent_evaluation_run, get_agent_evaluation
-from service_common.concurrency import runtime_thread_manager
+from thread_management.runtime import runtime_thread_manager
 from service_common.service_identity.internal_tokens import verify_internal_runtime_jwt
 
 

@@ -16,7 +16,7 @@ from ext_components.aidp.consts.aidp_exceptions import (
 )
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from service_common.http.server.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     LanePolicy,
     ThreadManager,

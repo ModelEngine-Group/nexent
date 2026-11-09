@@ -25,9 +25,9 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from service_common.concurrency import mcp_thread_manager
+from thread_management.mcp import mcp_thread_manager
 from service_common.service_identity.gateway import enabled as gateway_identity_enabled
-from service_common.service_identity.mcp import TenantMCPRouter as _TenantMCPRouter
+from api_to_mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,

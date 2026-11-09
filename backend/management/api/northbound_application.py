@@ -13,7 +13,7 @@ from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECOND
 from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
 from management.api.northbound import a2a_router
 from management.api.northbound import router as northbound_router
-from service_common.concurrency import config_thread_manager
+from thread_management.management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from service_common.http.server.app_factory import create_app
 from nexent.core.concurrency import (

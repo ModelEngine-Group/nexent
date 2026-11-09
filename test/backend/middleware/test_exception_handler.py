@@ -20,7 +20,7 @@ if backend_dir not in sys.path:
 import pytest
 from fastapi import Request, HTTPException
 from fastapi.responses import Response
-from service_common.http.server.exception_handler import (
+from runtime.api.exception_handler import (
     ExceptionHandlerMiddleware,
     _http_status_to_error_code,
     create_error_response,

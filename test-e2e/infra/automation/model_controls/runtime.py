@@ -22,7 +22,7 @@ from model_controls.database import database_fixture
 from model_controls.provider import Provider
 from services import nl2agent_service as nl2agent_service
 from services import nl2skill_service as nl2skill_service
-from service_common.concurrency import runtime_thread_manager
+from thread_management.runtime import runtime_thread_manager
 from nexent.core.concurrency.helpers import shutdown_fallback_thread_manager
 from nexent.core.concurrency import ThreadManager
 from tool_collection.mcp.local_mcp_service import local_mcp_service

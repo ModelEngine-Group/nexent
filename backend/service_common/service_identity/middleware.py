@@ -3,16 +3,16 @@
 
 from starlette.responses import JSONResponse
 
-from service_common.security.policy import canonical_path
-from service_common.service_identity.routes import is_runtime_service_request
+from service_common.security.request_path import canonical_path
 from service_common.service_identity.gateway import (
     IDENTITY_HEADER, LOOKUP_PATH, IdentityError, enabled, identity_context, signing_key, verify_identity,
 )
 
 
 class GatewayIdentityMiddleware:
-    def __init__(self, app, *, audience, required=None):
+    def __init__(self, app, *, audience, required=None, internal_runtime_request=None):
         self.app, self.audience = app, audience
+        self.internal_runtime_request = internal_runtime_request
         self.required = enabled() if required is None else required
         if self.required:
             signing_key()
@@ -31,7 +31,8 @@ class GatewayIdentityMiddleware:
             # The private endpoint verifies a body-bound service token itself.
             return await self.app(scope, receive, send)
         try:
-            if self.audience == "runtime" and is_runtime_service_request(method, path):
+            if (self.audience == "runtime" and self.internal_runtime_request is not None
+                    and self.internal_runtime_request(method, path)):
                 from service_common.service_identity.internal_tokens import verify_internal_runtime_jwt
 
                 user_id, tenant_id = verify_internal_runtime_jwt(headers.get("authorization"))

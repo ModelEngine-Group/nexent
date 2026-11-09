@@ -6,7 +6,7 @@ import re
 from typing import Any, Callable, Dict
 
 from service_common.service_identity.context import identity_context
-from service_common.service_identity.credential_client import resolve_mcp_identity
+from api_to_mcp.credential_client import resolve_mcp_identity
 
 logger = logging.getLogger(__name__)
 

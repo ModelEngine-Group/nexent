@@ -12,9 +12,9 @@ import pytest
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
 from service_common.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
-from service_common.service_identity import mcp
+from api_to_mcp import identity_router as mcp
 from service_common.service_identity.context import identity_context
-from service_common.service_identity.credential_client import resolve_mcp_identity
+from api_to_mcp.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}

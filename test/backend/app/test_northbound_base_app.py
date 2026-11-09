@@ -227,9 +227,9 @@ concurrency_module.set_default_thread_manager = MagicMock()
 concurrency_module.clear_default_thread_manager = MagicMock()
 sys.modules["nexent.core.concurrency"] = concurrency_module
 
-thread_lifecycle_module = types.ModuleType("service_common.concurrency")
+thread_lifecycle_module = types.ModuleType("thread_management.management")
 thread_lifecycle_module.config_thread_manager = _NorthboundThreadManager()
-sys.modules["service_common.concurrency"] = thread_lifecycle_module
+sys.modules["thread_management.management"] = thread_lifecycle_module
 
 runtime_state_module = types.ModuleType("infrastructure.redis.run_state")
 runtime_state_module.runtime_state_service = MagicMock()

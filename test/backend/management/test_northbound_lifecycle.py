@@ -30,7 +30,7 @@ def lifecycle(monkeypatch):
     state = MagicMock()
     recovery = SimpleNamespace(recover_northbound_tasks=MagicMock(),
                                schedule_interrupted_upload_cleanup=AsyncMock())
-    monkeypatch.setitem(sys.modules, "service_common.concurrency", SimpleNamespace(config_thread_manager=manager))
+    monkeypatch.setitem(sys.modules, "thread_management.management", SimpleNamespace(config_thread_manager=manager))
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
     monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state", SimpleNamespace(runtime_state_service=state))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))

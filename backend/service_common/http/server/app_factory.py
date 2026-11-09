@@ -24,6 +24,7 @@ def create_app(
     enable_monitoring: bool = True,
     lifespan=None,
     gateway_identity_audience=None,
+    internal_runtime_request=None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -60,7 +61,11 @@ def create_app(
     if gateway_identity_audience:
         from service_common.service_identity.middleware import GatewayIdentityMiddleware
 
-        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
+        app.add_middleware(
+            GatewayIdentityMiddleware,
+            audience=gateway_identity_audience,
+            internal_runtime_request=internal_runtime_request,
+        )
 
     # Register exception handlers
     register_exception_handlers(app)

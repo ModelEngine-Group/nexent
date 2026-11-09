@@ -46,7 +46,7 @@ _STUB_SYMBOLS = {
     "management.services.evaluation.spreadsheet": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
-    "service_common.concurrency": ("config_thread_manager",),
+    "thread_management.management": ("config_thread_manager",),
 }
 for _module_name, _symbols in _STUB_SYMBOLS.items():
     _module = types.ModuleType(_module_name)
@@ -96,7 +96,7 @@ def _build_app():
     # ``AppException`` raised by endpoints is translated to a JSON HTTP
     # response (matching production behaviour) instead of propagating out
     # of ``TestClient`` as a raw exception.
-    from service_common.http.server.exception_handler import ExceptionHandlerMiddleware
+    from runtime.api.exception_handler import ExceptionHandlerMiddleware
 
     app.add_middleware(ExceptionHandlerMiddleware)
     from management.api.evaluation.agent_evaluation import router as eval_router

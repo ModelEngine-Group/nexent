@@ -195,9 +195,9 @@ sys.modules["nexent"] = stub_nexent
 sys.modules["nexent.core"] = stub_nexent_core
 sys.modules["nexent.core.concurrency"] = stub_concurrency
 
-stub_thread_lifecycle = types.ModuleType("service_common.concurrency")
+stub_thread_lifecycle = types.ModuleType("thread_management.mcp")
 stub_thread_lifecycle.mcp_thread_manager = MagicMock()
-sys.modules["service_common.concurrency"] = stub_thread_lifecycle
+sys.modules["thread_management.mcp"] = stub_thread_lifecycle
 
 # Stub http
 stub_http = types.ModuleType("http")

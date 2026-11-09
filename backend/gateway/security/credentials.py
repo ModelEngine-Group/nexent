@@ -4,7 +4,8 @@
 import jwt
 from service_common.security.token_codec import decode_session
 
-from service_common.security.policy import canonical_path, is_public_request
+from service_common.security.policy import is_public_request
+from service_common.security.request_path import canonical_path
 from service_common.security.identity import IdentityError, bearer_token
 from gateway.security.management_client import IdentityUnavailable
 

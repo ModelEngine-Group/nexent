@@ -56,7 +56,7 @@ from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABL
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
-from service_common.concurrency import config_thread_manager
+from thread_management.management import config_thread_manager
 
 logger = logging.getLogger("base_app")
 

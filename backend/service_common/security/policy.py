@@ -3,6 +3,8 @@
 
 import re
 
+from service_common.security.request_path import canonical_path
+
 _PUBLIC = {
     "POST": {"/user/signup", "/user/signin", "/user/refresh_token", "/user/logout",
              "/user/oauth/complete", "/user/cas/callback", "/user/cas/logout_callback"},
@@ -11,10 +13,6 @@ _PUBLIC = {
             "/user/cas/config", "/user/cas/login", "/user/cas/callback", "/user/cas/renew",
             "/user/cas/renew_callback", "/nb/v1/health", "/user/current_user_info"},
 }
-
-
-def canonical_path(path: str) -> str:
-    return path[4:] if path.startswith("/api/") else path
 
 
 def is_public_request(method: str, path: str) -> bool:

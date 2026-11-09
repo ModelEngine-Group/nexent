@@ -230,12 +230,12 @@ class TestConfigAppRouterConfiguration:
             sys.modules, "nexent.core.concurrency", concurrency_module
         )
         thread_lifecycle_module = types.ModuleType(
-            "service_common.concurrency"
+            "thread_management.management"
         )
         thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
         monkeypatch.setitem(
             sys.modules,
-            "service_common.concurrency",
+            "thread_management.management",
             thread_lifecycle_module,
         )
 

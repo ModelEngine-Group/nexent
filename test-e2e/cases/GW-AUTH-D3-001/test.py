@@ -28,8 +28,9 @@ from gateway.application import create_gateway_app
 from gateway.security.management_client import lookup_identity
 from gateway.configuration import GatewaySettings
 from service_common.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
+from runtime.api.identity_routes import is_runtime_service_request
 from service_common.service_identity.middleware import GatewayIdentityMiddleware
-from service_common.service_identity.mcp import TenantMCPRouter
+from api_to_mcp.identity_router import TenantMCPRouter
 from service_common.security.identity import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
 from nexent.core.concurrency import LanePolicy, ThreadManager
@@ -104,7 +105,8 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
     management.include_router(lookup_routes.router)
     runtime = FastAPI(root_path="/api")
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True,
+                           internal_runtime_request=is_runtime_service_request)
     reached = []
     context_checks = []
 

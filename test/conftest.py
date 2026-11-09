@@ -37,7 +37,7 @@ if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
 _canonical_backend_packages = {}
-for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway", "service_common"):
+for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway", "service_common", "thread_management", "api_to_mcp"):
     _namespace_path = Path(_repo_dir if _namespace == "infrastructure" else _backend_dir) / _namespace
     _canonical_backend_packages[_namespace] = str(_namespace_path)
     for _initializer in _namespace_path.rglob("__init__.py"):

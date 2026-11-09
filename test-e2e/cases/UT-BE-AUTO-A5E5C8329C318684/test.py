@@ -17,12 +17,10 @@ from nexent.core.concurrency import (
     ManagerState,
     ThreadManager,
 )
-from service_common.concurrency import (
-    config_thread_manager,
-    mcp_thread_manager,
-    northbound_thread_manager,
-    runtime_thread_manager,
-)
+from thread_management.management import config_thread_manager
+from thread_management.mcp import mcp_thread_manager
+from thread_management.northbound import northbound_thread_manager
+from thread_management.runtime import runtime_thread_manager
 
 CASE_ID = 'UT-BE-AUTO-A5E5C8329C318684'
 

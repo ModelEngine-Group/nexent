@@ -20,7 +20,7 @@ from nexent.container import (
     ContainerConnectionError,
 )
 from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
-from service_common.concurrency import config_thread_manager
+from thread_management.management import config_thread_manager
 
 logger = logging.getLogger("mcp_container_service")
 
