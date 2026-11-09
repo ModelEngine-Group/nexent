@@ -78,8 +78,20 @@ class NativeCompletionError(ValueError):
         super().__init__(f"{detail} (finish_reason={finish_reason!r})")
 
 
-def validate_native_completion(content, calls, finish_reason, refusal=None):
+def validate_native_completion(content, calls, finish_reason, refusal=None, *, usage=None, output_limit=None):
     """Generation completion authorizes effects; text alone does not prove it."""
+    if finish_reason == "length":
+        counters = dict(usage or {})
+        if output_limit is not None:
+            counters["requested_output_tokens"] = output_limit
+        evidence = ", ".join(f"{key}={value}" for key, value in counters.items() if value is not None)
+        detail = "Model reached its per-generation output-token limit (reasoning also consumes output tokens)"
+        if evidence:
+            detail += ": " + evidence
+        detail += ". Conversation context size is a separate limit; adjust the model output reserve or supported reasoning effort"
+        raise NativeCompletionError(finish_reason, detail)
+    if refusal:
+        raise NativeCompletionError(finish_reason, "Model refused the request")
     expected = "tool_calls" if calls else "stop"
     if refusal or finish_reason != expected:
         raise NativeCompletionError(finish_reason)
@@ -87,7 +99,7 @@ def validate_native_completion(content, calls, finish_reason, refusal=None):
         raise NativeCompletionError(finish_reason, "Native model returned neither content nor tool calls")
 
 
-def collect_native_stream(stream, stop_event, observer=None):
+def collect_native_stream(stream, stop_event, observer=None, *, output_limit=None):
     """Assemble indexed provider fragments without parsing assistant content."""
     wire = {"role": "assistant", "content": ""}
     calls = {}
@@ -116,6 +128,9 @@ def collect_native_stream(stream, stop_event, observer=None):
             value = getattr(delta, key, None)
             if value:
                 wire[key] = wire.get(key, "") + value
+        reasoning_delta = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+        if reasoning_delta and observer is not None:
+            observer.add_model_reasoning_content(reasoning_delta)
         for fragment in delta.tool_calls or []:
             if fragment.index is None:
                 raise ValueError("Native streamed tool call requires an index")
@@ -136,7 +151,12 @@ def collect_native_stream(stream, stop_event, observer=None):
         wire["tool_calls"] = [calls[index] for index in sorted(calls)]
     if stop_event.is_set():
         raise RunTerminated("Agent run cancelled")
-    validate_native_completion(wire["content"], calls, finish_reason, refusal)
+    validate_native_completion(
+        wire["content"], calls, finish_reason, refusal, output_limit=output_limit,
+        usage={"input_tokens": getattr(usage, "prompt_tokens", None),
+               "output_tokens": getattr(usage, "completion_tokens", None),
+               "reasoning_tokens": getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None)},
+    )
     if observer is not None:
         observer.flush_remaining_tokens()
     return wire, usage, finish_reason
@@ -239,7 +259,7 @@ class NativeModel(Model):
             token = model.cancellation_scope.register_closer(stream.close)
             model.last_finish_reason = None
             try:
-                wire, usage, finish_reason = collect_native_stream(stream, model.stop_event, model.observer)
+                wire, usage, finish_reason = collect_native_stream(stream, model.stop_event, model.observer, output_limit=request.get("max_tokens"))
                 model.last_finish_reason = finish_reason
                 model._monitoring.set_span_attributes(**{"llm.finish_reason": finish_reason})
             except NativeCompletionError as error:

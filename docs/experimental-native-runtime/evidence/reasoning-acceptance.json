@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-09",
+  "affected_python_tests": 87,
+  "python_failures": 0,
+  "frontend_adapter_and_cancellation_tests": 20,
+  "formal": [
+    {
+      "case_id": "AGENT-NATIVE-D3-002",
+      "run_id": "20261109T125114419224Z-AGENT-NATIVE-D3-002",
+      "summary": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "status": "PASS"
+    }
+  ],
+  "installed_image_controlled_http_scenarios": 10,
+  "note": "Installed-image proof separately reuses fixed primary scenarios without pytest source-path injection. Historical five-scenario API case needs outlets the user replaced; current reasoning API case uses operator-provided current models."
+}

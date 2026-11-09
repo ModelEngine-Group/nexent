@@ -49,6 +49,10 @@ def provider():
             if tool_turn:
                 delta['tool_calls'] = [{'index':0,'id':'actual-call','type':'function',
                     'function':{'name':'effect','arguments':'{}'}}]
+            if config.get('reasoning') or config.get('reasoning_only'):
+                delta['reasoning_content'] = 'Provider reasoning.'
+            if config.get('reasoning_only'):
+                delta.pop('content', None)
             if config['refusal']:
                 delta['refusal'] = config['refusal']
             finish = ('tool_calls' if tool_turn else 'stop') if config['mixed'] else config['finish']
@@ -60,6 +64,8 @@ def provider():
                 packets.append({'choices':[{'index':0,'delta':{},'finish_reason':finish}]})
             for packet in packets:
                 self.wfile.write(('data: '+json.dumps(packet)+'\n\n').encode())
+            if config.get('reasoning_only'):
+                self.wfile.write(('data: '+json.dumps({'choices':[], 'usage':{'prompt_tokens':10,'completion_tokens':64,'total_tokens':74,'completion_tokens_details':{'reasoning_tokens':64}}})+'\n\n').encode())
             self.wfile.write(b'data: [DONE]\n\n')
             self.wfile.flush()
 
@@ -100,7 +106,7 @@ def provider():
 @pytest.mark.stage('D3')
 def test_normal_mixed_generation_then_stop(provider):
     config, requests, create = provider
-    config.update(calls=True,mixed=True)
+    config.update(calls=True,mixed=True,reasoning=True)
     tool = EffectTool()
     model = create()
     agent = NativeToolCallingAgent(tools=[tool],model=model,observer=model.observer,verbosity_level=0,max_steps=2)
@@ -109,7 +115,9 @@ def test_normal_mixed_generation_then_stop(provider):
     events = [json.loads(value) for value in model.observer.message_query]
     public = [value['content'] for value in events if value['type']=='model_output']
     assert ''.join(public) == 'Checking now.FINAL_OBSERVED'
-    assert not any(value['type'] in ('model_output_thinking','model_output_deep_thinking') for value in events)
+    assert not any(value['type']=='model_output_thinking' for value in events)
+    assert ''.join(value['content'] for value in events if value['type']=='model_output_deep_thinking') == 'Provider reasoning.Provider reasoning.'
+    assert all(value.get('attempt_id') for value in events if value['type']=='model_output_deep_thinking')
     assert len(requests) == 2
     history = requests[1]['messages']
     assert history[-2]['content'] == 'Checking now.'
@@ -142,11 +150,15 @@ def test_invalid_tool_generation_has_no_effect(provider,finish):
 @pytest.mark.parametrize('finish,refusal',[('length',None),('content_filter',None),(None,None),('stop','Filtered')])
 def test_incomplete_or_refused_text_is_not_final(provider,finish,refusal):
     config, requests, create = provider
-    config.update(finish=finish,refusal=refusal)
+    config.update(finish=finish,refusal=refusal,reasoning_only=finish=='length')
     model = create()
     agent = NativeToolCallingAgent(tools=[],model=model,observer=model.observer,verbosity_level=0,max_steps=2)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception) as error:
         agent.run('Return text.')
+    if finish == 'length':
+        assert 'reasoning_tokens=64' in str(error.value)
+        assert 'output-token limit' in str(error.value)
+    assert not any(json.loads(value).get('type')=='final_answer' for value in model.observer.message_query)
     assert requests
     write_case_evidence('incomplete-text-'+str(finish)+('-refusal' if refusal else ''),
                         {'finish_reason':finish,'normal_completion':False,'refusal_present':bool(refusal)})
