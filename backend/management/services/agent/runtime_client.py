@@ -1,8 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP forwarding from northbound APIs to the runtime service."""
 
-from typing import AsyncIterator
-
 import httpx
 from fastapi.responses import StreamingResponse
 
@@ -11,6 +9,7 @@ from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServi
 from contracts.agent import AgentRequest
 from gateway.downstream.internal_tokens import generate_internal_runtime_jwt
 from backend.http.client import create_httpx_client
+from management.clients.agentos import AgentOSClient
 
 
 _HOP_BY_HOP_HEADERS = {
@@ -23,8 +22,6 @@ _HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
-_STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
-_REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _EVALUATION_DISPATCH_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _EVALUATION_TRIAL_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _RUNTIME_SERVICE_UNAVAILABLE_MESSAGE = "Runtime service is unavailable"
@@ -151,63 +148,17 @@ async def forward_agent_evaluation_trial_run(
     return payload
 
 
+def _agentos_client() -> AgentOSClient:
+    return AgentOSClient(RUNTIME_SERVICE_URL, create_httpx_client)
+
+
 async def forward_agent_run(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
 ) -> StreamingResponse:
-    """Start a runtime agent run and proxy its response without buffering."""
-    return await _forward_runtime_stream(
-        "POST", "/agent/internal/northbound/run", user_id, tenant_id,
-        payload=agent_request.model_dump(mode="json"),
-    )
-
-
-async def _forward_runtime_stream(
-    method: str,
-    path: str,
-    user_id: str,
-    tenant_id: str,
-    *,
-    payload: dict | None = None,
-    params: dict | None = None,
-) -> StreamingResponse:
-    """Forward SSE bytes and preserve runtime status, headers, and event IDs."""
-    client = create_httpx_client(
-        headers=_authorization_headers(user_id, tenant_id),
-        timeout=_STREAM_TIMEOUT,
-    )
-    try:
-        request = client.build_request(
-            method,
-            _runtime_url(path),
-            json=payload,
-            params=params,
-        )
-        upstream = await client.send(request, stream=True)
-    except httpx.TimeoutException as exc:
-        await client.aclose()
-        raise RuntimeServiceTimeoutError("Runtime agent run request timed out") from exc
-    except httpx.RequestError as exc:
-        await client.aclose()
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-    except Exception:
-        await client.aclose()
-        raise
-
-    async def body_iterator() -> AsyncIterator[bytes]:
-        try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
-
-    return StreamingResponse(
-        body_iterator(),
-        status_code=upstream.status_code,
-        headers=_forwarded_headers(upstream.headers),
-    )
+    """Start an AgentOS compatibility run and relay its SSE response."""
+    return await _agentos_client().run(agent_request.model_dump(mode="json"), user_id, tenant_id)
 
 
 async def forward_agent_stop(
@@ -215,35 +166,5 @@ async def forward_agent_stop(
     user_id: str,
     tenant_id: str,
 ) -> dict:
-    """Ask the runtime service to stop a northbound agent run."""
-    try:
-        async with create_httpx_client(
-            headers=_authorization_headers(user_id, tenant_id),
-            timeout=_REQUEST_TIMEOUT,
-        ) as client:
-            response = await client.post(
-                _runtime_url(f"/agent/internal/northbound/stop/{conversation_id}")
-            )
-    except httpx.TimeoutException as exc:
-        raise RuntimeServiceTimeoutError("Runtime stop request timed out") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeServiceUnavailableError(_RUNTIME_SERVICE_UNAVAILABLE_MESSAGE) from exc
-
-    if response.status_code >= 400:
-        raise RuntimeUpstreamError(
-            status_code=response.status_code,
-            content=response.content,
-            headers=_forwarded_headers(response.headers),
-        )
-
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise RuntimeServiceUnavailableError(
-            "Runtime stop response is not valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RuntimeServiceUnavailableError(
-            "Runtime stop response is not a JSON object"
-        )
-    return payload
+    """Cancel a Northbound conversation run through AgentOS."""
+    return await _agentos_client().stop(conversation_id, user_id, tenant_id)

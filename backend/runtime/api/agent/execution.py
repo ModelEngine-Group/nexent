@@ -6,6 +6,8 @@ from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError as PayloadValidationError
+from nexent.core.concurrency import run_blocking
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, NL2AgentRunRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
@@ -18,6 +20,7 @@ from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
+from infrastructure.agentos_identity import ServicePrincipal
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -104,9 +107,37 @@ async def northbound_agent_run_api(
     agent_request: AgentRequest,
     authorization: Optional[str] = Header(None),
 ):
-    """Run a northbound-prepared agent request inside the runtime service."""
+    """Compatibility route for callers on the previous deployment version."""
     try:
         user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    return await _execute_northbound_run(agent_request, user_id, tenant_id)
+
+
+async def run_agentos_compatibility(payload: dict, principal: ServicePrincipal):
+    try:
+        agent_request = AgentRequest.model_validate(payload)
+    except PayloadValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
+    return await _execute_northbound_run(agent_request, principal.user_id, principal.tenant_id)
+
+
+async def stop_agentos_compatibility(conversation_id: int, principal: ServicePrincipal):
+    from management.db.conversation.repository import get_conversation
+
+    def stop_owned_conversation():
+        if not get_conversation(conversation_id, user_id=principal.user_id, tenant_id=principal.tenant_id):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return stop_agent_tasks(conversation_id, principal.user_id)
+
+    return await run_blocking(
+        "agentos-stop-conversation", stop_owned_conversation, lane="control-io", owner="runtime",
+    )
+
+
+async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str):
+    try:
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=None,
@@ -115,10 +146,7 @@ async def northbound_agent_run_api(
             skip_user_save=True,
         )
     except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
     except ForbiddenError as exc:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,

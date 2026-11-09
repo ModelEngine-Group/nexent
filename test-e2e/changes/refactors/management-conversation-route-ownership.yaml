@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: MR-MANAGEMENT-ROUTES-20261109
+  change_type: refactor
+  title: Move share and workbench pin route ownership to Management
+  description: Mount conversation share and pin handlers in Management and retarget
+    their existing Gateway exposures.
+  affected_features:
+    existing:
+    - CHAT-SIDEBAR
+    - GW-AUTH
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: The public path, access policy, handler and data ownership
+    remain identical; only the assembly and Gateway destination change.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Gateway routes the existing share and pin paths to Management with the same
+      credential policy.
+    - Share and pin public handlers preserve their HTTP contracts.
+    reason: Reuse handler regressions and strengthen the existing Gateway destination
+      table.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py
+    - test/backend/apps/test_workbench_pins_app.py
+    - test/backend/app/test_conversation_share_app.py

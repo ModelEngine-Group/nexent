@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: AOS-TRANSPORT-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_signed_agentos_transport
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_signed_agentos_transport
+  AC-02:
+  - test_signed_agentos_transport
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -559,6 +559,38 @@ def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [True, False])
+async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, owned):
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent.execution import stop_agentos_compatibility
+
+    async def run_control_io(_task_name, function, **_kwargs):
+        return function()
+
+    mocker.patch("runtime.api.agent.execution.run_blocking", side_effect=run_control_io)
+    lookup = mocker.patch(
+        "management.db.conversation.repository.get_conversation",
+        return_value={"conversation_id": 123} if owned else None,
+    )
+    stop = mocker.patch(
+        "runtime.api.agent.execution.stop_agent_tasks", return_value={"message": "stopped"},
+    )
+    actor = ServicePrincipal("user-a", "tenant-a")
+
+    if owned:
+        assert await stop_agentos_compatibility(123, actor) == {"message": "stopped"}
+        stop.assert_called_once_with(123, "user-a")
+    else:
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as error:
+            await stop_agentos_compatibility(123, actor)
+        assert error.value.status_code == 404
+        stop.assert_not_called()
+    lookup.assert_called_once_with(123, user_id="user-a", tenant_id="tenant-a")
+
+
+@pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):

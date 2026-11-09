@@ -1325,7 +1325,7 @@
       "method": "GET",
       "path": "/api/conversation/workbench_pins",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/workbench_pins.py",
       "route_id": "route-370e0d99f5f330c2",
       "credential_kinds": [
@@ -1391,7 +1391,7 @@
       "method": "PUT",
       "path": "/api/conversation/{conversation_id}/workbench_pin",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/workbench_pins.py",
       "route_id": "route-0eea87a63bdc5bcf",
       "credential_kinds": [
@@ -4143,7 +4143,7 @@
       "method": "POST",
       "path": "/api/share/conversation/{conversation_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-fdf735d68912dc91",
       "credential_kinds": [
@@ -4154,7 +4154,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-57074332384320f1",
       "credential_kinds": [
@@ -4166,7 +4166,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}/assets/{asset_id}/download",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-bb4a100e19f70e70",
       "credential_kinds": [
@@ -4178,7 +4178,7 @@
       "method": "GET",
       "path": "/api/share/{share_token}/assets/{asset_id}/preview",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_share.py",
       "route_id": "route-eb28ffc79ffa4cb5",
       "credential_kinds": [
@@ -5998,5 +5998,5 @@
       ]
     }
   ],
-  "revision": "2026-11-09.1"
+  "revision": "2026-11-09.2"
 }

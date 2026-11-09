@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: AOS-TRANSPORT-D3-001
+  feature_id: AOS-TRANSPORT
+  requirement_ids:
+  - AOS-REQ-001
+  - AOS-REQ-002
+  business_rule_ids:
+  - AOS-TRANSPORT-RULE-01
+  title: AgentOS compatibility transport over local HTTP
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove signed AgentOS run and stop transport across actual Management
+    and Runtime HTTP boundaries.
+  preconditions:
+  - Local loopback sockets and Python backend dependencies are available.
+  test_data:
+    profile: mock
+    service_key: Synthetic local fixture
+    execution: Recording Agent execution sink
+  steps:
+  - order: 1
+    action: Invoke run and stop through the Management AgentOS client over loopback
+      HTTP.
+    expected: The Runtime dispatcher observes the signed user, tenant and exact resource;
+      SSE event IDs and JSON stop results reach the caller.
+  - order: 2
+    action: Submit an unsigned request, a modified body, a reused token on another
+      operation, an expired credential and an unknown version.
+    expected: Authentication failures are 401; the unsupported path is 404; no rejected
+      call enters the execution sink.
+  expected_results:
+  - Authorized operations preserve principal, body, stream events and stop JSON.
+  - Invalid credentials, modified requests and unknown versions do not dispatch.
+  forbidden_side_effects:
+  - Rejected calls must not invoke any execution handler.
+  - Verification must release temporary loopback servers.
+  integration_boundary:
+  - Actual Management AgentOS HTTP client and Runtime router behind the downstream
+    signature middleware; controlled execution sink.
+  observations:
+  - HTTP status, stream bytes, stop response and recorded invocations.
+  cleanup:
+  - Close HTTP streams and stop temporary servers.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  acceptance:
+  - id: AC-01
+    description: Signed run and stop traverse real service HTTP boundaries.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 2
+  - id: AC-02
+    description: Authentication, request binding and version reject before dispatch.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2

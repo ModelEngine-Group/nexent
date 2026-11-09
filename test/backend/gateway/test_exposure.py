@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Explicit exposure preserves registered APIs and denies accidental publication."""
 
+import ast
 import json
 from pathlib import Path
 
@@ -63,12 +64,33 @@ def test_snapshot_keeps_all_original_northbound_contracts():
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
     ("POST", "/api/agent/run", "runtime"), ("GET", "/api/conversation/list", "runtime"),
+    ("GET", "/api/conversation/workbench_pins", "management"),
+    ("PUT", "/api/conversation/42/workbench_pin", "management"),
+    ("POST", "/api/share/conversation/42", "management"),
+    ("GET", "/api/share/token", "management"),
+    ("GET", "/api/share/token/assets/file/download", "management"),
+    ("GET", "/api/share/token/assets/file/preview", "management"),
+    ("POST", "/api/internal/agentos/v1/compat/agent/run", None),
     ("POST", "/api/file/storage", "runtime"), ("GET", "/api/file/storage", "management"),
     ("POST", "/nb/v1/chat/run", "northbound"), ("GET", "/nb/v1/chat/run", None),
     ("HEAD", "/api/model/list", None), ("GET", "/api/not-registered", None),
 ])
 def test_regular_backend_and_northbound_have_explicit_targets(method, path, target):
     assert select_upstream(method, path) == target
+
+
+def test_conversation_share_and_pins_are_mounted_by_management():
+    root = Path(__file__).resolve().parents[3] / "backend"
+    owners = {"workbench_pins_router", "conversation_share_router"}
+    for service, expected in (("management", owners), ("runtime", set())):
+        tree = ast.parse((root / service / "api/application.py").read_text(encoding="utf-8"))
+        mounted = {
+            node.args[0].id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "include_router" and node.args and isinstance(node.args[0], ast.Name)
+        }
+        assert mounted & owners == expected
 
 
 def test_http_and_websocket_do_not_share_an_implicit_get_grant():

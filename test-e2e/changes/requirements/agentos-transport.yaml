@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-TRANSPORT-20261109
+  change_type: requirement
+  title: Introduce the AgentOS service transport
+  description: Implement the first signed transport slice for existing Northbound
+    and A2A run/stop calls.
+  affected_features:
+    existing:
+    - GW-AUTH
+    added:
+    - AOS-TRANSPORT
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    added:
+    - AOS-TRANSPORT-D3-001
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Service credential binds the exact operation and payload and expires.
+    - Streaming forwarding preserves headers and closes upstream resources.
+    - Only typed legacy run/stop payloads dispatch.
+    reason: Extend existing runtime proxy tests and verify authentication and neutral
+      protocol boundaries.
+    test_selectors:
+    - test/backend/services/test_agentos_proxy_service.py
+    - test/backend/services/test_runtime_proxy_service.py
+    - test/backend/app/test_agent_app.py
+    - test/backend/gateway/test_exposure.py
+  requirement_id: AOS-REQ-001

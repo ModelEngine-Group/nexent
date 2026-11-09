@@ -1,0 +1,124 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Exercise real AgentOS HTTP boundaries with a recording execution adapter."""
+
+import socket
+import threading
+import time
+from contextlib import contextmanager
+from types import SimpleNamespace
+
+import httpx
+import pytest
+import uvicorn
+from fastapi import FastAPI
+from starlette.responses import StreamingResponse
+
+from contracts.agentos import CompatibilityOperation, CompatibilityRun
+from contracts.constants import environment
+from gateway.downstream.middleware import GatewayIdentityMiddleware
+from gateway.security.context import trusted_identity
+from infrastructure import agentos_identity
+from infrastructure.agentos_identity import ServicePrincipal, sign_call
+from management.clients.agentos import AgentOSClient
+from runtime.agentos.compatibility import create_compatibility_router
+from runtime.agentos.middleware import AgentOSMiddleware
+
+_EVENTS = b"id: 1\ndata: first\n\nid: 2\ndata: done\n\n"
+
+
+@contextmanager
+def serve(app):
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="error"))
+        worker = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + 10
+            while not server.started:
+                if not worker.is_alive() or time.monotonic() >= deadline:
+                    raise RuntimeError("AgentOS verification server did not start")
+                time.sleep(0.02)
+            yield f"http://127.0.0.1:{port}"
+        finally:
+            server.should_exit = True
+            worker.join(timeout=10)
+            assert not worker.is_alive(), "AgentOS verification leaked a server"
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.asyncio
+async def test_signed_agentos_transport(monkeypatch):
+    key = "synthetic-agentos-transport-fixture-secret"
+    monkeypatch.setattr(environment, "JWT_SECRET", key)
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
+    principal = ServicePrincipal("user-a", "tenant-a")
+    calls = []
+
+    async def run(payload, actor):
+        async def events():
+            assert trusted_identity("internal") == {
+                "user_id": actor.user_id, "tenant_id": actor.tenant_id, "kind": "internal",
+            }
+            yield _EVENTS
+
+        calls.append(("run", payload, actor))
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    async def stop(conversation_id, actor):
+        calls.append(("stop", conversation_id, actor))
+        return {"message": "stopped"}
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_compatibility_router(run, stop))
+
+    with serve(runtime) as runtime_url:
+        def client_factory(**kwargs):
+            return httpx.AsyncClient(trust_env=False, **kwargs)
+
+        agentos = AgentOSClient(runtime_url, client_factory)
+        management = FastAPI()
+
+        @management.post("/run")
+        async def management_run():
+            return await agentos.run({"conversation_id": 42}, principal.user_id, principal.tenant_id)
+
+        @management.post("/stop")
+        async def management_stop():
+            return await agentos.stop(42, principal.user_id, principal.tenant_id)
+
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            with serve(management) as management_url:
+                response = await client.post(f"{management_url}/run")
+                assert response.status_code == 200
+                assert response.headers["content-type"].startswith("text/event-stream")
+                assert response.content == _EVENTS
+                response = await client.post(f"{management_url}/stop")
+                assert response.status_code == 200
+                assert response.json() == {"message": "stopped"}
+
+            run_url = f"{runtime_url}/api{CompatibilityOperation.RUN.value}"
+            stop_url = f"{runtime_url}/api{CompatibilityOperation.STOP.value}"
+            body = CompatibilityRun(request={"conversation_id": 42}).model_dump_json().encode()
+            token = sign_call(CompatibilityOperation.RUN, body, principal)
+            with monkeypatch.context() as expired_time:
+                expired_time.setattr(agentos_identity, "time", SimpleNamespace(time=lambda: time.time() - 120))
+                expired = sign_call(CompatibilityOperation.RUN, body, principal)
+
+            for url, payload, credential, status in (
+                (run_url, body, None, 401),
+                (run_url, body.replace(b"42", b"43"), token, 401),
+                (stop_url, body, token, 401),
+                (run_url, body, expired, 401),
+                (run_url.replace("/v1/", "/v2/"), body, token, 404),
+            ):
+                headers = {"Authorization": f"Bearer {credential}"} if credential else {}
+                result = await client.post(url, content=payload, headers=headers)
+                assert result.status_code == status
+                assert "conversation_id" not in result.text
+
+    assert calls == [("run", {"conversation_id": 42}, principal), ("stop", 42, principal)]
