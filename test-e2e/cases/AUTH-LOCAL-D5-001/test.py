@@ -56,13 +56,17 @@ def test_speed_seed_is_system_identity_and_replay_preserves_operator_changes():
             assert cursor.fetchone() == (3,'Y')
 
 
-def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
+def _load_case_helper(name):
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("automatic_upgrade_proof", Path(__file__).with_name("automatic_upgrade.py"))
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + ".py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.assert_automatic_upgrade(ROOT, tmp_path)
+    return module
+
+
+def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
+    _load_case_helper("automatic_upgrade").assert_automatic_upgrade(ROOT, tmp_path)
 
 
 def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
@@ -117,13 +121,9 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
             engine.dispose()
 
 
-def test_successful_apply_reclaims_source_stack_and_retains_data(target):
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("auth_source_cleanup", Path(__file__).with_name("source_cleanup.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module.assert_source_cleanup(ROOT, target)
+def test_successful_apply_reclaims_source_stack_and_retains_data(tmp_path):
+    build_worker_image = _load_case_helper("automatic_upgrade").build_worker_image
+    _load_case_helper("source_cleanup").assert_source_cleanup(ROOT, tmp_path, build_worker_image)
 
 
 @pytest.fixture
@@ -341,7 +341,7 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
             "POSTGRES_DB": params["dbname"],
             "NEXENT_POSTGRES_PASSWORD": params["password"],
         }
-        command = [sys.executable, str(ROOT / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py")]
+        command = [sys.executable, str(ROOT / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"), "--container"]
 
         def run_cli(*args):
             result = subprocess.run(command + list(args), cwd=ROOT / "backend", env=env,
@@ -362,7 +362,7 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
         assert applied["updated"] == 1
         assert "audit_history" not in preview and "audit_history" not in applied
         repeated = run_cli("--apply")
-        assert repeated["skipped"] == 1
+        assert repeated["skipped"] is True and repeated["complete"] is True
         assert "audit_history" not in repeated
     output = capsys.readouterr()
     assert row["encrypted_password"] not in output.out + output.err

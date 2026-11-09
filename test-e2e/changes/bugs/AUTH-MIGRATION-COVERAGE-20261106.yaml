@@ -31,8 +31,6 @@ change:
     test_selectors:
     - test/backend/services/test_auth_migration_automatic.py
     - test/backend/services/test_auth_migration_container_worker.py
-    - test/backend/services/test_auth_migration_cleanup.py
-    - test/backend/services/test_auth_migration_container.py
     - test/backend/services/test_local_credentials.py
     reason: UT owns branching and error transport. Existing D5 proves PostgreSQL schema/data recovery and real Docker Shell orchestration; controlled Kubernetes Shell tests prove shared preflight, Job and safe logging contracts. No new D1 or model/frontend layer is required.
   notes: SPEC ../nexent-doc/docs/Developing/auth-local-account-migration/design.md. Existing D5 owns disposable PostgreSQL and uniquely labelled Docker resources with cleanup; no shared preparation families are required. Immutable 001 remains unchanged. Live Kubernetes verification is separate from Shell contract tests.
