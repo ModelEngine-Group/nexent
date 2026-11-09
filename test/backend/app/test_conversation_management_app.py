@@ -964,11 +964,11 @@ async def test_branch_conversation_expired_token(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_branch_conversation_failure(conversation_mocks):
-    """Unexpected service errors are mapped to 500"""
+    """Unexpected service errors return a sanitized 500 without database diagnostics."""
     conversation_mocks["get_current_user_id"].return_value = (
         "user_id", "tenant_id")
     conversation_mocks["branch_conversation"].side_effect = Exception(
-        "branch error")
+        "Database error: SELECT * FROM private_table; connection password=secret")
 
     request_obj = MagicMock()
     request_obj.conversation_id = 7
@@ -978,3 +978,6 @@ async def test_branch_conversation_failure(conversation_mocks):
         await branch_conversation_endpoint(request_obj, authorization="Bearer test-token")
 
     assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to branch conversation"
+    assert "private_table" not in exc_info.value.detail
+    assert "secret" not in exc_info.value.detail

@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useState, type FC } from "react";
+import { useRef, useState, type FC } from "react";
 import {
   DownloadIcon,
   EyeIcon,
@@ -70,9 +70,9 @@ export const ConversationArtifactsPanel: FC<
   const [previewing, setPreviewing] = useState<ArtifactAttachmentLike | null>(
     null
   );
-  // Key of the entry currently being added to the composer; guards against
-  // double-activating the fetch-and-attach flow while it is in flight.
+  // Serialize additions across entries. The ref also blocks clicks before React flushes state.
   const [addingKey, setAddingKey] = useState<string | null>(null);
+  const addingRef = useRef(false);
 
   if (!open) return null;
 
@@ -80,11 +80,13 @@ export const ConversationArtifactsPanel: FC<
     key: string,
     attachment: ArtifactAttachmentLike
   ) => {
-    if (!onAddToComposer || addingKey === key) return;
+    if (!onAddToComposer || addingRef.current) return;
+    addingRef.current = true;
     setAddingKey(key);
     try {
       await onAddToComposer(attachment);
     } finally {
+      addingRef.current = false;
       setAddingKey(null);
     }
   };
@@ -209,7 +211,7 @@ export const ConversationArtifactsPanel: FC<
                         <TooltipIconButton
                           tooltip={t("chat.artifacts.addToChat")}
                           type="button"
-                          disabled={addingKey === artifact.key}
+                          disabled={addingKey !== null}
                           onClick={() =>
                             void handleAddToComposer(artifact.key, attachment)
                           }

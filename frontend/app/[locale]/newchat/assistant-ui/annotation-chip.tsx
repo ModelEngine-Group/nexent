@@ -133,6 +133,8 @@ export const ComposerAnnotationChip: FC<{
         align="start"
         onMouseEnter={openNow}
         onMouseLeave={scheduleClose}
+        onFocusCapture={openNow}
+        onBlurCapture={scheduleClose}
         className="w-80 p-2"
       >
         <p className="mb-1.5 px-1 text-xs font-medium text-muted-foreground">

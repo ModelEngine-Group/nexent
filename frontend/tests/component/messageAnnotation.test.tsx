@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -488,6 +489,24 @@ describe("ComposerAnnotationChip", () => {
   test("renders nothing without annotations", () => {
     const { container } = renderChip([]);
     expect(container.firstChild).toBeNull();
+  });
+
+  test("keeps the list open when keyboard focus enters its actions", async () => {
+    renderChip(baseAnnotations());
+    const trigger = screen.getByRole("button", {
+      name: "chat.annotation.listTitle",
+    });
+    fireEvent.focus(trigger);
+    const edit = screen.getAllByRole("button", {
+      name: "chat.annotation.editComment",
+    })[0];
+    fireEvent.blur(trigger);
+    fireEvent.focus(edit);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 220)));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    fireEvent.blur(edit);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 220)));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   test("opens the annotation list on hover and lists every entry", () => {

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -571,6 +572,59 @@ test("ConversationArtifactsPanel hides add-to-chat without a handler", () => {
   expect(
     screen.queryByRole("button", { name: "chat.artifacts.addToChat" })
   ).toBeNull();
+});
+
+test("ConversationArtifactsPanel serializes rapid additions across different files", async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const onAddToComposer = vi
+    .fn()
+    .mockReturnValueOnce(pending)
+    .mockResolvedValue(undefined);
+  const artifacts = collectConversationArtifacts([
+    {
+      id: "multi",
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          skillFileAttachments: [
+            makeAttachment("a", "one.docx"),
+            makeAttachment("b", "two.docx"),
+          ],
+        },
+      ],
+    },
+  ]);
+  renderArtifactsPanel({ artifacts, onAddToComposer });
+  const buttons = screen.getAllByRole("button", {
+    name: "chat.artifacts.addToChat",
+  });
+  act(() => {
+    fireEvent.click(buttons[0]);
+    fireEvent.click(buttons[1]);
+    fireEvent.click(buttons[0]);
+  });
+  expect(onAddToComposer).toHaveBeenCalledTimes(1);
+  expect(
+    buttons.every((button) => (button as HTMLButtonElement).disabled)
+  ).toBe(true);
+  await act(async () => {
+    finish();
+    await pending;
+  });
+  await waitFor(() =>
+    expect(
+      buttons.every((button) => !(button as HTMLButtonElement).disabled)
+    ).toBe(true)
+  );
+  fireEvent.click(buttons[1]);
+  await waitFor(() => expect(onAddToComposer).toHaveBeenCalledTimes(2));
+  expect(onAddToComposer).toHaveBeenLastCalledWith(
+    expect.objectContaining({ name: "two.docx" })
+  );
 });
 
 test("ConversationArtifactsPanel ignores repeat clicks while adding", () => {

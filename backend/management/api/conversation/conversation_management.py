@@ -318,7 +318,10 @@ async def branch_conversation_endpoint(
         raise
     except Exception as e:
         logging.exception(f"Failed to branch conversation: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to branch conversation",
+        ) from e
 
 
 @router.delete("/{conversation_id}", response_model=ConversationResponse)
