@@ -1,0 +1,101 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-LOAD-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-002
+  - TRJ-RULE-003
+  - TRJ-RULE-004
+  - TRJ-RULE-006
+  title: 200 并行运行与长历史读取下无确认事件丢失且缓存有界
+  type: PERFORMANCE
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 200 并行运行与长历史读取下无确认事件丢失且缓存有界
+  preconditions:
+  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
+  - 基于现有MonitoringManager，通过MONITORING_TRACE_SINK选择otlp/local_file/both；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
+  - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
+  - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 固定硬件/版本/配置，准备10万逻辑record的长会话，分别覆盖多执行和单个大执行；实际MonitoringManager/Exporter保持200个根运行至少30分钟，60秒一轮，未压缩OTLP（正文内嵌）按100KB/1MB及大正文分档，计入片段和包头。 另覆盖超过256KiB的大行、4MiB正文和高转义比例字符串。
+    expected: 记录实际并发、Span/片段数和字节，测吞吐、有界待写字节、meta.json大小/更新与锁等待、PG/磁盘/fsync/inode及P50/P95/P99。队列计入完整正文及编码缓冲，正文/引用完整，PG沿原业务写入和目录查询。 测量单行最大编码字节、源正文持有内存、编码/解码缓冲及200并发下进程峰值内存，队列计量完整正文；文件字节计入JSON转义开销。
+  - order: 2
+    action: 保持200根执行，用20个管理员客户端每5秒显式查询历史并分页/读正文；分页三级目录，混合无meta、正常及归属冲突候选。测首次打开、翻页、复杂片段归并及长执行清单，记录自研查看器资源。 增加同用户多智能体目录以及最近Agent与storage_agent_id不同的会话，测目录检查数/元信息字节和预算失败。
+    expected: 从meta选择执行并流式解析，分别记录每请求扫描字节、行数和延迟，接受复杂归并顺序重扫的成本；响应及内存受预算约束。节点DTO每段≤500条/8MiB、正文缓存≤32MiB，切段释放；已确认丢失/重复为0，稳态待写积压不持续增长。目录复用PG并核验meta归属，允许短页；记录PG查询计划和meta更新/读取开销。
+      目录查找只检查目标owner/会话的候选位置；按预算控制查找开销，未完成查找不报告未采集，也不创建新目录。
+  - order: 3
+    action: 停止输入，等待最多300秒排空已接收队列并发布终态，对账已确认内容、文件全文hash、资源和清理。
+    expected: 已确认丢失/重复均为0，300秒内完成已接收内容刷盘和终态发布；报告实际延迟/资源、顺序扫描与meta增长成本及容量模型偏差，独占资源释放。
+  expected_results:
+  - 记录实际并发、Span/片段数和字节，测吞吐、有界待写字节、meta.json大小/更新与锁等待、PG/磁盘/fsync/inode及P50/P95/P99。队列计入完整正文及编码缓冲，正文/引用完整，PG沿原业务写入和目录查询。 测量单行最大编码字节、源正文持有内存、编码/解码缓冲及200并发下进程峰值内存，队列计量完整正文；文件字节计入JSON转义开销。
+  - 从meta选择执行并流式解析，分别记录每请求扫描字节、行数和延迟，接受复杂归并顺序重扫的成本；响应及内存受预算约束。节点DTO每段≤500条/8MiB、正文缓存≤32MiB，切段释放；已确认丢失/重复为0，稳态待写积压不持续增长。目录复用PG并核验meta归属，允许短页；记录PG查询计划和meta更新/读取开销。
+    目录查找只检查目标owner/会话的候选位置；按预算控制查找开销，未完成查找不报告未采集，也不创建新目录。
+  - 已确认丢失/重复均为0，300秒内完成已接收内容刷盘和终态发布；报告实际延迟/资源、顺序扫描与meta增长成本及容量模型偏差，独占资源释放。
+  forbidden_side_effects:
+  - 不得借丢弃正文、跳过历史读取或减少200个实际采集并发取得通过；查看端按需求保持静态。
+  - 不得修改或压测共享生产实例。
+  acceptance:
+  - id: AC-01
+    description: 记录实际并发、Span/片段数和字节，测吞吐、有界待写字节、meta.json大小/更新与锁等待、PG/磁盘/fsync/inode及P50/P95/P99。队列计入完整正文及编码缓冲，正文/引用完整，PG沿原业务写入和目录查询。 测量单行最大编码字节、源正文持有内存、编码/解码缓冲及200并发下进程峰值内存，队列计量完整正文；文件字节计入JSON转义开销。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 从meta选择执行并流式解析，分别记录每请求扫描字节、行数和延迟，接受复杂归并顺序重扫的成本；响应及内存受预算约束。节点DTO每段≤500条/8MiB、正文缓存≤32MiB，切段释放；已确认丢失/重复为0，稳态待写积压不持续增长。目录复用PG并核验meta归属，允许短页；记录PG查询计划和meta更新/读取开销。
+      目录查找只检查目标owner/会话的候选位置；按预算控制查找开销，未完成查找不报告未采集，也不创建新目录。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 已确认丢失/重复均为0，300秒内完成已接收内容刷盘和终态发布；报告实际延迟/资源、顺序扫描与meta增长成本及容量模型偏差，独占资源释放。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    acceptance_criteria:
+    - AC-010
+    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: PERFORMANCE
+  risk: 200 并行运行与长历史读取下无确认事件丢失且缓存有界
+  condition:
+  - 独占性能环境；明确模型事件速率和浏览请求频率，Provider 使用可控边界
+  metrics:
+  - 真实并发
+  - 吞吐与P50/P95/P99
+  - 内存待写字节及积压斜率
+  - meta大小/原子更新/锁等待
+  - 每请求实际扫描字节/行数
+  - 已确认丢失/重复
+  - 浏览器页数/缓存字节
+  - 单行最大字节与JSON转义放大率
+  - 源正文持有/编码解码缓冲/并发峰值内存
+  thresholds:
+  - 真实并发=200
+  - 已确认丢失=0、重复=0
+  - 稳态待写积压无持续增长，停止后300秒内完成已接收队列刷盘及终态发布
+  - 节点DTO单段最多500条/8MiB，Nexent正文缓存最多32MiB，轨迹实时连接=0
+  recovery_expectations:
+  - 卸载全部负载客户端、测试会话与文件，确认积压清空和测试机资源恢复。

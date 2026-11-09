@@ -1,0 +1,99 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-002
+  - TRJ-RULE-005
+  - TRJ-RULE-008
+  title: trace_id复用conversation_id定位跨轮次会话，完整性和能力状态不混淆
+  type: CONTRACT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: trace_id复用conversation_id定位跨轮次会话，完整性和能力状态不混淆
+  preconditions:
+  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
+  - 基于现有MonitoringManager，通过MONITORING_TRACE_SINK选择otlp/local_file/both；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
+  - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
+  - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 准备三轮含并行和嵌套子调用的独占会话，以及超过两页的聊天和轨迹；同会话切换根Agent，使用同一个trace_id请求会话详情和摘要。 目录使用首次根Agent，另准备_unknown、已删除Agent目录和查找预算耗尽。
+    expected: trace_id与conversation_id恒等，以规范十进制字符串定位同一会话；轮次、根执行、物理attempt及父子调用身份正确。直接在会话详情路径使用该ID完成授权定位，聊天既有数字接口保持；缺采集目录的旧会话仍按原ID定位，显示未采集。 定位先PG授权并确定owner，在该owner的一级Agent目录核验同会话；预算耗尽503/lookup_unavailable且不返回未采集。仅完整查找无痕迹才判未采集，固定目录与当前最近Agent不同时仍返回完整会话。
+  - order: 2
+    action: 从会话详情取得快照，使用include=messages及message_cursor分页读取聊天，通过snapshot读取全部轨迹段与执行/采集状态；经contents分块取大聊天正文和轨迹字段，期间新增记录、修改已读聊天目标、测试未读历史修改的检测边界、清理meta执行清单换版并越过一条轨迹内容的到期边界。
+    expected: 稳定成员范围内无重复或跳过；详情默认不附消息，include=messages及源摘要默认50最多200且列表至多2MiB，节点DTO单段最多500条/8MiB，正文块至多1MiB；新增不混入旧成员快照，聊天正文不冻结；已读目标内容改删后引用返回snapshot_reset，未读取字段的变更不承诺全局检测，轨迹到期优先禁止读且聊天保留规则不变。
+  - order: 3
+    action: 分别查询从首轮完整采集、部分旧运行过期、中途启用、采集缺口和所有轨迹到期但聊天仍在的会话。
+    expected: 分别返回聊天/窗口/整个会话的完整性及明确原因；has_more与source完整性分开；旧轨迹到期不能伪称全历史完整，trace摘要仍200且聊天可读，到期正文410。
+  - order: 4
+    action: 用普通会话创建者、其他租户ADMIN、DEV及分享身份访问统一会话详情、snapshot与contents，篡改cursor、正文引用来源/字段/版本及非正整数/前导零/越界会话ID，核对响应trace_id与conversation_id一致；再由合法管理员删除独占会话并清理。
+    expected: 普通角色403，范围外管理员和不存在统一404且不暴露会话名/范围；非法参数422，删除立即撤权；所有查询只读且原聊天/其他租户canary不变，独占资源释放。
+  expected_results:
+  - trace_id与conversation_id恒等，以规范十进制字符串定位同一会话；轮次、根执行、物理attempt及父子调用身份正确。直接在会话详情路径使用该ID完成授权定位，聊天既有数字接口保持；缺采集目录的旧会话仍按原ID定位，显示未采集。 定位先PG授权并确定owner，在该owner的一级Agent目录核验同会话；预算耗尽503/lookup_unavailable且不返回未采集。仅完整查找无痕迹才判未采集，固定目录与当前最近Agent不同时仍返回完整会话。
+  - 稳定成员范围内无重复或跳过；详情默认不附消息，include=messages及源摘要默认50最多200且列表至多2MiB，节点DTO单段最多500条/8MiB，正文块至多1MiB；新增不混入旧成员快照，聊天正文不冻结；已读目标内容改删后引用返回snapshot_reset，未读取字段的变更不承诺全局检测，轨迹到期优先禁止读且聊天保留规则不变。
+  - 分别返回聊天/窗口/整个会话的完整性及明确原因；has_more与source完整性分开；旧轨迹到期不能伪称全历史完整，trace摘要仍200且聊天可读，到期正文410。
+  - 普通角色403，范围外管理员和不存在统一404且不暴露会话名/范围；非法参数422，删除立即撤权；所有查询只读且原聊天/其他租户canary不变，独占资源释放。
+  forbidden_side_effects:
+  - 不得因查询或分页触发模型/工具或修改原聊天。
+  - 目录定位限于服务端核验的目标owner/会话；旧租户归属检查只用于拒绝冲突，范围外元信息不进入响应；不得遍历其他用户正文或泄漏凭证/路径。
+  acceptance:
+  - id: AC-01
+    description: trace_id与conversation_id恒等，以规范十进制字符串定位同一会话；轮次、根执行、物理attempt及父子调用身份正确。直接在会话详情路径使用该ID完成授权定位，聊天既有数字接口保持；缺采集目录的旧会话仍按原ID定位，显示未采集。 定位先PG授权并确定owner，在该owner的一级Agent目录核验同会话；预算耗尽503/lookup_unavailable且不返回未采集。仅完整查找无痕迹才判未采集，固定目录与当前最近Agent不同时仍返回完整会话。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 稳定成员范围内无重复或跳过；详情默认不附消息，include=messages及源摘要默认50最多200且列表至多2MiB，节点DTO单段最多500条/8MiB，正文块至多1MiB；新增不混入旧成员快照，聊天正文不冻结；已读目标内容改删后引用返回snapshot_reset，未读取字段的变更不承诺全局检测，轨迹到期优先禁止读且聊天保留规则不变。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 分别返回聊天/窗口/整个会话的完整性及明确原因；has_more与source完整性分开；旧轨迹到期不能伪称全历史完整，trace摘要仍200且聊天可读，到期正文410。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 普通角色403，范围外管理员和不存在统一404且不暴露会话名/范围；非法参数422，删除立即撤权；所有查询只读且原聊天/其他租户canary不变，独占资源释放。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    acceptance_criteria:
+    - AC-004
+    - AC-007
+    - AC-013
+    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  contract:
+    protocol: HTTP/JSON
+    endpoint: /trajectory/conversations/{conversation_id} and /trajectory/conversations/{conversation_id}/snapshot and /trajectory/conversations/{conversation_id}/contents/{content_id}
+    method: GET
+    request_expectations:
+    - trace_id同值用作conversation_id路径参数；全部读取要求ADMIN/SU及可信租户/目标用户范围，ID不是访问凭证。
+    - 聊天/轨迹使用各自有界快照游标；contents仅接受聊天正文与record的input/output/raw/reasoning。
+    response_expectations:
+    - 身份层级、分页字节限制、coverage和禁用能力符合设计“采集与身份”和“查询与自研展示”。
+    - 过期后保留会话定位，不延长正文30天可读期。
+    - 目录定位完成前不判未采集；查找预算耗尽返回503/lookup_unavailable。storage_agent_id固定且不代替当前最近Agent筛选。

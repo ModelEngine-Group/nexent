@@ -1,0 +1,124 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-CAPTURE-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-001
+  - TRJ-RULE-002
+  - TRJ-RULE-004
+  - TRJ-RULE-006
+  - TRJ-RULE-007
+  - TRJ-RULE-008
+  - TRJ-RULE-003
+  title: 两个 Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
+  type: AGENT-IT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 两个 Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
+  preconditions:
+  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
+  - 基于现有MonitoringManager，通过MONITORING_TRACE_SINK选择otlp/local_file/both；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
+  - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
+  - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 分别用两个受支持 Core 启动隔离普通会话，经真实产品入口访问受控 Provider HTTP fixture；首次物理请求输出固定片段后断开，第二次成功。
+    expected: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+  - order: 2
+    action: 驱动两个并行子调用、一个嵌套工具、一次受控取消和一个大于监控预览上限的结果，记录实际工具次数。
+    expected: 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。
+  - order: 3
+    action: 通过真实配置入口依次验证默认otlp、local_file及both；本地模式配合Metrics关闭监测远端连接，双写时让远端端点失败、本地写入失败并分别观测。使用未采样父Trace和远端summary/metrics/full及小预览上限，读取本地OTLP/meta.json再重启冷读，对账PG定义和真实SpanContext。
+      发送超过256KiB的完整安全请求/工具结果，验证实际Span属性与同一OTLP文件内容。
+    expected: 默认otlp沿用原上报；local_file仅导出本地Trace，Metrics按独立开关；both分支隔离且同一源调用身份一致，远端保持原预览/过滤/采样。本地在原DROP决策下提升RECORD_ONLY并保留sampled位，实际Span ID有效且正文完整；入队不等于成功，只有OTLP先刷盘，再持久化meta.json的confirmed_bytes/hash才确认。每行按标准OTLP解码，hex
+      ID/纳秒字符串/数字枚举/AnyValue正确。PG结构/序列复用，新增业务UUID由宿主生成；模型请求/响应/思考共用一个record及物理Span，业务父与Span父分别保存，异步归档不串上下文。 大正文完整内嵌属性/Events，单个请求行可超过刷盘阈值，落盘值不因预览长度被截断；每执行的业务事实均在一份OTLP文件。
+  - order: 4
+    action: 目标切回otlp后再次运行，再关闭ENABLE_TELEMETRY；保持历史读取，核对聊天、已有文件和canary。
+    expected: 两种配置均停止新本地轨迹写入，旧归档仍按读取开关访问；otlp目标保留原远端行为，监控关闭时原聊天结果和canary不变。
+  - order: 5
+    action: 重新选择local_file或both，在两个Core同会话切换根Agent增加第二轮，核对OTLP属性、文件及DTO中的业务trace、原生Trace/Span、根Agent和UUID，最后清理。 核对tenant/user/首次根Agent/conversation目录与meta.storage_agent_id，覆盖首次根Agent未知后变为已知。
+    expected: 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
+      物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
+  expected_results:
+  - 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+  - 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。
+  - 默认otlp沿用原上报；local_file仅导出本地Trace，Metrics按独立开关；both分支隔离且同一源调用身份一致，远端保持原预览/过滤/采样。本地在原DROP决策下提升RECORD_ONLY并保留sampled位，实际Span ID有效且正文完整；入队不等于成功，只有OTLP先刷盘，再持久化meta.json的confirmed_bytes/hash才确认。每行按标准OTLP解码，hex
+    ID/纳秒字符串/数字枚举/AnyValue正确。PG结构/序列复用，新增业务UUID由宿主生成；模型请求/响应/思考共用一个record及物理Span，业务父与Span父分别保存，异步归档不串上下文。 大正文完整内嵌属性/Events，单个请求行可超过刷盘阈值，落盘值不因预览长度被截断；每执行的业务事实均在一份OTLP文件。
+  - 两种配置均停止新本地轨迹写入，旧归档仍按读取开关访问；otlp目标保留原远端行为，监控关闭时原聊天结果和canary不变。
+  - 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
+    物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
+  forbidden_side_effects:
+  - 不重复调用模型或业务工具，不把失败 attempt 写回正常聊天。
+  - 不修改共享 Provider、租户或其他会话数据。
+  acceptance:
+  - id: AC-01
+    description: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 默认otlp沿用原上报；local_file仅导出本地Trace，Metrics按独立开关；both分支隔离且同一源调用身份一致，远端保持原预览/过滤/采样。本地在原DROP决策下提升RECORD_ONLY并保留sampled位，实际Span ID有效且正文完整；入队不等于成功，只有OTLP先刷盘，再持久化meta.json的confirmed_bytes/hash才确认。每行按标准OTLP解码，hex
+      ID/纳秒字符串/数字枚举/AnyValue正确。PG结构/序列复用，新增业务UUID由宿主生成；模型请求/响应/思考共用一个record及物理Span，业务父与Span父分别保存，异步归档不串上下文。 大正文完整内嵌属性/Events，单个请求行可超过刷盘阈值，落盘值不因预览长度被截断；每执行的业务事实均在一份OTLP文件。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 两种配置均停止新本地轨迹写入，旧归档仍按读取开关访问；otlp目标保留原远端行为，监控关闭时原聊天结果和canary不变。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
+      物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
+    steps:
+    - 5
+    expected_results:
+    - 5
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    acceptance_criteria:
+    - AC-001
+    - AC-002
+    - AC-003
+    - AC-005
+    - AC-009
+    - AC-011
+    - AC-013
+    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider
+  integration_boundary:
+  - 真实 Agent 入口与两种 Core 到 Provider HTTP 协议 Mock
+  - MonitoringManager到本地受管处理器/Exporter，真实OTLP及meta.json原子提交，再到查询API
+  observations:
+  - 物理请求与工具次数
+  - attempt/invocation 父子关联
+  - OTLP持久化确认、meta.json的confirmed_bytes/hash和终态发布、PG结构复用
+  - 聊天历史回归
+  cleanup:
+  - 关闭并删除独占 Mock fixture、Agent、会话与轨迹目录；保存清理和 canary 核验结果。

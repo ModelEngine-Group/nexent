@@ -85,6 +85,7 @@ feature_overrides:
   CHAT-CLARIFICATION-HISTORY: runtime
   CHAT-MODEL-CONTROLS: model
   CHAT-SIDEBAR: runtime
+  CHAT-TRAJECTORY: runtime
   FAF-001: runtime
   MSRF-001: model
   NAV-MENU-VISIBILITY: system

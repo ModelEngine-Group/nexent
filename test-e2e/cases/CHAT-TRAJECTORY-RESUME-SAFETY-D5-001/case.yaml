@@ -1,0 +1,101 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-RESUME-SAFETY-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-006
+  - TRJ-RULE-008
+  - TRJ-RULE-009
+  title: 中断及失效材料不能伪称可恢复，也不能自动重放不确定副作用
+  type: RELIABILITY
+  priority: P0
+  status: retired
+  automation: automated
+  objective: 中断及失效材料不能伪称可恢复，也不能自动重放不确定副作用
+  preconditions:
+  - Retired on 2026-11-05 following the user scope change; no product, fixed script or execution binding was implemented.
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG零新增表、零新增字段、零新增序列且无SQL migration，轨迹及索引全部为文件。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 在独占部署依次于状态文件写入、rename、manifest持久化及文件目录发布处终止进程，恢复归档并检查所有检查点。
+    expected: 未满足持久前缀/状态/依赖一致性的检查点不得complete；已发布文件校验正确，重复归档不重复记录，恢复仅处理持久材料。
+  - order: 2
+    action: 对已发布检查点分别制造状态缺失/损坏、前缀内采集gap、适配器不支持的schema、元信息与快照配置指纹不一致、外部依赖不可用及必需依赖更早到期；尝试晚建或复制快照引用旧材料。
+    expected: 内部材料读取/校验给出partial/unsupported/expired/corrupt等对应原因，不宣称可恢复；依赖最早期限生效且不能刷新旧数据30天保留，任何损坏不返回成功空状态；仅当前Agent配置改变不把完整历史材料误判为损坏。
+  - order: 3
+    action: 受控测试工具先在专用外部账本记录一次可观测副作用，在结果持久化前终止进程，再恢复归档，重复HTTP查询会话/轨迹，并通过真实内部材料服务读取检查点；另测调用开始观测本身未确认的中断。
+    expected: 已发出无可靠结果的操作为unknown，连观测也未确认时执行/材料显示gap或partial；没有自动重放且外部副作用总数保持1，不把failed解释为无副作用。
+  - order: 4
+    action: 以隔离夹具构造跨会话/turn因果引用和未决操作，通过实际只读材料解析路径检查引用与能力，再恢复正常存储、时钟和配置并执行一次全新initial运行。
+    expected: 引用解析拒绝跨归属/无效来源，当前retry/resume始终false且没有写入口；新运行生成新身份并正常归档，旧记录不被覆盖，canary不变且故障资源清理。
+  expected_results:
+  - 未满足持久前缀/状态/依赖一致性的检查点不得complete；已发布文件校验正确，重复归档不重复记录，恢复仅处理持久材料。
+  - 内部材料读取/校验给出partial/unsupported/expired/corrupt等对应原因，不宣称可恢复；依赖最早期限生效且不能刷新旧数据30天保留，任何损坏不返回成功空状态；仅当前Agent配置改变不把完整历史材料误判为损坏。
+  - 已发出无可靠结果的操作为unknown，连观测也未确认时执行/材料显示gap或partial；没有自动重放且外部副作用总数保持1，不把failed解释为无副作用。
+  - 引用解析拒绝跨归属/无效来源，当前retry/resume始终false且没有写入口；新运行生成新身份并正常归档，旧记录不被覆盖，canary不变且故障资源清理。
+  forbidden_side_effects:
+  - 不得自动重跑模型、有副作用或unknown工具；外部副作用重复数必须为0。
+  - 不得覆盖原执行、绕过期限/权限或把不完整材料标complete。
+  acceptance:
+  - id: AC-01
+    description: 未满足持久前缀/状态/依赖一致性的检查点不得complete；已发布文件校验正确，重复归档不重复记录，恢复仅处理持久材料。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 内部材料读取/校验给出partial/unsupported/expired/corrupt等对应原因，不宣称可恢复；依赖最早期限生效且不能刷新旧数据30天保留，任何损坏不返回成功空状态；仅当前Agent配置改变不把完整历史材料误判为损坏。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 已发出无可靠结果的操作为unknown，连观测也未确认时执行/材料显示gap或partial；没有自动重放且外部副作用总数保持1，不把failed解释为无副作用。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 引用解析拒绝跨归属/无效来源，当前retry/resume始终false且没有写入口；新运行生成新身份并正常归档，旧记录不被覆盖，canary不变且故障资源清理。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json
+    acceptance_criteria:
+    - AC-009
+    - AC-014
+    - AC-015
+    - AC-016
+    retired_on: '2026-11-05'
+    retirement_reason: The user withdrew execution-recovery preparation from this delivery; preserve this unimplemented historical contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: RELIABILITY
+  risk: 执行中断与材料失效导致伪完整检查点或副作用重复
+  condition:
+  - 独占可终止进程的部署、可控时钟、真实持久目录和测试外部副作用计数器
+  metrics:
+  - 错误complete数
+  - 自动重放/外部副作用重复数
+  - 到期材料可读数
+  - 跨归属因果接受数
+  thresholds:
+  - 上述四项均为0；中断未知结果必须明确unknown或缺口
+  - 恢复后已确认前缀无丢失/重复，新initial可正常归档
+  recovery_expectations:
+  - 还原部署/配置/时钟，清理本Case文件及测试外部操作，核验canary和正常新运行。

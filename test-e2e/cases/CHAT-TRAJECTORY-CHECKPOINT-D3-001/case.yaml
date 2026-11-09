@@ -1,0 +1,100 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-CHECKPOINT-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-001
+  - TRJ-RULE-006
+  - TRJ-RULE-008
+  - TRJ-RULE-009
+  title: 两个 Core 导出安全边界状态并持久化可核验检查点和操作记录
+  type: AGENT-IT
+  priority: P0
+  status: retired
+  automation: automated
+  objective: 两个 Core 导出安全边界状态并持久化可核验检查点和操作记录
+  preconditions:
+  - Retired on 2026-11-05 following the user scope change; no product, fixed script or execution binding was implemented.
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG零新增表、零新增字段、零新增序列且无SQL migration，轨迹及索引全部为文件。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 两个Core分别经真实产品入口和Provider HTTP fixture执行多轮；在turn_input及支持的model/step settled边界导出状态，记录实际下游请求和版本。
+    expected: 同会话trace稳定、turn不同且initial执行各自独立；输入/最终请求/状态版本与实际执行一致；只有适配器声明且无未决分支的边界形成complete候选。
+  - order: 2
+    action: 驱动并行子调用、一个显式不支持状态导出的受控工具、一次压缩；分别制造超过16MiB状态/manifest预算和在途状态总预算耗尽的导出。
+    expected: 未结算边界为partial；不能导出的依赖/版本为unsupported，超限分别为partial/limit_exceeded或budget_exhausted；不pickle对象、不静默截断后标complete，原诊断正文仍可分块读取。
+  - order: 3
+    action: 等候前缀归档和状态/manifest发布，重启服务后经真实内部材料读取/校验服务读取全部状态，核对sha256、event_seq、依赖与配置指纹；不依赖检查点HTTP接口。
+    expected: complete仅在同一安全边界的状态、已确认归档前缀与所有依赖一致时发布；冷读校验完全匹配，正文/state在本地文件，有界目录及材料引用也仅在文件；不支持状态原因可见。
+  - order: 4
+    action: 通过实际工具边界执行两次参数相同的独立无副作用测试操作，读取effect观测、tool record和事件；读取全部材料后清理。
+    expected: 两次操作具有不同operation_id，参数hash/工具版本/可信effect分类与结果引用正确；内部模型重试不新增业务执行attempt；能力仍关闭且原模型/工具次数不变，资源释放。
+  expected_results:
+  - 同会话trace稳定、turn不同且initial执行各自独立；输入/最终请求/状态版本与实际执行一致；只有适配器声明且无未决分支的边界形成complete候选。
+  - 未结算边界为partial；不能导出的依赖/版本为unsupported，超限分别为partial/limit_exceeded或budget_exhausted；不pickle对象、不静默截断后标complete，原诊断正文仍可分块读取。
+  - complete仅在同一安全边界的状态、已确认归档前缀与所有依赖一致时发布；冷读校验完全匹配，正文/state在本地文件，有界目录及材料引用也仅在文件；不支持状态原因可见。
+  - 两次操作具有不同operation_id，参数hash/工具版本/可信effect分类与结果引用正确；内部模型重试不新增业务执行attempt；能力仍关闭且原模型/工具次数不变，资源释放。
+  forbidden_side_effects:
+  - 不得因导出状态、读取或冷恢复归档再次执行模型或工具。
+  - 不得保存认证配置、任意对象pickle或修改其他租户/canary。
+  acceptance:
+  - id: AC-01
+    description: 同会话trace稳定、turn不同且initial执行各自独立；输入/最终请求/状态版本与实际执行一致；只有适配器声明且无未决分支的边界形成complete候选。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 未结算边界为partial；不能导出的依赖/版本为unsupported，超限分别为partial/limit_exceeded或budget_exhausted；不pickle对象、不静默截断后标complete，原诊断正文仍可分块读取。
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: complete仅在同一安全边界的状态、已确认归档前缀与所有依赖一致时发布；冷读校验完全匹配，正文/state在本地文件，有界目录及材料引用也仅在文件；不支持状态原因可见。
+    steps:
+    - 3
+    expected_results:
+    - 3
+  - id: AC-04
+    description: 两次操作具有不同operation_id，参数hash/工具版本/可信effect分类与结果引用正确；内部模型重试不新增业务执行attempt；能力仍关闭且原模型/工具次数不变，资源释放。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json
+    acceptance_criteria:
+    - AC-002
+    - AC-013
+    - AC-014
+    - AC-015
+    - AC-016
+    retired_on: '2026-11-05'
+    retirement_reason: The user withdrew execution-recovery preparation from this delivery; preserve this unimplemented historical contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - model-provider
+  integration_boundary:
+  - 真实Agent两Core到Provider HTTP协议Mock及受控工具
+  - Core状态导出到TraceSink、真实文件写入/刷盘/封段与文件索引器，再到内部材料读取/校验服务
+  observations:
+  - trace/turn/执行/调用身份
+  - 原始请求、state/manifest校验及已确认前缀
+  - 安全边界、材料状态和effect结果
+  - 物理调用计数及清理
+  cleanup:
+  - 释放本Case创建的Agent、会话、工具/Mock、连接与独占目录，记录canary和清理结果。

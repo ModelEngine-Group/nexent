@@ -1,0 +1,116 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-ISOLATION-D5-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-LOCAL-TRAJECTORY-20261103
+  business_rule_ids:
+  - TRJ-RULE-005
+  - TRJ-RULE-008
+  - TRJ-RULE-006
+  title: 仅管理员可读可信租户内轨迹，普通创建者及范围外访问拒绝
+  type: SECURITY
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 仅管理员可读可信租户内轨迹，普通创建者及范围外访问拒绝
+  preconditions:
+  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
+  - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
+  - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
+  - 基于现有MonitoringManager，通过MONITORING_TRACE_SINK选择otlp/local_file/both；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
+  - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
+  - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
+  - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间，全部产品/脚本仍待实现。
+  - 用户搜索直接复用POST /users/list；Agent/会话选择在既有两个GET增加view=trajectory、target_user_id及普通/工作台分类；新增仅3个轨迹GET及清理POST，原分支行为保持。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 准备租户A/B各自ADMIN、A租户USER/DEV/ASSET_OWNER普通身份及受信目标租户的SU；由普通用户运行带安全业务文本与凭证配置canary的会话，管理员查询用户/智能体/会话目录及历史。
+    expected: ADMIN可读本租户获授权会话，SU只读受信目标租户；目录无范围外账号。凭证不进入OTLP resource/Span/Events、队列、远端副本、响应或证据，属性归属由可信上下文注入；用户正文中同名nexent.*字符串不能覆盖系统属性，审计actor为管理员。
+  - order: 2
+    action: 用普通创建者/DEV/ASSET_OWNER/分享身份访问菜单及新增3个轨迹GET、扩展2个会话GET的轨迹分支及已有用户搜索入口；再用范围外ADMIN、其他用户的智能体关联、篡改selected_agent/target_user/cursor/会话/content_id访问，枚举可预测conversation_id。合法ADMIN也尝试将正文引用改为内部文件来源，并在受控OTLP字段引用中构造跨归属来源。
+    expected: 普通角色403且前端无菜单，范围外管理员和用户/智能体/会话不匹配404；无会话标题/范围/正文泄漏，撤权后新读取拒绝，跨归属正文来源被拒绝；trace_id同值使用会话详情，省略筛选仍执行同一管理员资源门禁；contents逐次校验来源/字段/版本及归属，非白名单来源拒绝
+  - order: 3
+    action: 在独占根目录构造路径穿越、绝对路径、symlink及检查后替换竞态，尝试读取根外canary，再清理并恢复合法ADMIN查询。 在tenant/user/agent/conversation各级构造目录名与meta不符、分隔符及同owner重复会话目录。
+    expected: 安全文件操作拒绝逃逸；根外/其他租户canary保持，合法ADMIN仍可读，普通创建者仍无权；全部攻击资产和身份清理。 各层规范编码/归属均被核验，重复位置报corrupt；客户端不能通过目录参数指定磁盘路径。
+  - order: 4
+    action: 在受控夹具中将同一用户从租户A迁至B，保持原会话和A的meta.json；用A/B管理员分别请求目录/详情/正文及尝试再次采集，最后恢复用户关系；另测仅按user_id的歧义成员查询。
+    expected: A因当前成员失效拒绝；B虽能查当前用户也不能读取A的旧文件，目录过滤该会话且详情/正文404，不泄漏标题/聊天；旧meta.json不重绑，新采集不得覆盖，需新会话；成员核验必须带可信tenant且不依赖无租户条件.first()，恢复关系后正常路径可用。 本租户目录缺失和首次登记时，服务端检查同owner/会话旧归属；预算耗尽阻止判未采集/创建新目录，旧tenant目录内容不返回新tenant管理员。
+  - order: 5
+    action: 使用普通角色调用清理POST，合法A管理员将cursor复用于B/其他actor并在body注入tenant_id、绝对路径；以SU受信目标租户正向清理，期间撤权；在归属不符目录和symlink中放置根外/其他租户canary。
+    expected: 普通角色403；非法或跨身份/租户游标及额外范围参数422，每批撤权后拒绝；清理仅作用当前可信租户并核验固定文件归属，symlink/路径逃逸拒绝。其他租户/根外及未选目标文件不变，审计记录actor/租户/天数/截止/结果且无凭证正文；owned cleanup和正常读取核验完成。
+  expected_results:
+  - ADMIN可读本租户获授权会话，SU只读受信目标租户；目录无范围外账号。凭证不进入OTLP resource/Span/Events、队列、远端副本、响应或证据，属性归属由可信上下文注入；用户正文中同名nexent.*字符串不能覆盖系统属性，审计actor为管理员。
+  - 普通角色403且前端无菜单，范围外管理员和用户/智能体/会话不匹配404；无会话标题/范围/正文泄漏，撤权后新读取拒绝，跨归属正文来源被拒绝；trace_id同值使用会话详情，省略筛选仍执行同一管理员资源门禁；contents逐次校验来源/字段/版本及归属，非白名单来源拒绝
+  - 安全文件操作拒绝逃逸；根外/其他租户canary保持，合法ADMIN仍可读，普通创建者仍无权；全部攻击资产和身份清理。 各层规范编码/归属均被核验，重复位置报corrupt；客户端不能通过目录参数指定磁盘路径。
+  - A因当前成员失效拒绝；B虽能查当前用户也不能读取A的旧文件，目录过滤该会话且详情/正文404，不泄漏标题/聊天；旧meta.json不重绑，新采集不得覆盖，需新会话；成员核验必须带可信tenant且不依赖无租户条件.first()，恢复关系后正常路径可用。 本租户目录缺失和首次登记时，服务端检查同owner/会话旧归属；预算耗尽阻止判未采集/创建新目录，旧tenant目录内容不返回新tenant管理员。
+  - 普通角色403；非法或跨身份/租户游标及额外范围参数422，每批撤权后拒绝；清理仅作用当前可信租户并核验固定文件归属，symlink/路径逃逸拒绝。其他租户/根外及未选目标文件不变，审计记录actor/租户/天数/截止/结果且无凭证正文；owned cleanup和正常读取核验完成。
+  forbidden_side_effects:
+  - 不得越权读取、修改或删除根外/其他租户数据；管理员跨用户读取必须在已授权范围。
+  - 不得保存认证配置或以仅隐藏菜单替代后端角色门禁。
+  acceptance:
+  - id: AC-01
+    description: ADMIN可读本租户获授权会话，SU只读受信目标租户；目录无范围外账号。凭证不进入OTLP resource/Span/Events、队列、远端副本、响应或证据，属性归属由可信上下文注入；用户正文中同名nexent.*字符串不能覆盖系统属性，审计actor为管理员。
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 普通角色403且前端无菜单，范围外管理员和用户/智能体/会话不匹配404；无会话标题/范围/正文泄漏，撤权后新读取拒绝，跨归属正文来源被拒绝；trace_id同值使用会话详情，省略筛选仍执行同一管理员资源门禁；contents逐次校验来源/字段/版本及归属，非白名单来源拒绝
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: 安全文件操作拒绝逃逸；根外/其他租户canary保持，合法ADMIN仍可读，普通创建者仍无权；全部攻击资产和身份清理。 各层规范编码/归属均被核验，重复位置报corrupt；客户端不能通过目录参数指定磁盘路径。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: A因当前成员失效拒绝；B虽能查当前用户也不能读取A的旧文件，目录过滤该会话且详情/正文404，不泄漏标题/聊天；旧meta.json不重绑，新采集不得覆盖，需新会话；成员核验必须带可信tenant且不依赖无租户条件.first()，恢复关系后正常路径可用。 本租户目录缺失和首次登记时，服务端检查同owner/会话旧归属；预算耗尽阻止判未采集/创建新目录，旧tenant目录内容不返回新tenant管理员。
+    steps:
+    - 4
+    expected_results:
+    - 4
+  - id: AC-05
+    description: 普通角色403；非法或跨身份/租户游标及额外范围参数422，每批撤权后拒绝；清理仅作用当前可信租户并核验固定文件归属，symlink/路径逃逸拒绝。其他租户/根外及未选目标文件不变，审计记录actor/租户/天数/截止/结果且无凭证正文；owned cleanup和正常读取核验完成。
+    steps:
+    - 5
+    expected_results:
+    - 5
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
+    acceptance_criteria:
+    - AC-001
+    - AC-007
+    - AC-013
+    - AC-008
+    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  risk_type: SECURITY
+  risk: 普通用户或范围外管理员越权读取历史轨迹，或主动清理扩大到未授权范围
+  condition:
+  - 隔离管理员/普通用户身份、受信租户上下文和可控文件攻击目录
+  metrics:
+  - 普通用户读取成功数
+  - 范围外读取成功数
+  - 根外canary变化数
+  - 凭证落盘数
+  - 未授权清理数
+  thresholds:
+  - 上述四项均为0，合法ADMIN正向读取成功
+  - 未授权清理=0，合法当前租户清理可完成
+  recovery_expectations:
+  - 移除攻击文件和身份，合法ADMIN仍可查询，普通创建者继续拒绝。

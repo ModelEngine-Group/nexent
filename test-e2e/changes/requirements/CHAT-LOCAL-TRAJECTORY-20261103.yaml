@@ -1,0 +1,55 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-LOCAL-TRAJECTORY-20261103
+  change_type: requirement
+  requirement_id: CHAT-LOCAL-TRAJECTORY-20261103
+  title: 正文完整内嵌OTLP的本地轨迹与管理员自研轨迹查看设计
+  description: 本地按租户/用户/首次根Agent/会话ID分组；每会话meta.json保存归属、执行清单和确认进度，每执行一份OTLP JSONL，全部正文内嵌属性/Events。按Span/Event字段有界返回轨迹节点DTO与正文，256KiB为刷盘阈值，单行可更大。PG复用现有结构，业务trace_id=conversation_id，默认保留30天，200并发；本轮为设计交付。
+    补充可配置定期清理和按before_days主动清理当前租户；直接复用用户POST、扩展2个会话GET，新增3个轨迹GET和1个清理POST，分批返回固定截止时间与实际结果，失败留待重试。
+  affected_features:
+    existing: []
+    added:
+    - CHAT-TRAJECTORY
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D3-001
+    - FAF-D2-001
+    added:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    - CHAT-TRAJECTORY-REAL-MODEL-D3-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    - CHAT-TRAJECTORY-RECOVERY-D5-001
+    - CHAT-TRAJECTORY-RETENTION-D5-001
+    - CHAT-TRAJECTORY-LOAD-D5-001
+    - CHAT-TRAJECTORY-DEPLOYMENT-D5-001
+    - CHAT-TRAJECTORY-TRACE-LOOKUP-D2-001
+    modified: []
+    retired:
+    - CHAT-TRAJECTORY-CHECKPOINT-D3-001
+    - CHAT-TRAJECTORY-RESUME-SAFETY-D5-001
+  traditional_ut:
+    decision: add
+    behaviors:
+    - MonitoringConfig/导出工厂默认otlp、local_file/both及非法配置；总开关、独立读取/Metrics、backend注入SDK，本地与远端队列/失败隔离；原远端预览/过滤/采样保持。
+    - OTLP JSON的resourceSpans/scopeSpans/spans、AnyValue、hex Trace/Span/Link ID、64位时间/整数及数字枚举；官方protobuf编码与JSON映射往返，大字段内嵌、片段/事件上限及dropped缺口。
+    - 原DROP为本地提升RECORD_ONLY并保持sampled位，本地接收未采样记录；最终安全请求在预览前分流，每个物理attempt独立Span，片段Events按来源/区间去重，失败部分输出/实际reasoning、上下文及真实usage/耗时保留。
+    - OTLP先fsync，再原子替换meta.json并fsync目录；confirmed_bytes/hash、批次/Span幂等、实际运行文件锁和会话短锁、终态发布、确认前缀校验及未确认尾部、30天整份回收。
+    - 管理员可信租户成员、actor/owner、created_by/最近agent_id、固定meta.json归属，迁租不重绑；候选过滤/短页/游标、普通及工作台；用户正文不能覆盖系统属性。
+    - PG复用原表/列/序列及查询；业务UUID和OTLP实际Span身份分离，Agent/模型/工具每次调用对应一个节点，模型input/output/reasoning归于同一record，parent_id及source保留业务父与实际Span来源，排序位置与export_seq分离。
+    - 静态节点DTO转换及片段归并、500条/8MiB输入、1MiB正文块/32MiB缓存、选择取消和迟到响应；3个轨迹GET、2个扩展会话GET、用户POST和统一content_id权限/字段/版本/期限校验。
+    - publication_no/cleanup_version快照、逐执行流式解析/行位置正文读取、聊天message_id上界/keyset/hash引用及snapshot_reset；原聊天rollback、模型/工具次数保持，trace同会话定位及覆盖完整性。
+    - tenant/user/agent/conversation目录规范编码；storage_agent_id固定、根Agent切换/删除/未知、同owner/会话的有界定位及503预算错误、迁租旧归属拒绝；跨实例稳定owner/会话锁串行首次登记，PG结构复用。
+    - 大于256KiB的OTLP行、4MiB全文、JSON转义及Unicode跨块；增量字符串编码/解码，正文游标使用解码后UTF-8字节区间；大行中断只裁未确认尾部，完整确认/幂等及30天唯一文件回收。
+    - 定期清理默认true/30天/3600秒及非法配置；UTC截止含等号、异常终态固定时间、活跃/未发布跳过；收紧expires_at持久化、读块及时失效。主动POST天数/actor/tenant/固定cutoff游标签名、逐批限额/统计、撤权/422/409/503；先撤引用后unlink/fsync，失败项/墓碑回收、幂等及定时/手动锁竞争。
+    - 复用POST /users/list原分页/搜索/响应；两个现有会话GET增加view=trajectory/target_user_id/分类，默认原权限/响应/游标及置顶保持。轨迹分支校验ADMIN/SU、可信租户当前成员、文件归属，绑定actor/tenant/owner/type/group/search签名游标及所有附带数组预算；3个新轨迹GET和清理POST保持独立。
+    reason: 新增能力需要独立UT；既有UT证明聊天回滚而非完整轨迹。此轮仅设计，实际selector在产品实施后确认，不注册为正式D1。
+  notes: 'Primary ownership: runtime. All diagnostic text is inline in OTLP Span attributes/events, one OTLP JSONL per execution. Existing business directory
+    grouping, fixed storage_agent_id, stable owner/conversation locks and bounded lookup remain. Ten current Cases are blocked pending product/scripts/bindings;
+    two retired Cases are unchanged. Scope provenance: nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json. Product
+    runtime acceptance remains pending. Current cleanup extension strengthens QUERY, JOURNEY, RETENTION, DEPLOYMENT and ISOLATION contracts; no new Cases
+    or product implementation. Primary ownership remains runtime. API reuse inspection on 2026-11-06: directly reuse one user-list route, extend two conversation
+    routes, add three trajectory GETs plus one cleanup POST. Product source is unchanged.'
