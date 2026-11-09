@@ -48,11 +48,12 @@ client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
 client_mock.db_client = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules["management.db.client"] = client_mock
+sys.modules["infrastructure.rdb.client"] = client_mock
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 db_models_mock = MagicMock()
 db_models_mock.UserOAuthAccount = MagicMock()

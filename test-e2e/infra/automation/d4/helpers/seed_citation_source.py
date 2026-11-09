@@ -18,7 +18,7 @@ def main() -> int:
     from shared.config import repo_root
 
     repo = repo_root()
-    sys.path.insert(0, str(repo / "backend"))
+    sys.path[:0] = [str(repo), str(repo / "backend")]
 
     # Product DB modules resolve POSTGRES_* at import time.
     from shared.postgres import apply_product_postgres_env

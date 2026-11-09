@@ -6,10 +6,16 @@ services:
       context: ../../..
       dockerfile: deploy/images/dockerfiles/gateway/Dockerfile
     restart: unless-stopped
-    entrypoint: ["python", "backend/gateway_service.py"]
+    entrypoint: ["python", "-m", "backend.http.gateway_service"]
     ports:
       - "${NEXENT_GATEWAY_PORT:-5016}:5013"
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      POSTGRES_HOST: "${POSTGRES_HOST:-nexent-postgresql}"
+      POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
+      POSTGRES_DB: "${POSTGRES_DB:-nexent}"
+      POSTGRES_USER: "${POSTGRES_USER:-root}"
+      NEXENT_POSTGRES_PASSWORD: "${NEXENT_POSTGRES_PASSWORD:?PostgreSQL password is required}"
       GATEWAY_AUTH_ENABLED: "true"
       GATEWAY_PORT: "5013"
       DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"

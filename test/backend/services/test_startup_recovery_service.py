@@ -46,7 +46,7 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
     )
     _install_module(
         monkeypatch,
-        "management.services.agent.run_state",
+        "infrastructure.redis.run_state",
         runtime_state_service=runtime_state,
     )
 
@@ -166,7 +166,7 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
     transition = MagicMock(side_effect=[{"file_id": "claimed", "version": 3}, None])
     delete_object = MagicMock(return_value={"success": True})
     _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
-    _install_module(monkeypatch, "management.db.client", minio_client=MagicMock())
+    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=MagicMock())
     _install_module(
         monkeypatch,
         "management.db.knowledge_base.file_lifecycle",
@@ -213,7 +213,7 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
         "management.db.file.attachment",
         delete_file=MagicMock(return_value={"success": False, "error": "storage down"}),
     )
-    _install_module(monkeypatch, "management.db.client", minio_client=minio_client)
+    _install_module(monkeypatch, "infrastructure.object_storage.client", minio_client=minio_client)
     _install_module(
         monkeypatch,
         "management.db.knowledge_base.file_lifecycle",

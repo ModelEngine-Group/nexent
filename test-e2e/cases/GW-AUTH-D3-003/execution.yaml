@@ -1,0 +1,22 @@
+schema_version: '1.0'
+case_id: GW-AUTH-D3-003
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_gateway_database_identity_protocol
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_gateway_database_identity_protocol
+  AC-02:
+  - test_gateway_database_identity_protocol
+  AC-03:
+  - test_gateway_database_identity_protocol
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Requires an explicitly supplied local disposable PostgreSQL admin DSN, creates/drops
+  a random database and read-only role; existing PostgreSQL connection settings are consumed directly; production/model execution excluded.

@@ -6,7 +6,7 @@ from gateway.security.token_codec import decode_session
 
 from gateway.security.policy import canonical_path, is_public_request
 from gateway.security.identity import IdentityError, bearer_token
-from gateway.security.management_client import IdentityUnavailable, lookup_identity
+from gateway.security.management_client import IdentityUnavailable
 
 
 def authorization_for(connection):
@@ -22,18 +22,18 @@ def authorization_for(connection):
     return None
 
 
-async def resolve_identity(connection, client, management_url, *, settings):
+async def resolve_identity(connection, *, settings, identity_lookup=None):
     if connection.scope.get("method", "GET") == "POST" and canonical_path(connection.url.path) == "/user/logout":
         # Verified logout identity is needed for CAS revocation; invalid logout
         # credentials must retain the existing idempotent anonymous outcome.
         try:
-            return await _resolve_identity(connection, client, management_url, settings=settings)
+            return await _resolve_identity(connection, settings=settings, identity_lookup=identity_lookup)
         except (IdentityError, IdentityUnavailable):
             return None
-    return await _resolve_identity(connection, client, management_url, settings=settings)
+    return await _resolve_identity(connection, settings=settings, identity_lookup=identity_lookup)
 
 
-async def _resolve_identity(connection, client, management_url, *, settings):
+async def _resolve_identity(connection, *, settings, identity_lookup=None):
     method = connection.scope.get("method", "GET")
     path = canonical_path(connection.url.path)
     authorization = authorization_for(connection)
@@ -59,8 +59,12 @@ async def _resolve_identity(connection, client, management_url, *, settings):
                 raise IdentityError("Invalid session policy")
             if not isinstance(claims["sub"], str) or not claims["sub"].strip() or type(claims["ver"]) is not int:
                 raise IdentityError("Invalid session identity")
+            if claims.get("sid") is not None and (not isinstance(claims["sid"], str) or not claims["sid"] or len(claims["sid"]) > 100):
+                raise IdentityError("Invalid session identifier")
         except (jwt.InvalidTokenError, TypeError, ValueError) as exc:
             raise IdentityError("Invalid session credential") from exc
         payload = {"kind": "session", "user_id": claims["sub"], "token_version": claims["ver"],
                    "session_id": claims.get("sid"), "language": language}
-    return await lookup_identity(payload, client, management_url, key=settings.signing_key())
+    if identity_lookup is None:
+        raise IdentityUnavailable("Identity provider is unavailable")
+    return await identity_lookup(payload)

@@ -8,8 +8,7 @@ This module works around circular import bugs in openjiuwen 0.1.13 by:
   2. Installing a meta-path finder that blocks broken __init__.py files
   3. All of the above runs at MODULE LOAD TIME (before openjiuwen imports)
 
-The adapters/__init__.py wraps the import in try/except so the server
-starts even when openjiuwen is not installed.
+The prompt and evaluation services handle an unavailable SDK at the import boundary.
 """
 import asyncio
 import importlib.abc
@@ -216,7 +215,7 @@ def _extract_score_reason(evaluated: Any) -> Tuple[float, str]:
 
 logger = logging.getLogger("jiuwen_adapter")
 
-from adapters.exception import JiuwenSDKError
+from contracts.errors.capabilities import JiuwenSDKError
 
 
 # ----------------------------------------------------------------------
@@ -474,7 +473,7 @@ class JiuwenSDKAdapter:
     Jiuwen SDK 调用适配器
 
     封装 Jiuwen SDK 的所有调用，内部不处理降级，
-    失败时抛出 JiuwenSDKError，由上层 PromptOptimizationService 决定是否降级
+    Raises JiuwenSDKError when optimization fails.
     """
 
     def __init__(self, model_id: int, tenant_id: str):

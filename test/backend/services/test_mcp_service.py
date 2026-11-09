@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for backend/mcp_service.py
+Unit tests for backend/http/mcp_service.py
 Tests MCP service for OpenAPI service registration and management.
 """
 
@@ -150,14 +150,14 @@ logging.config = logging_config_mod  # patch the actual logging module too
 # Stub utils
 stub_utils = types.ModuleType("utils")
 stub_utils.__path__ = [os.path.abspath(os.path.join(current_dir, "../../../backend/utils"))]
-stub_utils.logging_utils = types.ModuleType("infrastructure.logging")
+stub_utils.logging_utils = types.ModuleType("backend.http.logging")
 stub_utils.logging_utils.configure_logging = MagicMock()
 stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
 stub_utils.logging_utils.get_uvicorn_logging_config = MagicMock(
     return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
 )
 sys.modules['utils'] = stub_utils
-sys.modules['infrastructure.logging'] = stub_utils.logging_utils
+sys.modules['backend.http.logging'] = stub_utils.logging_utils
 
 # Stub database
 stub_database = types.ModuleType("database")
@@ -165,6 +165,7 @@ sys.modules['database'] = stub_database
 
 # Create backend package structure
 stub_backend = types.ModuleType("backend")
+stub_backend.__path__ = [os.path.abspath(os.path.join(current_dir, "../../../backend"))]
 stub_backend.database = types.ModuleType("backend.database")
 sys.modules['backend'] = stub_backend
 sys.modules['backend.database'] = stub_backend.database
@@ -195,9 +196,9 @@ sys.modules["nexent"] = stub_nexent
 sys.modules["nexent.core"] = stub_nexent_core
 sys.modules["nexent.core.concurrency"] = stub_concurrency
 
-stub_thread_lifecycle = types.ModuleType("infrastructure.concurrency")
+stub_thread_lifecycle = types.ModuleType("backend.mcp.thread_management")
 stub_thread_lifecycle.mcp_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = stub_thread_lifecycle
+sys.modules["backend.mcp.thread_management"] = stub_thread_lifecycle
 
 # Stub http
 stub_http = types.ModuleType("http")
@@ -212,7 +213,7 @@ sys.modules['mcpadapt'] = stub_mcpadapt
 sys.modules['mcpadapt.smolagents_adapter'] = stub_mcpadapt.smolagents_adapter
 
 # Import the module under test
-import mcp_service
+from backend.http import mcp_service
 
 # Update module-level references to use our mocks
 mcp_service.MCPTool = MockMCPTool
@@ -1329,7 +1330,7 @@ class TestRunMcpServerWithManagement:
         assert callable(mcp_service.run_mcp_server_with_management)
 
     @patch.object(Thread, 'start')
-    @patch('mcp_service.uvicorn')
+    @patch('backend.http.mcp_service.uvicorn')
     def test_starts_fastapi_server(self, mock_uvicorn, mock_thread_start):
         """Test that function starts FastAPI server in thread"""
         # Reset global state
@@ -1346,7 +1347,7 @@ class TestRunMcpServerWithManagement:
             pass
 
     @patch.object(Thread, 'start')
-    @patch('mcp_service.uvicorn')
+    @patch('backend.http.mcp_service.uvicorn')
     @patch.object(mcp_service, 'nexent_mcp')
     def test_run_mcp_server_calls_nexent_run(self, mock_nexent_mcp, mock_uvicorn, mock_thread_start):
         """Test that run_mcp_server_with_management calls nexent_mcp.run"""
@@ -1361,7 +1362,7 @@ class TestRunMcpServerWithManagement:
             pass
 
     @patch.object(Thread, 'start')
-    @patch('mcp_service.uvicorn')
+    @patch('backend.http.mcp_service.uvicorn')
     def test_run_mcp_server_with_management_thread_creation(self, mock_uvicorn, mock_thread_start):
         """Test that function creates a daemon thread for FastAPI server"""
         mcp_service._mcp_management_app = None
@@ -1592,7 +1593,7 @@ def test_run_mcp_server_with_management_starts_and_cleans_up_services():
     clear_default.assert_called_once_with(mcp_service.mcp_thread_manager)
 
     @patch.object(Thread, 'start')
-    @patch('mcp_service.uvicorn')
+    @patch('backend.http.mcp_service.uvicorn')
     def test_run_mcp_server_with_management_creates_new_event_loop(self, mock_uvicorn, mock_thread_start):
         """Test that FastAPI server thread creates a new event loop"""
         import asyncio

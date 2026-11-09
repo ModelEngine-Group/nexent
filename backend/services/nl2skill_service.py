@@ -32,7 +32,7 @@ from management.services.skill.stream_parser import SkillStreamParser
 from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
-from infrastructure.concurrency import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
 
 logger = logging.getLogger(__name__)

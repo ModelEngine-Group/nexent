@@ -338,7 +338,7 @@ nexent_multi_modal_module.utils = multi_modal_utils_module
 sys.modules['nexent.multi_modal'] = nexent_multi_modal_module
 sys.modules['nexent.multi_modal.utils'] = multi_modal_utils_module
 
-# Mock psycopg2 before management.db.client is imported
+# Mock psycopg2 before infrastructure.rdb.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -465,10 +465,10 @@ sys.modules['management.services.configuration.tenant.settings'] = config_utils_
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
 
-knowledge_telemetry_mock = types.ModuleType('infrastructure.observability.knowledge')
+knowledge_telemetry_mock = types.ModuleType('infrastructure.trace.knowledge')
 knowledge_telemetry_mock.set_span_attributes = MagicMock()
 knowledge_telemetry_mock.trace_knowledge_operation = MagicMock()
-sys.modules['infrastructure.observability.knowledge'] = knowledge_telemetry_mock
+sys.modules['infrastructure.trace.knowledge'] = knowledge_telemetry_mock
 setattr(sys.modules['utils'], 'knowledge_telemetry', knowledge_telemetry_mock)
 
 # Shared mock instances for MinIO
@@ -485,10 +485,10 @@ backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 # Set backend.utils as attribute so imports like 'from backend.utils.xxx import yyy' work
 setattr(backend_module, 'utils', backend_utils_mock)
-backend_database_client_module = importlib.import_module('management.db.client')
-sys.modules['management.db.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('infrastructure.rdb.client')
+sys.modules['infrastructure.rdb.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Storage deletion tests isolate Agent previews and binding persistence.
 # Their actual implementations are covered in focused app/database tests.
@@ -5286,7 +5286,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertIn("Unsupported vector database type", str(exc.exception))
 
     @patch('management.services.knowledge_base.common.tenant_config_manager')
-    @patch('management.services.knowledge_base.common.DataMateCore')
+    @patch('infrastructure.vdb.client.DataMateCore')
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
         from management.services.knowledge_base.service import get_vector_db_core
@@ -5306,7 +5306,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(result, mock_datamate_core.return_value)
 
     @patch('management.services.knowledge_base.common.tenant_config_manager')
-    @patch('management.services.knowledge_base.common.DataMateCore')
+    @patch('infrastructure.vdb.client.DataMateCore')
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
         from management.services.knowledge_base.service import get_vector_db_core

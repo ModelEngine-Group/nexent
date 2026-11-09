@@ -19,9 +19,13 @@ def cli(mocker):
     target.close.side_effect = lambda: events.append("close")
     mocker.patch.object(migrate, "load_settings", return_value={})
     mocker.patch.object(migrate, "connections", return_value=({}, {}, True))
+    mocker.patch.object(migrate, "target_connection", return_value={})
     mocker.patch.object(migrate, "prepare_source", return_value="supabase-selected-db")
     mocker.patch.object(migrate, "source_stack_configuration", return_value={"selected": True})
-    mocker.patch("psycopg2.connect", side_effect=[source, target])
+    preflight = MagicMock()
+    preflight.__enter__.return_value = preflight
+    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
+    mocker.patch("psycopg2.connect", side_effect=[preflight, source, target])
     mocker.patch.object(migration, "read_source_users", return_value=[])
     importer = mocker.patch.object(migration, "import_users", return_value={"inserted": 0})
     cleanup = mocker.patch.object(migrate, "cleanup_source_stack", side_effect=lambda values: events.append("cleanup"))
@@ -60,7 +64,7 @@ def test_cleanup_error_reports_committed_data_without_leaking_driver_values(mock
     events, importer, cleanup = cli
     cleanup.side_effect = error
     mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
-    assert migrate.main() == 1
+    assert migrate.main() == 0
     output = capsys.readouterr()
     assert "migration committed; source cleanup failed" in output.err
     assert "private-secret" not in output.err

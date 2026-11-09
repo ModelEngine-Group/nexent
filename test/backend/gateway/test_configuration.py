@@ -4,6 +4,7 @@
 import ast
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,7 @@ def test_invalid_configuration_fails_before_startup(name, value):
 
 def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monkeypatch):
     from contracts.constants import environment
-    from infrastructure.service_identity.gateway import sign_identity as backend_sign, signing_key
+    from gateway.downstream.identity import sign_identity as backend_sign, signing_key
 
     identity = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
     key = derive_signing_key("master-fixture")
@@ -69,39 +70,65 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt"}
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "infrastructure"}
     for path in (BACKEND / "gateway").rglob("*.py"):
+        if path.relative_to(BACKEND / "gateway").parts[0] == "downstream":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             modules = [node.module] if isinstance(node, ast.ImportFrom) else [item.name for item in node.names] if isinstance(node, ast.Import) else []
             for module in modules:
                 assert module and module.split(".")[0] in allowed, (path, module)
+                if module.startswith("infrastructure"):
+                    assert module == "infrastructure.rdb.identity", (path, module)
+                assert not module.startswith("gateway.downstream"), (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 
 
 def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_path):
-    shutil.copytree(BACKEND / "gateway", tmp_path / "gateway", ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy2(BACKEND / "gateway_service.py", tmp_path)
+    repository = BACKEND.parent
+    dockerfile = repository / "deploy/images/dockerfiles/gateway/Dockerfile"
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("COPY "):
+            continue
+        *sources, destination = shlex.split(line)[1:]
+        if not destination.startswith("/opt/"):
+            continue
+        target = tmp_path / destination.removeprefix("/opt/")
+        for source in sources:
+            for entry in repository.glob(source):
+                if entry.is_dir():
+                    shutil.copytree(entry, target, dirs_exist_ok=True,
+                                    ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    output = target / entry.name if destination.endswith("/") else target
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(entry, output)
+    backend = tmp_path / "backend"
+    assert not (backend / "gateway/downstream").exists()
     code = """import json,sys
-sys.path.insert(0, sys.argv[1])
-import gateway_service
+sys.path[:0] = sys.argv[1:3]
+sys.modules["bcrypt"] = None
+import http.client
+import logging.handlers
+from backend.http import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
-assert not {'management','runtime','contracts','infrastructure','nexent','dotenv'} & sys.modules.keys()
+assert not {'management','runtime','contracts','infrastructure.rdb.client','gateway.downstream','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
 print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()
     env["MAX_KNOWLEDGE_FILE_SIZE_MB"] = "invalid-business-setting"
-    result = subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path)], cwd=tmp_path,
+    result = subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path), str(backend)], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["imported"] is True
 
 
 def test_launcher_uses_injected_settings_and_does_not_trust_forwarded_headers(monkeypatch):
-    import gateway_service
+    from backend.http import gateway_service
 
     settings = GatewaySettings(host="127.0.0.1", port=5099, jwt_secret="launcher-fixture")
     calls = []

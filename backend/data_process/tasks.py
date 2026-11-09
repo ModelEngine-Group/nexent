@@ -23,11 +23,11 @@ from contracts.errors.codes import ErrorCode
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.file.upload import get_file_size
-from infrastructure.ingestion.errors import (
+from contracts.errors.ingestion import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )
-from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
+from infrastructure.trace.knowledge import set_span_attributes, trace_knowledge_operation
 
 from .app import app
 from .parse_tasks import process

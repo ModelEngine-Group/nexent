@@ -18,7 +18,7 @@ SPLIT_MODULES = (
     (
         "management.services.permission.identity.session", "management.services.permission.identity.northbound",
         "management.services.permission.identity.provider",
-        "infrastructure.service_identity.internal_tokens", "gateway.security.signatures",
+        "gateway.downstream.internal_tokens", "management.services.permission.identity.signatures",
         "gateway.security.token_codec", "gateway.security.service_tokens",
     ),
     ("management.services.monitor.audit", "management.utils.request_context"),

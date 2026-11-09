@@ -255,7 +255,7 @@ bash build.sh --package \
   --target all \
   --version v2.5.0 \
   --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source general \
   --compress true \
   --output-dir offline-package
@@ -281,7 +281,7 @@ bash build.sh --package \
   --target docker \
   --version latest \
   --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source local-latest \
   --compress true \
   --output-dir offline-package/docker-local

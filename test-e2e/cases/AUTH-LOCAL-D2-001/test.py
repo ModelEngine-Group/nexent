@@ -18,7 +18,7 @@ from local_auth_http import native_runtime, runtime, register, bearer  # noqa: F
 
 def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from sqlalchemy import select, func
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.token import create_token
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
@@ -44,7 +44,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
         assert northbound_auth.validate_bearer_token(user["api_key"])[0]
         with get_db_session() as session:
             account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == user["user_id"])).scalar_one()
-            assert account.account_status == "active" and account.user_role == "DEV"
+            assert account.delete_flag == "N" and account.user_role == "DEV"
             assert account.user_email is account.password_hash is account.email_confirmed_at is None
             assert not account.password_login_enabled
             assert session.query(models.TenantGroupUser).filter_by(user_id=user["user_id"], group_id=group_id).count() == 1
@@ -75,8 +75,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     for state in ["disabled", "deleted"]:
         with get_db_session() as session:
             account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == users[0]["user_id"])).scalar_one()
-            account.account_status = "disabled" if state == "disabled" else "active"
-            account.delete_flag = "Y" if state == "deleted" else "N"
+            account.delete_flag = "Y"
         assert not northbound_auth.validate_bearer_token(current_key)[0]
 
 
@@ -184,11 +183,11 @@ def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
         ).status_code
         == 401
     )
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
         session.execute(
-            models.UserAccount.__table__.update().values(account_status="disabled")
+            models.UserAccount.__table__.update().values(delete_flag="Y")
         )
     assert (
         client.get("/api/user/current_user_info", headers=bearer(token)).status_code
@@ -207,7 +206,7 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
     client, auth, helpers, models = runtime
     data = register(client)
     user_id = data["user"]["id"]
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
 
     with get_db_session() as session:
         session.add(
@@ -243,7 +242,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
     from management.cli.account import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
-    from gateway.security.passwords import verify_password
+    from management.utils.account_passwords import verify_password
     from management.services.permission.identity.cas import (
         CasPrincipal,
         _resolve_project_user,

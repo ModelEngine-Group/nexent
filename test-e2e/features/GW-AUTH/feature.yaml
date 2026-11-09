@@ -11,7 +11,9 @@ feature:
   business_rules:
   - rule_id: GW-AUTH-RULE-01
     description: Only Gateway verifies ordinary external credentials; every request
-      resolves current account, version, membership and revocation state.
+      resolves current account, version, membership and revocation state. Authenticated
+      SU sessions retain their default context for an empty bootstrap tenant; ordinary
+      roles and API keys still require a tenant.
   - rule_id: GW-AUTH-RULE-02
     description: Downstream accepts audience/request-bound Gateway identity for HTTP
       and WebSocket, rejects unsigned/spoofed requests, and isolates request context.
@@ -19,6 +21,20 @@ feature:
     description: MCP delegates forwarded external sessions to Gateway through body-bound
       service authentication, verifies the MCP audience and request binding, checks
       tenant ownership and restores request context.
+  - rule_id: GW-AUTH-RULE-04
+    description: Gateway explicitly allowlists public method/path/transport for ordinary
+      Management5010 and Runtime5014 forwarding and Northbound5013 entry; unknown
+      or reserved routes never reach authentication or business upstream.
+  - rule_id: GW-AUTH-RULE-05
+    description: Gateway resolves external session and API-key state directly through
+      an infrastructure read-only PostgreSQL repository without implicit Management
+      HTTP fallback; revocation and tenant/CAS ownership remain authoritative. Deployment
+      passes existing PostgreSQL settings directly without a separate database credential
+      configuration.
+  - rule_id: GW-AUTH-RULE-06
+    description: Deployment starts the unified nexent-gateway container; obsolete
+      northbound process resources are removed without deleting images or changing
+      durable task owners.
   required_test_stages:
   - D3
   source:

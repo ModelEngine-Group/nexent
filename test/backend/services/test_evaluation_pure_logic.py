@@ -134,7 +134,7 @@ if str(_BACKEND_DIR) not in sys.path:
 # collection. Restore the surrounding process state so sibling test modules do
 # not inherit those doubles.
 _MODULE_ROOTS = (
-    "adapters",
+    "adapters.jiuwen_sdk_adapter",
     "boto3",
     "botocore",
     "consts",
@@ -272,13 +272,7 @@ def _install_sys_modules_stubs() -> None:
     sys.modules["nexent.core.agents.sandbox"] = sandbox_mock
     _nexent_core_agents.sandbox = sandbox_mock
 
-    # ---- adapters ----------------------------------------------------------
-    _adapters_pkg = _register_package("adapters")
-    _jw_err_cls = type("JiuwenSDKUnavailableError", (Exception,), {})
-    _exc_mod = _mk_mod("adapters.exception", JiuwenSDKUnavailableError=_jw_err_cls)
-    _adapters_pkg.exception = _exc_mod
-    _jw_mod = _mk_mod("adapters.jiuwen_sdk_adapter", JiuwenSDKAdapter=None)
-    _adapters_pkg.jiuwen_sdk_adapter = _jw_mod
+    _mk_mod("adapters.jiuwen_sdk_adapter", JiuwenSDKAdapter=None)
 
     # ---- consts ------------------------------------------------------------
     _consts_pkg = _register_package("consts")
@@ -344,7 +338,7 @@ def _install_sys_modules_stubs() -> None:
     # database/client imports ``as_dict`` in sibling database tests; expose both
     # names so this test's collection-time graph is self-contained as well.
     _dc_mod = _mk_mod(
-        "management.db.client", get_db_session=MagicMock(), as_dict=MagicMock()
+        "infrastructure.rdb.client", get_db_session=MagicMock(), as_dict=MagicMock()
     )
     _db_pkg.client = _dc_mod
     _dm_mod = _mk_mod(
@@ -391,10 +385,11 @@ def _install_sys_modules_stubs() -> None:
     )
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
-        "infrastructure.concurrency",
+        "runtime.thread_management",
         config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )
+    sys.modules["management.thread_management"] = _tls_mod
     _services_pkg.thread_lifecycle_service = _tls_mod
 
     _utils_pkg = _register_package("utils")

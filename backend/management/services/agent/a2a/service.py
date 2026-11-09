@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from management.db.a2a import repository as a2a_agent_db
 from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from management.db.client import get_db_session
+from infrastructure.rdb.client import get_db_session
 from contracts.a2a import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
 from contracts.errors.exceptions import RuntimeUpstreamError

@@ -4,7 +4,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from infrastructure.web.application import create_app
+from backend.http.server.app_factory import create_app
 from runtime.api.agent.execution import agent_runtime_router as agent_router
 from management.api.automation.agent_automation import (
     conversation_automation_router,
@@ -18,15 +18,16 @@ from management.api.conversation.conversation_share import router as conversatio
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-from middleware.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.exception_handler import ExceptionHandlerMiddleware
+from runtime.api.identity_routes import is_runtime_service_request
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from infrastructure.concurrency import runtime_thread_manager
-from management.services.agent.run_state import runtime_state_service
+from runtime.thread_management import runtime_thread_manager
+from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
@@ -92,6 +93,7 @@ app = create_app(
     description="Runtime APIs",
     lifespan=runtime_lifespan,
     gateway_identity_audience="runtime",
+    internal_runtime_request=is_runtime_service_request,
 )
 if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager

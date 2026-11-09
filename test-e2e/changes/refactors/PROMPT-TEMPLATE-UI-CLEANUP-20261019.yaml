@@ -39,7 +39,6 @@ change:
     - test/backend/services/test_agent_service.py
     - test/backend/services/test_core_service_slimming.py
     - test/backend/app/test_config_app.py
-    - test/backend/app/test_prompt_app.py
     - frontend/tests/agentVersionSwitchGuard.test.ts
     - frontend/tests/agentUsageGuideLocales.test.ts
     - test/sdk/benchmark/test_export_agent_config.py

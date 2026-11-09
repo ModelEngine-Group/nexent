@@ -31,13 +31,13 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_client_mock).start()
 
 
 def _make_client(mocker, role: str, granted_permissions: set) -> TestClient:
     """Build a TestClient whose user has the given role and permissions."""
     mocker.patch('boto3.client')
-    mocker.patch('management.db.client.MinioClient')
+    mocker.patch('infrastructure.object_storage.client.MinioClient')
 
     import types
     import sys as _sys

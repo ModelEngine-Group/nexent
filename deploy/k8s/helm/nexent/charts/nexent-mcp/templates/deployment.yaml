@@ -39,7 +39,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/mcp_service.py
+            - -m
+            - backend.http.mcp_service
           envFrom:
             - configMapRef:
                 name: nexent-config
@@ -48,6 +49,13 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
+            - name: GATEWAY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: GATEWAY_SERVICE_URL
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "wait"

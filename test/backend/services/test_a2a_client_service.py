@@ -1040,7 +1040,7 @@ class TestDiscoverSingleFromNacos:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+        with patch.dict(sys.modules, {"management.services.agent.a2a.nacos": mock_nacos_module}):
             with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)
@@ -1085,7 +1085,7 @@ class TestDiscoverSingleFromNacos:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+        with patch.dict(sys.modules, {"management.services.agent.a2a.nacos": mock_nacos_module}):
             result = await service._discover_single_from_nacos(
                 nacos_config=mock_nacos_config,
                 agent_name="test-agent",
@@ -1595,7 +1595,7 @@ class TestCallAgent:
     async def test_raises_authentication_error_on_unauthorized_response(self):
         """Test unauthorized responses explain that configured credentials failed."""
         from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
-        from infrastructure.http.a2a import A2AHttpStatusError
+        from management.services.agent.a2a.http_client import A2AHttpStatusError
 
         service = A2AClientService()
         mock_agent = {
@@ -2199,7 +2199,7 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+        with patch.dict(sys.modules, {"management.services.agent.a2a.nacos": mock_nacos_module}):
             result = await service._discover_single_from_nacos(
                 nacos_config=mock_nacos_config,
                 agent_name="test-agent",
@@ -2243,7 +2243,7 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+        with patch.dict(sys.modules, {"management.services.agent.a2a.nacos": mock_nacos_module}):
             with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)
@@ -2291,7 +2291,7 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+        with patch.dict(sys.modules, {"management.services.agent.a2a.nacos": mock_nacos_module}):
             with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)

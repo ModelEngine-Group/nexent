@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-gateway
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: nexent-gateway
+  annotations:
+    "helm.sh/hook-weight": "20"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+{{ toYaml .Values.strategy | indent 4 }}
+  selector:
+    matchLabels:
+      app: nexent-gateway
+  template:
+    metadata:
+      labels:
+        app: nexent-gateway
+      annotations:
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
+        checksum/nexent-gateway-image: {{ dig "rolloutChecksums" "gatewayImage" "" .Values.global | quote }}
+        checksum/nexent-postgres: {{ dig "rolloutChecksums" "postgresSecret" "" .Values.global | quote }}
+    spec:
+      containers:
+        - name: nexent-gateway
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          ports:
+            - containerPort: 5013
+              name: http
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["python", "-m", "backend.http.gateway_service"]
+          env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: TZ
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: POSTGRES_USER
+            - name: NEXENT_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: NEXENT_POSTGRES_PASSWORD
+            - name: GATEWAY_PORT
+              value: "5013"
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: JWT_ISSUER
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: JWT_SECRET
+            - name: GATEWAY_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: GATEWAY_SIGNING_SECRET
+                  optional: true
+            - name: GATEWAY_MANAGEMENT_URL
+              value: "http://nexent-config:5010"
+            - name: GATEWAY_RUNTIME_URL
+              value: "http://nexent-runtime:5014"
+            - name: GATEWAY_NORTHBOUND_URL
+              value: "http://nexent-config:5010"
+            - name: DEPLOYMENT_VERSION
+              value: {{ .Values.global.deploymentVersion | quote }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 5013
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: {{ .Values.resources.backend.requests.memory }}
+              cpu: {{ .Values.resources.backend.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.backend.limits.memory }}
+              cpu: {{ .Values.resources.backend.limits.cpu }}

@@ -57,21 +57,21 @@ class TestConfigAppIntegration:
 
     def test_config_app_can_import_app_factory(self):
         """Test that we can import create_app from app_factory."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app()
         assert isinstance(app, FastAPI)
         assert app.root_path == "/api"
 
     def test_config_app_title(self):
         """Test that create_app works with config app title."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app(title="Nexent Config API", description="Configuration APIs")
         assert app.title == "Nexent Config API"
         assert app.description == "Configuration APIs"
 
     def test_config_app_default_cors_config(self):
         """Test that config app has correct CORS configuration."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         app = create_app()
 
         cors_middleware = None
@@ -110,11 +110,11 @@ class TestConfigAppRouterConfiguration:
 
                 return register
 
-        app_factory_module = types.ModuleType("infrastructure.web.application")
+        app_factory_module = types.ModuleType("backend.http.server.app_factory")
         app_factory_module.create_app = (
             lambda **kwargs: RecordingApp(kwargs.get("lifespan"))
         )
-        monkeypatch.setitem(sys.modules, "infrastructure.web.application", app_factory_module)
+        monkeypatch.setitem(sys.modules, "backend.http.server.app_factory", app_factory_module)
 
         api_key_router = APIRouter(prefix="/api-keys")
 
@@ -144,7 +144,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.mock_user_management": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
-            "management.api.prompt.prompt": {"router": APIRouter()},
             "management.api.mcp.mcp_management": {"router": APIRouter()},
             "management.api.mcp.remote_mcp": {"router": APIRouter()},
             "management.api.skill.skill": {"router": APIRouter()},
@@ -186,10 +185,14 @@ class TestConfigAppRouterConfiguration:
                 setattr(module, attribute, value)
             monkeypatch.setitem(sys.modules, module_name, module)
 
-        retired_router = APIRouter(prefix="/prompt-template")
-        retired_module = types.ModuleType("management.api.prompt.prompt_template")
-        retired_module.router = retired_router
-        monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
+        retired_routers = {
+            "management.api.prompt.prompt_template": APIRouter(prefix="/prompt-template"),
+            "management.api.prompt.prompt": APIRouter(prefix="/prompt"),
+        }
+        for module_name, router in retired_routers.items():
+            retired_module = types.ModuleType(module_name)
+            retired_module.router = router
+            monkeypatch.setitem(sys.modules, module_name, retired_module)
 
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
@@ -230,17 +233,17 @@ class TestConfigAppRouterConfiguration:
             sys.modules, "nexent.core.concurrency", concurrency_module
         )
         thread_lifecycle_module = types.ModuleType(
-            "infrastructure.concurrency"
+            "management.thread_management"
         )
         thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
         monkeypatch.setitem(
             sys.modules,
-            "infrastructure.concurrency",
+            "management.thread_management",
             thread_lifecycle_module,
         )
 
         runtime_state = MagicMock()
-        monkeypatch.setitem(sys.modules, "management.services.agent.run_state",
+        monkeypatch.setitem(sys.modules, "infrastructure.redis.run_state",
                             types.SimpleNamespace(runtime_state_service=runtime_state))
         component_path = Path(backend_dir) / "management/api/northbound_application.py"
         component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
@@ -253,7 +256,11 @@ class TestConfigAppRouterConfiguration:
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
-        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert all(
+            registered is not retired
+            for registered in config_app.app.included_routers
+            for retired in retired_routers.values()
+        )
         assert api_key_router in config_app.app.included_routers
         for router in router_modules["management.api.northbound"].values():
             assert router in config_app.app.included_routers
@@ -358,7 +365,7 @@ class TestConfigAppRouterConfiguration:
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -382,7 +389,7 @@ class TestConfigAppRouterConfiguration:
 
     def test_router_path_prefixes(self):
         """Test router path prefix patterns."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -403,7 +410,7 @@ class TestConfigAppExceptionHandling:
 
     def test_http_exception_handler_config(self):
         """Test HTTPException handler configuration."""
-        from infrastructure.web.application import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -421,7 +428,7 @@ class TestConfigAppExceptionHandling:
 
     def test_exception_handlers_registered(self):
         """Test that exception handlers are properly registered."""
-        from infrastructure.web.application import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -438,26 +445,26 @@ class TestConfigAppMonitoring:
 
     def test_monitoring_can_be_enabled(self):
         """Test that monitoring can be enabled for config app."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(enable_monitoring=True)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_can_be_disabled(self):
         """Test that monitoring can be disabled for config app."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(enable_monitoring=False)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_import_failure_handled(self):
         """Test that monitoring import failure is handled gracefully."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('infrastructure.web.application.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.trace.bootstrap': None}):
+            with patch('backend.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None
 
@@ -473,7 +480,7 @@ class TestConfigAppSpeedMode:
     def test_speed_mode_conditional(self):
         """Test speed mode conditional logic."""
         from contracts.constants.environment import IS_SPEED_MODE
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         # App should work regardless of speed mode
         app = create_app()
@@ -510,7 +517,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_stack_exists(self):
         """Test that middleware stack exists."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
         assert hasattr(app, 'user_middleware')
@@ -518,7 +525,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_cors_middleware_present(self):
         """Test that CORS middleware is present."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
 
@@ -532,7 +539,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_order(self):
         """Test middleware order is preserved."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app()
         middleware_count = len(app.user_middleware)
@@ -546,7 +553,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_path_parameters(self):
         """Test routes with path parameters."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -564,7 +571,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_query_parameters(self):
         """Test routes with query parameters."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -583,7 +590,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_post_body(self):
         """Test routes with POST body."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
         from pydantic import BaseModel
 
@@ -611,7 +618,7 @@ class TestConfigAppErrorResponses:
 
     def test_404_error_format(self):
         """Test 404 error response format."""
-        from infrastructure.web.application import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -623,7 +630,7 @@ class TestConfigAppErrorResponses:
 
     def test_500_error_format(self):
         """Test 500 error response format."""
-        from infrastructure.web.application import create_app, register_exception_handlers
+        from backend.http.server.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -644,7 +651,7 @@ class TestConfigAppVersioning:
 
     def test_root_path_configuration(self):
         """Test root path configuration."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
 
         app = create_app(root_path="/api")
         assert app.root_path == "/api"
@@ -654,7 +661,7 @@ class TestConfigAppVersioning:
 
     def test_custom_root_path_with_routes(self):
         """Test custom root path with routes."""
-        from infrastructure.web.application import create_app
+        from backend.http.server.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app(root_path="/api")

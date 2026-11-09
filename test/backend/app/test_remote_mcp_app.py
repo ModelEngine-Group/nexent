@@ -48,9 +48,9 @@ minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 patch('contracts.constants.environment.ENABLE_UPLOAD_IMAGE', True).start()
 patch('management.services.mcp.containers.create_container_client_from_config').start()
@@ -62,7 +62,7 @@ from fastapi import FastAPI
 from http import HTTPStatus
 
 from management.api.mcp.remote_mcp import router
-from infrastructure.web.application import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 from management.api.mcp import remote_mcp as remote_app
 remote_app.MCPConnectionError = MCPConnectionError

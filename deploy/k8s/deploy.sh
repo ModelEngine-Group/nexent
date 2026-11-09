@@ -430,9 +430,14 @@ render_k8s_runtime_config_values() {
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "  config:"
     printf '    timezone: %s\n' "$(yaml_quote "${TZ:-Asia/Shanghai}")"
+    echo "    postgres:"
+    printf '      host: %s\n' "$(yaml_quote "${POSTGRES_HOST:-nexent-postgresql}")"
+    printf '      port: %s\n' "$(yaml_quote "${POSTGRES_PORT:-5432}")"
+    printf '      db: %s\n' "$(yaml_quote "${POSTGRES_DB:-nexent}")"
+    printf '      user: %s\n' "$(yaml_quote "${POSTGRES_USER:-root}")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
-    printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-northbound:5013/api")")"
+    printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-gateway:5013/api")")"
     # These inputs also supply defaults for runtime state and worker concurrency.
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
@@ -856,7 +861,7 @@ wait_for_nexent_ready() {
     local deployment
 
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web"
+        deployments="nexent-config nexent-runtime nexent-mcp nexent-gateway nexent-web"
     fi
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
         deployments="$deployments nexent-data-process"
@@ -1110,6 +1115,7 @@ render_runtime_secret_values() {
         printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
         printf '    authSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$JWT_SECRET")")"
+        printf '    postgresSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")")"
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  envFiles:"
@@ -1323,9 +1329,9 @@ apply() {
         SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
-    # Capture the source before replacing Secrets needed by a stopped old DB.
+    # Complete historical import before replacing source Secrets or starting application SQL.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-        deployment_upgrade_local_accounts prepare kubernetes "$NAMESPACE" || exit 1
+        deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1
     fi
 
     render_runtime_secret_values
@@ -1353,9 +1359,6 @@ apply() {
         fi
     fi
 
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-        deployment_upgrade_local_accounts apply kubernetes "$NAMESPACE" || exit 1
-    fi
 
     # Step 9: Create the super admin user after local account migrations.
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"

@@ -122,7 +122,6 @@ change:
     - test/backend/app/test_notification_app.py
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_oauth_app_audit.py
-    - test/backend/app/test_prompt_app.py
     - test/backend/app/test_remote_mcp_app.py
     - test/backend/app/test_skill_app.py
     - test/backend/app/test_skill_repository_app.py

@@ -23,20 +23,20 @@ case:
     credentials required.
   test_data:
     profile: mock
-    accounts: Two synthetic active accounts, a revoked CAS session and an opaque revocable
-      API key.
+    accounts: Two ordinary synthetic accounts, an active SU with an empty bootstrap
+      tenant, a revoked CAS session and an opaque revocable API key.
     persistence: Database functions use synthetic adapters; downstream business/voice
       execution uses recording sinks. Product credential parsing, identity endpoint/policy,
       signing, middleware and proxy execute unchanged.
   steps:
   - order: 1
-    action: Send two session users and an API key through actual Gateway HTTP, signed
+    action: Send two session users, an empty-tenant SU session and an API key through actual Gateway HTTP, signed
       Management lookup and downstream handlers. Exercise the existing signed Management-to-Runtime
       dispatch credential separately from user sessions.
     expected: Each handler sees its own signed identity and membership lookup occurs
-      once per session request.
+      once per session request. The protected current-user route accepts SU with its established default tenant context.
   - order: 2
-    action: Submit missing/forged identities, direct unsigned calls, wrong service
+    action: Submit missing/forged identities, empty-tenant ordinary/API credentials, direct unsigned calls, wrong service
       signatures, changed account version, revoked CAS session and revoked API key.
       Tamper lookup body and attempt public access to lookup.
     expected: 401/404 reject paths and no rejected call reaches a business handler.
@@ -57,7 +57,7 @@ case:
   - Authoritative account and API-key identities cross real HTTP network hops without
     cross-user contamination.
   - Forged, unsigned, wrong-audience and revoked identities never invoke business
-    handlers; service lookup body and private route are protected.
+    handlers; service lookup body and private route are protected. Empty-tenant ordinary users and API keys remain rejected.
   - Anonymous bootstrap and authenticated WebSocket subprotocol/binary/close behavior
     work, with no residual identity or managed work.
   - MCP uses Gateway authentication and retains tenant authorization; unsigned or

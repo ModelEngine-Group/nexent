@@ -29,8 +29,8 @@ from management.services.knowledge_base.service import ElasticSearchService, get
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 from management.services.file.upload import save_upload_file
-from infrastructure.ingestion.errors import ingestion_error_fields
-from infrastructure.observability.knowledge import trace_knowledge_operation
+from contracts.errors.ingestion import ingestion_error_fields
+from infrastructure.trace.knowledge import trace_knowledge_operation
 
 
 # Create upload directory

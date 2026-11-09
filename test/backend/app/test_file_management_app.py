@@ -244,7 +244,7 @@ file_management_app = __import__(
 
 
 from runtime.api.file import upload as runtime_file
-from management.utils import file_http as file_http
+from management.api.file import http as file_http
 
 # --- Helpers ---
 
@@ -1303,7 +1303,7 @@ def test_build_content_disposition_header_exception_handling(monkeypatch):
     def boom(_value: str, safe: str = "") -> str:
         raise RuntimeError("quote failure")
 
-    monkeypatch.setattr("management.utils.file_http.quote", boom)
+    monkeypatch.setattr("management.api.file.http.quote", boom)
 
     result = file_http.build_content_disposition_header("测试.pdf")
     assert 'attachment; filename=' in result
@@ -1337,7 +1337,7 @@ def test_build_content_disposition_header_inline_exception_handling(monkeypatch)
     def boom(_value: str, safe: str = "") -> str:
         raise RuntimeError("quote failure")
 
-    monkeypatch.setattr("management.utils.file_http.quote", boom)
+    monkeypatch.setattr("management.api.file.http.quote", boom)
 
     result = file_http.build_content_disposition_header("中文.pdf", inline=True)
     assert 'inline; filename=' in result
@@ -1849,7 +1849,7 @@ def test_build_datamate_url_from_parts_trailing_slash_branch(monkeypatch):
     def fake_urlparse(_url: str):
         return DummyParseResult()
 
-    monkeypatch.setattr("management.utils.file_http.urlparse", fake_urlparse)
+    monkeypatch.setattr("management.api.file.http.urlparse", fake_urlparse)
 
     result = file_http._build_datamate_url_from_parts(
         "http://placeholder",

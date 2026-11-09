@@ -19,7 +19,7 @@ def recover_runtime_tasks() -> dict[str, int]:
     from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
     from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
     from management.db.conversation.repository import fail_streaming_assistant_messages
-    from management.services.agent.run_state import runtime_state_service
+    from infrastructure.redis.run_state import runtime_state_service
 
     messages = fail_streaming_assistant_messages()
     for message in messages:
@@ -99,7 +99,7 @@ def recover_northbound_tasks() -> dict[str, int]:
 def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int:
     """Fail old uploads owned by a restarted service and remove partial objects."""
     from management.db.file.attachment import delete_file
-    from management.db.client import minio_client
+    from infrastructure.object_storage.client import minio_client
     from management.db.knowledge_base.file_lifecycle import list_uploading_files_created_before, transition_file_record
 
     failed = 0

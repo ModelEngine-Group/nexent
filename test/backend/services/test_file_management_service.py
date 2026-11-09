@@ -41,8 +41,8 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('management.db.client.MinioClient', return_value=minio_mock).start()
-patch('management.db.client.minio_client', minio_mock).start()
+patch('infrastructure.object_storage.client.MinioClient', return_value=minio_mock).start()
+patch('infrastructure.object_storage.client.minio_client', minio_mock).start()
 
 # Stub Elasticsearch service module to avoid initializing real client during import
 services_stub = types.ModuleType('services')
@@ -115,7 +115,7 @@ list_files_impl = file_management_service.list_files_impl
 def setup_patches():
     """Setup global patches for the test module"""
     patches = [
-        patch('management.db.client.db_client', MagicMock()),
+        patch('infrastructure.rdb.client.db_client', MagicMock()),
         patch('management.db.file.attachment.minio_client', minio_mock),
         patch('management.db.file.attachment.upload_fileobj', MagicMock()),
         patch('management.db.file.attachment.get_file_url', MagicMock()),

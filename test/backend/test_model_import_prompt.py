@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from contracts.agent import AgentImportRequest, ExportAndImportAgentInfo
-from infrastructure.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
+from contracts.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 
 
 @pytest.fixture

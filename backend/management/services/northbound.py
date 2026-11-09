@@ -26,8 +26,8 @@ from management.services.agent.service import (
     get_agent_by_name_impl,
 )
 from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
-from infrastructure.concurrency import config_thread_manager
-from management.services.agent.run_state import runtime_state_service
+from management.thread_management import config_thread_manager
+from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
 from management.services.knowledge_base.scope import (
     AIDP_TOOL_CLASS,
@@ -44,7 +44,7 @@ from management.services.conversation.service import (
     update_conversation_title as update_conversation_title_service,
 )
 from management.services.model.management import list_models_for_tenant
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     runtime_metadata_hash,
     validate_runtime_metadata,
 )

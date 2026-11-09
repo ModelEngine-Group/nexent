@@ -2,10 +2,9 @@ schema_version: '1.0'
 change:
   change_id: MR-WEB-FOUNDATION-20261102
   change_type: refactor
-  title: Extract shared Web assembly before independent Management and Runtime images
-  description: First implementation slice stacked on the Gateway branch. Preserve
-    HTTP and signed identity contracts; keep evaluation composition in Management
-    and Agent/model capability execution in Runtime in the corrected plan.
+  title: Verify shared Web assembly before independent Management and Runtime images
+  description: Validate the shared Web assembly in backend/http/server after the
+    infrastructure split. Preserve HTTP and signed identity coverage.
   affected_features:
     existing:
     - GW-AUTH
@@ -30,7 +29,6 @@ change:
     - Shared web assembly imports no Management or Runtime implementation.
     - A minimal source-only deployment constructs and serves process health without
       either business service.
-    - Legacy public factory imports resolve to the canonical functions.
     - Exception status/body, CORS, lifespan, health readiness and signed downstream
       audience enforcement remain unchanged.
     reason: Reuse app_factory/health/caller regressions, add source-isolation and

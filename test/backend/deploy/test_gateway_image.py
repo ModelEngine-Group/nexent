@@ -68,17 +68,19 @@ deployment_render_image_values
     assert result.splitlines()[0] == expected
     assert "gatewayImage:" in result
     overrides = yaml.safe_load(result[result.index("nexent-config:"):])
-    image = overrides["nexent-northbound"]["images"]["backend"]
+    image = overrides["nexent-gateway"]["images"]["backend"]
     assert image["repository"] + ":" + image["tag"] == expected
 
 
 @pytest.mark.parametrize("filename", ["docker-compose.yml", "docker-compose.prod.yml"])
 def test_compose_gateway_has_no_business_dependencies(filename):
     compose = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))
-    gateway = compose["services"]["nexent-northbound"]
+    gateway = compose["services"]["nexent-gateway"]
     assert "NEXENT_GATEWAY_IMAGE" in gateway["image"]
-    assert gateway["entrypoint"] == ["python", "backend/gateway_service.py"]
+    assert gateway["entrypoint"] == ["python", "-m", "backend.http.gateway_service"]
     assert gateway["environment"]["GATEWAY_PORT"] == "5013"
+    assert "nexent-northbound" not in compose["services"]
+    assert "NEXENT_POSTGRES_PASSWORD" in gateway["environment"]
     assert gateway["environment"]["GATEWAY_AUTH_ENABLED"] == "true"
     assert "JWT_ISSUER" in gateway["environment"]
     assert "JWT_SECRET" in gateway["environment"]
@@ -87,15 +89,15 @@ def test_compose_gateway_has_no_business_dependencies(filename):
     assert gateway["healthcheck"]["test"] == ["CMD", "python", "-m", "gateway.healthcheck"]
     mcp = compose["services"]["nexent-mcp"]
     assert mcp["environment"]["GATEWAY_AUTH_ENABLED"] == "true"
-    assert mcp["environment"]["GATEWAY_SERVICE_URL"] == "http://nexent-northbound:5013"
+    assert mcp["environment"]["GATEWAY_SERVICE_URL"] == "http://nexent-gateway:5013"
 
 
 def test_helm_gateway_is_independent_and_scalable(tmp_path):
     helm = shutil.which("helm")
     assert helm, "Helm is required for deployment verification"
     # Build file:// dependencies in a temporary copy, without cluster access.
-    chart = tmp_path / "charts/nexent-northbound"
-    shutil.copytree(CHART / "charts/nexent-northbound", chart)
+    chart = tmp_path / "charts/nexent-gateway"
+    shutil.copytree(CHART / "charts/nexent-gateway", chart)
     shutil.copytree(CHART / "charts/nexent-common", chart.parent / "nexent-common")
     dependencies = subprocess.run([helm, "dependency", "build", str(chart)],
                                   capture_output=True, text=True, timeout=30)
@@ -111,21 +113,21 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     config = next(item for item in documents if item.get("kind") == "ConfigMap" and item["metadata"]["name"] == "nexent-config")
     assert "GATEWAY_AUTH_ENABLED" not in config["metadata"]
     assert config["data"]["GATEWAY_AUTH_ENABLED"] == "true"
-    assert config["data"]["GATEWAY_SERVICE_URL"] == "http://nexent-northbound:5013"
+    assert config["data"]["GATEWAY_SERVICE_URL"] == "http://nexent-gateway:5013"
     deployment = next(item for item in documents if item.get("kind") == "Deployment")
     assert deployment["spec"]["replicas"] == 2
     assert deployment["spec"]["strategy"]["type"] == "RollingUpdate"
     pod = deployment["spec"]["template"]["spec"]
     container = pod["containers"][0]
     assert container["image"] == "nexent/nexent-gateway:latest"
-    assert container["command"] == ["python", "backend/gateway_service.py"]
+    assert container["command"] == ["python", "-m", "backend.http.gateway_service"]
     assert container["securityContext"]["runAsNonRoot"] is True
     assert not {"envFrom", "volumeMounts"} & container.keys()
     assert "volumes" not in pod
     env = {item["name"]: item for item in container["env"]}
     assert env["JWT_SECRET"]["valueFrom"]["secretKeyRef"]["key"] == "JWT_SECRET"
     assert env["GATEWAY_SIGNING_SECRET"]["valueFrom"]["secretKeyRef"]["optional"] is True
-    assert set(env) == {"JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
+    assert set(env) == {"TZ", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "NEXENT_POSTGRES_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
                         "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT"}
 
 

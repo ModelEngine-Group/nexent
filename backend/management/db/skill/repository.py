@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_, update as sa_update
 
-from management.db.client import get_db_session
-from management.utils.orm import filter_property, as_dict
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.orm import filter_property, as_dict
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
 from contracts.constants.environment import MAX_SKILLS_PER_TENANT
 from contracts.errors.codes import ErrorCode

@@ -39,11 +39,11 @@ from management.db.model.repository import create_model_record
 from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
 from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
 from management.db.identity.group import query_group_ids_by_user
-from management.utils.orm import as_dict
-from management.db.client import get_db_session
+from infrastructure.rdb.orm import as_dict
+from infrastructure.rdb.client import get_db_session
 from management.db.models import RolePermission, UserAccount
 from management.db.identity.account import create_account, get_account_by_email, change_password
-from gateway.security.passwords import hash_password, verify_password
+from management.utils.account_passwords import hash_password, verify_password
 from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
 from management.services.tool.configuration import init_tool_list_for_tenant
@@ -361,7 +361,7 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
-    from management.db.client import get_db_session
+    from infrastructure.rdb.client import get_db_session
     from management.db.identity.token import soft_delete_tokens_by_user
 
     access_key = generate_access_key()

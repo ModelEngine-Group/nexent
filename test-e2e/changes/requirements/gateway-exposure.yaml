@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: GW-EXPOSURE-20261105
+  change_type: requirement
+  title: Explicit Gateway exposure for ordinary backend and Northbound requests
+  description: First dependency-ordered implementation batch for approved Gateway
+    design; preserve regular Management5010 Runtime5014 forwarding alongside Northbound
+    entry. DB provider and adaptation ownership migration remain subsequent batches.
+  affected_features:
+    existing:
+    - GW-AUTH
+    added: []
+    modified:
+    - GW-AUTH
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    added:
+    - GW-AUTH-D3-002
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Explicit method/path/transport match without catchall Management forwarding.
+    - Malformed or reserved paths reject before external authentication and upstream
+      work.
+    - Existing public ordinary routes, streaming and Northbound contracts remain callable.
+    - New backend declarations do not automatically expose endpoints.
+    reason: UT proves matcher validation and negative boundaries; D3 separately proves
+      real forwarding and transport across local services.
+    test_selectors:
+    - test/backend/gateway/test_exposure.py
+    - test/backend/gateway/test_edge.py
+    - test/backend/gateway/test_central_authentication.py
+    - test/backend/gateway/test_edge_integration.py
+  requirement_id: GW-EXPOSURE

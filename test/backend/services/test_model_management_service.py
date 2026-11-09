@@ -33,13 +33,13 @@ if "nexent.core.agents.agent_model" not in sys.modules:
     agent_model_mod.ToolConfig = ToolConfig
     sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Stub boto3 used by management.db.client
+# Stub boto3 used by infrastructure.rdb.client
 if "boto3" not in sys.modules:
     sys.modules["boto3"] = mock.MagicMock()
 
-# Provide stub modules for management.db.client and management.db.client so that
+# Provide stub modules for infrastructure.rdb.client and infrastructure.rdb.client so that
 # patching MinioClient does not import the real client module (which pulls SQLAlchemy).
-backend_db_client_mod = types.ModuleType("management.db.client")
+backend_db_client_mod = types.ModuleType("infrastructure.rdb.client")
 
 
 class _MinioClient:  # minimal stub
@@ -47,9 +47,10 @@ class _MinioClient:  # minimal stub
 
 
 backend_db_client_mod.MinioClient = _MinioClient
-sys.modules["management.db.client"] = backend_db_client_mod
+sys.modules["infrastructure.rdb.client"] = backend_db_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 # Ensure parent package exposes the submodule attribute for import machinery
 try:
@@ -61,14 +62,15 @@ except Exception:
         setattr(sys.modules["management.db"],
                 "client", backend_db_client_mod)
 
-# Also stub management.db.client.MinioClient in case modules import without the 'backend.' prefix
-database_client_mod = types.ModuleType("management.db.client")
+# Also stub infrastructure.object_storage.client.MinioClient in case modules import without the 'backend.' prefix
+database_client_mod = types.ModuleType("infrastructure.rdb.client")
 database_client_mod.MinioClient = _MinioClient
-sys.modules["management.db.client"] = database_client_mod
+sys.modules["infrastructure.rdb.client"] = database_client_mod
+sys.modules["infrastructure.object_storage.client"] = sys.modules["infrastructure.rdb.client"]
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 from test.common.database_stubs import install_serialization_stub
-install_serialization_stub(sys.modules["management.db.client"])
+install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
@@ -523,7 +525,7 @@ def import_svc(module="management"):
     sampling_module = importlib.util.module_from_spec(sampling_spec)
     sampling_spec.loader.exec_module(sampling_module)
     sys.modules["nexent.core.models.sampling"] = sampling_module
-    with mock.patch("management.db.client.MinioClient", return_value=minio_client_mock):
+    with mock.patch("infrastructure.object_storage.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
     return svc
 

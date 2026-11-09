@@ -49,7 +49,7 @@ def test_environment_reaches_sdk_configuration(
     monkeypatch.setitem(sys.modules, "contracts.constants.environment", None if fallback else constants)
     monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", constants)
     get_manager = mocker.patch("nexent.monitor.get_monitoring_manager")
-    runpy.run_path(str(ROOT / "backend/infrastructure/observability/bootstrap.py"))
+    runpy.run_path(str(ROOT / "infrastructure/trace/bootstrap.py"))
     get_manager.return_value.configure.assert_called_once()
     config, = get_manager.return_value.configure.call_args.args
     assert isinstance(config, MonitoringConfig)

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from contracts.errors.exceptions import AccountConflictError
-from gateway.security.passwords import hash_password
+from management.utils.account_passwords import hash_password
 from management.db.identity import account
 from management.db.models import UserAccount
 
@@ -87,7 +87,7 @@ def test_create_account_preserves_hash_or_disables_provider_only_password(sessio
     assert stored.password_login_enabled is password_enabled
     assert stored.password_hash_scheme == ("scrypt" if password_enabled else None)
     assert stored.token_version == 0
-    assert stored.account_status == "active"
+    assert "account_status" not in UserAccount.__table__.columns
     assert stored.delete_flag == "N"
     assert stored.email_confirmed_at is not None
     assert stored.created_by == stored.updated_by == result["user_id"]
@@ -103,7 +103,7 @@ def test_explicit_api_only_account_has_no_email_or_password(session):
     stored = session.add.call_args.args[0]
     assert result["user_id"] == "api-user"
     assert stored.user_email is stored.password_hash is stored.password_hash_scheme is stored.email_confirmed_at is None
-    assert stored.account_status == "active" and stored.password_login_enabled is False
+    assert "account_status" not in UserAccount.__table__.columns and stored.password_login_enabled is False
     assert stored.source_metadata == {"api_only": True}
     assert stored.created_by == stored.updated_by == "admin"
     assert all("account-email:None" not in str(call) for call in session.execute.call_args_list)
@@ -126,7 +126,7 @@ def test_delete_account_disables_login_and_invalidates_existing_tokens(session):
     account.delete_account("identity", session)
     query = compiled(session.execute.call_args.args[0])
     assert query.params["delete_flag"] == "Y"
-    assert query.params["account_status"] == "disabled"
+    assert "account_status" not in query.params
     assert query.params["password_hash"] is None
     assert query.params["password_login_enabled"] is False
     assert query.params["updated_by"] == "identity"
@@ -141,7 +141,7 @@ def test_password_update_compares_old_hash_and_increments_token_version(session,
     assert account.change_password("identity", "old-hash", encoded) is changed
     query = compiled(session.execute.call_args.args[0])
     assert query.params["password_hash_1"] == "old-hash"
-    assert query.params["account_status_1"] == "active"
+    assert "account_status" not in str(query)
     assert query.params["delete_flag_1"] == "N"
     assert query.params["password_hash"] == encoded
     assert query.params["password_hash_scheme"] == "scrypt"

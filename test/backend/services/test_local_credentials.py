@@ -7,7 +7,7 @@ from uuid import uuid4
 import bcrypt
 import pytest
 
-from gateway.security.passwords import (
+from management.utils.account_passwords import (
     hash_password,
     password_scheme,
     verify_password,
@@ -89,12 +89,16 @@ def test_source_mapping_preserves_identity_hash_times_and_separates_roles():
     ],
 )
 def test_inactive_source_users_stay_disabled(extra):
-    assert map_source_user(source_user(**extra))["account_status"] == "disabled"
+    assert map_source_user(source_user(**extra))["delete_flag"] == "Y"
 
 
-def test_cas_generated_password_does_not_enable_password_login():
-    row = source_user(raw_user_meta_data={"provider": "cas"})
-    assert not map_source_user(row)["password_login_enabled"]
+@pytest.mark.parametrize("provider", ["cas", "github"])
+@pytest.mark.parametrize("has_password", [False, True])
+def test_provider_binding_does_not_override_actual_password_credential(provider, has_password):
+    row = source_user(raw_user_meta_data={"provider": provider})
+    if not has_password:
+        row["encrypted_password"] = None
+    assert map_source_user(row)["password_login_enabled"] is has_password
 
 
 @pytest.mark.parametrize(
@@ -123,7 +127,7 @@ def test_migration_cli_rejects_missing_password_without_connecting(monkeypatch, 
     connect = mocker.patch("psycopg2.connect")
     assert migrate.main() == 1
     connect.assert_not_called()
-    assert "SUPABASE_POSTGRES_PASSWORD" in capsys.readouterr().err
+    assert "NEXENT_POSTGRES_PASSWORD" in capsys.readouterr().err
 
 
 def test_migration_cli_hides_database_connection_details(monkeypatch, mocker, capsys):

@@ -1,239 +1,215 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Deployment checkpoint, private snapshot and retry contracts."""
-
+"""Account coverage selects migration; schema and credentials share one transaction."""
 import argparse
-import base64
-import hashlib
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 from deploy.sql.tools.supabase_to_postgres import migrate_docker as migration
-from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
-    _run_worker,
-    _source_target,
-    deployment_status,
-)
 
 
 @pytest.fixture
-def upgrade(tmp_path, mocker, monkeypatch):
-    monkeypatch.delenv("POSTGRES_DB", raising=False)
-    args = argparse.Namespace(deployment="docker", namespace="nexent", database_target="owned-target",
-                              config_target="owned-config", state_dir=tmp_path, env_file=tmp_path / ".env",
-                              source_container=None, deploy_phase="prepare", wait_timeout=1)
-    checksum = hashlib.sha256((migration.ROOT / "deploy/sql/migrations" / migration.AUTH_SQL).read_bytes()).hexdigest()
-    status = {"history": {}, "pending": 0, "legacy_logins": False}
-    mocker.patch.object(migration, "deployment_status", return_value=status)
-    source = mocker.patch.object(migration, "_source_target", return_value=None)
-    worker = mocker.patch.object(migration, "_run_worker", return_value={"inserted": 0})
+def upgrade(tmp_path, mocker):
+    args = argparse.Namespace(deployment="docker", namespace="nexent", database_target="owned-db",
+                              config_target="owned-config", env_file=tmp_path / ".env",
+                              source_container=None, wait_timeout=1, apply=True)
+    source = mocker.patch.object(migration, "_source_target", return_value={"target": "supabase-db", "configuration": {"owned": True}})
+    mocker.patch.object(migration, "source_snapshot", return_value=[])
+    sql = mocker.patch.object(migration, "_psql", side_effect=[
+        '{"complete":false,"legacy":true}', '{"source":0,"dry_run":false}'])
     cleanup = mocker.patch.object(migration, "cleanup_source_stack")
-    return args, checksum, status, source, worker, cleanup
+    return args, source, sql, cleanup
 
 
-def checkpoint(status, checksum, *markers):
-    status["history"].update({marker: {"checksum": checksum} for marker in markers})
+def test_complete_account_data_skips_source_access_and_all_writes(upgrade):
+    args, source, sql, cleanup = upgrade
+    sql.side_effect = ['{"complete":true,"legacy":true}']
+    assert migration.automatic_upgrade(args)["skipped"]
+    source.assert_not_called()
+    cleanup.assert_not_called()
+    assert sql.call_count == 1
+    assert "user_account_t" in sql.call_args.args[2]
+    assert "schema_migrations" not in sql.call_args.args[2]
 
 
-def test_fresh_install_uses_empty_snapshot_then_records_data_and_cleanup(upgrade):
-    args, checksum, status, _, worker, cleanup = upgrade
+def test_fresh_database_uses_normal_initialization_without_source(upgrade):
+    args, source, sql, cleanup = upgrade
+    sql.side_effect = ['{"complete":false,"legacy":false}']
+    assert migration.automatic_upgrade(args)["new"]
+    source.assert_not_called()
+    cleanup.assert_not_called()
+
+
+def test_upgrade_runs_one_atomic_sql_command_before_cleanup(upgrade):
+    args, _, sql, cleanup = upgrade
+    assert migration.automatic_upgrade(args) == {"source": 0, "dry_run": False}
+    command = sql.call_args.args[2]
+    assert command.startswith("BEGIN;") and command.rstrip().endswith("COMMIT;")
+    assert command.index("CREATE TABLE IF NOT EXISTS nexent.user_account_t") < command.index("CREATE TEMP TABLE account_import")
+    assert "ADD COLUMN account_status" not in command
+    assert "account_status VARCHAR(30)" not in command
+    assert "account_schema_replay" not in command
+    assert "INSERT INTO pg_temp.account_migration_profiles" in command
+    cleanup.assert_called_once_with({"owned": True})
+    assert not (args.env_file.parent / ".migration-state").exists()
+
+
+def test_missing_source_does_not_create_target_or_process_files(upgrade):
+    args, source, sql, cleanup = upgrade
+    source.return_value = None
+    with pytest.raises(migration.MigrationSetupError, match="original Supabase database"):
+        migration.automatic_upgrade(args)
+    assert sql.call_count == 1
+    cleanup.assert_not_called()
+    assert not list(args.env_file.parent.glob("*.json"))
+
+
+def test_import_failure_keeps_source_and_no_persistent_retry_state(upgrade):
+    args, _, sql, cleanup = upgrade
+    sql.side_effect = ['{"complete":false,"legacy":true}', migration.MigrationSetupError("database failure")]
+    with pytest.raises(migration.MigrationSetupError):
+        migration.automatic_upgrade(args)
+    cleanup.assert_not_called()
+    assert not list(args.env_file.parent.glob("*.json"))
+
+
+def test_cleanup_failure_preserves_committed_accounts_and_reports_warning(upgrade, capsys):
+    args, _, _, cleanup = upgrade
+    cleanup.side_effect = migration.MigrationSetupError("cleanup")
     assert migration.automatic_upgrade(args)["source"] == 0
-    snapshot = next(args.state_dir.glob("*.json"))
-    assert json.loads(snapshot.read_text())["rows"] == []
-    checkpoint(status, checksum, migration.AUTH_SQL)
-    args.deploy_phase = "apply"
+    assert "cleanup" in capsys.readouterr().err.lower()
+
+
+def test_preview_rolls_back_and_does_not_reclaim_source(upgrade):
+    args, _, sql, cleanup = upgrade
+    args.apply = False
     migration.automatic_upgrade(args)
-    assert [call.args[1]["action"] for call in worker.call_args_list] == ["apply", "cleanup"]
-    cleanup.assert_not_called()
-    assert not snapshot.exists()
-
-
-def test_completed_upgrade_skips_source_and_removes_stale_snapshot(upgrade):
-    args, checksum, status, source, worker, _ = upgrade
-    migration.automatic_upgrade(args)
-    checkpoint(status, checksum, migration.AUTH_SQL, migration.DATA_MARKER, migration.CLEANUP_MARKER)
-    source.reset_mock()
-    assert migration.automatic_upgrade(args) == {"automatic": True, "skipped": True}
-    source.assert_not_called()
-    worker.assert_not_called()
-    assert not list(args.state_dir.glob("*.json"))
-
-
-def test_locally_repairable_pending_is_not_mistaken_for_completed_upgrade(upgrade):
-    args, checksum, status, _, worker, _ = upgrade
-    status["pending_total"] = 4
-    checkpoint(status, checksum, migration.AUTH_SQL, migration.DATA_MARKER, migration.CLEANUP_MARKER)
-    assert migration.automatic_upgrade(args)["prepared"]
-    args.deploy_phase = "apply"
-    migration.automatic_upgrade(args)
-    job = worker.call_args_list[0].args[1]
-    assert job["rows"] == []
-    assert hashlib.sha256(job["account_sql"].encode()).hexdigest() == checksum
-
-
-@pytest.mark.parametrize("sql", [None, "changed SQL"])
-def test_worker_rejects_missing_or_changed_repair_sql(mocker, sql):
-    checksum = hashlib.sha256(b"expected SQL").hexdigest()
-    connect = mocker.patch("psycopg2.connect")
-    cursor = connect.return_value.cursor.return_value.__enter__.return_value
-    cursor.fetchone.side_effect = [(checksum,), None, (4,)]
-    importer = mocker.patch.object(migration, "import_users")
-    job = {"action": "apply", "checksum": checksum}
-    if sql is not None:
-        job["account_sql"] = sql
-    with pytest.raises(migration.MigrationSetupError, match="exact versioned account SQL"):
-        migration._worker(job)
-    importer.assert_not_called()
-    connect.return_value.close.assert_called_once()
-
-
-@pytest.mark.parametrize("field", ["pending", "legacy_logins"])
-def test_missing_historical_source_fails_before_replacement(upgrade, field):
-    args, _, status, _, worker, _ = upgrade
-    status[field] = 1
-    with pytest.raises(migration.MigrationSetupError, match="original Supabase"):
-        migration.automatic_upgrade(args)
-    worker.assert_not_called()
-    assert not list(args.state_dir.glob("*.json"))
-
-
-def test_prepare_retry_reuses_snapshot_and_rejects_different_target(upgrade):
-    args, _, _, source, _, _ = upgrade
-    migration.automatic_upgrade(args)
-    source.reset_mock()
-    assert migration.automatic_upgrade(args)["retained"]
-    source.assert_not_called()
-    args.database_target = "different"
-    with pytest.raises(migration.MigrationSetupError, match="different deployment"):
-        migration.automatic_upgrade(args)
-
-
-@pytest.mark.parametrize("failure", ["import", "cleanup"])
-def test_failed_apply_retains_snapshot_and_only_cleans_after_commit(upgrade, failure, mocker):
-    args, checksum, status, source, worker, cleanup = upgrade
-    source.return_value = {"target": "supabase-db", "configuration": {"owned": True}}
-    # No actual source I/O is allowed in this unit test.
-    mocker.patch.object(migration, "source_snapshot", return_value=[])
-    migration.automatic_upgrade(args)
-    checkpoint(status, checksum, migration.AUTH_SQL)
-    args.deploy_phase = "apply"
-    if failure == "import":
-        worker.side_effect = migration.MigrationConflict("conflict")
-    else:
-        cleanup.side_effect = migration.MigrationSetupError("cleanup failed")
-    with pytest.raises((migration.MigrationConflict, migration.MigrationSetupError)):
-        migration.automatic_upgrade(args)
-    assert list(args.state_dir.glob("*.json"))
-    assert worker.call_count == 1
-    assert cleanup.call_count == (failure == "cleanup")
-    worker.side_effect = cleanup.side_effect = None
-    migration.automatic_upgrade(args)
-    assert not list(args.state_dir.glob("*.json"))
-
-
-def test_sql_success_does_not_skip_import_and_timeout_preserves_snapshot(upgrade, mocker):
-    args, checksum, status, _, worker, _ = upgrade
-    migration.automatic_upgrade(args)
-    args.deploy_phase = "apply"
-    mocker.patch.object(migration.time, "monotonic", side_effect=[0, 2, 3])
-    with pytest.raises(migration.MigrationSetupError, match="timed out"):
-        migration.automatic_upgrade(args)
-    worker.assert_not_called()
-    checkpoint(status, checksum, migration.AUTH_SQL)
-    migration.automatic_upgrade(args)
-    assert worker.call_args_list[0].args[1]["action"] == "apply"
-
-
-def test_apply_without_prepare_is_rejected(upgrade):
-    args = upgrade[0]
-    args.deploy_phase = "apply"
-    with pytest.raises(migration.MigrationSetupError, match="snapshot is missing"):
-        migration.automatic_upgrade(args)
-
-
-def test_source_psql_uses_exported_password_over_container_and_sends_it_on_stdin(upgrade, mocker):
-    args = upgrade[0]
-    mocker.patch.object(migration, "_database_environment", return_value={"POSTGRES_PASSWORD": "old", "PGPORT": "5436"})
-    execute = mocker.patch.object(migration, "_exec", return_value="[]")
-    migration._psql(args, "source", "SELECT 1;", {"SUPABASE_POSTGRES_PASSWORD": "exported"}, source=True)
-    _, _, command, data = execute.call_args.args
-    assert "exported" not in str(command) and "old" not in str(command)
-    assert "5436" in command
-    assert data == base64.b64encode(b"exported").decode() + "\nSELECT 1;"
-
-
-def test_kubernetes_storage_is_backed_up_and_retained_before_rollout(upgrade, mocker):
-    args = upgrade[0]
-    args.deployment = "kubernetes"
-    command = mocker.patch.object(migration, "_command", side_effect=[
-        json.dumps({"spec": {"volumeName": "owned-pv"}}),
-        json.dumps({"spec": {"persistentVolumeReclaimPolicy": "Delete"}}), "patched"])
-    path = args.state_dir / "snapshot.json"
-    migration._preserve_source_storage(args, {"target": "owned-source"}, path)
-    assert json.loads((args.state_dir / "snapshot-storage.json").read_text())["claim"]["spec"]["volumeName"] == "owned-pv"
-    assert command.call_args.args[0] == ["kubectl", "patch", "pv", "owned-pv", "--type=merge", "-p", '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}']
-
-
-def test_remote_source_never_removes_local_containers(upgrade, mocker):
-    args, checksum, status, source, _, cleanup = upgrade
-    source.return_value = {"remote": True}
-    mocker.patch.object(migration, "source_snapshot", return_value=[])
-    migration.automatic_upgrade(args)
-    checkpoint(status, checksum, migration.AUTH_SQL)
-    args.deploy_phase = "apply"
-    migration.automatic_upgrade(args)
+    assert sql.call_args.args[2].rstrip().endswith("ROLLBACK;")
     cleanup.assert_not_called()
 
 
-def test_explicit_remote_host_does_not_discover_unrelated_local_sources(upgrade, mocker):
-    args = upgrade[0]
+def test_invalid_source_is_rejected_before_target_ddl(upgrade, mocker):
+    args, _, sql, cleanup = upgrade
+    mocker.patch.object(migration, "source_snapshot", return_value=[{"id": "invalid"}])
+    with pytest.raises(migration.MigrationConflict):
+        migration.automatic_upgrade(args)
+    assert sql.call_count == 1
+    cleanup.assert_not_called()
+
+
+def test_remote_source_does_not_discover_local_containers(mocker):
     docker = mocker.patch.object(migration, "_docker")
-    assert _source_target(args, {"SUPABASE_POSTGRES_HOST": "old-db.example"}) == {"remote": True}
+    args = argparse.Namespace(source_container=None)
+    assert migration._source_target(args, {"SUPABASE_POSTGRES_HOST": "external"}) == {"remote": True}
     docker.assert_not_called()
 
 
-def test_command_preserves_stdin_newlines_on_windows(mocker):
-    run = mocker.patch.object(migration.subprocess, "run", return_value=argparse.Namespace(returncode=0, stdout=b"ready\n"))
-    assert migration._command(["owned-test"], data="line1\nline2\n") == "ready"
-    assert run.call_args.kwargs["input"] == b"line1\nline2\n"
-    assert "text" not in run.call_args.kwargs
-
-
-def test_kubernetes_exec_uses_selected_namespace_and_stdin(upgrade, mocker):
-    args = upgrade[0]
-    args.deployment = "kubernetes"
-    args.namespace = "owned-namespace"
-    command = mocker.patch.object(migration, "_command")
-    migration._exec(args, "owned-pod", ["python", "-c", "pass"], "private-input")
-    command.assert_called_once_with(["kubectl", "--namespace", "owned-namespace", "exec", "-i",
-                                     "deployment/owned-pod", "--", "python", "-c", "pass"], data="private-input")
-
-
-def test_status_only_accepts_completed_history_and_counts_pending_accounts(upgrade, mocker):
-    args = upgrade[0]
-    rows = [{"migration_id": migration.AUTH_SQL, "status": "baselined", "checksum": "sql"},
-            {"migration_id": migration.DATA_MARKER, "status": "failed", "checksum": "data"}]
-    psql = mocker.patch.object(migration, "_psql", return_value=json.dumps(rows) + '\n{"pending":2}\n{"legacy_logins":true}')
-    status = deployment_status(args, {})
-    assert status == {"history": {migration.AUTH_SQL: rows[0]}, "pending": 2, "legacy_logins": True}
-    assert "auth.audit_log_entries" not in psql.call_args.args[2]
-
-
-def test_source_snapshot_keeps_provider_binding_in_readonly_transaction(upgrade, mocker):
-    args = upgrade[0]
-    output = mocker.patch.object(migration, "_psql", return_value='[{"id":"one"},{"id":"two"}]\n[{"user_id":"one","provider":"github"}]')
-    rows = migration.source_snapshot(args, {}, {"target": "source"})
-    assert rows[0]["source_provider_identities"] == [{"user_id": "one", "provider": "github"}]
-    assert rows[1]["source_provider_identities"] == []
-    assert "REPEATABLE READ READ ONLY" in output.call_args.args[2]
-    assert output.call_args.kwargs == {"source": True}
-
-
-def test_worker_reports_sanitized_conflict_and_transports_payload_on_stdin(upgrade, mocker):
-    args = upgrade[0]
-    execute = mocker.patch.object(migration, "_exec", return_value='{"migration_error":"Target account conflicts with a source identity"}')
-    with pytest.raises(migration.MigrationConflict, match="Target account conflicts"):
-        _run_worker(args, {"action": "apply", "rows": [{"private": "credential"}]})
+def test_worker_conflict_is_sanitized_and_payload_uses_stdin(upgrade, mocker):
+    execute = mocker.patch.object(migration, "_exec", return_value='{"migration_error":"identity conflict"}')
+    with pytest.raises(migration.MigrationConflict, match="identity conflict"):
+        migration._run_worker(upgrade[0], {"action": "snapshot", "params": {"password": "credential"}})
     command, payload = execute.call_args.args[2:]
     assert "credential" not in str(command)
-    assert json.loads(payload)["job"]["rows"] == [{"private": "credential"}]
+    assert json.loads(payload)["job"]["params"]["password"] == "credential"
+
+
+def test_completed_manual_migration_skips_source_credentials_and_discovery(mocker, capsys):
+    mocker.patch.object(migration.sys, "argv", ["migrate_docker.py", "--apply"])
+    mocker.patch.object(migration, "load_settings", return_value={"NEXENT_POSTGRES_PASSWORD": "target-only"})
+    connection = mocker.patch("psycopg2.connect").return_value
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": True, "legacy": True},)
+    source = mocker.patch.object(migration, "connections")
+    discovery = mocker.patch.object(migration, "prepare_source")
+    assert migration.main() == 0
+    assert json.loads(capsys.readouterr().out)["complete"]
+    source.assert_not_called()
+    discovery.assert_not_called()
+    connection.close.assert_called_once()
+
+
+def test_source_metadata_is_quoted_and_never_used_as_sql_template():
+    sql = migration._account_import_sql([{
+        "id": str(uuid4()), "email": "__DRY_RUN__@example.com",
+        "raw_user_meta_data": {"literal": "__ROWS__ __DRY_RUN__ O'Reilly \\"},
+    }])
+    assert "__dry_run__@example.com" in sql
+    assert "__ROWS__ __DRY_RUN__ O''Reilly" in sql
+    assert sql.startswith("SET LOCAL standard_conforming_strings=on;")
+
+
+@pytest.mark.parametrize("deployment", ["docker", "kubernetes"])
+def test_psql_conflict_keeps_ids_without_exposing_raw_error(upgrade, mocker, deployment):
+    args = upgrade[0]
+    args.deployment = deployment
+    ids = [str(uuid4()),str(uuid4())]
+    marker = 'ERROR: NEXENT_ACCOUNT_CONFLICT=' + json.dumps(ids)
+    mocker.patch.object(migration, "_database_environment", return_value={"POSTGRES_PASSWORD":"private-password"})
+    mocker.patch.object(migration.subprocess,"run",return_value=argparse.Namespace(
+        returncode=1,stdout=b'',stderr=(marker+'\nprivate-password raw SQL').encode()))
+    # The fixture's psql boundary is mocked for automatic-upgrade tests.
+    from deploy.sql.tools.supabase_to_postgres.migrate_docker import _command
+    with pytest.raises(migration.MigrationConflict) as error:
+        _command([deployment,'exec'])
+    assert all(value in str(error.value) for value in ids)
+    assert 'private-password' not in str(error.value) and 'raw SQL' not in str(error.value)
+
+
+def test_duplicate_source_uuid_reports_its_id():
+    uid=str(uuid4())
+    with pytest.raises(migration.MigrationConflict,match=uid):
+        migration._account_import_sql([{"id":uid,"email":"a@example.com"},{"id":uid,"email":"b@example.com"}])
+
+
+def test_existing_empty_account_table_stops_without_source_access_or_repair(upgrade):
+    args, source, sql, cleanup = upgrade
+    sql.side_effect = [
+        '{"complete":false,"legacy":true,"account_table":true,"accounts":0,"members":1,"unresolved_ids":["original-user"]}',
+    ]
+    with pytest.raises(migration.MigrationSetupError, match="original-user") as error:
+        migration.automatic_upgrade(args)
+    assert "no automatic repair" in str(error.value)
+    source.assert_not_called()
+    cleanup.assert_not_called()
+    assert sql.call_count == 1
+
+
+@pytest.mark.parametrize("prefix", ["", "ERROR: "])
+def test_incomplete_coverage_error_keeps_ids_and_recovery_guidance_only(prefix):
+    error = migration._migration_conflict(prefix + 'NEXENT_ACCOUNT_INCOMPLETE=["missing-user"]\nprivate-source-password raw SQL')
+    assert "missing-user" in str(error) and "backup" in str(error)
+    assert "private-source-password" not in str(error) and "raw SQL" not in str(error)
+
+
+@pytest.mark.parametrize("ids", ['[]', '[123]', '["bad\\nidentifier"]', '"not-a-list"'])
+def test_malformed_incomplete_error_is_not_exposed(ids):
+    assert migration._migration_conflict('NEXENT_ACCOUNT_INCOMPLETE=' + ids) is None
+
+
+def test_conflict_marker_inside_unrelated_sql_context_is_not_exposed():
+    message='CONTEXT: SQL statement contains NEXENT_ACCOUNT_CONFLICT=["private-value"]'
+    assert migration._migration_conflict(message) is None
+
+
+@pytest.mark.parametrize("payload", ['[]','[123]','[""]','["'+('x'*101)+'"]','["line\\nvalue"]','[invalid]'])
+def test_malformed_conflict_details_are_not_logged(payload):
+    assert migration._migration_conflict('NEXENT_ACCOUNT_CONFLICT='+payload) is None
+
+
+def test_import_conflict_preserves_ids_before_savepoint_rollback(mocker):
+    uid=str(uuid4())
+    failure=RuntimeError("private driver details")
+    failure.diag=SimpleNamespace(message_primary='NEXENT_ACCOUNT_CONFLICT='+json.dumps([uid]))
+    target=MagicMock()
+    cursor=target.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value=({"complete": False, "legacy": True},)
+    cursor.execute.side_effect=[None,None,None,failure,None,None]
+    mocker.patch.object(migration,"_account_import_sql",return_value="import-body")
+    with pytest.raises(migration.MigrationConflict,match=uid) as error:
+        migration.import_users(target,[],dry_run=False)
+    assert 'private driver details' not in str(error.value)
+    assert [call.args[0] for call in cursor.execute.call_args_list][-2:] == [
+        'ROLLBACK TO SAVEPOINT account_migration','RELEASE SAVEPOINT account_migration']

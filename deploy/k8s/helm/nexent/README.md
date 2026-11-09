@@ -289,7 +289,7 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-config | Configuration service | 1 |
 | nexent-runtime | Runtime service | 1 |
 | nexent-mcp | MCP container service | 1 |
-| nexent-northbound | Northbound API service | 1 |
+| nexent-gateway | Northbound API service | 1 |
 | nexent-web | Web frontend | 1 |
 | nexent-data-process | Data processing service | 1 |
 
@@ -461,4 +461,4 @@ Released PVs are automatically cleaned during deployment. To manually clean:
 kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
 
-Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../sql/tools/supabase_to_postgres/README.md) covers historical credentials and cutover.

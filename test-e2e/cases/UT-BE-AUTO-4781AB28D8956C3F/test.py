@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import builtins
 import concurrent.futures
@@ -8,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from backend.adapters.jiuwen_sdk_adapter import run_async
+from adapters.jiuwen_sdk_adapter import run_async
 
 CASE_ID = 'UT-BE-AUTO-4781AB28D8956C3F'
 
