@@ -22,7 +22,7 @@ from ..utils.tools_common_message import SearchResultTextMessage, ToolSign
 logger = logging.getLogger(__name__)
 
 # Field candidates commonly used by retrieval/RAG MCP tools.
-_TEXT_FIELDS = ("text", "content", "chunk_content", "chunk", "snippet", "segment", "passage", "page_content")
+_TEXT_FIELDS = ("text", "content", "chunk_content", "chunk_text", "chunk", "snippet", "segment", "passage", "page_content")
 _TITLE_FIELDS = ("title", "name", "doc_title", "document_name", "document_title")
 _URL_FIELDS = ("url", "link", "source_url", "uri", "web_url")
 _FILENAME_FIELDS = ("filename", "file_name", "doc_name")

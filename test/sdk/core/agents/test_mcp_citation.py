@@ -197,6 +197,23 @@ def test_maps_field_aliases_and_defaults():
     assert reported[0]["score_details"] is None
 
 
+def test_maps_chunk_text_field_alias():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "url": "https://example.com/c",
+        "chunk_text": "Document body carried in the chunk_text alias field.",
+    }]
+    result = annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    assert result is not None
+    payload = json.loads(result)
+    assert payload[0]["text"] == "Document body carried in the chunk_text alias field."
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["text"].startswith("Document body")
+    assert reported[0]["title"] == "Doc"
+    assert reported[0]["url"] == "https://example.com/c"
+
+
 def test_defaults_to_file_source_type_without_url():
     observer = _RecordingObserver()
     items = [{"title": "Doc", "text": "A local document chunk long enough for checks."}]
