@@ -188,3 +188,129 @@ def test_ac003_native_thinking_toggle_uses_existing_provider_adapter(
     )
     NativeModel(configured_model).generate([{"role": "user", "content": "Think"}])
     assert dispatch.call_args.kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_ac008_pre_cancelled_model_never_dispatches(configured_model, mocker):
+    dispatch = mocker.patch.object(configured_model, "_dispatch_chat_completion")
+    configured_model.cancellation_scope.cancel()
+    with pytest.raises(RunTerminated):
+        NativeModel(configured_model).generate(
+            [{"role": "user", "content": "Cancelled"}]
+        )
+    dispatch.assert_not_called()
+
+
+def test_ac008_cancellation_racing_provider_failure_is_not_retried(
+    configured_model, mocker
+):
+    def interrupted(**kwargs):
+        configured_model.cancellation_scope.cancel()
+        raise ConnectionError("Closed by cancellation")
+
+    dispatch = mocker.patch.object(
+        configured_model, "_dispatch_chat_completion", side_effect=interrupted
+    )
+    with pytest.raises(RunTerminated):
+        NativeModel(configured_model).generate([{"role": "user", "content": "Cancel"}])
+    assert dispatch.call_count == 1
+
+
+def test_ac008_cancellation_during_backoff_stops_before_second_request(
+    configured_model, mocker
+):
+    class TemporaryUnavailable(Exception):
+        status_code = 503
+
+    configured_model.retry_config = ModelRetryConfig(
+        max_attempts=2, backoff_base_seconds=0, jitter=False
+    )
+    dispatch = mocker.patch.object(
+        configured_model,
+        "_dispatch_chat_completion",
+        side_effect=TemporaryUnavailable(),
+    )
+
+    def cancel_during_wait(delay):
+        configured_model.cancellation_scope.cancel()
+        return True
+
+    mocker.patch.object(
+        configured_model.stop_event, "wait", side_effect=cancel_during_wait
+    )
+    with pytest.raises(RunTerminated):
+        NativeModel(configured_model).generate(
+            [{"role": "user", "content": "Cancel retry"}]
+        )
+    assert dispatch.call_count == 1
+
+
+def test_ac008_real_concurrency_limit_is_preserved_without_provider_dispatch(
+    configured_model, mocker
+):
+    from nexent.core.models.model_concurrency import (
+        ModelConcurrencyExceeded,
+        model_concurrency_limiter,
+    )
+
+    permit = model_concurrency_limiter.acquire(
+        configured_model.concurrency_key, 1, 0.01, configured_model.stop_event
+    )
+    dispatch = mocker.patch.object(configured_model, "_dispatch_chat_completion")
+    try:
+        with pytest.raises(ModelConcurrencyExceeded):
+            NativeModel(configured_model).generate(
+                [{"role": "user", "content": "Busy"}]
+            )
+        dispatch.assert_not_called()
+    finally:
+        permit.release()
+
+
+def test_ac003_headless_adapter_preserves_canonical_schema_without_optional_controls(
+    configured_model, mocker
+):
+    configured_model.observer = None
+    configured_model.extra_body = None
+    configured_model.max_output_tokens = None
+    configured_model.concurrency_limit = None
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "echo",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    stream = ProviderStream(
+        [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="Done", tool_calls=None)
+                    )
+                ],
+                usage=None,
+            )
+        ]
+    )
+    dispatch = mocker.patch.object(
+        configured_model, "_dispatch_chat_completion", return_value=stream
+    )
+    message = NativeModel(configured_model).generate(
+        [{"role": "user", "content": "Answer"}], native_tool_schemas=[schema]
+    )
+    assert message.content == "Done"
+    assert dispatch.call_args.kwargs["tools"] == [schema]
+    assert "extra_body" not in dispatch.call_args.kwargs
+    assert "max_tokens" not in dispatch.call_args.kwargs
+    assert stream.closed == 1
+
+
+def test_ac008_pre_wrapped_native_model_retains_its_cancellation_scope(
+    configured_model,
+):
+    from nexent.core.agents.native_runtime import NativeToolCallingAgent
+
+    adapter = NativeModel(configured_model)
+    agent = NativeToolCallingAgent(model=adapter, tools=[], verbosity_level=0)
+    assert agent.model is adapter
+    assert agent.stop_event is configured_model.stop_event

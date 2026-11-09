@@ -1,46 +1,31 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""AC-001: process configuration selects explicit runtimes and fails clearly."""
+"""AC-001: actual configuration executes in an isolated module namespace."""
 
-import os
-import subprocess
-import sys
+import runpy
+from pathlib import Path
 
 import pytest
+
+CONFIGURATION = Path(__file__).resolve().parents[3] / "backend/consts/const.py"
 
 
 @pytest.mark.parametrize(
     "value,expected",
     [(None, "codeagent"), ("codeagent", "codeagent"), ("toolcalling", "toolcalling")],
 )
-def test_ac001_runtime_environment_selection(value, expected):
-    env = dict(os.environ)
-    env.pop("NEXENT_AGENT_RUNTIME", None)
+def test_ac001_runtime_environment_selection(monkeypatch, value, expected):
+    monkeypatch.delenv("NEXENT_AGENT_RUNTIME", raising=False)
     if value is not None:
-        env["NEXENT_AGENT_RUNTIME"] = value
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from backend.consts.const import NEXENT_AGENT_RUNTIME; print(NEXENT_AGENT_RUNTIME)",
-        ],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == expected
+        monkeypatch.setenv("NEXENT_AGENT_RUNTIME", value)
+    settings = runpy.run_path(str(CONFIGURATION))
+    assert settings["NEXENT_AGENT_RUNTIME"] == expected
 
 
 @pytest.mark.parametrize("value", ["", "unknown", "ToolCalling"])
-def test_ac001_invalid_runtime_fails_at_configuration_boundary(value):
-    result = subprocess.run(
-        [sys.executable, "-c", "import backend.consts.const"],
-        env={**os.environ, "NEXENT_AGENT_RUNTIME": value},
-        text=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert result.returncode != 0
-    assert "NEXENT_AGENT_RUNTIME must be codeagent or toolcalling" in result.stderr
+def test_ac001_invalid_runtime_fails_at_configuration_boundary(monkeypatch, value):
+    monkeypatch.setenv("NEXENT_AGENT_RUNTIME", value)
+    with pytest.raises(
+        ValueError, match="NEXENT_AGENT_RUNTIME must be codeagent or toolcalling"
+    ):
+        runpy.run_path(str(CONFIGURATION))

@@ -5,21 +5,21 @@
       "file": "test/sdk/core/agents/test_native_runtime.py",
       "exit_code": 0,
       "summary": [
-        "25 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+        "47 passed; native boundary/error/guardrail/termination backfill"
       ]
     },
     {
       "file": "test/sdk/core/models/test_native_model.py",
       "exit_code": 0,
       "summary": [
-        "5 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+        "11 passed; branch/error backfill verified on unchanged product source"
       ]
     },
     {
       "file": "test/backend/consts/test_agent_runtime_config.py",
       "exit_code": 0,
       "summary": [
-        "6 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+        "6 passed; branch/error backfill verified on unchanged product source"
       ]
     },
     {
@@ -108,19 +108,63 @@
         "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
         "24 passed, 1 warning in 2.84s"
       ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_subagent_resource_ownership.py",
+      "exit_code": 0,
+      "summary": [
+        "3 passed in 0.80s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_subagent_invocation_wrapper.py",
+      "exit_code": 0,
+      "summary": [
+        "6 passed in 0.66s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_subagent_wrapper.py",
+      "exit_code": 0,
+      "summary": [
+        "15 passed in 0.65s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/observability/test_subagent_spans.py",
+      "exit_code": 0,
+      "summary": [
+        "7 passed in 0.05s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/observability/test_managed_call_spans.py",
+      "exit_code": 0,
+      "summary": [
+        "7 passed in 0.40s"
+      ]
     }
   ],
-  "total_passed": 913,
-  "focused_new_runtime_coverage": {
-    "covered_lines": 412,
-    "num_statements": 445,
-    "percent_covered": 92.58426966292134
-  },
+  "total_passed": 979,
   "coverage_scope": [
     "sdk/nexent/core/agents/native_runtime.py",
     "sdk/nexent/core/agents/runtime_factory.py"
   ],
   "limitations": [
     "Coverage percentage is restricted to the two new runtime modules; not whole repository or combined with formal tests."
+  ],
+  "focused_new_runtime_statement_coverage": {
+    "covered_lines": 441,
+    "num_statements": 445,
+    "percent_statements_covered": 99.10112359550561
+  },
+  "focused_new_runtime_branch_coverage": {
+    "covered_branches": 186,
+    "num_branches": 196,
+    "percent_branches_covered": 94.89795918367346
+  },
+  "notes": [
+    "Initial CI unit/image/header workflows passed on 128f22ee1; Codecov patch coverage 82.86334% triggered meaningful test-only branch/error backfill.",
+    "Product source and images are unchanged; remote Codecov result is checked again after publication."
   ]
 }

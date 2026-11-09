@@ -307,7 +307,8 @@ def test_ac007_guardrail_input_terminates_before_model():
     assert model.requests == []
 
 
-def test_ac007_guardrail_blocks_tool_without_side_effect():
+@pytest.mark.parametrize("include_following_call", [False, True])
+def test_ac007_guardrail_blocks_tool_without_side_effect(include_following_call):
     tool = EchoTool()
     effects = []
     tool.forward = lambda text: effects.append(text) or text
@@ -315,7 +316,12 @@ def test_ac007_guardrail_blocks_tool_without_side_effect():
         [
             {
                 "role": "assistant",
-                "tool_calls": [call("blocked", arguments='{"text":"forbidden"}')],
+                "tool_calls": [call("blocked", arguments='{"text":"forbidden"}')]
+                + (
+                    [call("unexecuted", arguments='{"text":"safe"}')]
+                    if include_following_call
+                    else []
+                ),
             },
         ],
         tool=tool,
@@ -323,6 +329,12 @@ def test_ac007_guardrail_blocks_tool_without_side_effect():
     assert str(agent.run("Use tool"))
     assert effects == []
     assert len(model.requests) == 1
+    results = [
+        message for message in agent.native_messages if message["role"] == "tool"
+    ]
+    assert [message["tool_call_id"] for message in results] == (
+        ["blocked", "unexecuted"] if include_following_call else ["blocked"]
+    )
 
 
 def test_ac007_guardrail_checks_resolved_programmatic_arguments():
@@ -371,7 +383,8 @@ def test_ac007_final_verification_rejects_and_repairs_candidate():
     assert "Verification feedback" in model.requests[1][-1]["content"]
 
 
-def test_ac007_plan_tools_use_existing_callbacks_and_persistence():
+@pytest.mark.parametrize("terminal", ["content", "tool"])
+def test_ac007_plan_tools_use_existing_callbacks_and_persistence(terminal):
     from nexent.core.tools.plan_tools import CreatePlanTool
 
     tool = CreatePlanTool(
@@ -401,7 +414,16 @@ def test_ac007_plan_tools_use_existing_callbacks_and_persistence():
                     )
                 ],
             },
-            {"role": "assistant", "content": "Plan created."},
+            (
+                {"role": "assistant", "content": "Plan created."}
+                if terminal == "content"
+                else {
+                    "role": "assistant",
+                    "tool_calls": [
+                        call("final-plan", "final_answer", '{"answer":"Plan created."}')
+                    ],
+                }
+            ),
         ]
     )
     agent = NativeToolCallingAgent(
@@ -558,3 +580,299 @@ def test_ac007_guardrail_termination_emits_existing_verification_event():
     events = [json.loads(value) for value in observer.get_cached_message()]
     assert any(event["type"] == "verification" for event in events)
     assert not model.requests
+
+
+def test_ac001_runtime_identity_rejects_marker_impostors_and_accepts_legacy():
+    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.runtime_factory import is_runtime_agent
+
+    legacy = CoreAgent(
+        observer=None, tools=[], model=ScriptedModel([]), verbosity_level=0
+    )
+    assert is_runtime_agent(legacy)
+    assert not is_runtime_agent(object())
+
+    class Impostor:
+        nexent_runtime_name = "toolcalling"
+
+    assert not is_runtime_agent(Impostor())
+
+
+@pytest.mark.parametrize("runtime", ["unknown", ""])
+def test_ac001_sdk_factory_rejects_invalid_runtime_before_allocating(runtime):
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.utils.observer import MessageObserver
+
+    with pytest.raises(ValueError, match="NEXENT_AGENT_RUNTIME"):
+        NexentAgent(MessageObserver(lang="en"), [], Event(), agent_runtime=runtime)
+
+
+@pytest.mark.parametrize("identifier", ["", "duplicate"])
+def test_ac002_invalid_batch_ids_fail_before_any_tool_side_effect(identifier):
+    effects = []
+    tool = EchoTool()
+    tool.forward = lambda text: effects.append(text) or text
+    calls = (
+        [call(identifier)] if not identifier else [call(identifier), call(identifier)]
+    )
+    model = ScriptedModel([{"role": "assistant", "tool_calls": calls}])
+    agent = NativeToolCallingAgent(tools=[tool], model=model, verbosity_level=0)
+    with pytest.raises(ValueError, match="unique nonempty identifiers"):
+        agent.run("Execute")
+    assert effects == []
+
+
+def test_ac002_terminal_tool_in_batch_is_rejected_without_early_termination():
+    agent, model = agent_for(
+        [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    call("terminal", "final_answer", '{"answer":"Premature"}'),
+                    call("work"),
+                ],
+            },
+            {"role": "assistant", "content": "Recovered"},
+        ]
+    )
+    assert str(agent.run("Continue")) == "Recovered"
+    results = [message for message in model.requests[1] if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in results] == ["terminal", "work"]
+    assert "terminal tool must be the only call" in results[0]["content"]
+    assert results[1]["content"] == "hello"
+
+
+def test_ac002_empty_native_response_cannot_be_reported_as_success():
+    agent, model = agent_for([{"role": "assistant", "content": ""}])
+    with pytest.raises(ValueError, match="neither content nor tool calls"):
+        agent.run("Answer")
+    assert len(model.requests) == 1
+
+
+def test_ac003_stream_requires_index_but_accepts_id_only_header_fragment():
+    def packet(fragment):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None, tool_calls=[fragment])
+                )
+            ],
+            usage=None,
+        )
+
+    with pytest.raises(ValueError, match="requires an index"):
+        collect_native_stream([packet(SimpleNamespace(index=None))], Event())
+    header = SimpleNamespace(index=0, id="correlation", function=None)
+    body = SimpleNamespace(
+        index=0,
+        id=None,
+        function=SimpleNamespace(name="echo", arguments='{"text":"ok"}'),
+    )
+    wire, _ = collect_native_stream([packet(header), packet(body)], Event())
+    assert wire["tool_calls"] == [call("correlation", arguments='{"text":"ok"}')]
+
+
+def test_ac008_cancelled_stream_collection_never_consumes_a_chunk():
+    stop = Event()
+    stop.set()
+    with pytest.raises(RunTerminated):
+        collect_native_stream([SimpleNamespace()], stop)
+
+
+def test_ac005_duplicate_authorized_tool_names_fail_before_registration():
+    with pytest.raises(ValueError, match="must be unique"):
+        NativeToolCallingAgent(tools=[EchoTool(), EchoTool()], model=ScriptedModel([]))
+
+
+def test_ac004_python_precheck_blocks_invalid_code_before_executor_side_effect():
+    from nexent.core.agents.agent_model import AgentVerificationConfig
+    from nexent.core.agents.verification import VerificationController
+
+    effects = []
+    tool = CodeExecutionTool(lambda code: effects.append(code), Event())
+    tool.verification_controller = VerificationController(
+        AgentVerificationConfig(enabled=True, llm_verification_enabled=False),
+        None,
+        "agent",
+        ScriptedModel([]),
+    )
+    with pytest.raises(ValueError, match="Verification feedback"):
+        tool.forward("def invalid(:")
+    assert effects == []
+
+
+def test_ac008_python_cancellation_after_execution_cannot_return_partial_output():
+    stop = Event()
+
+    def executor(code):
+        stop.set()
+        return "partial"
+
+    with pytest.raises(RunTerminated):
+        CodeExecutionTool(executor, stop).forward("print('partial')")
+
+
+def test_ac007_context_overflow_fails_before_provider_and_keeps_native_history():
+    from nexent.core.agents.context import (
+        ContextManager,
+        ContextManagerConfig,
+        ManagedContextRuntime,
+    )
+
+    agent, model = agent_for([])
+    agent.context_runtime = ManagedContextRuntime(
+        ContextManager(
+            ContextManagerConfig(
+                context_window_tokens=10,
+                effective_input_limit_tokens=1,
+                token_threshold=1,
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="Native context exceeds"):
+        agent.run("A task which cannot fit the authorized one-token input limit")
+    assert model.requests == []
+    assert agent.native_messages[-1]["role"] == "user"
+
+
+def test_ac007_prompt_adapter_rejects_unknown_owned_final_layout_and_adapts_code_norms():
+    from nexent.core.agents.context import ContextItemInput
+    from nexent.core.agents.native_runtime import adapt_native_context_items
+
+    def owned(section, text):
+        return ContextItemInput(
+            id="system:" + section,
+            type="system",
+            content={"text": text},
+            source=("agent_prompt:" + section,),
+            metadata={"authority": "platform"},
+        )
+
+    items = adapt_native_context_items(
+        [owned("execution_flow", "old"), owned("code_norms", "old")]
+    )
+    assert "native tool calls" in items[0].content["text"]
+    assert "prebound" in items[1].content["text"]
+    with pytest.raises(ValueError, match="Unknown catalog final-answer guidance"):
+        adapt_native_context_items(
+            [
+                owned(
+                    "final_answer_guidance",
+                    "Unrecognized policy without a semantic paragraph",
+                )
+            ]
+        )
+
+
+def test_ac007_final_verification_budget_returns_controlled_failure():
+    from nexent.core.agents.agent_model import AgentVerificationConfig
+
+    model = ScriptedModel([{"role": "assistant", "content": "{{TODO}}"}])
+    agent = NativeToolCallingAgent(
+        tools=[],
+        model=model,
+        verbosity_level=0,
+        verification_config=AgentVerificationConfig(
+            enabled=True, llm_verification_enabled=False, max_final_rounds=1
+        ),
+    )
+    output = str(agent.run("Answer"))
+    assert "TODO" not in output
+    assert "自验证" in output
+    assert len(model.requests) == 1
+
+
+@pytest.mark.parametrize("checkpoint", ["input", "arguments", "output"])
+def test_ac007_guardrail_masking_preserves_execution_but_redacts_boundary(checkpoint):
+    from nexent.core.agents.agent_model import (
+        AgentVerificationConfig,
+        GuardrailConfig,
+        GuardrailRule,
+    )
+
+    seen = []
+    tool = EchoTool()
+
+    def forward(text):
+        seen.append(text)
+        return "sensitive output" if checkpoint == "output" else text
+
+    tool.forward = forward
+    responses = (
+        [{"role": "assistant", "content": "Done"}]
+        if checkpoint == "input"
+        else [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    call(
+                        "mask",
+                        arguments=json.dumps(
+                            {
+                                "text": "sensitive"
+                                if checkpoint == "arguments"
+                                else "safe"
+                            }
+                        ),
+                    )
+                ],
+            },
+            {"role": "assistant", "content": "Done"},
+        ]
+    )
+    model = ScriptedModel(responses)
+    agent = NativeToolCallingAgent(
+        tools=[tool],
+        model=model,
+        verbosity_level=0,
+        verification_config=AgentVerificationConfig(
+            guardrail_config=GuardrailConfig(
+                enabled=True,
+                rules=[
+                    GuardrailRule(name="redact", pattern="sensitive", severity="mask")
+                ],
+            )
+        ),
+    )
+    assert str(agent.run("sensitive" if checkpoint == "input" else "Proceed")) == "Done"
+    if checkpoint == "input":
+        assert "sensitive" not in model.requests[0][-1]["content"]
+    else:
+        if checkpoint == "arguments":
+            assert seen and "sensitive" not in seen[0]
+        assert "sensitive" not in model.requests[1][-1]["content"]
+
+
+def test_ac007_error_observation_includes_verifier_repair_feedback():
+    from nexent.core.agents.agent_model import AgentVerificationConfig
+
+    tool = EchoTool()
+    tool.forward = lambda text: "Error: resource unavailable"
+    model = ScriptedModel(
+        [
+            {"role": "assistant", "tool_calls": [call("error")]},
+            {"role": "assistant", "content": "Reported failure."},
+        ]
+    )
+    agent = NativeToolCallingAgent(
+        tools=[tool],
+        model=model,
+        verbosity_level=0,
+        verification_config=AgentVerificationConfig(
+            enabled=True,
+            llm_verification_enabled=False,
+            final_verification_enabled=False,
+            strictness="strict",
+        ),
+    )
+    assert str(agent.run("Use the tool")) == "Reported failure."
+    assert "Verification feedback" in model.requests[1][-1]["content"]
+
+
+def test_ac007_headless_clarification_keeps_terminal_question_text():
+    from nexent.core.agents.native_runtime import NativeClarificationTool
+
+    tool = NativeClarificationTool("ask_user", None)
+    assert "Which topic?" in tool.forward(
+        [{"id": "topic", "type": "text", "title": "Which topic?", "required": True}]
+    )

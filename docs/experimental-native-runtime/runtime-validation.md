@@ -8,9 +8,9 @@ The user explicitly selected the host for final deployment and stopped Nexent-Te
 
 ## Traditional unit verification
 
-**913 relevant unit cases passed**, with modules isolated in separate processes following `test/run_all_test.py`'s established pattern. New runtime/configuration tests account for 36 cases. Existing CoreAgent (179), NexentAgent (247), run_agent (51), context/factory/sandbox/MCP parameter suites, backend Agent construction (259) and authoring helper suites (83) passed. Detailed module counts: [unit-results.json](evidence/unit-results.json).
+**979 relevant unit cases passed**, with modules isolated in separate processes following `test/run_all_test.py`'s established pattern. New runtime/configuration tests account for 64 cases. Existing CoreAgent (179), NexentAgent (247), run_agent (51), context/factory/sandbox/MCP parameter suites, backend Agent construction (259) and authoring helper suites (83) passed. An additional 38 subagent resource/span cases also passed. Detailed module counts: [unit-results.json](evidence/unit-results.json).
 
-The two new runtime modules have **93% line coverage** (412/445 statements). This is a scoped unit metric, not whole-repository coverage and not combined with formal functional results. New source Ruff checks and copyright checks pass; `git diff --check` passes. Existing files contain pre-existing import-order findings; no broad formatting changes were made.
+The two new runtime modules have **99% statement coverage** (441/445 statements) and **95% branch coverage** (186/196 branches). This is a scoped unit metric, not whole-repository coverage and not combined with formal functional results. New source Ruff checks and copyright checks pass; `git diff --check` passes. Existing files contain pre-existing import-order findings; no broad formatting changes were made.
 
 Commands used the task-local Python 3.11 environment, `pytest -p no:cacheprovider --basetemp=<task-local>`, and separate module invocations. Focused coverage used `--cov=sdk/nexent/core/agents --cov-config=.runtime/native-coverage.ini` with report inclusion restricted to native_runtime.py/runtime_factory.py.
 
@@ -63,4 +63,4 @@ The architecture spike establishes the native/direct/code/programmatic/hybrid co
 
 Authored CodeAgent formatting instructions are retained, so some definitions may remain incompatible. Only platform-owned execution policies are replaced. NL2Agent/NL2Skill intentionally retain CodeAgent for their closed authoring protocols. No database migration, destructive definition rewrite or frontend runtime selector was added. The develop roadmap identifies the remaining engineering work rather than presenting these limitations as completed parity.
 
-PR CI/Codecov results are reported in the PR conversation after publication; local verification is not represented as CI completion.
+The initial CI unit tests, amd64/arm64 image builds and copyright checks passed. Codecov reported 82.86334% patch coverage, so meaningful boundary/error/cancellation/masking/context/termination tests were added. Product source and image inputs are unchanged. Updated remote CI/Codecov results are reported in the PR conversation; local verification is not represented as remote completion.
