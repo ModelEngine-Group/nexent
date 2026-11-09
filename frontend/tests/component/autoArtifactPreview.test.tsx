@@ -3,21 +3,26 @@
 import { act, renderHook } from "@testing-library/react";
 import { expect, test } from "vitest";
 import { useAutoArtifactPreview } from "@/app/newchat/components/use-auto-artifact-preview";
-import type { ConversationArtifact } from "@/app/newchat/utils/conversation-artifacts";
+import type {
+  ArtifactAttachmentLike,
+  ConversationArtifact,
+} from "@/app/newchat/utils/conversation-artifacts";
 
 const file = (
   name: string,
   key = name,
   objectName = `workspace/${name}`
-): ConversationArtifact => ({
-  key,
-  messageId: "assistant",
-  attachment: {
+): ConversationArtifact => {
+  const attachment: ArtifactAttachmentLike = {
     id: key,
     name,
+    type: "file",
+    status: { type: "complete" },
+    content: [],
     object_name: objectName,
-  } as ConversationArtifact["attachment"],
-});
+  };
+  return { key, messageId: "assistant", attachment };
+};
 const initial = {
   scopeKey: "chat-1",
   artifacts: [] as ConversationArtifact[],
@@ -163,13 +168,14 @@ test("waits for a real preview source when a file marker arrives before upload",
   rerender({ ...initial, isRunning: true, artifacts: [pending] });
   rerender({ ...initial, artifacts: [pending] });
   expect(result.current.selected).toBeNull();
-  const uploaded = {
+  const uploadedAttachment: ArtifactAttachmentLike = {
+    ...pending.attachment,
+    preview_url: "https://files/report.docx",
+  };
+  const uploaded: ConversationArtifact = {
     ...pending,
-    attachment: {
-      ...pending.attachment,
-      preview_url: "https://files/report.docx",
-    },
-  } as ConversationArtifact;
+    attachment: uploadedAttachment,
+  };
   rerender({ ...initial, artifacts: [uploaded] });
   expect(result.current.selected).toEqual(uploaded);
 });

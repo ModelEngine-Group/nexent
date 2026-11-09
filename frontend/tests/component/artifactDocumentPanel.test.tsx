@@ -39,14 +39,19 @@ vi.mock("@/app/newchat/ui/attachment", () => ({
   triggerUrlDownload: state.download,
 }));
 
-const attachment = (name: string, extra = {}) =>
-  ({
-    id: "file",
-    name,
-    object_name: "workspace/report",
-    preview_url: "https://old/raw.docx",
-    ...extra,
-  }) as ArtifactAttachmentLike;
+const attachment = (
+  name: string,
+  extra: Partial<ArtifactAttachmentLike> = {}
+): ArtifactAttachmentLike => ({
+  id: "file",
+  name,
+  type: "file",
+  status: { type: "complete" },
+  content: [],
+  object_name: "workspace/report",
+  preview_url: "https://old/raw.docx",
+  ...extra,
+});
 
 test.each(["docx", "xlsx", "pptx"])(
   "%s uses original bytes and the stream renderer instead of PDF",
@@ -87,7 +92,7 @@ test("renders an inline document with close, download and return-to-artifacts co
     key: "a:file",
     messageId: "a",
     attachment: attachment("report.docx"),
-  } as ConversationArtifact;
+  } satisfies ConversationArtifact;
   render(
     <ArtifactDocumentPanel
       artifact={artifact}
