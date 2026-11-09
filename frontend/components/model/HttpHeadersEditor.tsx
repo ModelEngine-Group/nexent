@@ -3,9 +3,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Input } from "antd";
+import { Input, Button } from "antd";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 
 const snapshotHeaders = (value: Record<string, string | null>) =>
   JSON.stringify(
@@ -106,22 +105,22 @@ export function HttpHeadersEditor({
               )
             }
           />
-          <StandardButton
+          <Button
             disabled={disabled}
             onClick={() => update(rows.filter((item) => item.id !== row.id))}
           >
             {t("common.delete")}
-          </StandardButton>
+          </Button>
         </div>
       ))}
-      <StandardButton
+      <Button
         disabled={disabled}
         onClick={() =>
           update([...rows, { id: ++sequence.current, name: "", value: "" }])
         }
       >
         {t("modelProfile.addHeader")}
-      </StandardButton>
+      </Button>
     </div>
   );
 }

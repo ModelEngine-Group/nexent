@@ -79,7 +79,7 @@ describe("AgentListCard", () => {
 
     expect(container.querySelector("article")).toHaveClass(
       "h-[180px]",
-      "rounded-[12px]",
+      "rounded-lg",
       "px-6",
       "py-4"
     );
@@ -89,7 +89,7 @@ describe("AgentListCard", () => {
     );
     expect(screen.getByText("医疗").closest(".ant-tag")).toHaveClass(
       "!h-[22px]",
-      "!rounded-full"
+      "!rounded-base"
     );
     expect(screen.getByText("一个专业、全面的健康咨询智能体")).toHaveClass(
       "text-[12px]",

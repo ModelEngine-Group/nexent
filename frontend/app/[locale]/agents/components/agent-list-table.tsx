@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ConfigProvider, Table, Tag } from "antd";
+import { Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { useTranslation } from "react-i18next";
@@ -114,7 +114,7 @@ export default function AgentListTable({
             <button
               type="button"
               onClick={() => onOpen(agent)}
-              className="min-w-0 truncate text-left font-medium text-[#1f2937] hover:text-[#0067d1]"
+              className="min-w-0 truncate text-left font-medium text-[#1f2937] hover:text-[var(--color-brand)]"
               title={title}
             >
               {title}
@@ -134,7 +134,7 @@ export default function AgentListTable({
           ? getAgentRepositoryTagLabel(rawCategory, t)
           : undefined;
         return category ? (
-          <Tag className="agent-table-category" title={category}>
+          <Tag className="max-w-full truncate" title={category}>
             {category}
           </Tag>
         ) : (
@@ -163,10 +163,10 @@ export default function AgentListTable({
         const isOnline = Boolean(agent.current_version_no);
         return (
           <span
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] leading-4 ${isOnline ? "bg-[#edf5ff] text-[#0067d1]" : "bg-[#f1f3f5] text-[#6b7280]"}`}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-[12px] leading-4 ${isOnline ? "bg-[var(--color-select)] text-[var(--color-brand)]" : "bg-[#f1f3f5] text-[#6b7280]"}`}
           >
             <span
-              className={`size-1.5 rounded-full ${isOnline ? "bg-[#2070f3]" : "bg-[#aeaeae]"}`}
+              className={`size-1.5 rounded-full ${isOnline ? "bg-[var(--color-brand)]" : "bg-[#aeaeae]"}`}
               aria-hidden="true"
             />
             {t(
@@ -211,7 +211,7 @@ export default function AgentListTable({
           <div className="flex min-w-0 items-center agent-table-actions gap-3 whitespace-nowrap text-[13px] leading-5">
             <button
               type="button"
-              className="text-[#0067d1] hover:text-[#0052a8]"
+              className="text-[var(--color-brand)] hover:text-[var(--color-brand-hover)]"
               onClick={() => onConfigure(agentId)}
             >
               {t("agentConfig.list.configure")}
@@ -256,47 +256,29 @@ export default function AgentListTable({
     <div
       ref={containerRef}
       data-testid="agent-list-table-scroll"
-      className="agent-table-container min-h-0 w-full min-w-0 flex-1 overflow-hidden rounded-xl border border-[#e8edf3] bg-white"
+      className="agent-table-container min-h-0 w-full min-w-0 flex-1 overflow-hidden rounded-[4px] border border-[#e8edf3] bg-white"
     >
-      <ConfigProvider
-        theme={{
-          components: {
-            Table: {
-              colorText: "#191919",
-              headerBg: "#f7f9fc",
-              headerColor: "#475569",
-              headerSplitColor: "transparent",
-              borderColor: "#eef1f5",
-              cellFontSizeSM: 14,
-              cellPaddingBlockSM: 12,
-              cellPaddingInlineSM: 16,
-              rowHoverBg: "#f0f7ff",
-            },
+      <Table<Agent>
+        className="agent-list-table"
+        styles={{
+          header: {
+            cell: { height: 44, paddingBlock: 0, fontWeight: 500 },
           },
+          body: { cell: { height: 52 } },
         }}
-      >
-        <Table<Agent>
-          className="agent-list-table"
-          styles={{
-            header: {
-              cell: { height: 44, paddingBlock: 0, fontWeight: 500 },
-            },
-            body: { cell: { height: 52 } },
-          }}
-          components={{ header: { cell: AgentTableHeader } }}
-          columns={resizableColumns}
-          dataSource={agents}
-          pagination={false}
-          rowKey="id"
-          size="small"
-          tableLayout="fixed"
-          scroll={{
-            x: Object.values(widths).reduce((sum, width) => sum + width, 0),
-            y: bodyHeight,
-            scrollToFirstRowOnChange: true,
-          }}
-        />
-      </ConfigProvider>
+        components={{ header: { cell: AgentTableHeader } }}
+        columns={resizableColumns}
+        dataSource={agents}
+        pagination={false}
+        rowKey="id"
+        size="small"
+        tableLayout="fixed"
+        scroll={{
+          x: Object.values(widths).reduce((sum, width) => sum + width, 0),
+          y: bodyHeight,
+          scrollToFirstRowOnChange: true,
+        }}
+      />
     </div>
   );
 }

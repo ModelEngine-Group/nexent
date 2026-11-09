@@ -221,14 +221,14 @@ function SelectedModelCard({
           </span>
         </Tooltip>
         {contextSize ? (
-          <span className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
+          <span className="shrink-0 rounded-[var(--radius-control)] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]">
             {contextLabel?.replace("{{count}}", contextSize) ?? contextSize}
           </span>
         ) : null}
         {capabilities.map((capability) => (
           <span
             key={capability}
-            className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
+            className="shrink-0 rounded-[var(--radius-control)] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
           >
             {capability}
           </span>

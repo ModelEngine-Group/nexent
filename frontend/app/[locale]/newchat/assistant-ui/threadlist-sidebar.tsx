@@ -13,9 +13,8 @@ import { getWorkbenchPinStorageKey } from "./thread-pins";
 import { useConversationActivitySync } from "@/hooks/chat/useConversationActivitySync";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useEffect, useRef, useState } from "react";
-import { message, Typography } from "antd";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardButton } from "@/components/common/StandardButton";
+import { message, Typography, Input, Button } from "antd";
+
 import { ConversationExpandButton } from "@/components/common/ConversationExpandButton";
 import {
   Sidebar,
@@ -378,14 +377,14 @@ export function ThreadListSidebar({
                         />
                       </div>
                       {onNewConversation ? (
-                        <StandardButton
-                          variant="default"
+                        <Button
+                          type="default"
                           className="!bg-white flex !h-9 min-w-0 !w-full items-center justify-center gap-2 !rounded-lg border border-[#d9d9d9] shadow-sm font-medium hover:brightness-95"
                           onClick={onNewConversation}
                         >
                           <SquarePen className="size-4 shrink-0" aria-hidden />
                           {t("workbench.sidebar.newConversation")}
-                        </StandardButton>
+                        </Button>
                       ) : (
                         <ThreadListPrimitive.New
                           className="flex h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-[#191919]"
@@ -397,7 +396,7 @@ export function ThreadListSidebar({
                       )}
                       {searchOpen && (
                         <div data-workbench-history-search>
-                          <StandardInput
+                          <Input
                             autoFocus
                             value={legacySearchQuery}
                             onChange={(event) =>
@@ -449,7 +448,7 @@ export function ThreadListSidebar({
                     // Toggled search field mirrors the pill's box (h-9,
                     // rounded-lg) and sits below it so the header reads as
                     // one evenly spaced stack.
-                    <StandardInput
+                    <Input
                       autoFocus
                       className="!h-9 !rounded-lg"
                       value={conversationSearch}

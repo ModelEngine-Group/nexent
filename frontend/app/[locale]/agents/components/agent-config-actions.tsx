@@ -5,8 +5,8 @@
 import { useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { App, Button, Dropdown, Modal, Tooltip } from "antd";
-import type { MenuProps } from "antd";
+import { App, Button, Dropdown, Modal, Tooltip, type MenuProps } from "antd";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Copy,
@@ -443,7 +443,7 @@ export default function AgentConfigActions({
         <>
           <button
             type="button"
-            className="text-[#0067d1] hover:text-[#0052a8] disabled:cursor-not-allowed disabled:opacity-50"
+            className="text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             disabled={disabled || isReadOnly}
             onClick={handleDeleteAction}
           >

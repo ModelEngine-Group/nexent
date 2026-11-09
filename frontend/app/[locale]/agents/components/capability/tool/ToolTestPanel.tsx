@@ -13,11 +13,12 @@ import {
   Form,
   Tag,
   Segmented,
+  Button,
 } from "antd";
 import { Braces, FlaskConical, ListChecks, Play, X } from "lucide-react";
 
 import { ParamLabel } from "@/components/resource-picker/ParamDialog";
-import { StandardButton } from "@/components/common/StandardButton";
+
 import { Tool, ToolParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import {
@@ -1162,8 +1163,8 @@ export default function ToolTestPanel({
             )}
           </Form>
         </>
-        <StandardButton
-          variant="primary"
+        <Button
+          type="primary"
           className="mt-4 !w-full"
           icon={<Play size={16} />}
           loading={testExecuting}
@@ -1173,7 +1174,7 @@ export default function ToolTestPanel({
           {testExecuting
             ? t("toolConfig.toolTest.executing")
             : t("ui.localization.runTest")}
-        </StandardButton>
+        </Button>
       </div>
       {/* Test result */}
       <div

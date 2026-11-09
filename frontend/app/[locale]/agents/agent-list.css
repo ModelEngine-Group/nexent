@@ -1,18 +1,3 @@
-.agent-development-list {
-  font-family: "HarmonyOS Sans SC", "Huawei Sans", system-ui, sans-serif;
-}
-
-.agent-development-list .ant-btn,
-.agent-development-list .ant-input,
-.agent-development-list .ant-input-affix-wrapper,
-.agent-development-list .ant-input-number,
-.agent-development-list .ant-select,
-.agent-development-list .ant-table-wrapper,
-.agent-development-list .ant-table-wrapper .ant-spin,
-.agent-development-list .ant-table {
-  font-family: inherit;
-}
-
 .agent-list-table .ant-table-thead > tr > th {
   position: relative;
   overflow: visible;
@@ -45,8 +30,8 @@
   inset-block: 13px;
   right: 3px;
   width: 2px;
-  border-radius: 2px;
-  background: #dbe2ea;
+  border-radius: var(--radius-xs);
+  background: var(--color-brand-border);
   transition:
     background-color 150ms,
     inset-block 150ms;
@@ -56,38 +41,11 @@
 .agent-table-resize-handle:focus-visible::after,
 .agent-table-resize-handle.is-dragging::after {
   inset-block: 7px;
-  background: #0067d1;
-}
-
-.agent-list-table .agent-table-category {
-  display: inline-block;
-  max-width: 100%;
-  margin: 0;
-  padding: 2px 8px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 6px;
-  background: #edf5ff;
-  color: #3b6eaa;
-  font-size: 12px;
-  line-height: 20px;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-  white-space: nowrap;
+  background: var(--color-brand);
 }
 
 .agent-table-actions > button {
   flex-shrink: 0;
-}
-
-.agent-table-actions > button:not(.ant-btn):hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.agent-table-container .ant-table-body {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* Keep both resize targets accessible beside the fixed actions column. */
