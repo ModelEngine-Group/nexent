@@ -24,7 +24,7 @@ def _repo_root() -> Path:
 
 
 def _stub_openjiuwen_if_missing() -> None:
-    if 'management.services.model.jiuwen_sdk_adapter' in sys.modules:
+    if 'adapters.jiuwen_sdk_adapter' in sys.modules:
         return
     try:
         if importlib.util.find_spec('openjiuwen') is not None:
@@ -44,7 +44,7 @@ def _stub_openjiuwen_if_missing() -> None:
 
 def _load_adapter():
     _stub_openjiuwen_if_missing()
-    import management.services.model.jiuwen_sdk_adapter as adapter
+    import adapters.jiuwen_sdk_adapter as adapter
     return adapter
 
 
@@ -184,7 +184,7 @@ def test_global_thread_pool_removal_and_run_async_migration(monkeypatch) -> None
 
     # 9. no plaintext secret field is logged by the adapter source
     secret_fields = ('api_key', 'access_key', 'access_token', 'password', 'secret')
-    adapter_path = _repo_root() / 'backend' / 'management' / 'services' / 'model' / 'jiuwen_sdk_adapter.py'
+    adapter_path = _repo_root() / 'backend' / 'adapters' / 'jiuwen_sdk_adapter.py'
     for lineno, line in enumerate(adapter_path.read_text(encoding='utf-8').splitlines(), 1):
         if not any(token in line for token in ('logger', 'logging', '_logger')):
             continue

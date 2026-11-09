@@ -5,12 +5,11 @@ module:
 feature:
   feature_id: F-048
   name: badcase 优化与 debug history 优化
-  status: active
+  status: retired
   description: '智能体配置 / Prompt优化: badcase 优化与 debug history 优化'
   business_rules:
   - rule_id: F-048-RULE-01
     description: badcase 优化与 debug history 优化
-  required_test_stages:
-  - D3
+  required_test_stages: []
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

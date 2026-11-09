@@ -113,7 +113,11 @@ async def test_denial_happens_before_credentials_upstream_and_cors(monkeypatch):
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             for method, path in [("GET", "/api/not-registered"), ("GET", "/nb/v1/chat/run"),
-                                 ("GET", "/api/internal/thread-capacity"), ("GET", "/api/voice/stt/ws")]:
+                                 ("GET", "/api/internal/thread-capacity"), ("GET", "/api/voice/stt/ws"),
+                                 ("POST", "/api/prompt/generate"),
+                                 ("POST", "/api/prompt/optimize"),
+                                 ("POST", "/api/prompt/optimize/badcase"),
+                                 ("POST", "/api/prompt/optimize/from_debug")]:
                 response = await client.request(method, path, headers={"Authorization": "Bearer forged"})
                 assert response.status_code == 404
             headers = {"Origin": "https://frontend.test", "Access-Control-Request-Method": "POST"}

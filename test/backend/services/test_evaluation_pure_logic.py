@@ -134,7 +134,7 @@ if str(_BACKEND_DIR) not in sys.path:
 # collection. Restore the surrounding process state so sibling test modules do
 # not inherit those doubles.
 _MODULE_ROOTS = (
-    "management.services.model.jiuwen_sdk_adapter",
+    "adapters.jiuwen_sdk_adapter",
     "boto3",
     "botocore",
     "consts",
@@ -272,7 +272,7 @@ def _install_sys_modules_stubs() -> None:
     sys.modules["nexent.core.agents.sandbox"] = sandbox_mock
     _nexent_core_agents.sandbox = sandbox_mock
 
-    _mk_mod("management.services.model.jiuwen_sdk_adapter", JiuwenSDKAdapter=None)
+    _mk_mod("adapters.jiuwen_sdk_adapter", JiuwenSDKAdapter=None)
 
     # ---- consts ------------------------------------------------------------
     _consts_pkg = _register_package("consts")

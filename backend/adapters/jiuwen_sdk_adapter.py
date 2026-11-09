@@ -473,7 +473,7 @@ class JiuwenSDKAdapter:
     Jiuwen SDK 调用适配器
 
     封装 Jiuwen SDK 的所有调用，内部不处理降级，
-    失败时抛出 JiuwenSDKError，由上层 PromptOptimizationService 决定是否降级
+    Raises JiuwenSDKError when optimization fails.
     """
 
     def __init__(self, model_id: int, tenant_id: str):

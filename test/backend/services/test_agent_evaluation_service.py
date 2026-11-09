@@ -27,7 +27,7 @@ if str(_BACKEND_DIR) not in sys.path:
 # The service imports a large dependency graph. Keep its test doubles scoped
 # to this module's fixture so they cannot leak into sibling test modules.
 _MODULE_ROOTS = (
-    "management.services.model.jiuwen_sdk_adapter",
+    "adapters.jiuwen_sdk_adapter",
     "boto3",
     "botocore",
     "consts",
@@ -390,7 +390,7 @@ _consts_pkg.exceptions = _consts_exceptions_module
 # Disable the optional Jiuwen SDK in these evaluation unit tests.
 _jiuwen_module = MagicMock()
 _jiuwen_module.JiuwenSDKAdapter = None
-sys.modules["management.services.model.jiuwen_sdk_adapter"] = _jiuwen_module
+sys.modules["adapters.jiuwen_sdk_adapter"] = _jiuwen_module
 
 # Make sure pre-existing real utils package is in sys.modules so
 # the app test (and any sibling tests) can resolve doted paths like

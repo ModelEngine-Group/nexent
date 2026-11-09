@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from management.services.model.jiuwen_sdk_adapter import run_async
+from adapters.jiuwen_sdk_adapter import run_async
 
 CASE_ID = 'UT-BE-AUTO-4781AB28D8956C3F'
 

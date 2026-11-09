@@ -9,7 +9,7 @@ from contracts.errors.exceptions import AppException
 from contracts.agent import AgentRequest
 
 try:
-    from management.services.model.jiuwen_sdk_adapter import JiuwenSDKAdapter
+    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
 except ModuleNotFoundError:
     JiuwenSDKAdapter = None
 import asyncio

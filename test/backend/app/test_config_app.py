@@ -144,7 +144,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.mock_user_management": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
             "management.api.identity.oauth": {"router": APIRouter()},
-            "management.api.prompt.prompt": {"router": APIRouter()},
             "management.api.mcp.mcp_management": {"router": APIRouter()},
             "management.api.mcp.remote_mcp": {"router": APIRouter()},
             "management.api.skill.skill": {"router": APIRouter()},
@@ -186,10 +185,14 @@ class TestConfigAppRouterConfiguration:
                 setattr(module, attribute, value)
             monkeypatch.setitem(sys.modules, module_name, module)
 
-        retired_router = APIRouter(prefix="/prompt-template")
-        retired_module = types.ModuleType("management.api.prompt.prompt_template")
-        retired_module.router = retired_router
-        monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
+        retired_routers = {
+            "management.api.prompt.prompt_template": APIRouter(prefix="/prompt-template"),
+            "management.api.prompt.prompt": APIRouter(prefix="/prompt"),
+        }
+        for module_name, router in retired_routers.items():
+            retired_module = types.ModuleType(module_name)
+            retired_module.router = router
+            monkeypatch.setitem(sys.modules, module_name, retired_module)
 
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
@@ -253,7 +256,11 @@ class TestConfigAppRouterConfiguration:
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
-        assert all(router is not retired_router for router in config_app.app.included_routers)
+        assert all(
+            registered is not retired
+            for registered in config_app.app.included_routers
+            for retired in retired_routers.values()
+        )
         assert api_key_router in config_app.app.included_routers
         for router in router_modules["management.api.northbound"].values():
             assert router in config_app.app.included_routers

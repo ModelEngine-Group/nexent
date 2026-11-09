@@ -11,7 +11,7 @@ from contracts.agent import AgentRequest
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
 
 try:
-    from management.services.model.jiuwen_sdk_adapter import JiuwenSDKAdapter
+    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
 except ModuleNotFoundError:
     JiuwenSDKAdapter = None
 import ast
