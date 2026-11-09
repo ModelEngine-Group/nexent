@@ -94,7 +94,8 @@ export function ThreadListSidebar({
         : null;
   useConversationActivitySync(
     user ? `${user.id}:${user.tenantId}` : null,
-    newChatDesign ? "agent_chat" : "workbench"
+    newChatDesign ? "agent_chat" : "workbench",
+    { serverConversationIds, generatedTitles }
   );
   const { state, openMobile, toggleSidebar } = useSidebar();
   const { t } = useTranslation();
