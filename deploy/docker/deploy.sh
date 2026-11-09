@@ -1537,7 +1537,7 @@ select_terminal_tool() {
 }
 
 check_super_admin_user_exists() {
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker exec nexent-config python /opt/backend/account_admin.py bootstrap-su --check >/dev/null
+  docker exec nexent-config python -m management.cli.account bootstrap-su --check >/dev/null
 }
 
 prompt_super_admin_password() {

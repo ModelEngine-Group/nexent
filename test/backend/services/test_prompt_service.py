@@ -677,7 +677,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_insert_mode_raises(self):
         """nexent 模式: mode=insert 应该抛出 NexentCapabilityError"""
-        from adapters.exception import NexentCapabilityError
+        from contracts.errors.capabilities import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         req = OptimizeRequest(
@@ -693,7 +693,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_select_mode_raises(self):
         """nexent 模式: mode=select 应该抛出 NexentCapabilityError"""
-        from adapters.exception import NexentCapabilityError
+        from contracts.errors.capabilities import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         req = OptimizeRequest(
@@ -708,7 +708,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_badcase_nexent_raises(self):
         """nexent 模式: badcase 优化应该抛出 NexentCapabilityError"""
-        from adapters.exception import NexentCapabilityError
+        from contracts.errors.capabilities import NexentCapabilityError
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         with self.assertRaises(NexentCapabilityError) as ctx:
@@ -1039,7 +1039,7 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_jiuwen_unavailable_raises(self):
-        from adapters.exception import NexentCapabilityError
+        from contracts.errors.capabilities import NexentCapabilityError
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
         with self.assertRaises(NexentCapabilityError):
@@ -1049,7 +1049,7 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_successful_optimize_from_debug(self, mock_search_agent, mock_get_adapter):
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_search_agent.return_value = {
             "prompt": "Duty content",
@@ -1124,7 +1124,7 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_from_debug_adapter_none_raises(self, mock_search_agent, mock_get_adapter):
         """When _get_jiuwen_adapter_class returns None after is_jiuwen_mode_available check, raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_search_agent.return_value = {
             "prompt": "Duty",
@@ -1216,7 +1216,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_insert_no_start_pos_raises(self, mock_get_adapter):
         """Insert mode without start_pos raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1240,7 +1240,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_insert_out_of_bounds_raises(self, mock_get_adapter):
         """Insert mode with out-of-bounds start_pos raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1263,7 +1263,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_missing_positions_raises(self, mock_get_adapter):
         """Select mode without start_pos/end_pos raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1286,7 +1286,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_non_int_positions_raises(self, mock_get_adapter):
         """Select mode with non-integer positions raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1309,7 +1309,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_invalid_range_raises(self, mock_get_adapter):
         """Select mode with start >= end raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1332,7 +1332,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_end_out_of_bounds_raises(self, mock_get_adapter):
         """Select mode with end_pos > length raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1355,7 +1355,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_adapter_unavailable_raises(self, mock_get_adapter):
         """When adapter class is None in _optimize_with_jiuwen, raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
         mock_get_adapter.return_value = None
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
@@ -1375,7 +1375,7 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_error_falls_back_to_nexent(self, mock_impl, mock_get_adapter):
         """When Jiuwen SDK raises JiuwenSDKError, falls back to nexent native."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1432,7 +1432,7 @@ class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_badcase_jiuwen_fallback_on_error(self, mock_get_adapter):
         """When Jiuwen SDK badcase fails, falls back to nexent which raises NexentCapabilityError."""
-        from adapters.exception import JiuwenSDKError, NexentCapabilityError
+        from contracts.errors.capabilities import JiuwenSDKError, NexentCapabilityError
 
         mock_adapter_cls = MagicMock()
         mock_adapter_instance = MagicMock()
@@ -1456,7 +1456,7 @@ class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_badcase_jiuwen_adapter_none_raises(self, mock_get_adapter):
         """When adapter class is None in badcase, raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError, NexentCapabilityError
+        from contracts.errors.capabilities import JiuwenSDKError, NexentCapabilityError
 
         mock_get_adapter.return_value = None
 
@@ -1477,25 +1477,24 @@ class TestGetJiuwenAdapterClass(unittest.TestCase):
     """Tests for _get_jiuwen_adapter_class (line 53, 1375-1388)."""
 
     def test_returns_adapter_when_importable(self):
-        """When adapters module has JiuwenSDKAdapter, return it."""
+        """When the model adapter module has JiuwenSDKAdapter, return it."""
         from management.services.agent.prompt_generation import _get_jiuwen_adapter_class
 
         mock_adapter = MagicMock()
         mock_module = MagicMock()
         mock_module.JiuwenSDKAdapter = mock_adapter
 
-        with patch.dict(sys.modules, {'adapters': mock_module}):
+        with patch.dict(sys.modules, {'management.services.model.jiuwen_sdk_adapter': mock_module}):
             result = _get_jiuwen_adapter_class()
 
         self.assertEqual(result, mock_adapter)
 
     def test_returns_none_when_not_importable(self):
-        """When adapters module is not found, return None."""
+        """When the model adapter module is not found, return None."""
         from management.services.agent.prompt_generation import _get_jiuwen_adapter_class
 
-        with patch.dict(sys.modules, {'adapters': None}):
-            with patch('builtins.__import__', side_effect=ModuleNotFoundError("No module named 'adapters'")):
-                result = _get_jiuwen_adapter_class()
+        with patch.dict(sys.modules, {'management.services.model.jiuwen_sdk_adapter': None}):
+            result = _get_jiuwen_adapter_class()
 
         self.assertIsNone(result)
 
@@ -1519,7 +1518,7 @@ class TestOptimizeBadcaseWithJiuwenDirect(unittest.TestCase):
     @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
     def test_badcase_jiuwen_adapter_none_raises_directly(self, mock_get_adapter):
         """When adapter class is None, _optimize_badcase_with_jiuwen raises JiuwenSDKError."""
-        from adapters.exception import JiuwenSDKError
+        from contracts.errors.capabilities import JiuwenSDKError
         mock_get_adapter.return_value = None
 
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")

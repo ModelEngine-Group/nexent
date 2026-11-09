@@ -9,7 +9,7 @@ from contracts.errors.exceptions import AppException
 from contracts.agent import AgentRequest
 
 try:
-    from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
+    from management.services.model.jiuwen_sdk_adapter import JiuwenSDKAdapter
 except ModuleNotFoundError:
     JiuwenSDKAdapter = None
 import asyncio
@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import datetime
 from statistics import mean
 
-from adapters.exception import JiuwenSDKUnavailableError
+from contracts.errors.capabilities import JiuwenSDKUnavailableError
 from contracts.constants.constants import MAX_TURNS_PER_SESSION
 from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
 from infrastructure.rdb.client import get_db_session

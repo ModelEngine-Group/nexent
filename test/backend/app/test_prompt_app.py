@@ -126,7 +126,7 @@ def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, m
     """Test /prompt/optimize returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
 
-    from adapters.exception import NexentCapabilityError
+    from contracts.errors.capabilities import NexentCapabilityError
     mock_svc_instance = MagicMock()
     mock_svc_instance.optimize.side_effect = NexentCapabilityError(
         "nexent 原生模式只支持 general 模式，当前请求 mode=insert 不支持"
@@ -206,7 +206,7 @@ def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get
     """Test /prompt/optimize/badcase returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
 
-    from adapters.exception import NexentCapabilityError
+    from contracts.errors.capabilities import NexentCapabilityError
     mock_svc_instance = MagicMock()
     mock_svc_instance.optimize_badcase.side_effect = NexentCapabilityError(
         "nexent 原生模式不支持 badcase 优化"

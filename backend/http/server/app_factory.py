@@ -212,7 +212,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             return await app_exception_handler(request, exc)
 
         # Handle NexentCapabilityError with a friendly message
-        from adapters.exception import NexentCapabilityError as _NCE
+        from contracts.errors.capabilities import NexentCapabilityError as _NCE
 
         if isinstance(exc, _NCE):
             logger.warning(f"NexentCapabilityError: {exc}")

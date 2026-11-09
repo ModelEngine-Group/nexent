@@ -4,8 +4,11 @@
 from contextlib import nullcontext
 from io import StringIO
 import json
+import os
 from pathlib import Path
 import runpy
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -66,7 +69,7 @@ def test_bootstrap_rejects_weak_password_before_writing(store, password):
 
 @pytest.mark.parametrize("result,code,check", [({"created": True}, 0, False), ({"exists": True}, 0, True), ({"exists": False}, 3, True)])
 def test_cli_exit_codes_and_stdin_password_are_stable(mocker, capsys, result, code, check):
-    args = ["account_admin.py", "bootstrap-su", "--email", "su@example.com"] + (["--check"] if check else [])
+    args = ["account.py", "bootstrap-su", "--email", "su@example.com"] + (["--check"] if check else [])
     mocker.patch("sys.argv", args)
     mocker.patch.object(cli.sys, "stdin", StringIO("Password123\r\nignored\n"))
     bootstrap = mocker.patch.object(cli, "bootstrap_super_admin", return_value=result)
@@ -83,7 +86,7 @@ def test_cli_exit_codes_and_stdin_password_are_stable(mocker, capsys, result, co
     (RuntimeError("password=private-credential"), "Account operation failed (RuntimeError)"),
 ])
 def test_cli_failure_returns_safe_diagnostics(mocker, capsys, error, expected):
-    mocker.patch("sys.argv", ["account_admin.py", "bootstrap-su", "--check"])
+    mocker.patch("sys.argv", ["account.py", "bootstrap-su", "--check"])
     mocker.patch.object(cli, "bootstrap_super_admin", side_effect=error)
     assert cli.main() == 1
     output = capsys.readouterr()
@@ -92,13 +95,19 @@ def test_cli_failure_returns_safe_diagnostics(mocker, capsys, error, expected):
     assert "private-credential" not in output.err
 
 
-def test_container_entry_point_propagates_cli_status(mocker):
-    main = mocker.patch.object(cli, "main", return_value=3)
-    path = Path(__file__).resolve().parents[3] / "backend/account_admin.py"
-    with pytest.raises(SystemExit) as raised:
-        runpy.run_path(str(path), run_name="__main__")
-    assert raised.value.code == 3
-    main.assert_called_once_with()
+def test_container_module_is_importable_from_an_unrelated_working_directory(tmp_path):
+    root = Path(__file__).resolve().parents[3]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join((str(root), str(root / "backend")))}
+    result = subprocess.run(
+        [sys.executable, "-m", "management.cli.account", "bootstrap-su", "--help"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    assert "--check" in result.stdout
 
 
 def test_cli_module_entry_point_runs_preflight(mocker, capsys):

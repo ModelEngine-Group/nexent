@@ -25,13 +25,13 @@ from management.services.model.invocation import call_llm_for_system_prompt
 
 from typing import Optional as Opt
 
-from adapters.exception import JiuwenSDKError, NexentCapabilityError
+from contracts.errors.capabilities import JiuwenSDKError, NexentCapabilityError
 
 
 def _get_jiuwen_adapter_class():
     """Import Jiuwen adapter only when optimization paths need it."""
     try:
-        from adapters import JiuwenSDKAdapter
+        from management.services.model.jiuwen_sdk_adapter import JiuwenSDKAdapter
     except ModuleNotFoundError:
         return None
     return JiuwenSDKAdapter

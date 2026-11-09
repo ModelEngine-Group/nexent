@@ -15,7 +15,7 @@ from management.services.agent.prompt_generation import (
     OptimizeResult,
     PromptOptimizationService,
 )
-from adapters.exception import NexentCapabilityError
+from contracts.errors.capabilities import NexentCapabilityError
 from management.services.permission.identity.session import get_current_user_info
 
 router = APIRouter(prefix="/prompt")

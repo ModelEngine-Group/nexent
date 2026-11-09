@@ -879,7 +879,7 @@ class TestNexentCapabilityErrorInGenericHandler:
 
     def test_nexent_capability_error_returns_400(self):
         """Test NexentCapabilityError returns 400 via the generic handler."""
-        from adapters.exception import NexentCapabilityError
+        from contracts.errors.capabilities import NexentCapabilityError
 
         app = FastAPI()
         register_exception_handlers(app)
