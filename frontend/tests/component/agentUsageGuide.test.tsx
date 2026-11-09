@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -68,10 +70,8 @@ function renderCard(
       agent={agent}
       onEdit={vi.fn()}
       onView={vi.fn()}
-      onApplyListing={vi.fn()}
       onViewReview={vi.fn()}
       onDelete={vi.fn()}
-      onEvaluate={vi.fn()}
       onUsageGuide={onUsageGuide}
       {...guideMenuProps}
     />
@@ -108,21 +108,18 @@ beforeEach(() => {
 });
 
 describe("Agent usage guide component coverage", () => {
-  it("shows apply listing from the paged agent data without another request", async () => {
+  it("omits migrated listing and evaluation entries without another request", async () => {
     const fetchListings = vi
       .spyOn(agentRepositoryService, "fetchAgentRepositoryListings")
       .mockResolvedValue({ items: [] });
-    const onApplyListing = vi.fn();
     const onGuideMenuOpenChange = vi.fn();
     renderWithProviders(
       <MyAgentCard
         agent={editableAgent}
         onEdit={vi.fn()}
         onView={vi.fn()}
-        onApplyListing={onApplyListing}
         onViewReview={vi.fn()}
         onDelete={vi.fn()}
-        onEvaluate={vi.fn()}
         onUsageGuide={vi.fn()}
         onGuideMenuOpenChange={onGuideMenuOpenChange}
       />
@@ -133,13 +130,17 @@ describe("Agent usage guide component coverage", () => {
       .click(
         screen.getByRole("button", { name: "agentRepository.mine.menu.more" })
       );
-    const applyItem = await screen.findByRole("menuitem", {
-      name: "agentRepository.mine.menu.apply",
-    });
+    await screen.findByRole("menu");
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "agentRepository.mine.menu.apply",
+      })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: "agentRepository.mine.evaluate" })
+    ).toBeNull();
     expect(fetchListings).not.toHaveBeenCalled();
     expect(onGuideMenuOpenChange.mock.calls[0]?.[0]).toBe(true);
-    await userEvent.setup().click(applyItem);
-    expect(onApplyListing).toHaveBeenCalledOnce();
     fetchListings.mockRestore();
   });
 

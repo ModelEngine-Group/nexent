@@ -85,7 +85,7 @@ def test_managed_source_connection_wait_is_bounded(mocker, monkeypatch, capsys):
     mocker.patch.object(migrate.time, "monotonic", side_effect=[0, 100])
     preflight = MagicMock()
     preflight.__enter__.return_value = preflight
-    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = (False,)
+    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
     mocker.patch("psycopg2.connect", side_effect=[preflight, psycopg2.OperationalError("secret")])
     monkeypatch.setattr("sys.argv", ["migrate_docker.py", "--wait-timeout", "1"])
     assert migrate.main() == 1
@@ -104,7 +104,7 @@ def test_explicit_source_never_starts_a_container(mocker, monkeypatch):
     prepare = mocker.patch.object(migrate, "prepare_source")
     preflight = MagicMock()
     preflight.__enter__.return_value = preflight
-    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = (False,)
+    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
     mocker.patch("psycopg2.connect", side_effect=[preflight, RuntimeError("stop")])
     monkeypatch.setattr("sys.argv", ["migrate_docker.py"])
     assert migrate.main() == 1

@@ -45,7 +45,7 @@ case:
     expected: The update-time cell shows the missing-value placeholder rather than the creation
       date.
   - order: 3
-    action: Trigger the row's detail, configure, and publish actions.
+    action: Trigger the row's detail and configure actions; confirm no Publish shortcut exists.
     expected: Each callback receives the corresponding agent or numeric agent ID.
   - order: 4
     action: Resize a real header cell with keyboard controls and trigger a row action.

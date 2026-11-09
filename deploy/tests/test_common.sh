@@ -1355,27 +1355,17 @@ deployment_prepare_config --components infrastructure,supabase --port-policy dev
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "legacy authentication component must use application local accounts"
 assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must keep auth enabled"
 assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
-# Exercise the host migration hook with a controlled Python executable.
-mkdir -p "$TMP_DIR/auto-auth-bin"
-cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
-#!/usr/bin/env bash
-if [ "${1:-}" = -c ]; then exit 0; fi
-printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
-printf '%s\n' "${MSYS_NO_PATHCONV:-unset}/${MSYS2_ARG_CONV_EXCL:-unset}" >> "$AUTH_HOOK_ARGUMENTS"
-exit "${AUTH_HOOK_EXIT:-0}"
-PYTHON
-chmod +x "$TMP_DIR/auto-auth-bin/python3"
+# The host hook delegates to Shell without looking up any Python interpreter.
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
-unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts docker
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
+bash() { printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"; return "${AUTH_HOOK_EXIT:-0}"; }
+deployment_upgrade_local_accounts docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.sh" "deployment must use the Shell migration coordinator"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete the migration before rollout"
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts kubernetes custom-namespace
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes deployment must select its dedicated entry point"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--deploy" "host entry must select deployment mode"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete migration before rollout"
+deployment_upgrade_local_accounts kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "kubernetes" "Kubernetes must select its Shell transport"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "unset/unset" "host Python must allow Git Bash automatic path conversion"
+assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "python" "host hook must not invoke Python"
 
 # Guard the real deployment call sites, including HTTPS and bootstrap paths
 # which can start Config and execute SQL indirectly.
@@ -1416,10 +1406,13 @@ assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_acco
 assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
 
 export AUTH_HOOK_EXIT=17
-if PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts docker; then
+if deployment_upgrade_local_accounts docker; then
   echo "FAIL: a migration error must propagate to the deployment caller"
   exit 1
 fi
 unset AUTH_HOOK_EXIT
 
 echo "All deployment common tests passed."
+
+unset -f bash
+bash "$SCRIPT_DIR/test_account_migration.sh"

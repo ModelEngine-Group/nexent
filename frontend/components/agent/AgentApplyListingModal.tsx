@@ -44,7 +44,7 @@ import type { TagAssignmentValue } from "@/types/tagManagement";
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
 
-interface MineApplyListingModalProps {
+interface AgentApplyListingModalProps {
   open: boolean;
   agent: MyEditableAgentItem | null;
   isSubmitting?: boolean;
@@ -52,13 +52,13 @@ interface MineApplyListingModalProps {
   onSubmit: (payload: AgentRepositoryListingCreatePayload) => Promise<void>;
 }
 
-export function MineApplyListingModal({
+export function AgentApplyListingModal({
   open,
   agent,
   isSubmitting = false,
   onClose,
   onSubmit,
-}: MineApplyListingModalProps) {
+}: AgentApplyListingModalProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
 

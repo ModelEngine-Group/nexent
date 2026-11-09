@@ -157,13 +157,6 @@ export default function AgentsPage() {
     },
     [pathname, router]
   );
-  const openPublishFlow = useCallback(
-    (agentId: number) => {
-      router.push(`${pathname}/${agentId}?publish=1`);
-    },
-    [pathname, router]
-  );
-
   const handleOpenAgent = useCallback(
     (agent: Agent) => updateUrl(Number(agent.id)),
     [updateUrl]
@@ -367,7 +360,6 @@ export default function AgentsPage() {
                           onColumnWidthsChange={setTableColumnWidths}
                           onOpen={handleOpenAgent}
                           onConfigure={updateUrl}
-                          onPublish={openPublishFlow}
                           onManageVersions={handleManageVersions}
                         />
                       ) : (
@@ -377,8 +369,6 @@ export default function AgentsPage() {
                               key={agent.id}
                               agent={agent}
                               onOpen={handleOpenAgent}
-                              onConfigure={updateUrl}
-                              onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}
                             />
                           ))}

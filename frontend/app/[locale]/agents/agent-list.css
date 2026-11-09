@@ -47,3 +47,8 @@
 .agent-table-actions > button {
   flex-shrink: 0;
 }
+
+/* Keep both resize targets accessible beside the fixed actions column. */
+.agent-list-table .agent-table-date-header .agent-table-resize-handle {
+  right: 8px;
+}

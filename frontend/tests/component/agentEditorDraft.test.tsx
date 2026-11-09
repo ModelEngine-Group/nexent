@@ -270,3 +270,18 @@ describe("Agent editor entry draft synchronization", () => {
     expect(searchAgentInfo).not.toHaveBeenCalled();
   });
 });
+
+
+it("keeps prompt visibility as server metadata through initialization, readback and reset", () => {
+  const hidden = { ...draft(), prompt: undefined, permission: "READ_ONLY", prompts_hidden: true } as Agent;
+  useAgentStore.getState().initialize(hidden);
+  expect(useAgentStore.getState().promptsHidden).toBe(true);
+  expect(useAgentStore.getState().editedAgent).not.toHaveProperty("prompts_hidden");
+  expect(useAgentStore.getState().replaceServerSnapshot(42, draft())).toBe(true);
+  expect(useAgentStore.getState().promptsHidden).toBe(false);
+  expect(useAgentStore.getState().replaceServerSnapshot(42, hidden)).toBe(true);
+  expect(useAgentStore.getState().promptsHidden).toBe(true);
+  useAgentStore.getState().reset();
+  expect(useAgentStore.getState().promptsHidden).toBe(false);
+  expect(updateAgentInfo).not.toHaveBeenCalled();
+});

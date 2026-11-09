@@ -111,7 +111,6 @@ describe("AgentListTable", () => {
           agents={[agent, { ...secondAgent, author: "Imported Author" }]}
           onOpen={vi.fn()}
           onConfigure={vi.fn()}
-          onPublish={vi.fn()}
           onManageVersions={vi.fn()}
         />
       );
@@ -123,7 +122,7 @@ describe("AgentListTable", () => {
         within(firstRow).queryByText(provider === "cas" ? "刘晨" : "平台作者")
       ).not.toBeInTheDocument();
       expect(screen.getByText("Imported Author")).toBeInTheDocument();
-      expect(screen.getAllByRole("separator")).toHaveLength(6);
+      expect(screen.getAllByRole("separator")).toHaveLength(7);
       expect(screen.getByRole("columnheader", { name: "操作" })).toHaveClass(
         "ant-table-cell-fix-end"
       );
@@ -137,7 +136,6 @@ describe("AgentListTable", () => {
         agents={[firstAgent, secondAgent]}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -181,7 +179,6 @@ describe("AgentListTable", () => {
         agents={[{ ...firstAgent, tags: [rawTag] }]}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -193,30 +190,26 @@ describe("AgentListTable", () => {
     }
   });
 
-  it("keeps detail, configure, publish, and version actions connected", () => {
+  it("keeps detail, configure and version actions connected without publication shortcuts", () => {
     const onOpen = vi.fn();
     const onConfigure = vi.fn();
-    const onPublish = vi.fn();
     const onManageVersions = vi.fn();
     render(
       <AgentListTable
         agents={[firstAgent, secondAgent]}
         onOpen={onOpen}
         onConfigure={onConfigure}
-        onPublish={onPublish}
         onManageVersions={onManageVersions}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
     fireEvent.click(screen.getAllByRole("button", { name: "配置" })[0]);
-    fireEvent.click(screen.getAllByRole("button", { name: "发布" })[0]);
     fireEvent.click(screen.getAllByRole("button", { name: "更多" })[0]);
     expect(onManageVersions).toHaveBeenCalledWith(1);
-    expect(screen.getAllByRole("button", { name: "发布" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "发布" })).toBeNull();
     expect(onOpen).toHaveBeenCalledWith(firstAgent);
     expect(onConfigure).toHaveBeenCalledWith(1);
-    expect(onPublish).toHaveBeenCalledWith(2);
   });
 
   it("preserves action permissions and complete long-name hints", () => {
@@ -228,7 +221,6 @@ describe("AgentListTable", () => {
         ]}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
@@ -274,11 +266,10 @@ describe("Agent table column resizing", () => {
         onColumnWidthsChange={onColumnWidthsChange}
         onOpen={vi.fn()}
         onConfigure={vi.fn()}
-        onPublish={vi.fn()}
         onManageVersions={vi.fn()}
       />
     );
-    expect(screen.getAllByRole("separator")).toHaveLength(6);
+    expect(screen.getAllByRole("separator")).toHaveLength(7);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize 名称" }), {
       key: "ArrowRight",
     });
