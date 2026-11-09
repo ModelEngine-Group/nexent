@@ -1,0 +1,45 @@
+{
+  "ids": {
+    "tenant_id": "5484234d-839b-488c-8c66-c4ee4b858314",
+    "model_id": 1,
+    "model_name": "qwen3.8-flash",
+    "agent_id": 2
+  },
+  "definition_sha256_before": "ea6911db7b90ba9f7a7076fd5b479a6c30d1dda1557d8f469a1ce18bc0867fd5",
+  "definition_sha256_after": "ea6911db7b90ba9f7a7076fd5b479a6c30d1dda1557d8f469a1ce18bc0867fd5",
+  "runs": [
+    {
+      "scenario": "plain",
+      "event_types": [
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count"
+      ],
+      "expected_marker": "NATIVE_RUNTIME_OK",
+      "elapsed_seconds": 2.018,
+      "event_count": 7
+    },
+    {
+      "scenario": "python",
+      "event_types": [
+        "execution_logs",
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count",
+        "tool"
+      ],
+      "expected_marker": "323",
+      "elapsed_seconds": 5.569,
+      "event_count": 13
+    },
+    {
+      "scenario": "unauthenticated",
+      "status_code": 500,
+      "denied": true
+    }
+  ]
+}

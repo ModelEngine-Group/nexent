@@ -1,0 +1,37 @@
+{
+  "run_id": "20261109T081530917315Z-NATIVE-RUNTIME-D5",
+  "status": "PASS",
+  "records": [
+    {
+      "containers": {
+        "nexent-runtime": {
+          "container_id": "d8ddad6561c6e026cfa39abe54b27abbb8fa7db44462aabc0f24a5222b4498a2",
+          "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5"
+        },
+        "nexent-config": {
+          "container_id": "eaa6911721391b2d7d7f189fe4bc5fe24e83fb6fa2fd4034720f6d1502ee4aa2",
+          "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5"
+        },
+        "nexent-northbound": {
+          "container_id": "2734ed74f033071aeb61229caa95aebdfa2c21d39d509b4e9b91b80eab17303e",
+          "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5"
+        },
+        "nexent-mcp": {
+          "container_id": "55bd2cba466abdfbb5c2be870641d085b28504574a90a2f271fccbbefffb3b80",
+          "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5"
+        },
+        "nexent-web": {
+          "container_id": "77d7bcaa0ea5736d763d1b1a0168374a61483f91851c898e917221ca69ea6ef4",
+          "image_id": "sha256:12ae7d92874641da2cf43d9f7c8758b3baba10aa7bd316bf1a644603caeae161"
+        }
+      },
+      "runtime_source": {
+        "runtime": "toolcalling",
+        "sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+      },
+      "sandbox_image_id": "sha256:378770c0d540f65b553741a2d81dfa93055ace3f5eace175772dd68952aa19ae",
+      "runtime_source_mount_absent": true,
+      "application_and_auth_health": true
+    }
+  ]
+}

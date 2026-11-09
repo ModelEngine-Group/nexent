@@ -33,6 +33,7 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
+from .runtime_factory import create_agent_runtime, is_runtime_agent
 from .output_protocol import ModelOutputProtocolExhaustedError
 from .prompt.user_context import render_user_context
 from .sandbox_workspace import SandboxWorkspace, probe_workspace
@@ -250,7 +251,8 @@ class NexentAgent:
                  cancellation_scope=None,
                  user_context=None,
                  tool_fastpath_enabled=True,
-                 tool_fastpath_allowed_tools=None):
+                 tool_fastpath_allowed_tools=None,
+                 agent_runtime="codeagent"):
         """
         Initialize the NexentAgent factory.
 
@@ -280,6 +282,9 @@ class NexentAgent:
             raise TypeError("Create Observer Object with MessageObserver")
 
         self.observer = observer
+        if agent_runtime not in ("codeagent", "toolcalling"):
+            raise ValueError(f"Invalid NEXENT_AGENT_RUNTIME: {agent_runtime!r}")
+        self.agent_runtime = agent_runtime
         self.model_config_list = model_config_list
         self.stop_event = stop_event
         self._sandbox_skill_cleanup_owner = self
@@ -789,6 +794,7 @@ class NexentAgent:
                 raise RunTerminated("Subagent invocation cancelled before allocation")
             runtime = type(self)(
                 observer=self.observer,
+                agent_runtime=self.agent_runtime,
                 model_config_list=self.model_config_list,
                 stop_event=scope.stop_event,
                 mcp_tool_collection=self.mcp_tool_collection,
@@ -1006,7 +1012,9 @@ class NexentAgent:
                 and getattr(self.observer, "enable_nl2a_wrapper", False) is not True
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )
-            if enable_clarification and any(item.type == ContextItemType.SYSTEM for item in context_items):
+            if self.agent_runtime == "codeagent" and enable_clarification and any(
+                item.type == ContextItemType.SYSTEM for item in context_items
+            ):
                 tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *worker_agents_list]})
                 context_items.append(ContextItemInput(
                     id="system:clarification_protocol",
@@ -1249,7 +1257,11 @@ class NexentAgent:
 
             # Create the agent
             self._check_sandbox_cancelled()
-            agent = CoreAgent(
+            agent_factory = (
+                CoreAgent if self.agent_runtime == "codeagent"
+                else functools.partial(create_agent_runtime, runtime=self.agent_runtime)
+            )
+            agent = agent_factory(
                 observer=self.observer,
                 tools=tool_list,
                 model=model,
@@ -1314,7 +1326,7 @@ class NexentAgent:
         if history is None:
             return
 
-        if not isinstance(self.agent, CoreAgent):
+        if not (isinstance(self.agent, CoreAgent) or is_runtime_agent(self.agent)):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
         if not all(isinstance(msg, AgentHistory) for msg in history):
@@ -1341,7 +1353,7 @@ class NexentAgent:
         visited = set()
         while pending:
             current = pending.pop()
-            if not isinstance(current, CoreAgent) or id(current) in visited:
+            if not (isinstance(current, CoreAgent) or is_runtime_agent(current)) or id(current) in visited:
                 continue
             visited.add(id(current))
             snapshots.append(("core", current, "metadata" in current.state, current.state.get("metadata")))
@@ -1356,10 +1368,10 @@ class NexentAgent:
             for child in child_values:
                 inner_agent = (
                     child
-                    if isinstance(child, CoreAgent)
+                    if (isinstance(child, CoreAgent) or is_runtime_agent(child))
                     else getattr(child, "_inner", child)
                 )
-                if isinstance(inner_agent, CoreAgent):
+                if (isinstance(inner_agent, CoreAgent) or is_runtime_agent(inner_agent)):
                     pending.append(inner_agent)
                     continue
 
@@ -1388,7 +1400,7 @@ class NexentAgent:
         reset: bool = True,
         additional_args: Optional[Dict[str, Any]] = None,
     ):
-        if not isinstance(self.agent, CoreAgent):
+        if not (isinstance(self.agent, CoreAgent) or is_runtime_agent(self.agent)):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
         monitoring_manager = get_monitoring_manager()
@@ -1941,7 +1953,7 @@ class NexentAgent:
             logger.error("Failed to clean run workspace %s: %s", workspace, exc)
 
     def set_agent(self, agent: CoreAgent):
-        if not isinstance(agent, CoreAgent):
+        if not (isinstance(agent, CoreAgent) or is_runtime_agent(agent)):
             raise TypeError(f"agent must be a CoreAgent object, not {type(agent)}")
         self.agent = agent
 

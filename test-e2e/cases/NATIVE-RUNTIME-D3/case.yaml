@@ -1,0 +1,225 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "NATIVE-RUNTIME-D3",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001",
+      "NATIVE-RUNTIME-RULE-002"
+    ],
+    "title": "Native provider and sandbox hybrid execution",
+    "type": "AGENT-IT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Native provider and sandbox hybrid execution",
+    "preconditions": [
+      "Real MODEL_URL/MODEL_API_KEY/MODEL_NAME and configured Phoenix endpoint/project are available.",
+      "Docker Engine is available with the branch-built sandbox image; local fallback is forbidden for Docker variants."
+    ],
+    "test_data": {
+      "runtime_values": [
+        "codeagent",
+        "toolcalling"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Discover the configured model and configure real trace export.",
+        "expected": "Configured model is listed and telemetry is enabled."
+      },
+      {
+        "order": 2,
+        "action": "Run a direct ListDirectoryTool task on local and Docker-backed native runtimes.",
+        "expected": "Structured native tool calls use actual authorized existing tools."
+      },
+      {
+        "order": 3,
+        "action": "Run arithmetic through code_execution on both backends.",
+        "expected": "Actual Python output is 323."
+      },
+      {
+        "order": 4,
+        "action": "Run ListDirectoryTool only from Python through code_execution on both backends.",
+        "expected": "No direct list_directory model call; actual existing tool span and filename observed."
+      },
+      {
+        "order": 5,
+        "action": "Run a hybrid direct/programmatic task on both backends.",
+        "expected": "Both native paths execute and results are used in the final answer."
+      },
+      {
+        "order": 6,
+        "action": "Inspect Phoenix call/result and nested tool evidence; release owned executors and remove marker files.",
+        "expected": "Every ID is correlated, expected spans exist without errors, and owned artifacts are cleaned."
+      },
+      {
+        "order": 7,
+        "action": "Run native existing-tool tasks with discovered Qwen, DeepSeek, GLM and MiniMax models using existing catalog reasoning controls when available.",
+        "expected": "Actual native tool result is used; requested controls and reasoning-field presence are recorded independently. Qwen/GLM verified routes must produce reasoning; DeepSeek/MiniMax absence is explicitly unverified, not a reasoning pass."
+      },
+      {
+        "order": 8,
+        "action": "Delegate a real-model task to a native child Agent and invoke a standard MCP tool through Nexent managed session and tool factory.",
+        "expected": "Child executes Python; MCP returns its marker; session and model resources close."
+      },
+      {
+        "order": 9,
+        "action": "Observe an actual tool failure and recovery, a one-step native execution limit, and cancellation after real provider streaming starts.",
+        "expected": "Errors retain correlated results; step limit performs no fallback inference; cancellation closes the provider resource within 15 seconds."
+      }
+    ],
+    "expected_results": [
+      "Direct native invocation returns the existing tool result.",
+      "Restricted code execution produces 323.",
+      "Programmatic tool invocation runs the existing authorized tool and preserves parent trace context.",
+      "Hybrid task uses both paths and returns observed filename and number.",
+      "Both backends use valid native histories; Docker never falls back to local.",
+      "Real Phoenix spans correlate calls/results; cleanup executes for every scenario.",
+      "All four providers complete actual existing-tool requests. Qwen/GLM reasoning fields are observed; DeepSeek/MiniMax reasoning status is reported independently and absence is unverified.",
+      "Managed child and actual MCP protocol tool complete with correlated native results and lifecycle cleanup.",
+      "Failure recovery, bounded execution and live cancellation are observed against actual services."
+    ],
+    "forbidden_side_effects": [
+      "No tool outside the authorized registry executes and no persisted Agent Definition is modified.",
+      "No credential or private reasoning body is written into retained evidence.",
+      "No Docker-variant acceptance is passed using a local executor."
+    ],
+    "source": {
+      "notes": "Executable real provider and strict Docker integration; execution results retained separately."
+    },
+    "integration_boundary": [
+      "Actual Nexent ToolCallingAgent -> configured provider -> authorized existing ListDirectoryTool / restricted Python / Docker Tool Bridge -> native continuation -> Phoenix"
+    ],
+    "observations": [
+      "Separate direct/code/programmatic/hybrid trace evidence, valid tool IDs, final result and errors."
+    ],
+    "cleanup": [
+      "Release per-run Docker executor using the canonical release function; close model client; remove owned marker."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Direct existing tool invocation uses native protocol.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          5
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Independent stateful executor path performs actual Python arithmetic.",
+        "steps": [
+          3
+        ],
+        "expected_results": [
+          2,
+          5
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Python invokes the existing authorized tool through the appropriate backend/bridge.",
+        "steps": [
+          4
+        ],
+        "expected_results": [
+          3,
+          5
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-04",
+        "description": "Hybrid results are returned to and used by the model.",
+        "steps": [
+          5
+        ],
+        "expected_results": [
+          4,
+          5
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-05",
+        "description": "Real trace evidence is sanitized and owned resources are cleaned.",
+        "steps": [
+          6
+        ],
+        "expected_results": [
+          6
+        ],
+        "forbidden_side_effects": [
+          2
+        ]
+      },
+      {
+        "id": "AC-06",
+        "description": "Real provider native-tool compatibility with independent, evidence-bounded reasoning status.",
+        "steps": [
+          7
+        ],
+        "expected_results": [
+          7
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-07",
+        "description": "Managed Agent and MCP integrations reuse existing lifecycle and registry.",
+        "steps": [
+          8
+        ],
+        "expected_results": [
+          8
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      },
+      {
+        "id": "AC-08",
+        "description": "Real runtime error recovery and execution lifecycle bounds.",
+        "steps": [
+          9
+        ],
+        "expected_results": [
+          9
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ]
+  }
+}

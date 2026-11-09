@@ -1,0 +1,117 @@
+{
+  "definition_sha256_before": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+  "definition_sha256_after": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+  "runs": [
+    {
+      "runtime": "codeagent",
+      "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5",
+      "started_at": "2026-11-09T08:10:20.885591+00:00",
+      "scenario": "plain",
+      "elapsed_seconds": 2.22,
+      "event_types": [
+        "agent_new_run",
+        "final_answer",
+        "model_attempt_control",
+        "model_output_deep_thinking",
+        "model_output_thinking",
+        "step_count",
+        "token_count"
+      ],
+      "tool_events": [],
+      "passed": true
+    },
+    {
+      "runtime": "codeagent",
+      "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5",
+      "started_at": "2026-11-09T08:10:23.105994+00:00",
+      "scenario": "hybrid",
+      "elapsed_seconds": 25.338,
+      "event_types": [
+        "agent_new_run",
+        "card",
+        "execution_logs",
+        "final_answer",
+        "model_attempt_control",
+        "model_output_deep_thinking",
+        "model_output_thinking",
+        "parse",
+        "step_count",
+        "token_count",
+        "tool"
+      ],
+      "tool_events": [
+        {
+          "tool_name": "list_directory",
+          "tool_arguments": {
+            "directory_path": ".",
+            "max_depth": 3,
+            "show_hidden": false,
+            "show_size": true
+          },
+          "tool_call_id": "584c6501-3178-4ee6-bbd1-2e3cd8a9d1c3"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "runtime": "codeagent",
+      "scenario": "unauthenticated",
+      "status_code": 500,
+      "denied": true
+    },
+    {
+      "runtime": "toolcalling",
+      "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5",
+      "started_at": "2026-11-09T08:10:59.626044+00:00",
+      "scenario": "plain",
+      "elapsed_seconds": 2.54,
+      "event_types": [
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count"
+      ],
+      "tool_events": [],
+      "passed": true
+    },
+    {
+      "runtime": "toolcalling",
+      "image_id": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5",
+      "started_at": "2026-11-09T08:11:02.166333+00:00",
+      "scenario": "hybrid",
+      "elapsed_seconds": 13.679,
+      "event_types": [
+        "card",
+        "execution_logs",
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count",
+        "tool"
+      ],
+      "tool_events": [
+        {
+          "tool_name": "list_directory",
+          "tool_arguments": "{\"directory_path\": \".\", \"max_depth\": 3, \"show_size\": true}",
+          "tool_call_id": "call_d92e66213e7b447baa7c388e"
+        },
+        {
+          "tool_name": "code_execution",
+          "tool_arguments": "{\"code\": \"result = 17 * 19\\nprint(result)\"}",
+          "tool_call_id": "call_76d466738a254774bb67def1"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "runtime": "toolcalling",
+      "scenario": "unauthenticated",
+      "status_code": 500,
+      "denied": true
+    }
+  ],
+  "final_runtime": "toolcalling",
+  "latency_note": "Single observations; not a benchmark."
+}

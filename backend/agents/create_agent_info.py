@@ -88,6 +88,7 @@ from infrastructure.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from infrastructure.redis import get_redis_client
 from consts.const import (
+    NEXENT_AGENT_RUNTIME,
     AGENT_WORKSPACE_ROOT,
     A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -2910,6 +2911,7 @@ async def create_agent_run_info(
             })
 
     agent_run_info = AgentRunInfo(
+        agent_runtime=NEXENT_AGENT_RUNTIME,
         query=final_query,
         model_config_list=model_list,
         observer=MessageObserver(lang=language),

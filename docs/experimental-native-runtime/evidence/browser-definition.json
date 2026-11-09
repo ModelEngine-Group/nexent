@@ -1,0 +1,22 @@
+{
+  "agent_id": 2,
+  "semantic_fields": [
+    "name",
+    "display_name",
+    "description",
+    "model_ids",
+    "max_steps",
+    "requested_output_tokens",
+    "prompt",
+    "enable_context_manager",
+    "verification_config",
+    "context_policy",
+    "model_params_override",
+    "tools",
+    "sub_agent_id_list"
+  ],
+  "sha256_before": "4b8b103aa8b3da25004616c82ba8463c39165a9fad3106dd026c264b9fa8d869",
+  "sha256_after": "4b8b103aa8b3da25004616c82ba8463c39165a9fad3106dd026c264b9fa8d869",
+  "browser": "Codex built-in browser",
+  "verification": "manual browser journey, separate from automated formal runner"
+}

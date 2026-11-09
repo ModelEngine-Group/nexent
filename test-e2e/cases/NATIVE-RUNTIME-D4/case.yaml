@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "stage": "D4",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "NATIVE-RUNTIME-D4",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001",
+      "NATIVE-RUNTIME-RULE-002"
+    ],
+    "title": "Existing definition completes browser hybrid debug",
+    "type": "E2E",
+    "priority": "P0",
+    "status": "manual",
+    "automation": "manual",
+    "objective": "Verify the unchanged browser renders native tool execution and final answers for an existing persisted test Agent.",
+    "preconditions": [
+      "Final host deployment is running in toolcalling mode with a configured real model, test tenant administrator and persisted Agent with authorized list_directory."
+    ],
+    "test_data": {
+      "runtime_values": [
+        "codeagent",
+        "toolcalling"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Sign in to the test tenant using the existing administrator; open the existing Agent Definition and Debug agent.",
+        "expected": "Persisted name, prompt and model load without runtime-specific definition edits."
+      },
+      {
+        "order": 2,
+        "action": "Request a workspace directory listing and Python calculation of 17*19.",
+        "expected": "The browser streams progress and displays a final answer based on actual tool results."
+      },
+      {
+        "order": 3,
+        "action": "Expand tool calls and inspect names, arguments and execution results.",
+        "expected": "list_directory and code_execution are visible, with a successful Python 323 observation."
+      },
+      {
+        "order": 4,
+        "action": "Reload the editor and inspect the persisted Agent name, prompt, model and tool selection.",
+        "expected": "The existing semantic definition remains usable after runtime execution."
+      }
+    ],
+    "expected_results": [
+      "Existing Agent Definition opens and debug mode is usable.",
+      "Final answer includes observed results.",
+      "Browser shows actual direct and Python calls and output.",
+      "Reload retains the persisted semantic definition; debug conversation persistence is not asserted."
+    ],
+    "forbidden_side_effects": [
+      "No unauthorized tool execution, destructive definition changes, exposed secrets or uncorrelated tool results."
+    ],
+    "source": {
+      "notes": "Manual browser verification through Codex built-in browser; no frontend code changed. Execution evidence is retained separately. This manual Case is not reported as an automated runner pass."
+    },
+    "actor": "Existing test tenant administrator",
+    "journey": [
+      "Open existing persisted Agent -> Debug -> hybrid task -> inspect actual native tools -> reload definition."
+    ],
+    "final_business_result": [
+      "An existing definition runs a hybrid task with visible native tool results and final answer."
+    ],
+    "failure_evidence": [
+      "Capture browser failure, response and correlated trace without secrets."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Existing browser definition/debug flow renders actual hybrid execution and retains semantic configuration.",
+        "steps": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "expected_results": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ]
+  }
+}

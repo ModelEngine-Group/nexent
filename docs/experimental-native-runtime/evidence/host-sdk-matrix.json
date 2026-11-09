@@ -1,0 +1,489 @@
+{
+  "case_id": "NATIVE-RUNTIME-D3",
+  "run_id": "20261109T081223286992Z-NATIVE-RUNTIME-D3",
+  "test_count": 17,
+  "passed": true,
+  "records": [
+    {
+      "trace_id": "1eba942c5aad44d32bba18e075af9a64",
+      "parent_delegated": true,
+      "child_used_python": true,
+      "observed_answer": 323
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "code",
+      "backend": "docker",
+      "trace_id": "09af1ca79f22255a305599f1c9b026a3",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "code_execution",
+        "final_answer"
+      ],
+      "call_ids": [
+        "call_60ddd1de7ccf42878f4ef233",
+        "call_ca5dd7f53c2643b495becf8c"
+      ],
+      "result_ids": [
+        "call_60ddd1de7ccf42878f4ef233",
+        "call_ca5dd7f53c2643b495becf8c"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "2589cce1e515a90c",
+          "parent_id": null
+        },
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "59acb5dd222ba4e0",
+          "parent_id": "2589cce1e515a90c"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "f6d1f814398d7cc6",
+          "parent_id": "2589cce1e515a90c"
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "cb236aaf3d273886",
+          "parent_id": "2589cce1e515a90c"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "114129b076058111",
+          "parent_id": "2589cce1e515a90c"
+        }
+      ],
+      "latency_seconds": 6.803,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "direct",
+      "backend": "docker",
+      "trace_id": "9f0dfc4d1b560817019c2dd540f777f6",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "list_directory",
+        "final_answer"
+      ],
+      "call_ids": [
+        "call_5fb9fefec2db423bbbca8441",
+        "call_02ca48c3309740e38f7ed67f"
+      ],
+      "result_ids": [
+        "call_5fb9fefec2db423bbbca8441",
+        "call_02ca48c3309740e38f7ed67f"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "9620bce23755c47d",
+          "parent_id": null
+        },
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "dbdc76fb091e8768",
+          "parent_id": "9620bce23755c47d"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "a4b3c47b22436a04",
+          "parent_id": "9620bce23755c47d"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "973c4f1d7204b67f",
+          "parent_id": "9620bce23755c47d"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "27bc1e9fb2b8ff5a",
+          "parent_id": "973c4f1d7204b67f"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "9737c063024f1ead",
+          "parent_id": "9620bce23755c47d"
+        }
+      ],
+      "latency_seconds": 5.81,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "hybrid",
+      "backend": "docker",
+      "trace_id": "e40a9f8744abe1dfcc82da55265f36cf",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "list_directory",
+        "code_execution"
+      ],
+      "call_ids": [
+        "call_aa894602f3d54ed1acb9d29f",
+        "call_3ec8628699514ed19b308f1e"
+      ],
+      "result_ids": [
+        "call_aa894602f3d54ed1acb9d29f",
+        "call_3ec8628699514ed19b308f1e"
+      ],
+      "spans": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "380e0991fe7a56b2",
+          "parent_id": "43292392794c6077"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "2a78894f448b2324",
+          "parent_id": "380e0991fe7a56b2"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "bbdbcde28b7f027b",
+          "parent_id": "43292392794c6077"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "3d7621c40763bc0a",
+          "parent_id": "43292392794c6077"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "8ee06ed82974be70",
+          "parent_id": "3d7621c40763bc0a"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "fd1da4bed6a7d3b6",
+          "parent_id": "43292392794c6077"
+        }
+      ],
+      "latency_seconds": 10.953,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "programmatic",
+      "backend": "docker",
+      "trace_id": "3687731019bfc4ab8a3b8adec1199762",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "code_execution",
+        "final_answer"
+      ],
+      "call_ids": [
+        "call_4a15803ba0464de1b1ce49d0",
+        "call_1b5f58d9fe7e48b390e1145e"
+      ],
+      "result_ids": [
+        "call_4a15803ba0464de1b1ce49d0",
+        "call_1b5f58d9fe7e48b390e1145e"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "179f9511120ae3d9",
+          "parent_id": null
+        },
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "ff2c6b68c0bde055",
+          "parent_id": "179f9511120ae3d9"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "5194321acf267210",
+          "parent_id": "179f9511120ae3d9"
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "411cb81f504d1d22",
+          "parent_id": "179f9511120ae3d9"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "66ac57be972716ec",
+          "parent_id": "411cb81f504d1d22"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "3ba201777df8a2ef",
+          "parent_id": "179f9511120ae3d9"
+        }
+      ],
+      "latency_seconds": 7.926,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "trace_id": "240751897839ba327679c8151e274bd5",
+      "call_ids": [
+        "call_63d3fe240f0b47778f24f9af",
+        "call_21f50a2b1e214bbb97166447"
+      ],
+      "error_observed": true,
+      "recovery_observed": true
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "code",
+      "backend": "local",
+      "trace_id": "34232c2e3b0c3c58247e79a3e1111520",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "code_execution",
+        "final_answer"
+      ],
+      "call_ids": [
+        "call_be269d56af8b4ee2a3ac44b1",
+        "call_dc2be9dda10c4e4d99d2b730"
+      ],
+      "result_ids": [
+        "call_be269d56af8b4ee2a3ac44b1",
+        "call_dc2be9dda10c4e4d99d2b730"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "a3d7d712527f66e7",
+          "parent_id": null
+        },
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "5ad9e4ac9d8f76f9",
+          "parent_id": "a3d7d712527f66e7"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "27271ab51aceceac",
+          "parent_id": "a3d7d712527f66e7"
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "670ecbf92fc794e2",
+          "parent_id": "a3d7d712527f66e7"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "1c155e44c3bc888a",
+          "parent_id": "a3d7d712527f66e7"
+        }
+      ],
+      "latency_seconds": 3.792,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "direct",
+      "backend": "local",
+      "trace_id": "91100ec014f395cf31e51d6d73749d34",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "list_directory"
+      ],
+      "call_ids": [
+        "call_398c9a20568d439a8b2b044a"
+      ],
+      "result_ids": [
+        "call_398c9a20568d439a8b2b044a"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "f498c7017bacf712",
+          "parent_id": null
+        },
+        {
+          "name": "native.generate",
+          "span_id": "0684ac1e8838af6e",
+          "parent_id": "f498c7017bacf712"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "ad4177f0dd622b63",
+          "parent_id": "f498c7017bacf712"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "0b36eb0102726053",
+          "parent_id": "ad4177f0dd622b63"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "943dbd69c96b9514",
+          "parent_id": "f498c7017bacf712"
+        }
+      ],
+      "latency_seconds": 4.11,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "hybrid",
+      "backend": "local",
+      "trace_id": "cadc1cef8eaccd811dd8a276c0d9af96",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "list_directory",
+        "code_execution"
+      ],
+      "call_ids": [
+        "call_1e442002e2ed48cb88b97270",
+        "call_1b78e4c78790463a8ba59e8d"
+      ],
+      "result_ids": [
+        "call_1e442002e2ed48cb88b97270",
+        "call_1b78e4c78790463a8ba59e8d"
+      ],
+      "spans": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "bdd59d17dc167ef0",
+          "parent_id": "a5c344c8872180ba"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "f3c7cf865f504482",
+          "parent_id": "bdd59d17dc167ef0"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "18480d7579c77e40",
+          "parent_id": "a5c344c8872180ba"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "26446c51a6d7c868",
+          "parent_id": "a5c344c8872180ba"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "e309d3165e24c9b7",
+          "parent_id": "26446c51a6d7c868"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "bc8c9c7360221559",
+          "parent_id": "a5c344c8872180ba"
+        }
+      ],
+      "latency_seconds": 9.076,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "scenario": "programmatic",
+      "backend": "local",
+      "trace_id": "8623dedd1283ef87090c1e1a01db4f3d",
+      "model": "qwen3.8-flash",
+      "tool_names": [
+        "code_execution"
+      ],
+      "call_ids": [
+        "call_2919fcf1ef4d40d1a7ed7c5d"
+      ],
+      "result_ids": [
+        "call_2919fcf1ef4d40d1a7ed7c5d"
+      ],
+      "spans": [
+        {
+          "name": "agent.run",
+          "span_id": "436308c3c60cd691",
+          "parent_id": null
+        },
+        {
+          "name": "native.generate",
+          "span_id": "4910a208fa3f9815",
+          "parent_id": "436308c3c60cd691"
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "a8f26c7338806aa5",
+          "parent_id": "436308c3c60cd691"
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "b15167e0a80fdce3",
+          "parent_id": "a8f26c7338806aa5"
+        },
+        {
+          "name": "native.generate",
+          "span_id": "b0a94759fd7796e6",
+          "parent_id": "436308c3c60cd691"
+        }
+      ],
+      "latency_seconds": 4.29,
+      "runtime_sha256": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+    },
+    {
+      "trace_id": "0d7598886ef523bbcf1acb5b8a542ac7",
+      "maximum_steps": 1,
+      "assistant_requests": 1,
+      "limit_error_observed": true
+    },
+    {
+      "trace_id": "2e3773a5f41304dd04b0253fb6396155",
+      "native_mcp_call": true,
+      "marker_observed": true,
+      "lifecycle": "managed context owns session cleanup"
+    },
+    {
+      "trace_id": "8b39206544a51b1cf454194b93c0cd9f",
+      "actual_stream_started": true,
+      "provider_closed": true,
+      "pending_closers": 0,
+      "request_count": 1,
+      "termination_seconds": 0.003
+    },
+    {
+      "model_id": "MiniMax-M3.1-Flash",
+      "trace_id": "accc6ad5cebb49796e199f4a1395d55e",
+      "configured_effort": null,
+      "capability_source": null,
+      "reasoning_field_present": true,
+      "reasoning_verification": "observed",
+      "configured_thinking_object": false,
+      "native_tool_observed": true,
+      "answer_marker_observed": true
+    },
+    {
+      "model_id": "deepseek-v4.1-flash",
+      "trace_id": "409440c7a81e9b1a368ee1247159ed46",
+      "configured_effort": "high",
+      "capability_source": "operator",
+      "reasoning_field_present": false,
+      "reasoning_verification": "unverified",
+      "configured_thinking_object": true,
+      "native_tool_observed": true,
+      "answer_marker_observed": true
+    },
+    {
+      "model_id": "glm-5.3",
+      "trace_id": "f702a73a77ebeeeff70d2a40ff01825b",
+      "configured_effort": "high",
+      "capability_source": "catalog",
+      "reasoning_field_present": true,
+      "reasoning_verification": "observed",
+      "configured_thinking_object": false,
+      "native_tool_observed": true,
+      "answer_marker_observed": true
+    },
+    {
+      "model_id": "qwen3.8-flash",
+      "trace_id": "acc7fa307b4c610c237115d6b368fd44",
+      "configured_effort": "low",
+      "capability_source": "catalog",
+      "reasoning_field_present": true,
+      "reasoning_verification": "observed",
+      "configured_thinking_object": false,
+      "native_tool_observed": true,
+      "answer_marker_observed": true
+    }
+  ],
+  "trace_config": {
+    "trace_max_chars": 100000,
+    "trace_max_items": 100
+  }
+}

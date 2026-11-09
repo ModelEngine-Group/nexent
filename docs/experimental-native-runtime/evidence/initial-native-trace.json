@@ -1,0 +1,61 @@
+{
+  "scope": "Initial SDK protocol proof only; backend selection, streaming, lifecycle and final branch-built container acceptance pending",
+  "source_revision": "a6ba04a312938242d27824921beb2e7212b36c74 plus uncommitted native_runtime.py",
+  "source_sha256": "23b7e8e6cd4c91749cf8ea8520c51decb27d83d9b7c1957e2b3fc431b01ce9ea",
+  "trace_id": "35580ffbad09157ce417940ef296969a",
+  "project": "nexent-pr4310-native-runtime",
+  "model": "qwen3.8-flash",
+  "unit_tests": "6 passed",
+  "spans": [
+    {
+      "name": "agent.run",
+      "span_id": "ef6b2b4fe25c3e57",
+      "status": "OK"
+    },
+    {
+      "name": "native.generate",
+      "span_id": "09890647418583e2",
+      "status": "UNSET",
+      "input.value_roles": [
+        "system",
+        "user"
+      ],
+      "input.value_results": [],
+      "output.value_calls": [
+        {
+          "id": "call_82562163b1ac46d78be3f993",
+          "name": "list_directory",
+          "arguments": "{\"directory_path\": \".\", \"show_hidden\": true}"
+        }
+      ],
+      "output.value_content_present": false,
+      "output.value_reasoning_field_present": true
+    },
+    {
+      "name": "agent.tool.list_directory",
+      "span_id": "3715556f7f4f4f04",
+      "status": "UNSET",
+      "tool_success": true
+    },
+    {
+      "name": "native.generate",
+      "span_id": "af51cc9a5b4c4dbc",
+      "status": "UNSET",
+      "input.value_roles": [
+        "system",
+        "user",
+        "assistant",
+        "tool"
+      ],
+      "input.value_results": [
+        {
+          "tool_call_id": "call_82562163b1ac46d78be3f993",
+          "content_present": true
+        }
+      ],
+      "output.value_calls": [],
+      "output.value_content_present": true,
+      "output.value_reasoning_field_present": true
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "scenario": "Unauthenticated runtime request",
+  "status": 500,
+  "passed": false,
+  "response": "{\"message\":\"No authorization header provided\"}"
+}

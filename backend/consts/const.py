@@ -18,6 +18,10 @@ except ModuleNotFoundError as exc:
 # avoids silently replacing operator-provided service addresses.
 load_dotenv(override=False)
 
+NEXENT_AGENT_RUNTIME = os.getenv("NEXENT_AGENT_RUNTIME", "codeagent").strip()
+if NEXENT_AGENT_RUNTIME not in ("codeagent", "toolcalling"):
+    raise ValueError("NEXENT_AGENT_RUNTIME must be codeagent or toolcalling")
+
 
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)

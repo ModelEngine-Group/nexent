@@ -1,0 +1,126 @@
+{
+  "suite": "traditional unit tests; modules executed in separate processes following repository runner isolation",
+  "results": [
+    {
+      "file": "test/sdk/core/agents/test_native_runtime.py",
+      "exit_code": 0,
+      "summary": [
+        "25 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+      ]
+    },
+    {
+      "file": "test/sdk/core/models/test_native_model.py",
+      "exit_code": 0,
+      "summary": [
+        "5 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+      ]
+    },
+    {
+      "file": "test/backend/consts/test_agent_runtime_config.py",
+      "exit_code": 0,
+      "summary": [
+        "6 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_core_agent.py",
+      "exit_code": 0,
+      "summary": [
+        "...................................                                      [100%]",
+        "179 passed in 0.82s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent.py",
+      "exit_code": 0,
+      "summary": [
+        "...............................                                          [100%]",
+        "247 passed in 1.88s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_run_agent.py",
+      "exit_code": 0,
+      "summary": [
+        "...................................................                      [100%]",
+        "51 passed in 0.75s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent_context_runtime_factory.py",
+      "exit_code": 0,
+      "summary": [
+        ".........                                                                [100%]",
+        "9 passed in 0.91s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent_item_integration.py",
+      "exit_code": 0,
+      "summary": [
+        "......                                                                   [100%]",
+        "6 passed in 0.72s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent_sandbox_construction.py",
+      "exit_code": 0,
+      "summary": [
+        "......................                                                   [100%]",
+        "22 passed in 0.89s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent_tool_fastpath.py",
+      "exit_code": 0,
+      "summary": [
+        "....................                                                     [100%]",
+        "20 passed in 0.95s"
+      ]
+    },
+    {
+      "file": "test/sdk/core/agents/test_nexent_agent_mcp_parameters.py",
+      "exit_code": 0,
+      "summary": [
+        ".                                                                        [100%]",
+        "1 passed in 0.07s"
+      ]
+    },
+    {
+      "file": "test/backend/agents/test_create_agent_info.py",
+      "exit_code": 0,
+      "summary": [
+        "259 passed; see final-reviewed.log or test_create_agent_info-rerun.log"
+      ]
+    },
+    {
+      "file": "test/backend/services/test_nl2agent_service.py",
+      "exit_code": 0,
+      "summary": [
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "59 passed, 1 warning in 5.51s"
+      ]
+    },
+    {
+      "file": "test/backend/services/test_nl2skill_service.py",
+      "exit_code": 0,
+      "summary": [
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "24 passed, 1 warning in 2.84s"
+      ]
+    }
+  ],
+  "total_passed": 913,
+  "focused_new_runtime_coverage": {
+    "covered_lines": 412,
+    "num_statements": 445,
+    "percent_covered": 92.58426966292134
+  },
+  "coverage_scope": [
+    "sdk/nexent/core/agents/native_runtime.py",
+    "sdk/nexent/core/agents/runtime_factory.py"
+  ],
+  "limitations": [
+    "Coverage percentage is restricted to the two new runtime modules; not whole repository or combined with formal tests."
+  ]
+}

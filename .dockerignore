@@ -63,3 +63,6 @@ assets/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Task-local development artifacts and connection metadata.
+.runtime/

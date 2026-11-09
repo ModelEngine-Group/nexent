@@ -1,0 +1,1319 @@
+{
+  "project": "nexent-pr4310-host-acceptance",
+  "run_id": "20261109T081223286992Z-NATIVE-RUNTIME-D3",
+  "inspection": "Phoenix MCP getSpans; structural evidence only, no reasoning bodies",
+  "traces": [
+    {
+      "label": "managed-native-child",
+      "trace_id": "1eba942c5aad44d32bba18e075af9a64",
+      "span_count": 8,
+      "llm_history": [
+        {
+          "span_id": "a3d7b3cab201c28a",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "calculator"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "bb1e2c4333bb22b0",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "08169d4a78d52c37",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_8fec084669f34de899714d96"
+          ],
+          "result_ids": [
+            "call_8fec084669f34de899714d96"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "4b50ff4c1cca5f9f",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_74fcbe7d92344b3785cf6b0f"
+          ],
+          "result_ids": [
+            "call_74fcbe7d92344b3785cf6b0f"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "73fccbf8b9d4869f",
+          "parent_id": "2f304ef823c1e0b7",
+          "call_id": "call_b57d9e2a21fb4e87b1ce1d4d",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.calculator",
+          "span_id": "72aeebbc3de5dc1e",
+          "parent_id": "2f304ef823c1e0b7",
+          "call_id": "call_74fcbe7d92344b3785cf6b0f",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "fd548b89f97d3591",
+          "parent_id": "72aeebbc3de5dc1e",
+          "call_id": "call_8fec084669f34de899714d96",
+          "observed_323": true
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-docker-code",
+      "trace_id": "09af1ca79f22255a305599f1c9b026a3",
+      "span_count": 5,
+      "llm_history": [
+        {
+          "span_id": "114129b076058111",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "f6d1f814398d7cc6",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_60ddd1de7ccf42878f4ef233"
+          ],
+          "result_ids": [
+            "call_60ddd1de7ccf42878f4ef233"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "59acb5dd222ba4e0",
+          "parent_id": "2589cce1e515a90c",
+          "call_id": "call_ca5dd7f53c2643b495becf8c",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "cb236aaf3d273886",
+          "parent_id": "2589cce1e515a90c",
+          "call_id": "call_60ddd1de7ccf42878f4ef233",
+          "observed_323": true
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-docker-direct",
+      "trace_id": "9f0dfc4d1b560817019c2dd540f777f6",
+      "span_count": 6,
+      "llm_history": [
+        {
+          "span_id": "9737c063024f1ead",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "a4b3c47b22436a04",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_5fb9fefec2db423bbbca8441"
+          ],
+          "result_ids": [
+            "call_5fb9fefec2db423bbbca8441"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "dbdc76fb091e8768",
+          "parent_id": "9620bce23755c47d",
+          "call_id": "call_02ca48c3309740e38f7ed67f",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "973c4f1d7204b67f",
+          "parent_id": "9620bce23755c47d",
+          "call_id": "call_5fb9fefec2db423bbbca8441",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "27bc1e9fb2b8ff5a",
+          "parent_id": "973c4f1d7204b67f",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-docker-hybrid",
+      "trace_id": "e40a9f8744abe1dfcc82da55265f36cf",
+      "span_count": 8,
+      "llm_history": [
+        {
+          "span_id": "fd1da4bed6a7d3b6",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "bbdbcde28b7f027b",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_aa894602f3d54ed1acb9d29f"
+          ],
+          "result_ids": [
+            "call_aa894602f3d54ed1acb9d29f"
+          ],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "ec53483c9e9d7319",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_aa894602f3d54ed1acb9d29f",
+            "call_3ec8628699514ed19b308f1e"
+          ],
+          "result_ids": [
+            "call_aa894602f3d54ed1acb9d29f",
+            "call_3ec8628699514ed19b308f1e"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "380e0991fe7a56b2",
+          "parent_id": "43292392794c6077",
+          "call_id": "call_3ec8628699514ed19b308f1e",
+          "observed_323": true
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "2a78894f448b2324",
+          "parent_id": "380e0991fe7a56b2",
+          "call_id": null,
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "3d7621c40763bc0a",
+          "parent_id": "43292392794c6077",
+          "call_id": "call_aa894602f3d54ed1acb9d29f",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "8ee06ed82974be70",
+          "parent_id": "3d7621c40763bc0a",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-docker-programmatic",
+      "trace_id": "3687731019bfc4ab8a3b8adec1199762",
+      "span_count": 6,
+      "llm_history": [
+        {
+          "span_id": "3ba201777df8a2ef",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "5194321acf267210",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_4a15803ba0464de1b1ce49d0"
+          ],
+          "result_ids": [
+            "call_4a15803ba0464de1b1ce49d0"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "ff2c6b68c0bde055",
+          "parent_id": "179f9511120ae3d9",
+          "call_id": "call_1b5f58d9fe7e48b390e1145e",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "411cb81f504d1d22",
+          "parent_id": "179f9511120ae3d9",
+          "call_id": "call_4a15803ba0464de1b1ce49d0",
+          "observed_323": false
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "66ac57be972716ec",
+          "parent_id": "411cb81f504d1d22",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-error-recovery",
+      "trace_id": "240751897839ba327679c8151e274bd5",
+      "span_count": 7,
+      "llm_history": [
+        {
+          "span_id": "41071594f9806d4d",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "67df77cb0065d40b",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_63d3fe240f0b47778f24f9af"
+          ],
+          "result_ids": [
+            "call_63d3fe240f0b47778f24f9af"
+          ],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "2f30c24fda274687",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_63d3fe240f0b47778f24f9af",
+            "call_21f50a2b1e214bbb97166447"
+          ],
+          "result_ids": [
+            "call_63d3fe240f0b47778f24f9af",
+            "call_21f50a2b1e214bbb97166447"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "d6b6f750189541d5",
+          "parent_id": "46ffa9017430de76",
+          "call_id": "call_7f3f9732585845b9a19395db",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "a1a2c3be996bbdcd",
+          "parent_id": "46ffa9017430de76",
+          "call_id": "call_21f50a2b1e214bbb97166447",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "7bf7f748de644c7a",
+          "parent_id": "46ffa9017430de76",
+          "call_id": "call_63d3fe240f0b47778f24f9af",
+          "observed_323": null
+        }
+      ],
+      "error_span_names": [
+        "agent.tool.list_directory"
+      ]
+    },
+    {
+      "label": "native-local-code",
+      "trace_id": "34232c2e3b0c3c58247e79a3e1111520",
+      "span_count": 5,
+      "llm_history": [
+        {
+          "span_id": "1c155e44c3bc888a",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "27271ab51aceceac",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_be269d56af8b4ee2a3ac44b1"
+          ],
+          "result_ids": [
+            "call_be269d56af8b4ee2a3ac44b1"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "5ad9e4ac9d8f76f9",
+          "parent_id": "a3d7d712527f66e7",
+          "call_id": "call_dc2be9dda10c4e4d99d2b730",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "670ecbf92fc794e2",
+          "parent_id": "a3d7d712527f66e7",
+          "call_id": "call_be269d56af8b4ee2a3ac44b1",
+          "observed_323": true
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-local-direct",
+      "trace_id": "91100ec014f395cf31e51d6d73749d34",
+      "span_count": 5,
+      "llm_history": [
+        {
+          "span_id": "943dbd69c96b9514",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "0684ac1e8838af6e",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_398c9a20568d439a8b2b044a"
+          ],
+          "result_ids": [
+            "call_398c9a20568d439a8b2b044a"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "ad4177f0dd622b63",
+          "parent_id": "f498c7017bacf712",
+          "call_id": "call_398c9a20568d439a8b2b044a",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "0b36eb0102726053",
+          "parent_id": "ad4177f0dd622b63",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-local-hybrid",
+      "trace_id": "cadc1cef8eaccd811dd8a276c0d9af96",
+      "span_count": 8,
+      "llm_history": [
+        {
+          "span_id": "bc8c9c7360221559",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "18480d7579c77e40",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_1e442002e2ed48cb88b97270"
+          ],
+          "result_ids": [
+            "call_1e442002e2ed48cb88b97270"
+          ],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "cd48849d9d3a7722",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_1e442002e2ed48cb88b97270",
+            "call_1b78e4c78790463a8ba59e8d"
+          ],
+          "result_ids": [
+            "call_1e442002e2ed48cb88b97270",
+            "call_1b78e4c78790463a8ba59e8d"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "bdd59d17dc167ef0",
+          "parent_id": "a5c344c8872180ba",
+          "call_id": "call_1b78e4c78790463a8ba59e8d",
+          "observed_323": true
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "f3c7cf865f504482",
+          "parent_id": "bdd59d17dc167ef0",
+          "call_id": null,
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "26446c51a6d7c868",
+          "parent_id": "a5c344c8872180ba",
+          "call_id": "call_1e442002e2ed48cb88b97270",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "e309d3165e24c9b7",
+          "parent_id": "26446c51a6d7c868",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-local-programmatic",
+      "trace_id": "8623dedd1283ef87090c1e1a01db4f3d",
+      "span_count": 5,
+      "llm_history": [
+        {
+          "span_id": "b0a94759fd7796e6",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "4910a208fa3f9815",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_2919fcf1ef4d40d1a7ed7c5d"
+          ],
+          "result_ids": [
+            "call_2919fcf1ef4d40d1a7ed7c5d"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "a8f26c7338806aa5",
+          "parent_id": "436308c3c60cd691",
+          "call_id": "call_2919fcf1ef4d40d1a7ed7c5d",
+          "observed_323": false
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "b15167e0a80fdce3",
+          "parent_id": "a8f26c7338806aa5",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-max-steps",
+      "trace_id": "0d7598886ef523bbcf1acb5b8a542ac7",
+      "span_count": 3,
+      "llm_history": [
+        {
+          "span_id": "d2cec08652115eb7",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "30acd5740fb3698c",
+          "parent_id": "94fe5577189f155b",
+          "call_id": "call_c582623f412b439a9746e48b",
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-mcp-session",
+      "trace_id": "2e3773a5f41304dd04b0253fb6396155",
+      "span_count": 4,
+      "llm_history": [
+        {
+          "span_id": "e2f8d17e0eddb8b1",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "nexent_echo"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        },
+        {
+          "span_id": "37158a8d5488a53c",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_14ccbf84d6264ad4a2721eb3"
+          ],
+          "result_ids": [
+            "call_14ccbf84d6264ad4a2721eb3"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 2048
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.nexent_echo",
+          "span_id": "4e24a268f4addcd7",
+          "parent_id": "9a8abe8f0c2d0d6e",
+          "call_id": "call_14ccbf84d6264ad4a2721eb3",
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "native-stream-cancellation",
+      "trace_id": "8b39206544a51b1cf454194b93c0cd9f",
+      "span_count": 2,
+      "llm_history": [
+        {
+          "span_id": "695524852bb64666",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [],
+          "reasoning_field_present": false,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096
+          }
+        }
+      ],
+      "tools": [],
+      "error_span_names": []
+    },
+    {
+      "label": "provider-MiniMax-M3-1-Flash",
+      "trace_id": "accc6ad5cebb49796e199f4a1395d55e",
+      "span_count": 6,
+      "llm_history": [
+        {
+          "span_id": "8eb52164ed1c9930",
+          "model": "MiniMax-M3.1-Flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": false,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096
+          }
+        },
+        {
+          "span_id": "03e0be36d1590059",
+          "model": "MiniMax-M3.1-Flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_dce67ab1495ba872fe571ffa"
+          ],
+          "result_ids": [
+            "call_dce67ab1495ba872fe571ffa"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "dbea3eb4639a933d",
+          "parent_id": "7678d504e891cb1f",
+          "call_id": "call_f8e5a2374809afdbec53b888",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "ef0bfd3ecb84f0b4",
+          "parent_id": "7678d504e891cb1f",
+          "call_id": "call_dce67ab1495ba872fe571ffa",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "af6a7995dbcea0f3",
+          "parent_id": "ef0bfd3ecb84f0b4",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "provider-deepseek-v4-1-flash",
+      "trace_id": "409440c7a81e9b1a368ee1247159ed46",
+      "span_count": 5,
+      "llm_history": [
+        {
+          "span_id": "751d28634f826cc2",
+          "model": "deepseek-v4.1-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": false,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096,
+            "reasoning_effort": "high"
+          }
+        },
+        {
+          "span_id": "a1287e5bcf0868b7",
+          "model": "deepseek-v4.1-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_00_mmeqeiv41n5ngxzi4njocn8l"
+          ],
+          "result_ids": [
+            "call_00_mmeqeiv41n5ngxzi4njocn8l"
+          ],
+          "output_call_names": [],
+          "reasoning_field_present": false,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096,
+            "reasoning_effort": "high"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "680a5ab149325829",
+          "parent_id": "1af8ea03251fd572",
+          "call_id": "call_00_mmeqeiv41n5ngxzi4njocn8l",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "8001e12b5a7f4788",
+          "parent_id": "680a5ab149325829",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "provider-glm-5-3",
+      "trace_id": "f702a73a77ebeeeff70d2a40ff01825b",
+      "span_count": 6,
+      "llm_history": [
+        {
+          "span_id": "a10695552e4ebece",
+          "model": "glm-5.3",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096
+          }
+        },
+        {
+          "span_id": "65c8621bb8dac966",
+          "model": "glm-5.3",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_690b5a257a02406cae287c2d"
+          ],
+          "result_ids": [
+            "call_690b5a257a02406cae287c2d"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "1bf3bbd7e775a9b4",
+          "parent_id": "9089f4f71866a3fd",
+          "call_id": "call_44d7991ffab84d1da5ff5c68",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "2b2c28b2a4e71dcb",
+          "parent_id": "9089f4f71866a3fd",
+          "call_id": "call_690b5a257a02406cae287c2d",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "02b99337808bfb29",
+          "parent_id": "2b2c28b2a4e71dcb",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    },
+    {
+      "label": "provider-qwen3-8-flash",
+      "trace_id": "acc7fa307b4c610c237115d6b368fd44",
+      "span_count": 6,
+      "llm_history": [
+        {
+          "span_id": "de6f56285185e736",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user"
+          ],
+          "input_call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096,
+            "reasoning_effort": "low"
+          }
+        },
+        {
+          "span_id": "ceb6685beb2a9de3",
+          "model": "qwen3.8-flash",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "input_call_ids": [
+            "call_3af3b2fe55934e40816c62e6"
+          ],
+          "result_ids": [
+            "call_3af3b2fe55934e40816c62e6"
+          ],
+          "output_call_names": [
+            "final_answer"
+          ],
+          "reasoning_field_present": true,
+          "invocation_parameters": {
+            "temperature": 1,
+            "top_p": 1,
+            "max_tokens": 4096,
+            "reasoning_effort": "low"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "agent.tool.final_answer",
+          "span_id": "21b84d5b2008cc2c",
+          "parent_id": "bb26435ada778bfe",
+          "call_id": "call_ee8960f9978147acb2061cb6",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "4676a49cda824f39",
+          "parent_id": "bb26435ada778bfe",
+          "call_id": "call_3af3b2fe55934e40816c62e6",
+          "observed_323": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "8129af435430cb81",
+          "parent_id": "4676a49cda824f39",
+          "call_id": null,
+          "observed_323": null
+        }
+      ],
+      "error_span_names": []
+    }
+  ]
+}

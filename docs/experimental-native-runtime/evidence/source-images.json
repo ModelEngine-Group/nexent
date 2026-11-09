@@ -1,0 +1,26 @@
+{
+  "base_tag": "v2.8.4",
+  "base_commit": "c43d2d995b15c9005c0d736cd60200a22305de74",
+  "source_identity": "Product source hashes are the build/test identity; PR head associates these blobs with the final commit.",
+  "product_sha256": {
+    "backend/consts/const.py": "cf1e939bf35f4f7ccd13f64fc880716d0c337e06cf876f0b23cbac2bf4fb9bbe",
+    "backend/agents/create_agent_info.py": "4f5fead80190b59d655f8096f21e414ccae3595ef53ce83cc97799acd1fe3df7",
+    "backend/services/nl2agent_service.py": "ced7e1786ba312808b5f69bb43d5bd039cb613a633e7dfa7bea8d01eebadd424",
+    "backend/services/nl2skill_service.py": "41d36a9f69ce2c83843cc1a7823f81861226a3eeb51610e0ae33c5895ac0a0b0",
+    "sdk/nexent/core/agents/agent_model.py": "446325f195fd6c7e3476ab1885b8fc1ce98ad13826c21bace5e2a768e8d60f17",
+    "sdk/nexent/core/agents/nexent_agent.py": "405500ddc21e7a9605af4d9c55d41b5bf45e40f7a252984b968ee9ff871961ec",
+    "sdk/nexent/core/agents/run_agent.py": "03258339878d7d1df3ce433eb5c8a4f9f54ec3a6cc3a74e770af1d28736743ab",
+    "sdk/nexent/core/agents/runtime_factory.py": "2df66ee7cb578be4e1f9214d77f181b898fcabca15848dc22b7313ff959faa0f",
+    "sdk/nexent/core/agents/native_runtime.py": "d306935846a10a44a0cb0f5e4d1208f53198600630fef8136fbdf8e073bd3bb4"
+  },
+  "image_ids": {
+    "main": "sha256:cd0e5604e99984eb0f21db8c01703100861387183299538f923247f0b37a51e5",
+    "web": "sha256:12ae7d92874641da2cf43d9f7c8758b3baba10aa7bd316bf1a644603caeae161",
+    "sandbox": "sha256:378770c0d540f65b553741a2d81dfa93055ace3f5eace175772dd68952aa19ae",
+    "mcp": "sha256:d30a7130e636a1aafd281e0c526c94616451ea0240586431f5ed7c7a4bc2c16a"
+  },
+  "deployment": "host",
+  "runtime": "toolcalling",
+  "vm": "left stopped by explicit user instruction",
+  "source_overlay": false
+}

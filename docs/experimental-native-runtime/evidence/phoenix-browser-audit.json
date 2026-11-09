@@ -1,0 +1,114 @@
+{
+  "project": "nexent-pr4310-host-deployment",
+  "traces": [
+    {
+      "trace_id": "232768bfea4ff59da08fcdc5444a860d",
+      "llm_history": [
+        {
+          "span_id": "94cb9312b6607f7c",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "user"
+          ],
+          "call_ids": [],
+          "result_ids": [],
+          "output_call_names": [
+            "list_directory"
+          ],
+          "invocation_parameters": "{\"temperature\": 1.0, \"top_p\": 1.0, \"max_tokens\": 2048}"
+        },
+        {
+          "span_id": "c9f708ce64c771fd",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "call_ids": [
+            "call_081d7bbec1a94382af3a1bfe"
+          ],
+          "result_ids": [
+            "call_081d7bbec1a94382af3a1bfe"
+          ],
+          "output_call_names": [
+            "code_execution"
+          ],
+          "invocation_parameters": "{\"temperature\": 1.0, \"top_p\": 1.0, \"max_tokens\": 2048}"
+        },
+        {
+          "span_id": "38f8ff25d2d2e82f",
+          "input_truncated": false,
+          "roles": [
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool"
+          ],
+          "call_ids": [
+            "call_081d7bbec1a94382af3a1bfe",
+            "call_2de2b9c1896742989dc3e313"
+          ],
+          "result_ids": [
+            "call_081d7bbec1a94382af3a1bfe",
+            "call_2de2b9c1896742989dc3e313"
+          ],
+          "output_call_names": [],
+          "invocation_parameters": "{\"temperature\": 1.0, \"top_p\": 1.0, \"max_tokens\": 2048}"
+        }
+      ],
+      "tool_spans": [
+        {
+          "name": "agent.tool.code_execution",
+          "span_id": "bd775086b834a649",
+          "parent_id": "68b3a70832dd363f",
+          "call_id": "call_2de2b9c1896742989dc3e313",
+          "actual_323_output": true
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "0ba3e6e739fd08e5",
+          "parent_id": "68b3a70832dd363f",
+          "call_id": "call_081d7bbec1a94382af3a1bfe",
+          "actual_323_output": null
+        },
+        {
+          "name": "agent.tool.list_directory",
+          "span_id": "3f90b6f3c072712c",
+          "parent_id": "0ba3e6e739fd08e5",
+          "call_id": null,
+          "actual_323_output": null
+        }
+      ],
+      "error_span_names": []
+    }
+  ]
+}

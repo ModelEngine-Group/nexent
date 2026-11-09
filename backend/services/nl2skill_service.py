@@ -257,6 +257,7 @@ async def build_nl2skill_run_info(
         compaction_target_tokens=context_budget.compaction_target_tokens if context_budget else 0,
     )
     run_info = AgentRunInfo(
+        agent_runtime="codeagent",  # Platform authoring prompts retain their closed CodeAgent protocol.
         query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),

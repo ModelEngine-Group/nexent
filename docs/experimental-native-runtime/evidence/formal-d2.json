@@ -1,0 +1,44 @@
+{
+  "run_id": "20261109T081518091837Z-NATIVE-RUNTIME-D2",
+  "status": "PASS",
+  "records": [
+    {
+      "scenario": "plain",
+      "agent_id": 2,
+      "model_id": 1,
+      "definition_sha256_before": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+      "definition_sha256_after": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+      "event_types": [
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count"
+      ],
+      "actual_python_observation": false,
+      "expected_marker": "NATIVE_RUNTIME_OK"
+    },
+    {
+      "status_code": 500,
+      "denied_before_stream": true
+    },
+    {
+      "scenario": "python",
+      "agent_id": 2,
+      "model_id": 1,
+      "definition_sha256_before": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+      "definition_sha256_after": "2d40ce0b669d52cb397da6fa32a596c0639a0437b1d18a89a1ae2c4a2baf39f7",
+      "event_types": [
+        "execution_logs",
+        "final_answer",
+        "model_attempt_control",
+        "model_output_thinking",
+        "step_count",
+        "token_count",
+        "tool"
+      ],
+      "actual_python_observation": true,
+      "expected_marker": "323"
+    }
+  ]
+}

@@ -430,6 +430,9 @@ class AgentPlan(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    agent_runtime: Literal["codeagent", "toolcalling"] = Field(
+        default="codeagent", description="Process-selected agent runtime; not persisted in Agent Definitions"
+    )
     attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")

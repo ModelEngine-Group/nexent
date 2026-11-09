@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "case_id": "NATIVE-RUNTIME-D5",
+  "implementations": [
+    {
+      "framework": "pytest",
+      "file": "test.py",
+      "selector": "NATIVE-RUNTIME-D5"
+    }
+  ],
+  "timeout_seconds": 180,
+  "acceptance_bindings": {
+    "AC-01": [
+      "test_branch_built_runtime_identity_and_health"
+    ]
+  },
+  "preparation": {
+    "families": [],
+    "anchors": true,
+    "special_assets": false,
+    "d4_groups": []
+  },
+  "notes": "Operator provisions the branch deployment, immutable image IDs and sandbox through the existing deployment scripts and real API runs. This read-only case inspects those deployed anchors."
+}

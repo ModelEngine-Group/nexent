@@ -4768,8 +4768,9 @@ class TestCreateAgentRunInfo:
         assert mock_agent_run_info.call_args.kwargs["model_config_list"][0].reasoning_effort == expected_effort
         assert selected.reasoning_effort is None
 
+    @pytest.mark.parametrize("agent_runtime", ["codeagent", "toolcalling"])
     @pytest.mark.asyncio
-    async def test_create_agent_run_info_success(self):
+    async def test_create_agent_run_info_success(self, agent_runtime):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
         with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
@@ -4780,7 +4781,8 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no, \
+                patch('backend.agents.create_agent_info.NEXENT_AGENT_RUNTIME', agent_runtime):
 
             # Set mock return values
             mock_join_query.return_value = "processed_query"
@@ -4812,6 +4814,7 @@ class TestCreateAgentRunInfo:
             # Verify that AgentRunInfo was called correctly with dict format mcp_host
             assert mock_agent_run_info.call_count == 1
             mock_agent_run_info.assert_called_with(
+                agent_runtime=agent_runtime,
                 query="processed_query",
                 model_config_list=["model_config"],
                 observer=mock_message_observer.return_value,

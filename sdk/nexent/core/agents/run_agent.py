@@ -383,6 +383,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:
             nexent = NexentAgent(
+                agent_runtime=getattr(agent_run_info, "agent_runtime", "codeagent"),
                 observer=agent_run_info.observer,
                 model_config_list=agent_run_info.model_config_list,
                 stop_event=agent_run_info.stop_event,
@@ -431,6 +432,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
             ) as tool_collection:
                 nexent = NexentAgent(
+                    agent_runtime=getattr(agent_run_info, "agent_runtime", "codeagent"),
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
                     stop_event=agent_run_info.stop_event,

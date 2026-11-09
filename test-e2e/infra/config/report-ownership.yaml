@@ -73,6 +73,7 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  NATIVE-RUNTIME: runtime
   F-046: context
   F-047: context
   F-048: context
