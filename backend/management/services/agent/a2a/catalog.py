@@ -13,7 +13,7 @@ import aiohttp
 
 from management.db.a2a import repository as a2a_agent_db
 from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from service_common.http.a2a import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from management.services.agent.a2a.http_client import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger(__name__)

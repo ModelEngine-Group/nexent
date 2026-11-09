@@ -1595,7 +1595,7 @@ class TestCallAgent:
     async def test_raises_authentication_error_on_unauthorized_response(self):
         """Test unauthorized responses explain that configured credentials failed."""
         from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
-        from service_common.http.a2a import A2AHttpStatusError
+        from management.services.agent.a2a.http_client import A2AHttpStatusError
 
         service = A2AClientService()
         mock_agent = {

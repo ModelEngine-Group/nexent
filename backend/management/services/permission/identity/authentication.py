@@ -43,7 +43,7 @@ from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import RolePermission, UserAccount
 from management.db.identity.account import create_account, get_account_by_email, change_password
-from service_common.security.passwords import hash_password, verify_password
+from management.utils.account_passwords import hash_password, verify_password
 from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
 from management.services.tool.configuration import init_tool_list_for_tenant
@@ -172,7 +172,7 @@ async def signup_user_with_invitation(email: EmailStr,
                 try:
                     # Convert group_ids from string to list if needed
                     if isinstance(group_ids, str):
-                        from service_common.serialization.text import convert_string_to_list
+                        from management.utils.serialization import convert_string_to_list
                         group_ids = convert_string_to_list(group_ids)
 
                     if group_ids:

@@ -10,7 +10,7 @@ The repository selects only user identity, canonical account role/email, token v
 
 Every lookup uses a read-only repeatable-read transaction with finite acquire/query/connect timeouts and no cross-request identity cache. Lifespan owns the connection pool and closes it on shutdown. A broken or cancelled connection is terminated rather than reused or retried. Ordinary request resource authorization remains in each downstream service.
 
-The image contains Gateway, its launcher, and only the side-effect-free infrastructure initializer/database subpackage. It contains no Management/Runtime implementation, SDK, ORM, MinIO factory or global backend environment. Seven direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT, bcrypt and asyncpg. Gateway configuration reads injected environment only and never loads .env.
+The image packages Gateway, its launcher, the shared security protocol, and the read-only RDB identity adapter. Its six direct dependencies are FastAPI, Uvicorn, HTTPX, websockets, PyJWT and asyncpg. Gateway configuration reads injected environment only and never loads .env.
 
 ## Database configuration
 

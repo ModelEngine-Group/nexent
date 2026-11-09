@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
-from service_common.serialization.text import convert_string_to_list
+from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
 from contracts.constants.environment import MAX_GROUPS_PER_TENANT
 from sqlalchemy import text

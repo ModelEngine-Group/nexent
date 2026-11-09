@@ -93,7 +93,7 @@ sys.modules['management.db.models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
-utils_str_utils_mock = types.ModuleType('service_common.serialization.text')
+utils_str_utils_mock = types.ModuleType('management.utils.serialization')
 utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
 utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
@@ -101,10 +101,10 @@ utils_str_utils_mock.convert_string_to_list = (
 sys.modules['utils'] = MagicMock()
 sys.modules['management.services.permission.identity.session'] = MagicMock()
 sys.modules['management.services.skill.params'] = utils_skill_params_mock
-sys.modules['service_common.serialization.text'] = utils_str_utils_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['management.services.skill.params'] = utils_skill_params_mock
-sys.modules['service_common.serialization.text'] = utils_str_utils_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 
 from management.db.skill.repository import _params_value_for_db, _build_skill_update_values, _replace_skill_tool_relations, create_or_update_skill_by_skill_info, query_skill_instances_by_agent_id, query_enabled_skill_instances, query_skill_instance_by_id, search_skills_for_agent, delete_skills_by_agent_id, delete_skill_instances_by_skill_id, delete_skill_instances_by_tenant, list_skill_permission_summaries, list_skills, get_skill_by_name, get_skill_by_id, get_skill_by_id_global, create_skill, update_skill, update_skill_by_id, delete_skill, get_tool_names_by_ids, get_tool_ids_by_names, get_tool_names_by_skill_name, get_skill_with_tool_names, list_global_official_skills, check_skill_list_initialized, upsert_scanned_skills, _get_tool_ids, _to_dict
 

@@ -17,7 +17,7 @@ from contracts.constants.environment import ENABLE_ASSET_OWNER_ROLE
 from contracts.errors.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from service_common.serialization.text import convert_string_to_list
+from management.utils.serialization import convert_string_to_list
 
 logger = logging.getLogger(__name__)
 

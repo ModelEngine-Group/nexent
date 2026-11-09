@@ -38,7 +38,7 @@ from management.services.agent.versions import publish_version_impl
 from contracts.authentication import AuthenticatedIdentity
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
-from service_common.serialization.text import convert_list_to_string
+from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 

@@ -24,7 +24,7 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     import_users,
     read_source_users,
 )
-from service_common.security.passwords import verify_password
+from management.utils.account_passwords import verify_password
 
 
 def availability_sql():

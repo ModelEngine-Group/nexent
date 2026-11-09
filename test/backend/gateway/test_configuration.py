@@ -69,7 +69,7 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt", "infrastructure", "service_common"}
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "infrastructure", "service_common"}
     for path in (BACKEND / "gateway").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -99,6 +99,7 @@ def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_p
     shutil.copy2(BACKEND / "service_common/__init__.py", service_common)
     code = """import json,sys
 sys.path.insert(0, sys.argv[1])
+sys.modules["bcrypt"] = None
 import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app

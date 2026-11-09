@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from contracts.errors.exceptions import AccountConflictError
-from service_common.security.passwords import hash_password
+from management.utils.account_passwords import hash_password
 from management.db.identity import account
 from management.db.models import UserAccount
 

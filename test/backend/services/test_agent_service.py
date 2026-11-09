@@ -567,9 +567,9 @@ sys.modules["nexent.core.models.rerank_model"] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules["nexent.memory"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()
-sys.modules["service_common.serialization.text"] = MagicMock()
-sys.modules["service_common.serialization.text"].convert_list_to_string = mock_convert_list_to_string
-sys.modules["service_common.serialization.text"].convert_string_to_list = lambda s: (
+sys.modules["management.utils.serialization"] = MagicMock()
+sys.modules["management.utils.serialization"].convert_list_to_string = mock_convert_list_to_string
+sys.modules["management.utils.serialization"].convert_string_to_list = lambda s: (
     s.split(",") if s else []
 )
 
@@ -3921,7 +3921,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in service_common.serialization.text
+    # This should match the actual implementation in management.utils.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -4007,7 +4007,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in service_common.serialization.text
+    # This should match the actual implementation in management.utils.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []

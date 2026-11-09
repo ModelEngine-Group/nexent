@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import AgentNotFoundError, AppException, ForbiddenError, RuntimeMetadataValidationError
-from service_common.http.a2a import AGENT_CARD_TIMEOUT
+from management.services.agent.a2a.http_client import AGENT_CARD_TIMEOUT
 
 from management.services.agent.a2a.catalog import (
     a2a_client_service,

@@ -94,7 +94,7 @@ from management.services.agent.channels import (
 from service_common.concurrency import (
     runtime_thread_manager,
 )
-from service_common.http.server.request_context import get_user_language
+from management.utils.request_context import get_user_language
 from contracts.runtime_metadata import (
     validate_runtime_metadata,
 )

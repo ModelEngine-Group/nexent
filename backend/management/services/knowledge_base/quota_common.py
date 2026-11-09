@@ -20,7 +20,7 @@ from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, get_private_knowledge_info_by_creator, get_private_knowledge_info_by_tenant_id, update_knowledge_record
 from management.db.configuration.tenant import delete_config_by_tenant_config_id, get_configs_by_tenant_id_and_keys, get_single_config_info, insert_config, update_config_by_tenant_config_id
 from management.db.identity.user_tenant import get_user_email_map
-from service_common.serialization.formatting import bytes_to_readable
+from management.services.knowledge_base.quota_formatting import bytes_to_readable
 from management.services.knowledge_base.storage import (
     get_committed_bytes_by_kb,
     get_committed_source_bytes_by_paths,

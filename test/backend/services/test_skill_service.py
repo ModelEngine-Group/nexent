@@ -270,7 +270,7 @@ utils_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "
 utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('management.services.skill.classifier')
-utils_str_utils_mock = types.ModuleType('service_common.serialization.text')
+utils_str_utils_mock = types.ModuleType('management.utils.serialization')
 utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
@@ -289,7 +289,7 @@ sys.modules['utils'] = utils_mock
 
 sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 sys.modules['management.services.skill.classifier'] = utils_content_classifier_utils_mock
-sys.modules['service_common.serialization.text'] = utils_str_utils_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 
 # Set up database mocks

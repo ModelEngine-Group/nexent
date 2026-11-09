@@ -242,7 +242,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
     from management.cli.account import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
-    from service_common.security.passwords import verify_password
+    from management.utils.account_passwords import verify_password
     from management.services.permission.identity.cas import (
         CasPrincipal,
         _resolve_project_user,

@@ -15,7 +15,7 @@ from management.db.tool.repository import query_tool_knowledge_references
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import MAX_AGENTS_PER_TENANT
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
-from service_common.serialization.text import convert_list_to_string
+from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 

@@ -81,7 +81,7 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 
 sys.modules['utils'] = utils_mock
 sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
-sys.modules['service_common.serialization.text'] = utils_mock.str_utils
+sys.modules['management.utils.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3

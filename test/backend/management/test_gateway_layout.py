@@ -38,7 +38,7 @@ def test_gateway_authentication_and_management_route_ownership():
     }
     assert not list((BACKEND / "management/security").glob("*.py"))
     assert {p.name for p in (BACKEND.parent / "backend/service_common/security").glob("*.py")} == {
-        "__init__.py", "identity.py", "policy.py", "passwords.py", "signatures.py",
+        "__init__.py", "identity.py", "policy.py",
         "token_codec.py", "service_tokens.py",
     }
     assert not list((BACKEND / "gateway/api").glob("*.py"))

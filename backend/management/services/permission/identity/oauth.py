@@ -368,7 +368,7 @@ async def complete_pending_oauth_account(
         raise OAuthLinkError("Invitation code is invalid or unavailable")
 
     from management.db.identity.account import create_account
-    from service_common.security.passwords import hash_password
+    from management.utils.account_passwords import hash_password
     from infrastructure.rdb.client import get_db_session
     from management.services.permission.identity.authentication import validate_password_strength
 
@@ -392,7 +392,7 @@ async def complete_pending_oauth_account(
     invitation_result = use_invitation_code(normalized_invite_code, user_id)
     group_ids = invitation_result.get("group_ids", [])
     if isinstance(group_ids, str):
-        from service_common.serialization.text import convert_string_to_list
+        from management.utils.serialization import convert_string_to_list
 
         group_ids = convert_string_to_list(group_ids)
     if group_ids and not is_asset_owner_registration:

@@ -18,10 +18,10 @@ SPLIT_MODULES = (
     (
         "management.services.permission.identity.session", "management.services.permission.identity.northbound",
         "management.services.permission.identity.provider",
-        "service_common.service_identity.internal_tokens", "service_common.security.signatures",
+        "service_common.service_identity.internal_tokens", "management.services.permission.identity.signatures",
         "service_common.security.token_codec", "service_common.security.service_tokens",
     ),
-    ("management.services.monitor.audit", "service_common.http.server.request_context"),
+    ("management.services.monitor.audit", "management.utils.request_context"),
     ("management.services.notification.service", "management.services.repository.review_notifications"),
     tuple("management.services.evaluation." + name for name in (
         "runs", "execution", "scoring", "case_generation", "analysis", "queries", "common")),

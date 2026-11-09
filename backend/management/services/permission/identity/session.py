@@ -38,13 +38,13 @@ from service_common.service_identity.internal_tokens import (
     INTERNAL_RUNTIME_JWT_TTL_SECONDS,
     generate_internal_runtime_jwt,
 )
-from service_common.security.signatures import (
+from management.services.permission.identity.signatures import (
     TIMESTAMP_VALIDITY_WINDOW,
     calculate_hmac_signature,
     validate_timestamp,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from service_common.http.server.request_context import get_user_language
+from management.utils.request_context import get_user_language
 from permissions.models import CurrentUser
 
 # Module logger

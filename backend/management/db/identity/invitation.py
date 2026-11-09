@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import TenantInvitationCode, TenantInvitationRecord
-from service_common.serialization.text import convert_list_to_string
+from management.utils.serialization import convert_list_to_string
 
 
 def query_invitation_by_code(invitation_code: str) -> Optional[Dict[str, Any]]:
