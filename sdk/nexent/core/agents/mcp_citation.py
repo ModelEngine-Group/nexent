@@ -14,6 +14,7 @@ import functools
 import inspect
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..utils.observer import MessageObserver, ProcessType
@@ -24,7 +25,8 @@ logger = logging.getLogger(__name__)
 # Field candidates commonly used by retrieval/RAG MCP tools.
 _TEXT_FIELDS = ("text", "content", "chunk_content", "chunk_text", "chunk", "snippet", "segment", "passage", "page_content")
 _TITLE_FIELDS = ("title", "name", "doc_title", "document_name", "document_title")
-_URL_FIELDS = ("url", "link", "source_url", "uri", "web_url")
+# file_url is the attachment file address used by data-platform RAG chunks.
+_URL_FIELDS = ("url", "link", "source_url", "uri", "web_url", "file_url")
 _FILENAME_FIELDS = ("filename", "file_name", "doc_name")
 _DATE_FIELDS = ("published_date", "publish_date", "date", "created_at", "create_time")
 _SCORE_FIELDS = ("score", "similarity", "relevance", "similarity_score")
@@ -32,6 +34,17 @@ _SCORE_FIELDS = ("score", "similarity", "relevance", "similarity_score")
 _LIST_KEYS = ("results", "data", "items", "chunks", "documents", "records", "list")
 # Identity fields proving an entry is a document rather than arbitrary text.
 _IDENTITY_FIELDS = _TITLE_FIELDS + _URL_FIELDS + _FILENAME_FIELDS + ("source", "source_name")
+# Chunk identity fields of data-platform RAG MCP tools, normalized into the
+# unified score_details shape produced by built-in AIDP search tools.
+_CHUNK_ID_FIELDS = ("chunk_id", "id", "text_id")
+_KNOWLEDGE_DOC_ID_FIELDS = ("knowledge_doc_id",)
+_RETRIEVAL_SOURCE_FIELDS = ("retrieval_source", "source")
+_CHUNK_TYPE_FIELDS = ("chunk_type",)
+_PAGES_FIELDS = ("pages",)
+_FILE_URL_FIELDS = ("file_url",)
+# Inline <img> tags embedded in data-platform RAG chunk text are stripped the
+# same way built-in AIDP search tools do before reporting citation content.
+_HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 # Minimum characters a text-like field must contain to count as a chunk.
 _MIN_TEXT_LENGTH = 10
 # Minimum share of items that must carry an identity field.
@@ -100,6 +113,15 @@ def _pick_str(item: Dict[str, Any], metadata: Dict[str, Any], fields: Sequence[s
     return ""
 
 
+def _pick_value(item: Dict[str, Any], metadata: Dict[str, Any], fields: Sequence[str]) -> Any:
+    """Pick the first meaningful field value (any type) from item, then metadata."""
+    for source in (item, metadata):
+        for field in fields:
+            if _has_value(source, field):
+                return source.get(field)
+    return None
+
+
 def _pick_score(item: Dict[str, Any], metadata: Dict[str, Any]) -> str:
     """Pick a numeric or textual score from the item, then metadata."""
     for source in (item, metadata):
@@ -114,6 +136,39 @@ def _pick_score(item: Dict[str, Any], metadata: Dict[str, Any]) -> str:
     return ""
 
 
+def _build_score_details(item: Dict[str, Any], metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize chunk identity fields into the unified score_details shape.
+
+    Mirrors the mapping of built-in AIDP search tools so data-platform RAG
+    chunks (knowledge_doc_id/chunk_id/source/chunk_type/pages/file_url) keep
+    their retrieval identity in the citation UI. Payloads without any of
+    these fields fall back to the raw metadata mapping.
+    """
+    details: Dict[str, Any] = {}
+    chunk_id = _pick_value(item, metadata, _CHUNK_ID_FIELDS)
+    if chunk_id is not None:
+        details["chunk_id"] = chunk_id
+    knowledge_doc_id = _pick_value(item, metadata, _KNOWLEDGE_DOC_ID_FIELDS)
+    if knowledge_doc_id is not None:
+        details["knowledge_doc_id"] = knowledge_doc_id
+    retrieval_source = _pick_value(item, metadata, _RETRIEVAL_SOURCE_FIELDS)
+    if retrieval_source is not None:
+        details["retrieval_source"] = retrieval_source
+    chunk_type = _pick_value(item, metadata, _CHUNK_TYPE_FIELDS)
+    if chunk_type is not None:
+        details["chunk_type"] = str(chunk_type)
+    pages = _pick_value(item, metadata, _PAGES_FIELDS)
+    if pages is not None:
+        details["pages"] = pages
+    file_url = _pick_value(item, metadata, _FILE_URL_FIELDS)
+    if file_url is not None:
+        details["file_url"] = file_url
+    if details:
+        details["metadata"] = metadata
+        return details
+    return metadata if metadata else None
+
+
 def _build_search_result_message(
     item: Dict[str, Any],
     cite_index: int,
@@ -126,7 +181,9 @@ def _build_search_result_message(
         raw_metadata = item.get("meta")
     metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
 
-    text = _pick_str(item, metadata, _TEXT_FIELDS)
+    # Strip inline <img> tags once here: the shared text field feeds both the
+    # observer (UI) channel and the model-facing payload.
+    text = _HTML_IMAGE_TAG_PATTERN.sub("", _pick_str(item, metadata, _TEXT_FIELDS))
     title = _pick_str(item, metadata, _TITLE_FIELDS)
     url = _pick_str(item, metadata, _URL_FIELDS)
     filename = _pick_str(item, metadata, _FILENAME_FIELDS)
@@ -141,7 +198,7 @@ def _build_search_result_message(
         source_type="url" if url else "file",
         filename=filename or None,
         score=score or None,
-        score_details=metadata if metadata else None,
+        score_details=_build_score_details(item, metadata),
         cite_index=cite_index,
         search_type=search_type,
         tool_sign=tool_sign,

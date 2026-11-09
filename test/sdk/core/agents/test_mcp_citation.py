@@ -214,6 +214,64 @@ def test_maps_chunk_text_field_alias():
     assert reported[0]["url"] == "https://example.com/c"
 
 
+def test_strips_html_image_tags_from_text():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "url": "https://example.com/i",
+        "text": 'Intro paragraph <img src="/md_image/chunk.png" alt="diagram"> closing sentence.',
+    }]
+    result = annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    assert result is not None
+    payload = json.loads(result)
+    assert "<img" not in payload[0]["text"]
+    assert payload[0]["text"] == "Intro paragraph  closing sentence."
+    reported = json.loads(observer.messages[0][2])
+    assert "<img" not in reported[0]["text"]
+    assert reported[0]["text"] == payload[0]["text"]
+
+
+def test_maps_file_url_attachment_field():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Report.pdf",
+        "chunk_text": "Annual report summary with enough characters to pass checks.",
+        "file_url": "https://aidp.example.com/files/9",
+        "score": 0.9,
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["url"] == "https://aidp.example.com/files/9"
+    assert reported[0]["source_type"] == "url"
+    assert reported[0]["score_details"]["file_url"] == "https://aidp.example.com/files/9"
+
+
+def test_maps_data_platform_identity_fields_into_score_details():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Product manual",
+        "chunk_text": "Product feature overview with enough characters for detection.",
+        "knowledge_doc_id": "doc-9f2",
+        "chunk_id": "chk-31",
+        "source": "vector",
+        "chunk_type": "text",
+        "pages": [3, 4],
+        "file_url": "https://aidp.example.com/files/9",
+        "score": 0.9,
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["score_details"] == {
+        "chunk_id": "chk-31",
+        "knowledge_doc_id": "doc-9f2",
+        "retrieval_source": "vector",
+        "chunk_type": "text",
+        "pages": [3, 4],
+        "file_url": "https://aidp.example.com/files/9",
+        "metadata": {},
+    }
+
+
 def test_defaults_to_file_source_type_without_url():
     observer = _RecordingObserver()
     items = [{"title": "Doc", "text": "A local document chunk long enough for checks."}]
@@ -238,9 +296,8 @@ def test_metadata_fills_missing_fields():
     assert reported[0]["url"] == "https://example.com/m"
     assert reported[0]["score"] == "0.66"
     assert reported[0]["score_details"] == {
-        "title": "From Meta",
-        "url": "https://example.com/m",
-        "score": 0.66,
+        "retrieval_source": "wiki",
+        "metadata": {"title": "From Meta", "url": "https://example.com/m", "score": 0.66},
     }
 
 
