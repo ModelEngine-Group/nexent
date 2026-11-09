@@ -18,6 +18,7 @@ for _path in (str(PROJECT_ROOT), str(TEST_ROOT)):
 # the mocked agent harness so the annotation logic keeps the genuine observer
 # and tool-sign implementations (the bare "sdk" name resolves to test/sdk here).
 from nexent.core.agents.mcp_citation import (
+    _looks_like_retrieval_result,
     annotate_mcp_search_results,
     wrap_mcp_tool_with_citation,
 )
@@ -154,6 +155,18 @@ def test_passes_through_empty_results():
     assert annotate_mcp_search_results(json.dumps({"results": []}), observer) is None
 
 
+def test_passes_through_scalar_json_payload():
+    observer = _RecordingObserver()
+    assert annotate_mcp_search_results(json.dumps(42), observer) is None
+    assert annotate_mcp_search_results(json.dumps("a bare json string"), observer) is None
+    assert observer.messages == []
+
+
+def test_retrieval_heuristic_rejects_empty_items():
+    # Defensive branch: an empty item list is never a retrieval result.
+    assert _looks_like_retrieval_result([]) is False
+
+
 def test_returns_none_without_observer():
     assert annotate_mcp_search_results(json.dumps(RAG_RESULTS), None) is None
 
@@ -214,6 +227,34 @@ def test_metadata_fills_missing_fields():
     }
 
 
+def test_score_field_skips_boolean_values():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "url": "https://example.com/s",
+        "text": "Document chunk that is long enough to pass detection checks.",
+        "score": True,
+        "similarity": 0.87,
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    # The boolean must not shadow the numeric similarity (bool is an int subclass).
+    assert reported[0]["score"] == "0.87"
+
+
+def test_score_field_accepts_string_values():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "url": "https://example.com/s",
+        "text": "Document chunk that is long enough to pass detection checks.",
+        "score": "high",
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["score"] == "high"
+
+
 # ---------------------------------------------------------------------------
 # Citation index continuity
 # ---------------------------------------------------------------------------
@@ -254,6 +295,21 @@ def test_wrap_is_idempotent():
     wrapped = wrap_mcp_tool_with_citation(tool, observer)
     assert wrap_mcp_tool_with_citation(wrapped, observer) is wrapped
     payload = json.loads(wrapped.forward(query="deploy"))
+    assert [item["index"] for item in payload] == ["q1", "q2"]
+
+
+def test_wrap_tolerates_unwritable_citation_flag():
+    class _SlotsTool:
+        # No __dict__: writing the idempotency flag raises AttributeError
+        # while the forward slot stays assignable.
+        __slots__ = ("forward",)
+
+        def __init__(self):
+            self.forward = lambda query: json.dumps(RAG_RESULTS)
+
+    observer = _RecordingObserver()
+    tool = wrap_mcp_tool_with_citation(_SlotsTool(), observer)
+    payload = json.loads(tool.forward(query="deploy"))
     assert [item["index"] for item in payload] == ["q1", "q2"]
 
 
