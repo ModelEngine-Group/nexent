@@ -69,3 +69,9 @@ flowchart TD
 ```
 
 The shared layer here is the existing authorized tool objects/factories and monitoring/guardrail wrappers, not a newly invented execution service. Direct invocation uses native JSON arguments and smolagents dispatch; Python uses prebound functions and the existing executor/bridge. Both retain tool permission scope and callback context, while Python can carry interpreter values that are not representable in native JSON. A future execution contract should make those representation differences explicit.
+
+## Standalone branch follow-up — 2026-11-09
+
+This v2.8.4 branch is a standalone hotfix-like experiment and is not intended for merge into main/develop. The feature-introduction branch is feature/native-toolcalling-runtime (PR4315), based on develop and its model service. Historical evidence above refers to earlier source snapshots.
+
+The follow-up implements validated finish reasons: normal nonempty content-only stop or standalone final_answer can terminate; content accompanying ordinary tool calls is intermediate. Length/filter/refusal/missing/inconsistent completion cannot authorize tool execution or successful completion. Public content now bypasses the legacy thinking parser, is retained around tools, rolls back per attempt, and persists/reloads without duplicating the accepted final step. No progress tool is added. Current sanitized verification is retained separately from historical evidence.

@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "NATIVE-COMPLETION-20261109",
+    "change_type": "requirement",
+    "requirement_id": "NATIVE-RUNTIME-REQ-001",
+    "title": "Validate native generation completion and mixed text/tool responses",
+    "description": "Content-only stop or standalone final_answer can complete; mixed calls continue; incomplete or filtered generations cannot execute tools or complete.",
+    "affected_features": {
+      "existing": [
+        "NATIVE-RUNTIME"
+      ],
+      "added": [],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "NATIVE-RUNTIME-D2",
+        "NATIVE-RUNTIME-D3",
+        "NATIVE-RUNTIME-D5"
+      ],
+      "added": [
+        "AGENT-NATIVE-D3-002"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "test_selectors": [
+        "test/sdk/core/agents/test_native_completion.py",
+        "test/sdk/core/agents/test_native_runtime.py",
+        "test/sdk/core/models/test_native_model.py"
+      ],
+      "behaviors": [
+        "Finish-reason validation, terminal consistency, mixed text/tool continuation, refusal/length/missing completion and side-effect prevention."
+      ],
+      "reason": "Current UT lacks completion reason checks. Reuse actual API/runtime/image formal regression; add controlled protocol integration fault proof where needed."
+    },
+    "notes": "UT and formal proofs remain separate. D2 live API; D3 actual providers/executors/bridge/MCP/delegation/lifecycle; D4 manual built-in browser; D5 branch container identity. User authorized final host deployment and stopped the VM. No new D1 duplicates existing unit proof."
+  }
+}

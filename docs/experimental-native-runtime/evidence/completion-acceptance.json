@@ -1,0 +1,177 @@
+{
+  "date": "2026-11-09",
+  "unit_tests": {
+    "modules": [
+      {
+        "file": "test/sdk/core/agents/test_native_runtime.py",
+        "exit_code": 0,
+        "tests": 28,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_runtime_harness.py",
+        "exit_code": 0,
+        "tests": 19,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_completion.py",
+        "exit_code": 0,
+        "tests": 23,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_native_public_text.py",
+        "exit_code": 0,
+        "tests": 2,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_nexent_agent.py",
+        "exit_code": 0,
+        "tests": 247,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_core_agent.py",
+        "exit_code": 0,
+        "tests": 179,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/agents/test_run_agent.py",
+        "exit_code": 0,
+        "tests": 51,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer.py",
+        "exit_code": 0,
+        "tests": 107,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_final_answers.py",
+        "exit_code": 0,
+        "tests": 19,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_model_attempts.py",
+        "exit_code": 0,
+        "tests": 3,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/utils/test_observer_nl2agent_protocol.py",
+        "exit_code": 0,
+        "tests": 6,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/utils/test_final_answer_projection.py",
+        "exit_code": 0,
+        "tests": 24,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/services/test_agent_run_final_answers.py",
+        "exit_code": 0,
+        "tests": 4,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/sdk/core/models/test_native_model.py",
+        "exit_code": 0,
+        "tests": 11,
+        "failures": 0,
+        "skipped": 0
+      },
+      {
+        "file": "test/backend/consts/test_agent_runtime_config.py",
+        "exit_code": 0,
+        "tests": 6,
+        "failures": 0,
+        "skipped": 0
+      }
+    ],
+    "total_tests": 729,
+    "failures": 0,
+    "skipped": 0
+  },
+  "frontend_tests": {
+    "node_projection": 5,
+    "vitest_adapter_and_regressions": 17,
+    "typescript": "PASS"
+  },
+  "formal": [
+    {
+      "case_id": "NATIVE-RUNTIME-D2",
+      "run_id": "20261109T105126766003Z-NATIVE-RUNTIME-D2",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D3",
+      "run_id": "20261109T104539104733Z-NATIVE-RUNTIME-D3",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "AGENT-NATIVE-D3-002",
+      "run_id": "20261109T104002168186Z-AGENT-NATIVE-D3-002",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    },
+    {
+      "case_id": "NATIVE-RUNTIME-D5",
+      "run_id": "20261109T105006428252Z-NATIVE-RUNTIME-D5",
+      "status": "PASS",
+      "test_summary": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "semantic_review": "PASS: terminal/side-effect assertions, observed actual results and Phoenix or image identity evidence reviewed separately."
+    }
+  ],
+  "browser": {
+    "status": "PASS (manual)",
+    "screenshot": "interleaved-browser.png",
+    "tool_detail_screenshot": null,
+    "observations": "Public progress before direct directory call and Python execution; final observed 323. Reload/reopen retained text/tool order and one final answer.",
+    "note": "Existing workspace filename reported."
+  }
+}

@@ -51,7 +51,7 @@ def test_ac003_adapter_preserves_wire_history_and_releases_permit(
     delta = SimpleNamespace(content="Answer", tool_calls=None)
     stream = ProviderStream(
         [
-            SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None),
+            SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason="stop")], usage=None),
             SimpleNamespace(
                 choices=[], usage=SimpleNamespace(prompt_tokens=4, completion_tokens=2)
             ),
@@ -121,7 +121,7 @@ def test_ac008_transient_provider_failure_retries_before_any_tool_execution(
             SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        delta=SimpleNamespace(content="Recovered", tool_calls=None)
+                        delta=SimpleNamespace(content="Recovered", tool_calls=None), finish_reason="stop"
                     )
                 ],
                 usage=None,
@@ -176,7 +176,7 @@ def test_ac003_native_thinking_toggle_uses_existing_provider_adapter(
             SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        delta=SimpleNamespace(content="Done", tool_calls=None)
+                        delta=SimpleNamespace(content="Done", tool_calls=None), finish_reason="stop"
                     )
                 ],
                 usage=None,
@@ -285,7 +285,7 @@ def test_ac003_headless_adapter_preserves_canonical_schema_without_optional_cont
             SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        delta=SimpleNamespace(content="Done", tool_calls=None)
+                        delta=SimpleNamespace(content="Done", tool_calls=None), finish_reason="stop"
                     )
                 ],
                 usage=None,

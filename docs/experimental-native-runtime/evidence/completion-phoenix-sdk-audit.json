@@ -1,0 +1,673 @@
+{
+  "project": "nexent-pr4310-host-acceptance",
+  "run": "20261109T104539104733Z-NATIVE-RUNTIME-D3",
+  "traces": [
+    {
+      "label": "native-docker-hybrid",
+      "trace_id": "57913eecca4d1dd1255d5072e486b50f",
+      "models": [
+        {
+          "span_id": "7bab749f644caac6",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_9f3d8293529543b18c2dbed0",
+            "call_5d9223c32e734a0bb7c6c3ff"
+          ],
+          "input_result_ids": [
+            "call_9f3d8293529543b18c2dbed0",
+            "call_5d9223c32e734a0bb7c6c3ff"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "658bc8c739826bb8",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_5d9223c32e734a0bb7c6c3ff",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [
+            "call_9f3d8293529543b18c2dbed0"
+          ],
+          "input_result_ids": [
+            "call_9f3d8293529543b18c2dbed0"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "b2b435e24dc7eb0e",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_9f3d8293529543b18c2dbed0",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-docker-programmatic",
+      "trace_id": "52a22c20f08cc0b79c67c90e504595e2",
+      "models": [
+        {
+          "span_id": "4068e3fffd6bea4c",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_826cbc0fb8ea4e3b9b42032e"
+          ],
+          "input_result_ids": [
+            "call_826cbc0fb8ea4e3b9b42032e"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "a772ebc3a8d20877",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_826cbc0fb8ea4e3b9b42032e",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-mcp-session",
+      "trace_id": "a9867bf1f3b6189acaceebe99961b256",
+      "models": [
+        {
+          "span_id": "3dc9b5804ce5ad2b",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_1374e5f83797435fb2a7faeb",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_4071055968c443abad9c943b"
+          ],
+          "input_result_ids": [
+            "call_4071055968c443abad9c943b"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "9aa32a1f6aefffd6",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_4071055968c443abad9c943b",
+              "name": "nexent_echo"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-max-steps",
+      "trace_id": "356527604a9db85d3a7d3a2a9093a92a",
+      "models": [
+        {
+          "span_id": "eb38b70a51f043c0",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_738657bbad6344da878e88e9",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-local-hybrid",
+      "trace_id": "78e938b30f3448634ae55491c9043b69",
+      "models": [
+        {
+          "span_id": "9c940a20e0e6e836",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_c2be26600f084d1fa3f29328",
+            "call_f9eb35a181d541329ab2fe8b"
+          ],
+          "input_result_ids": [
+            "call_c2be26600f084d1fa3f29328",
+            "call_f9eb35a181d541329ab2fe8b"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "230767bc276fb64c",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_f9eb35a181d541329ab2fe8b",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [
+            "call_c2be26600f084d1fa3f29328"
+          ],
+          "input_result_ids": [
+            "call_c2be26600f084d1fa3f29328"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "dae983615f678fde",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_c2be26600f084d1fa3f29328",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-docker-code",
+      "trace_id": "5a9aa43d7a5a8002f64a33460824c5ba",
+      "models": [
+        {
+          "span_id": "cea51428d3d210fc",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_813e6b52e92a40e2b26c0e66",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_11c17d9981c54bbba9d77a28"
+          ],
+          "input_result_ids": [
+            "call_11c17d9981c54bbba9d77a28"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "ed1d6b67b384847a",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_11c17d9981c54bbba9d77a28",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-local-code",
+      "trace_id": "776833208bcc4bba16b9bfd1ee0973c1",
+      "models": [
+        {
+          "span_id": "e9a16eb3e95e8a5d",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_2e045e0dac4b4593b60a15a0",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_c2a216a895d94efb8fc4aa2f"
+          ],
+          "input_result_ids": [
+            "call_c2a216a895d94efb8fc4aa2f"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "ad6a38210953b9c8",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_c2a216a895d94efb8fc4aa2f",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "provider-MiniMax-M3-1-Flash",
+      "trace_id": "6a4dd7fb3087e176b2f7f33663aa2c65",
+      "models": [
+        {
+          "span_id": "07b85ab9fe0edca8",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_292f05b252ecdca7061bed95",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_6eaec6630e77acf7c4449a2f"
+          ],
+          "input_result_ids": [
+            "call_6eaec6630e77acf7c4449a2f"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "39973734483e77d3",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_6eaec6630e77acf7c4449a2f",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": false
+        }
+      ]
+    },
+    {
+      "label": "provider-glm-5-3",
+      "trace_id": "e41231dc1002d8f3ef88249f48fc5afc",
+      "models": [
+        {
+          "span_id": "34a919d37b1225b6",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_3a6bd2e6cde3469f961f4997",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_ebd3f62ffbf14ca5b8a41dde"
+          ],
+          "input_result_ids": [
+            "call_ebd3f62ffbf14ca5b8a41dde"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "686dcfccc26a1b84",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_ebd3f62ffbf14ca5b8a41dde",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "managed-native-child",
+      "trace_id": "73acc0780813a6eaac88435a34dec26f",
+      "models": [
+        {
+          "span_id": "148813528b91d599",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_f662386b318a4117a4e8b1b7"
+          ],
+          "input_result_ids": [
+            "call_f662386b318a4117a4e8b1b7"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "4a86b780a6912226",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_e3ff9869fdd64dee87e9ca18",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_cb97c2b594bd4637a50e4350"
+          ],
+          "input_result_ids": [
+            "call_cb97c2b594bd4637a50e4350"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "d8cdd375397c57bf",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_cb97c2b594bd4637a50e4350",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "bb78c21c744d2865",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_f662386b318a4117a4e8b1b7",
+              "name": "calculator"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-local-direct",
+      "trace_id": "824258adeda3c063affb38a285969983",
+      "models": [
+        {
+          "span_id": "4b05b9844dba4934",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_79544def9c2143ddb85a4760",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_a90d5545ade8457eae5c5674"
+          ],
+          "input_result_ids": [
+            "call_a90d5545ade8457eae5c5674"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "07c369359504325c",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_a90d5545ade8457eae5c5674",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "provider-qwen3-8-flash",
+      "trace_id": "cb4411d76c9bd2286acab2e04817658c",
+      "models": [
+        {
+          "span_id": "06f30a197cf8f8d6",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_d08678e094f648cc989fab24",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_0edac09fad1d4c69824354a7"
+          ],
+          "input_result_ids": [
+            "call_0edac09fad1d4c69824354a7"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "5378a9a154c40fb7",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_0edac09fad1d4c69824354a7",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-local-programmatic",
+      "trace_id": "cfc1471f6ad11cf9311e1d5c462b80c6",
+      "models": [
+        {
+          "span_id": "2982255af5c42e92",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_b4edcbbc5e7c4b8b81a2cab1",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_cd5a43f153634aaab9cda55b"
+          ],
+          "input_result_ids": [
+            "call_cd5a43f153634aaab9cda55b"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "f659a54ab145c8fc",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_cd5a43f153634aaab9cda55b",
+              "name": "code_execution"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-docker-direct",
+      "trace_id": "ad7e2b9fbfa2b473d201537b0aa44e9d",
+      "models": [
+        {
+          "span_id": "84750e442e9b006c",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_3f1f9f3af0f444b197bb5e3f"
+          ],
+          "input_result_ids": [
+            "call_3f1f9f3af0f444b197bb5e3f"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "4ff1532b1680828d",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_3f1f9f3af0f444b197bb5e3f",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-error-recovery",
+      "trace_id": "fd0ba9aefc9ef003cb0f2bd225b1a2c6",
+      "models": [
+        {
+          "span_id": "d281530e31316109",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_1eaab4f33666413a9144550b",
+              "name": "final_answer"
+            }
+          ],
+          "input_call_ids": [
+            "call_fe29c32ab1c24513b7af6444",
+            "call_d717720ab3db409ba542ab4a"
+          ],
+          "input_result_ids": [
+            "call_fe29c32ab1c24513b7af6444",
+            "call_d717720ab3db409ba542ab4a"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "ee2c6e635150a90e",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_d717720ab3db409ba542ab4a",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [
+            "call_fe29c32ab1c24513b7af6444"
+          ],
+          "input_result_ids": [
+            "call_fe29c32ab1c24513b7af6444"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "8e5c925d17ec3a07",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_fe29c32ab1c24513b7af6444",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    },
+    {
+      "label": "native-stream-cancellation",
+      "trace_id": "9270e25d624c17fef896a1d1e4cb5871",
+      "models": [
+        {
+          "span_id": "cc1c66a3f8f0f914",
+          "finish": null,
+          "status": "ERROR",
+          "output_calls": [],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": false
+        }
+      ]
+    },
+    {
+      "label": "provider-deepseek-v4-1-flash",
+      "trace_id": "32bab4c396536d35236c05e9df05cab6",
+      "models": [
+        {
+          "span_id": "cb699d8468ba6f52",
+          "finish": "stop",
+          "status": "UNSET",
+          "output_calls": [],
+          "input_call_ids": [
+            "call_00_mfonc9nduyff2qfkw5kj6zxb"
+          ],
+          "input_result_ids": [
+            "call_00_mfonc9nduyff2qfkw5kj6zxb"
+          ],
+          "reasoning_present": true
+        },
+        {
+          "span_id": "6936b1025c207145",
+          "finish": "tool_calls",
+          "status": "UNSET",
+          "output_calls": [
+            {
+              "id": "call_00_mfonc9nduyff2qfkw5kj6zxb",
+              "name": "list_directory"
+            }
+          ],
+          "input_call_ids": [],
+          "input_result_ids": [],
+          "reasoning_present": true
+        }
+      ]
+    }
+  ]
+}

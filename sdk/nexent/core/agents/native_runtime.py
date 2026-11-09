@@ -70,22 +70,48 @@ def adapt_native_context_items(items, enable_planning=False):
     return adapted
 
 
+class NativeCompletionError(ValueError):
+    """A provider generation did not reach a valid executable terminal state."""
+
+    def __init__(self, finish_reason, detail="Incomplete or inconsistent native generation"):
+        self.finish_reason = finish_reason
+        super().__init__(f"{detail} (finish_reason={finish_reason!r})")
+
+
+def validate_native_completion(content, calls, finish_reason, refusal=None):
+    """Generation completion authorizes effects; text alone does not prove it."""
+    expected = "tool_calls" if calls else "stop"
+    if refusal or finish_reason != expected:
+        raise NativeCompletionError(finish_reason)
+    if not calls and (not isinstance(content, str) or not content.strip()):
+        raise NativeCompletionError(finish_reason, "Native model returned neither content nor tool calls")
+
+
 def collect_native_stream(stream, stop_event, observer=None):
     """Assemble indexed provider fragments without parsing assistant content."""
     wire = {"role": "assistant", "content": ""}
     calls = {}
     usage = None
+    finish_reason = None
+    refusal = None
     for chunk in stream:
         if stop_event.is_set():
             raise RunTerminated("Agent run cancelled")
         usage = getattr(chunk, "usage", None) or usage
         if not chunk.choices:
             continue
-        delta = chunk.choices[0].delta
+        if len(chunk.choices) != 1 or getattr(chunk.choices[0], "index", 0) != 0:
+            raise NativeCompletionError(finish_reason, "Native generation requires exactly one choice")
+        choice = chunk.choices[0]
+        if finish_reason is not None:
+            raise NativeCompletionError(finish_reason, "Provider emitted choices after completion")
+        delta = choice.delta
+        refusal = getattr(delta, "refusal", None) or refusal
+        finish_reason = getattr(choice, "finish_reason", None)
         if delta.content:
             wire["content"] += delta.content
             if observer is not None:
-                observer.add_model_new_token(delta.content)
+                observer.add_assistant_text_delta(delta.content)
         for key in ("reasoning", "reasoning_content"):
             value = getattr(delta, key, None)
             if value:
@@ -108,9 +134,12 @@ def collect_native_stream(stream, stop_event, observer=None):
                 call["function"]["arguments"] += fragment.function.arguments or ""
     if calls:
         wire["tool_calls"] = [calls[index] for index in sorted(calls)]
+    if stop_event.is_set():
+        raise RunTerminated("Agent run cancelled")
+    validate_native_completion(wire["content"], calls, finish_reason, refusal)
     if observer is not None:
         observer.flush_remaining_tokens()
-    return wire, usage
+    return wire, usage, finish_reason
 
 
 class NativeModel(Model):
@@ -208,8 +237,15 @@ class NativeModel(Model):
                 **request,
             )
             token = model.cancellation_scope.register_closer(stream.close)
+            model.last_finish_reason = None
             try:
-                wire, usage = collect_native_stream(stream, model.stop_event, model.observer)
+                wire, usage, finish_reason = collect_native_stream(stream, model.stop_event, model.observer)
+                model.last_finish_reason = finish_reason
+                model._monitoring.set_span_attributes(**{"llm.finish_reason": finish_reason})
+            except NativeCompletionError as error:
+                model.last_finish_reason = error.finish_reason
+                model._monitoring.set_span_attributes(**{"llm.finish_reason": error.finish_reason or "missing"})
+                raise
             finally:
                 model.cancellation_scope.unregister_closer(token)
                 stream.close()
@@ -217,6 +253,7 @@ class NativeModel(Model):
                 raise RunTerminated("Agent run cancelled")
             message = ChatMessage.from_dict(deepcopy(wire))
             message.raw = wire
+            message.finish_reason = finish_reason
             if usage:
                 message.token_usage = TokenUsage(
                     input_tokens=usage.prompt_tokens,
@@ -546,6 +583,8 @@ class NativeToolCallingAgent(ToolCallingAgent):
         wire = dict(message.raw)
         wire.pop("refusal", None)
         calls = message.tool_calls or []
+        validate_native_completion(message.content, calls, getattr(message, "finish_reason", None),
+                                   getattr(message, "refusal", None))
         identifiers = [call.id for call in calls]
         if any(not identifier for identifier in identifiers) or len(set(identifiers)) != len(identifiers):
             raise ValueError("Native tool calls require unique nonempty identifiers")

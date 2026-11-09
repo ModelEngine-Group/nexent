@@ -64,3 +64,20 @@ The architecture spike establishes the native/direct/code/programmatic/hybrid co
 Authored CodeAgent formatting instructions are retained, so some definitions may remain incompatible. Only platform-owned execution policies are replaced. NL2Agent/NL2Skill intentionally retain CodeAgent for their closed authoring protocols. No database migration, destructive definition rewrite or frontend runtime selector was added. The develop roadmap identifies the remaining engineering work rather than presenting these limitations as completed parity.
 
 The initial CI unit tests, amd64/arm64 image builds and copyright checks passed. Codecov reported 82.86334% patch coverage, so meaningful boundary/error/cancellation/masking/context/termination tests were added. Product source and image inputs are unchanged. Updated remote CI/Codecov results are reported in the PR conversation; local verification is not represented as remote completion.
+
+## Standalone branch follow-up — 2026-11-09
+
+This v2.8.4 branch is a standalone hotfix-like experiment and is not intended for merge into main/develop. The feature-introduction branch is feature/native-toolcalling-runtime (PR4315), based on develop and its model service. Historical evidence above refers to earlier source snapshots.
+
+The follow-up implements validated finish reasons: normal nonempty content-only stop or standalone final_answer can terminate; content accompanying ordinary tool calls is intermediate. Length/filter/refusal/missing/inconsistent completion cannot authorize tool execution or successful completion. Public content now bypasses the legacy thinking parser, is retained around tools, rolls back per attempt, and persists/reloads without duplicating the accepted final step. No progress tool is added. Current sanitized verification is retained separately from historical evidence.
+
+
+## Standalone completion follow-up — 2026-11-09
+
+This v2.8.4 branch is retained as a standalone feature and will not merge into main/develop. The user approved content-only normal stop or standalone final_answer as completion candidates. Mixed content/tool responses stay intermediate; invalid/missing terminal reasons, refusal, truncation, cancellation and failed streams cannot authorize successful completion or tool effects.
+
+Relevant local Python suites: **729 passed**, no failures/skips. Frontend: **5 Node projection tests and 17 Vitest adapter/regression tests passed**, TypeScript passed. Formal host checks: **3 API**, **17 actual-model SDK**, **10 controlled HTTP/SSE fault/normal cases**, **1 deployed identity/health** passed. Browser public messages, actual direct/Python results and reopened saved-history order were manually verified. These are follow-up results, separate from historical experiment evidence.
+
+See [acceptance record](evidence/completion-acceptance.json), [API evidence](evidence/completion-api-results.json), [Phoenix structural audit](evidence/completion-phoenix-sdk-audit.json), [installed source/image identity](evidence/completion-image-identity.json), and [browser capture](evidence/interleaved-browser.png). The main/web images were built from this branch; all four changed backend/SDK product files match installed image hashes. Shared host data was retained when switching to the isolated develop deployment. VM remains stopped; the develop host deployment is the final active application.
+
+The historical experimental limitations above remain. The new implementation lives on PR4315 and uses develop's model service; this old branch deliberately keeps the v2.8.4 integration. No new pull request is required for this standalone branch.

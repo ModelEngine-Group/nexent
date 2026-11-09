@@ -1,0 +1,17 @@
+{
+  "source_parent": "1ba6aa0a490945dd92a510e877b16ea7b4293222",
+  "note": "Verified precommit tree; product file hashes identify the exact tested changes independently of documentation and tests.",
+  "images": {
+    "nexent": "sha256:f67255673f786869bcaa6fa3c997495e9e9280623db026e7a0b079d05f7ba453",
+    "nexent-web": "sha256:04a631434fddaf406255f94b519e8386602d7bfc7c99c2e3138549989d87354d",
+    "nexent-sandbox": "sha256:378770c0d540f65b553741a2d81dfa93055ace3f5eace175772dd68952aa19ae",
+    "nexent-mcp": "sha256:d30a7130e636a1aafd281e0c526c94616451ea0240586431f5ed7c7a4bc2c16a"
+  },
+  "all_changed_backend_sdk_files_match_built_image": true,
+  "files": {
+    "backend/management/services/agent/execution.py": "abcd198f1797aa9b7109effe8c77f82e45dee06f65d6d193b5d1e2642a58a86e",
+    "backend/management/services/agent/stream.py": "ed7474f43fa3aae64cca1663869522e35779fa616da3ea22e931f37b256d9e71",
+    "sdk/nexent/core/agents/native_runtime.py": "1b7b90012baf7607d536d683bddaf3902fa99e01f323c53ee7e7f5b50402167d",
+    "sdk/nexent/core/utils/observer.py": "39edd33a6ed53da7a02b4c2cc241762bd7bae68347f9ee7eba98018cab88f041"
+  }
+}

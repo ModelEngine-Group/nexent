@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "AGENT-NATIVE-D3-002",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001"
+    ],
+    "title": "Native completion over a controlled HTTP provider",
+    "type": "AGENT-IT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Prove provider stream termination controls actual native tool side effects and loop completion.",
+    "preconditions": [
+      "Branch SDK and Python test dependencies are installed. Loopback HTTP binding is available."
+    ],
+    "test_data": {
+      "normal_reason": "stop",
+      "tool_reason": "tool_calls",
+      "incomplete_reasons": [
+        "length",
+        "content_filter",
+        null,
+        "pause"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Start a case-owned loopback streaming provider; run mixed text/tool then text-only stop through the actual model adapter and agent loop.",
+        "expected": "Actual tool executes once, continuation contains correlated result, final answer is accepted."
+      },
+      {
+        "order": 2,
+        "action": "Return a complete-looking tool call with length, filtering, missing, unknown or inconsistent termination.",
+        "expected": "No tool executes and the run does not return a successful answer."
+      },
+      {
+        "order": 3,
+        "action": "Return text-only incomplete/filtered generation or explicit refusal.",
+        "expected": "No partial text becomes successful final output."
+      },
+      {
+        "order": 4,
+        "action": "Close owned provider server/client/scope after every variant.",
+        "expected": "No server thread, socket, model stream or cancellation closer remains."
+      }
+    ],
+    "expected_results": [
+      "Mixed response content remains in native history; actual tool result is returned and normal stop completes.",
+      "Incomplete or inconsistent tool generations never execute tools.",
+      "Incomplete or refused text generations never complete successfully.",
+      "Owned network and model resources are released."
+    ],
+    "forbidden_side_effects": [
+      "No external provider calls or persisted Agent Definition mutation.",
+      "No tool effects from an invalid generation.",
+      "No secret values or reasoning bodies in retained evidence."
+    ],
+    "integration_boundary": [
+      "Actual Nexent agent loop -> branch model adapter/service -> real HTTP/SSE loopback provider -> authorized tool -> correlated continuation"
+    ],
+    "observations": [
+      "Tool execution count, model request history, completion exception and owned resource cleanup."
+    ],
+    "source": {
+      "notes": "User-confirmed completion policy on 2026-11-09; controlled HTTP provider is explicit, separate from real-model acceptance."
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Normal mixed loop and final stop complete using actual model protocol.",
+        "steps": [
+          1,
+          4
+        ],
+        "expected_results": [
+          1,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Invalid tool generations have no effects.",
+        "steps": [
+          2,
+          4
+        ],
+        "expected_results": [
+          2,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Incomplete/refused text cannot complete.",
+        "steps": [
+          3,
+          4
+        ],
+        "expected_results": [
+          3,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          3
+        ]
+      }
+    ],
+    "cleanup": [
+      "Finally cancel/close model resources, shut down the owned loopback server and join its thread."
+    ]
+  }
+}

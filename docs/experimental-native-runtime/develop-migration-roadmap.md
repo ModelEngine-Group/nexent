@@ -38,3 +38,9 @@ Native current-run compaction and overflow recovery; model tool limits/schema po
 - Use capability-based adapters for plan/verification/clarification and authoring helpers; the spike's borrowed CoreAgent plan methods are a temporary coupling to replace.
 - Define atomic native exchange groups for context compaction and a multimodal message algebra before production rollout.
 - Preserve default CodeAgent as the rollback path. Both selected runtimes completed the same persisted-definition workloads; the isolated timing observations are not a performance benchmark.
+
+## Standalone branch follow-up — 2026-11-09
+
+This v2.8.4 branch is a standalone hotfix-like experiment and is not intended for merge into main/develop. The feature-introduction branch is feature/native-toolcalling-runtime (PR4315), based on develop and its model service. Historical evidence above refers to earlier source snapshots.
+
+The follow-up implements validated finish reasons: normal nonempty content-only stop or standalone final_answer can terminate; content accompanying ordinary tool calls is intermediate. Length/filter/refusal/missing/inconsistent completion cannot authorize tool execution or successful completion. Public content now bypasses the legacy thinking parser, is retained around tools, rolls back per attempt, and persists/reloads without duplicating the accepted final step. No progress tool is added. Current sanitized verification is retained separately from historical evidence.

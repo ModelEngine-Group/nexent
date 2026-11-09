@@ -72,10 +72,14 @@ def test_existing_definition_stream_and_immutability(scenario):
                 if line.startswith("data:") and line[5:].strip() != "[DONE]":
                     events.append(json.loads(line[5:].strip()))
         assert not any(event.get("type") == "error" for event in events)
-        text = "".join(
-            str(event.get("content", ""))
-            for event in events
-            if event.get("type") in {"model_output_thinking", "final_answer"}
+        completions = [event for event in events if event.get("type") == "final_answer"
+                       and event.get("answer_phase") == "complete" and not event.get("invocation_id")]
+        assert len(completions) == 1
+        completion = completions[0]
+        text = completion.get("content") or "".join(
+            str(event.get("content", "")) for event in events
+            if event.get("step_id") == completion.get("step_id") and not event.get("invocation_id")
+            and event.get("type") in {"model_output", "model_output_thinking", "final_answer"}
         )
         expected = "NATIVE_RUNTIME_OK" if scenario == "plain" else "323"
         assert expected in text
