@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-SIGNUP-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-SIGNUP]
+  title: Casdoor 注册入口携带安全授权参数并保持普通登录兼容
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the initial signup redirect HTTP contract without executing an external OAuth journey.
+  preconditions:
+  - Backend Python dependencies are installed; provider and persistence services are not required.
+  test_data:
+    profile: synthetic self-contained Casdoor signup settings
+  steps:
+  - order: 1
+    action: Request GET /user/oauth/authorize with provider=casdoor and signup=true.
+    expected: HTTP 302 targets /signup/oauth/authorize with the client ID, exact callback, random state and S256 challenge; the signed HttpOnly cookie matches the state.
+  - order: 2
+    action: Repeat with signup=false and without the signup parameter.
+    expected: Existing login requests still target /login/oauth/authorize and have valid browser-bound flows.
+  expected_results:
+  - Signup selects the registration page and preserves the authorization-code security parameters.
+  - Explicit and default login behavior remain compatible.
+  forbidden_side_effects:
+  - No external provider requests or account writes occur; the redirect reveals neither client secret nor PKCE verifier.
+  acceptance:
+  - id: AC-01
+    description: Signup redirect is securely bound to the browser.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Ordinary login behavior is unchanged.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: HTTP API through production FastAPI routes
+    request_expectations: ['GET /user/oauth/authorize?provider=casdoor with optional signup boolean']
+    response_expectations: [HTTP 302, browser-bound HttpOnly flow cookie, Casdoor signup or login URL without secret data]

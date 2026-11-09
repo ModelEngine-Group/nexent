@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-ROLE-SYNC-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-ROLE-SYNC]
+  title: Casdoor 角色变更自动应用到已有 Nexent 会话
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Observe promotion and revocation through the same session and actual HTTP authorization after Casdoor role reconciliation.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN points to an owned isolated PostgreSQL instance with database creation permission.
+  test_data:
+    profile: disposable PostgreSQL, original Casdoor binding, local linked account, and a controlled Casdoor HTTP directory
+  steps:
+  - order: 1
+    action: Sign an existing user session and read the user's permissions before and after reconciling a mapped Casdoor administrator role.
+    expected: The same token gains tenant administrator privileges and the authorization response enables automatic refresh.
+  - order: 2
+    action: Reconcile role removal, then retry the tenant administration endpoint with the same token.
+    expected: The role returns to USER, the session stays valid and the administrative request is denied.
+  - order: 3
+    action: Reconcile an unavailable or mismatched provider identity and inspect the separately linked native account.
+    expected: Provider errors do not change the last confirmed role; an unverified binding or linked native account cannot gain privileges.
+  - order: 4
+    action: Complete a Casdoor signup with a developer invitation, retry a failed provider write, then remove the resulting membership.
+    expected: The invited role survives the failed write, is added once alongside existing Casdoor role members, and can subsequently be revoked without the worker restoring it.
+  expected_results:
+  - Role and permissions reflect a verified promotion without a new session.
+  - Role removal also removes administrative authorization without a new session.
+  - Sync affects only verified Casdoor-registered tenant accounts.
+  - The onboarding assignment is durable and ordinary reconciliation takes over after confirmation.
+  forbidden_side_effects:
+  - No business account writes, external provider calls, credential leaks or leftover owned test database.
+  acceptance:
+  - id: AC-01
+    description: Same-session promotion applies to authorization.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Same-session role removal revokes administrative authorization.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Unverified results and unrelated accounts cannot gain privileges.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: A tenant invitation provisions the corresponding Casdoor role and later revocation remains authoritative.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: FastAPI HTTP authorization and isolated PostgreSQL with controlled Casdoor user directory responses
+    request_expectations: [Existing user information and tenant user list endpoints with the same signed session]
+    response_expectations: [Current role and permissions reflect each successful reconciliation; administrative access follows the updated role]

@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-20261105
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-20261105
+  title: Connect Nexent login to Casdoor
+  description: Add opt-in Casdoor authorization-code login with PKCE and browser-bound state while preserving native sessions and tenant onboarding.
+  affected_features:
+    existing: [F-008, F-009]
+    added: [AUTH-CASDOOR]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [API-015, CTR-001]
+    added: [AUTH-CASDOOR-CONFIG-D2-001, AUTH-CASDOOR-SIGNUP-D2-001, AUTH-CASDOOR-PASSWORDLESS-D2-001, AUTH-CASDOOR-LOGIN-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/services/test_casdoor_service.py
+    - test/backend/app/test_casdoor_app.py
+    - test/backend/services/test_oauth_service.py
+    - test/backend/app/test_oauth_app.py
+    - test/backend/services/test_casdoor_completion.py
+    - test/backend/database/test_local_account_persistence.py
+    behaviors:
+    - Enable only complete valid Casdoor configuration; keep secrets out of public responses.
+    - Build the exact callback, S256 challenge and signed browser flow; reject invalid, expired or mismatched state before provider calls.
+    - Send form-encoded code exchange with PKCE; validate userinfo and isolate subjects by endpoint.
+    - Preserve callback cookies through frontend redirects, existing login sessions and first-user completion.
+    - Signup mode uses the Casdoor signup endpoint with the same browser-bound state, PKCE and callback; normal login is unchanged.
+    - Trusted Casdoor completion ignores supplied passwords, creates a provider-only passwordless account and retains invitation/email validation; legacy OAuth still requires a password.
+    - Provider-only accounts reject native password login, password changes, alternate provider bindings and Casdoor unlink; existing local-account linking is preserved.
+    reason: Existing OAuth service/app UT cover generic provider mapping and onboarding but have no Casdoor, PKCE or browser-cookie assertions. No new D1 duplicates those units.
+  notes: >-
+    Responsibility is system. D2 config is self-contained with the real FastAPI routes and no storage/provider writes.
+    OAuth browser journeys remain skipped_by_policy under the maintained suite rules; the D4 contract records that limitation without counting a pass.
+    Frontend proxy regression: node --test frontend/tests/auth-proxy-casdoor.test.mjs.
+    Frontend registration component regression: frontend/tests/component/casdoorSignupButton.test.tsx.
+    Existing API-015/CTR-001 remain unchanged. New configuration follows the user instruction to use consts.const.

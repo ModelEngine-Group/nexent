@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-POLICY-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-POLICY-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_grant_and_revoke_skill_read_in_same_session]
+  AC-02: [test_grant_and_revoke_skill_read_in_same_session]
+  AC-03: [test_grant_and_revoke_skill_read_in_same_session]
+notes: Owns an isolated PostgreSQL database, HTTP client and managed worker. Casdoor responses are controlled at the HTTP transport boundary.

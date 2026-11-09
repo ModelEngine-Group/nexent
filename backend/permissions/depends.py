@@ -6,6 +6,7 @@ from typing import Callable
 from contracts.constants.environment import IS_SPEED_MODE
 from fastapi import Depends, HTTPException
 from permissions.models import CurrentUser
+from permissions.casdoor_policy import permission_override
 from permissions.rbac import has_permission
 from gateway.authentication.auth import authenticate
 
@@ -22,7 +23,10 @@ def require(permission: str) -> Callable[[CurrentUser], CurrentUser]:
             # Speed mode has no role_permission_t seeds, so allow the built-in
             # SPEED account to pass through permission checks.
             return current_user
-        if not has_permission(current_user.normalized_role, permission):
+        allowed = permission_override(current_user.user_id, current_user.normalized_role, permission)
+        if allowed is None:
+            allowed = has_permission(current_user.normalized_role, permission)
+        if not allowed:
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing required permission: {permission}",

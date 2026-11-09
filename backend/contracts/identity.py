@@ -39,6 +39,13 @@ class OAuthCompleteRequest(BaseModel):
     invite_code: str = Field(..., min_length=1)
 
 
+class CasdoorCompleteRequest(BaseModel):
+    """Complete a Casdoor signup without accepting a local password."""
+
+    email: Optional[EmailStr] = None
+    invite_code: str = Field(..., min_length=1)
+
+
 class UpdatePasswordRequest(BaseModel):
     """Password update request model for changing user password"""
 

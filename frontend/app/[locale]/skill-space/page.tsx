@@ -35,8 +35,15 @@ export default function SkillRepositoryPage() {
   const { t } = useTranslation("common");
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
-  const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const { user, hasPermission } = useAuthorizationContext();
+  const managed = user?.casdoorFeaturePolicy === true;
+  const canBrowse = !managed || hasPermission("skill.repository:read");
+  const canCreateSkill = !managed || hasPermission("skill:create");
+  const canPublish = !managed || hasPermission("skill.repository:publish");
+  const canUseMine = canCreateSkill || canPublish;
+  const canReview = managed
+    ? hasPermission("skill.repository:review")
+    : user?.role === USER_ROLES.ADMIN;
   const [tab, setTab] = useState<SkillRepositoryTab>(
     SkillRepositoryTab.REPOSITORY
   );
@@ -48,35 +55,34 @@ export default function SkillRepositoryPage() {
       setTab(SkillRepositoryTab.MINE);
     } else if (tabParam === SkillRepositoryTab.REPOSITORY) {
       setTab(SkillRepositoryTab.REPOSITORY);
-    } else if (tabParam === SkillRepositoryTab.REVIEW && isAdmin) {
+    } else if (tabParam === SkillRepositoryTab.REVIEW && canReview) {
       setTab(SkillRepositoryTab.REVIEW);
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [searchParams, isAdmin]);
+  }, [searchParams, canReview]);
 
-  useEffect(() => {
-    if (!isAdmin && tab === SkillRepositoryTab.REVIEW) {
-      /* eslint-disable react-hooks/set-state-in-effect -- Remove the admin tab when access changes. */
-      setTab(SkillRepositoryTab.REPOSITORY);
-      /* eslint-enable react-hooks/set-state-in-effect */
-    }
-  }, [isAdmin, tab]);
+  const visibleTabs = [
+    ...(canBrowse ? [SkillRepositoryTab.REPOSITORY] : []),
+    ...(canUseMine ? [SkillRepositoryTab.MINE] : []),
+    ...(canReview ? [SkillRepositoryTab.REVIEW] : []),
+  ];
+  const activeTab = visibleTabs.includes(tab) ? tab : visibleTabs[0];
 
   const { data: repositoryCountData } = useSkillRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
-    true
+    canBrowse
   );
-  const { data: mineCountData } = useMyEditableSkillCounts();
+  const { data: mineCountData } = useMyEditableSkillCounts(canUseMine);
   const { data: reviewCountData } = useSkillRepositoryListings(
     { status: "pending_review", page: 1, page_size: 1 },
-    isAdmin
+    canReview
   );
   const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
   const mineTabCount = mineCountData?.counts?.all ?? 0;
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
-  const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
-  const isMineTab = tab === SkillRepositoryTab.MINE;
-  const isReviewTab = tab === SkillRepositoryTab.REVIEW;
+  const isRepositoryTab = activeTab === SkillRepositoryTab.REPOSITORY;
+  const isMineTab = activeTab === SkillRepositoryTab.MINE;
+  const isReviewTab = activeTab === SkillRepositoryTab.REVIEW;
 
   return (
     <ConfigProvider theme={skillRepositoryTheme}>
@@ -108,28 +114,32 @@ export default function SkillRepositoryPage() {
               </section>
 
               <Tabs
-                value={tab}
+                value={activeTab ?? ""}
                 onValueChange={(value) => setTab(value as SkillRepositoryTab)}
                 className="w-full shrink-0"
               >
                 <TabsList className="flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
-                  <TabsTrigger
-                    value={SkillRepositoryTab.REPOSITORY}
-                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
-                  >
-                    <Inbox className="size-4" aria-hidden />
-                    {t("repository.page.tab.repository")}
-                    <CountBadge count={repositoryTabCount} />
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value={SkillRepositoryTab.MINE}
-                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
-                  >
-                    <User className="size-4" aria-hidden />
-                    {t("skillRepository.page.tab.mine")}
-                    <CountBadge count={mineTabCount} />
-                  </TabsTrigger>
-                  {isAdmin ? (
+                  {canBrowse && (
+                    <TabsTrigger
+                      value={SkillRepositoryTab.REPOSITORY}
+                      className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+                    >
+                      <Inbox className="size-4" aria-hidden />
+                      {t("repository.page.tab.repository")}
+                      <CountBadge count={repositoryTabCount} />
+                    </TabsTrigger>
+                  )}
+                  {canUseMine && (
+                    <TabsTrigger
+                      value={SkillRepositoryTab.MINE}
+                      className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+                    >
+                      <User className="size-4" aria-hidden />
+                      {t("skillRepository.page.tab.mine")}
+                      <CountBadge count={mineTabCount} />
+                    </TabsTrigger>
+                  )}
+                  {canReview ? (
                     <TabsTrigger
                       value={SkillRepositoryTab.REVIEW}
                       className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
@@ -146,9 +156,15 @@ export default function SkillRepositoryPage() {
                 data-testid="repository-tab-content"
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-px pb-1 [scrollbar-gutter:stable]"
               >
-                <SkillSpace active={isRepositoryTab} />
-                <MySkill active={isMineTab} />
-                {isAdmin ? <ReviewCenter active={isReviewTab} /> : null}
+                {canBrowse && <SkillSpace active={isRepositoryTab} />}
+                {canUseMine && (
+                  <MySkill
+                    active={isMineTab}
+                    canCreate={canCreateSkill}
+                    canPublish={canPublish}
+                  />
+                )}
+                {canReview && <ReviewCenter active={isReviewTab} />}
               </div>
             </div>
           </motion.div>

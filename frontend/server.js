@@ -467,6 +467,21 @@ function forwardAuthRequest(req, res, targetUrl) {
           const responseBody = Buffer.concat(responseChunks);
           let finalBody = responseBody;
 
+          // Preserve upstream cookies before any authentication redirect ends the response.
+          const existingSetCookie = res.getHeader("Set-Cookie") || [];
+          const upstreamSetCookie = proxyRes.headers["set-cookie"] || [];
+          const mergedCookies = [
+            ...(Array.isArray(existingSetCookie)
+              ? existingSetCookie
+              : [existingSetCookie]),
+            ...(Array.isArray(upstreamSetCookie)
+              ? upstreamSetCookie
+              : [upstreamSetCookie]),
+          ].filter(Boolean);
+          if (mergedCookies.length > 0) {
+            res.setHeader("Set-Cookie", mergedCookies);
+          }
+
           try {
             const contentType = proxyRes.headers["content-type"] || "";
             if (
@@ -571,21 +586,18 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
           // Copy response headers, but override content-length and set cookies
           const responseHeaders = { ...proxyRes.headers };
           responseHeaders["content-length"] = String(finalBody.length);
-          // Merge Set-Cookie: proxyRes cookies + our auth cookies
-          const existingSetCookie = res.getHeader("Set-Cookie") || [];
-          const upstreamSetCookie = proxyRes.headers["set-cookie"] || [];
-          const mergedCookies = [
-            ...(Array.isArray(existingSetCookie)
-              ? existingSetCookie
-              : [existingSetCookie]),
+          delete responseHeaders["set-cookie"];
+          const finalSetCookie = res.getHeader("Set-Cookie") || [];
+          const responseCookies = [
+            ...(Array.isArray(finalSetCookie)
+              ? finalSetCookie
+              : [finalSetCookie]),
             ...(Array.isArray(upstreamSetCookie)
               ? upstreamSetCookie
               : [upstreamSetCookie]),
           ].filter(Boolean);
-
-          delete responseHeaders["set-cookie"];
-          if (mergedCookies.length > 0) {
-            responseHeaders["set-cookie"] = mergedCookies;
+          if (responseCookies.length > 0) {
+            responseHeaders["set-cookie"] = [...new Set(responseCookies)];
           }
 
           res.writeHead(proxyRes.statusCode, responseHeaders);

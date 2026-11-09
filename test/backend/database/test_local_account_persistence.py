@@ -55,6 +55,15 @@ def test_missing_account_lookup_returns_none(session):
     assert account.get_account("missing", session) is None
 
 
+def test_casdoor_account_is_marked_and_has_no_local_password(session):
+    account.create_account("member@example.com", auth_provider="casdoor", db_session=session)
+    created = session.add.call_args.args[0]
+    assert created.password_hash is None
+    assert created.password_hash_scheme is None
+    assert created.password_login_enabled is False
+    assert created.source_metadata == {"auth_provider": "casdoor"}
+
+
 def test_ambiguous_accounts_are_rejected(session):
     session.execute.return_value.scalars.return_value.all.return_value = [object(), object()]
     with pytest.raises(AccountConflictError, match="Ambiguous"):
@@ -159,3 +168,14 @@ def test_profile_email_change_normalizes_and_keeps_current_identity(session, moc
     assert query.params["user_email"] == "updated@example.com"
     assert query.params["user_role"] == "DEV"
     assert query.params["updated_by"] == "actor"
+
+
+@pytest.mark.parametrize("options", [
+    {"auth_provider": "github"},
+    {"auth_provider": "casdoor", "password_hash": "unexpected-hash"},
+    {"auth_provider": "casdoor", "api_only": True},
+])
+def test_casdoor_only_creation_rejects_incompatible_credentials(session, options):
+    with pytest.raises(ValueError, match="Casdoor-only"):
+        account.create_account("member@example.com", db_session=session, **options)
+    session.add.assert_not_called()

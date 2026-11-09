@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-SIGNUP-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-SIGNUP-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_signup_and_login_redirect_contract]
+  AC-02: [test_signup_and_login_redirect_contract]
+notes: Self-contained initial redirect HTTP contract with actual routes; fixtures restore synthetic settings and close TestClient. No external OAuth journey, account, provider or persistence resource is created.

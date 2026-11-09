@@ -91,6 +91,7 @@ export function MineSkillsView({
   total,
   onPageChange,
   onRetry,
+  canPublish = true,
   onCreateSkill,
   onEditSkill,
   onViewSkill,
@@ -119,6 +120,7 @@ export function MineSkillsView({
   total: number;
   onPageChange: (page: number) => void;
   onRetry: () => void;
+  canPublish?: boolean;
   onCreateSkill: () => void;
   onEditSkill: (skill: MyEditableSkillItem) => void;
   onViewSkill: (skill: MyEditableSkillItem) => void;
@@ -366,6 +368,7 @@ export function MineSkillsView({
                   <MineSkillCard
                     key={skill.skill_id}
                     skill={skill}
+                    canPublishToRepository={canPublish}
                     onEdit={() => onEditSkill(skill)}
                     onView={() => onViewSkill(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
@@ -380,7 +383,7 @@ export function MineSkillsView({
       </div>
 
       <SkillReviewStatusModal
-        open={reviewModalOpen}
+        open={reviewModalOpen && canPublish}
         skill={reviewModalSkill}
         repositoryInfo={reviewModalInfo}
         isUpdatingStatus={isUpdatingStatus}
@@ -388,7 +391,7 @@ export function MineSkillsView({
         onSetNotShared={handleSetNotShared}
       />
       <MineApplyListingModal
-        open={applyModalOpen}
+        open={applyModalOpen && canPublish}
         skill={applyModalSkill}
         loading={applySubmitting}
         onClose={() => {
@@ -461,6 +464,7 @@ function getMineSkillMenuItems({
 
 function MineSkillCard({
   skill,
+  canPublishToRepository,
   onEdit,
   onView,
   onDelete,
@@ -468,6 +472,7 @@ function MineSkillCard({
   onViewReview,
 }: {
   skill: MyEditableSkillItem;
+  canPublishToRepository: boolean;
   onEdit: () => void;
   onView: () => void;
   onDelete: () => void;
@@ -482,7 +487,7 @@ function MineSkillCard({
   const repositoryStatus = latestRepository?.status ?? "not_shared";
   const canEdit =
     skill.permission !== "READ_ONLY" && skill.permission !== "PRIVATE";
-  const canPublish = skill.can_publish === true;
+  const canPublish = canPublishToRepository && skill.can_publish === true;
   const updatedAt = formatRepositoryDate(skill.updated_at ?? skill.update_time);
   const tags = skill.tags?.filter((tag) => tag.trim()) ?? [];
   const canApplyListing = canPublish && !hasRepositoryInfo;

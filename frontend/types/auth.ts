@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 // User type definition - contains only basic user information
 import type { USER_ROLES } from "@/const/auth";
 
@@ -11,6 +12,8 @@ export interface User {
   avatarUrl?: string;
   tenantId?: string;
   authProvider?: "local" | "cas";
+  casdoorRoleSync?: boolean;
+  casdoorFeaturePolicy?: boolean;
 }
 
 // Session type definition
@@ -44,6 +47,8 @@ export interface RegisterModalOptions {
   mode?: "register" | "oauth_complete";
   email?: string;
   emailReadOnly?: boolean;
+  oauthProvider?: string;
+  passwordRequired?: boolean;
 }
 
 // Authorization context type

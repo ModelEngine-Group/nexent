@@ -16,13 +16,17 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 from gateway.authentication.auth import get_current_user_context
+from permissions.casdoor_policy import permission_override
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 
 
 def _require_manage_context(authorization: str | None) -> tuple[str, str, str]:
     user_id, tenant_id, role = get_current_user_context(authorization)
-    if not check_role_permission(role, "RESOURCE", "TAG_LIBRARY", "MANAGE"):
+    allowed = permission_override(user_id, role, "tag_library:manage")
+    if allowed is None:
+        allowed = check_role_permission(role, "RESOURCE", "TAG_LIBRARY", "MANAGE")
+    if not allowed:
         raise HTTPException(status_code=403, detail="Tag library management permission is required")
     return user_id, tenant_id, role
 

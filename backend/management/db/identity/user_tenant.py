@@ -403,19 +403,18 @@ def update_user_tenant_role(user_id: str, role: str, updated_by: str) -> bool:
         normalized_role = (role or "").upper()
         if current_role != normalized_role and normalized_role in {"ADMIN", "SU"}:
             _validate_user_tenant_limit(session, target.tenant_id, normalized_role, include_user_count=False)
-        set_account_profile(user_id, role, None, updated_by, session)
-        result = (
-            session.query(UserTenant)
-            .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
-            .update(
-                {
-                    "updated_by": updated_by,
-                    "update_time": "NOW()",  # This will be handled by the database trigger
-                }
-            )
-        )
+        return _write_user_tenant_role(session, user_id, role, updated_by)
 
-        return result > 0
+
+def _write_user_tenant_role(session, user_id: str, role: str, updated_by: str) -> bool:
+    """Write the canonical role and membership audit fields in one transaction."""
+    set_account_profile(user_id, role, None, updated_by, session)
+    result = (
+        session.query(UserTenant)
+        .filter(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+        .update({"updated_by": updated_by, "update_time": "NOW()"})
+    )
+    return result > 0
 
 
 def soft_delete_user_tenant_by_user_id(user_id: str, deleted_by: str) -> bool:

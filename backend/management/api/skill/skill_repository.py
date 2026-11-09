@@ -21,6 +21,7 @@ from services.skill_repository_service import (
 )
 from starlette.responses import JSONResponse
 from gateway.authentication.auth import get_current_user_id
+from permissions.casdoor_policy import policy_scope
 
 logger = logging.getLogger(__name__)
 skill_repository_router = APIRouter(prefix="/repository/skill")
@@ -60,7 +61,11 @@ async def list_skill_repository_listings_api(
     """List all skill marketplace repository listings with optional filters."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        ensure_skill_repository_access(user_id)
+        if policy_scope():
+            if ensure_skill_repository_access(user_id, status=status) and status is None:
+                status = "shared"
+        else:
+            ensure_skill_repository_access(user_id)
         filters = {
             "user_id": user_id,
             "status": status,
@@ -185,11 +190,17 @@ async def get_skill_repository_listing_detail_api(
     """Get detailed skill marketplace repository listing by primary key."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        ensure_skill_repository_access(user_id)
+        managed = False
+        if policy_scope():
+            managed = ensure_skill_repository_access(user_id, detail=True)
+        else:
+            ensure_skill_repository_access(user_id)
         result = get_skill_repository_listing_detail_impl(
             skill_repository_id,
             tenant_id,
         )
+        if managed:
+            ensure_skill_repository_access(user_id, status=result.get("status"))
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
@@ -224,7 +235,10 @@ async def update_skill_repository_status_api(
     """Update skill marketplace repository listing status."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        ensure_skill_repository_access(user_id)
+        if policy_scope():
+            ensure_skill_repository_access(user_id, write=True)
+        else:
+            ensure_skill_repository_access(user_id)
         result = update_skill_repository_status_impl(
             skill_repository_id=skill_repository_id,
             status=status,
@@ -296,6 +310,8 @@ async def install_skill_from_repository_api(
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized skill repository install attempt (id={skill_repository_id}): {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         message = str(e)
         status_code = HTTPStatus.NOT_FOUND if "not found" in message.lower() else HTTPStatus.BAD_REQUEST

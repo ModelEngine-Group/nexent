@@ -287,8 +287,22 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 RolePermission.user_role == user_role
             ).all()
             permissions = [as_dict(record) for record in permission_records]
+            from consts.const import is_casdoor_role_sync_configured
+
+            source_metadata = None
+            if user_role in {"USER", "DEV", "ADMIN"} and is_casdoor_role_sync_configured():
+                source_metadata = session.query(UserAccount.source_metadata).filter(
+                    UserAccount.user_id == user_id,
+                    UserAccount.delete_flag == "N",
+                ).scalar()
 
         permissions_data = format_role_permissions(permissions)
+        from permissions.casdoor_policy import managed_grants, overlay_user_permissions
+
+        grants = managed_grants(source_metadata, user_role)
+        if grants is not None:
+            overlay_user_permissions(permissions_data, grants)
+        casdoor_role_sync = isinstance(source_metadata, dict) and source_metadata.get("auth_provider") == "casdoor"
 
         return {
             "user": {
@@ -299,6 +313,8 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
                 "user_role": user_role,
                 "permissions": permissions_data["permissions"],
                 "accessibleRoutes": permissions_data["accessibleRoutes"],
+                **({"casdoor_role_sync": True} if casdoor_role_sync else {}),
+                **({"casdoor_feature_policy": True} if grants is not None else {}),
             }
         }
 

@@ -1,13 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
-from management.utils.oauth_providers import get_all_provider_definitions
 import logging
+from http import HTTPStatus
+from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from http import HTTPStatus
-from typing import Optional
-
 from pydantic import ValidationError as PydanticValidationError
 
 from contracts.constants.environment import JWT_EXPIRY_SECONDS
@@ -28,6 +26,8 @@ from management.services.permission.identity.oauth import (
     get_pending_oauth_info,
     get_provider_user_info,
     list_linked_accounts,
+    require_provider_authentication,
+    require_provider_unlink,
     unlink_account,
 )
 from gateway.authentication.auth import (
@@ -38,6 +38,7 @@ from gateway.authentication.auth import (
 )
 from gateway.authentication.auth import parse_state, parse_pending_oauth_token
 from management.services.monitor.audit import record_security_event
+from management.services.permission.identity import casdoor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])
@@ -61,8 +62,12 @@ async def get_providers():
 
 
 @router.get("/authorize")
-async def authorize(provider: str):
+async def authorize(provider: str, signup: bool = False):
     try:
+        if provider == "casdoor":
+            return _casdoor_authorization_response(signup=signup)
+        if signup:
+            raise OAuthProviderError("Direct signup is only supported for Casdoor")
         url = get_authorize_url(provider)
         return RedirectResponse(url=url, status_code=HTTPStatus.FOUND)
     except OAuthProviderError as e:
@@ -82,11 +87,14 @@ async def link(provider: str, authorization: Optional[str] = Header(None)):
 
     try:
         user_id, _ = get_current_user_id(authorization)
+        require_provider_authentication(require_active_account(user_id), provider)
+        if provider == "casdoor":
+            return _casdoor_authorization_response(link_user_id=user_id)
         url = get_authorize_url(provider, link_user_id=user_id)
         return RedirectResponse(url=url, status_code=HTTPStatus.FOUND)
     except UnauthorizedError:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Not logged in")
-    except OAuthProviderError as e:
+    except (OAuthProviderError, OAuthLinkError) as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"OAuth link failed: {e}")
@@ -96,8 +104,18 @@ async def link(provider: str, authorization: Optional[str] = Header(None)):
         )
 
 
-@router.get("/callback")
-async def callback(
+def _casdoor_authorization_response(link_user_id: str = "", *, signup: bool = False) -> RedirectResponse:
+    url, cookie = casdoor.create_authorization(link_user_id=link_user_id, signup=signup)
+    response = RedirectResponse(url=url, status_code=HTTPStatus.FOUND)
+    response.set_cookie(
+        casdoor.FLOW_COOKIE_NAME, cookie, max_age=casdoor.FLOW_TTL_SECONDS,
+        httponly=True, secure=urlparse(casdoor.OAUTH_CALLBACK_BASE_URL).scheme == "https",
+        samesite="lax", path="/",
+    )
+    return response
+
+
+async def _handle_callback(
     http_request: Request,
     provider: str,
     code: str = "",
@@ -141,18 +159,17 @@ async def callback(
             },
         )
 
-    state_info = parse_state(state)
-    link_user_id = state_info.get("link_user_id", "")
-
     try:
-        token_data = exchange_code_for_provider_token(provider, code)
-        provider_access_token = token_data["access_token"]
-
-        user_info = get_provider_user_info(
-            provider,
-            provider_access_token,
-            openid=token_data.get("openid", ""),
-        )
+        if provider == "casdoor":
+            state_info = casdoor.validate_flow(state, http_request.cookies.get(casdoor.FLOW_COOKIE_NAME, ""))
+            user_info = casdoor.authenticate(code, state_info)
+        else:
+            state_info = parse_state(state)
+            token_data = exchange_code_for_provider_token(provider, code)
+            user_info = get_provider_user_info(
+                provider, token_data["access_token"], openid=token_data.get("openid", ""),
+            )
+        link_user_id = state_info.get("link_user_id", "")
 
         provider_user_id = user_info["id"]
         email = user_info["email"]
@@ -167,7 +184,7 @@ async def callback(
                 user_id = existing_binding["user_id"]
             else:
                 user_id = None
-                if email:
+                if email and provider != "casdoor":
                     user_id = find_account_user_id_by_email(email)
 
                 if not user_id:
@@ -192,7 +209,7 @@ async def callback(
                         },
                     )
 
-        require_active_account(user_id)
+        require_provider_authentication(require_active_account(user_id), provider)
         ensure_user_tenant_exists(user_id=user_id, email=email)
 
         create_or_update_oauth_account(
@@ -231,6 +248,14 @@ async def callback(
             },
         )
 
+    except OAuthProviderError:
+        logger.warning("OAuth provider authentication failed for provider=%s", provider)
+        return JSONResponse(
+            status_code=HTTPStatus.BAD_REQUEST if provider == "casdoor" else HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={"message": "OAuth login failed", "data": {
+                "oauth_error": "callback_failed", "oauth_error_description": "OAuth login failed",
+            }},
+        )
     except TenantResourceLimitError as e:
         logger.warning(f"OAuth callback rejected by tenant resource limit for provider={provider}: {e}")
         return JSONResponse(
@@ -263,6 +288,21 @@ async def callback(
         )
 
 
+@router.get("/callback")
+async def callback(
+    http_request: Request,
+    provider: str,
+    code: str = "",
+    state: str = "",
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    response = await _handle_callback(http_request, provider, code, state, error, error_description)
+    if provider == "casdoor":
+        response.delete_cookie(casdoor.FLOW_COOKIE_NAME, path="/")
+    return response
+
+
 @router.get("/pending")
 async def get_pending(
     pending_token: Optional[str] = Header(None, alias="X-OAuth-Pending-Token"),
@@ -291,11 +331,17 @@ async def complete(
     pending_token: Optional[str] = Header(None, alias="X-OAuth-Pending-Token"),
 ):
     try:
-        request_data = OAuthCompleteRequest(**(await request.json()))
+        pending_identity = parse_pending_oauth_token(pending_token or "")
+        if pending_identity["provider"] == "casdoor":
+            from contracts.identity import CasdoorCompleteRequest
+
+            request_data = CasdoorCompleteRequest(**(await request.json()))
+        else:
+            request_data = OAuthCompleteRequest(**(await request.json()))
         result = await complete_pending_oauth_account(
-            pending_identity=parse_pending_oauth_token(pending_token or ""),
+            pending_identity=pending_identity,
             email=str(request_data.email) if request_data.email else None,
-            password=request_data.password,
+            password=getattr(request_data, "password", None),
             invite_code=request_data.invite_code,
         )
         completed_user = (result or {}).get("user") or {}
@@ -358,6 +404,7 @@ async def delete_account(provider: str, http_request: Request, authorization: Op
 
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        require_provider_unlink(require_active_account(user_id), provider)
         unlink_account(user_id, provider)
         record_security_event(
             "oauth_unlink", request=http_request, user_id=user_id, tenant_id=tenant_id, details={"provider": provider}

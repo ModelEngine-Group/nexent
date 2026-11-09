@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -12,6 +14,7 @@ import {
   Space,
   App,
   Popover,
+  Alert,
 } from "antd";
 import {
   UserRound,
@@ -29,6 +32,7 @@ import { getEffectiveRoutePath } from "@/lib/auth";
 import { withBasePath, withoutBasePath } from "@/lib/basePath";
 import { authEventUtils } from "@/lib/authEvents";
 import { oauthService } from "@/services/oauthService";
+import { CasdoorSignupButton } from "@/components/auth/CasdoorSignupButton";
 import log from "@/lib/logger";
 import { getPasswordChecks, getStrengthLevel, validatePassword as validatePasswordUtil } from "@/lib/utils";
 import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
@@ -60,6 +64,10 @@ export function RegisterModal() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const isOAuthCompletion = registerModalOptions?.mode === "oauth_complete";
+  const isCasdoorOnly =
+    isOAuthCompletion &&
+    registerModalOptions?.oauthProvider === "casdoor" &&
+    registerModalOptions?.passwordRequired === false;
 
   const validateEmail = (email: string): boolean => {
     if (!email) return false;
@@ -169,7 +177,7 @@ export function RegisterModal() {
       return;
     }
 
-    if (!validatePassword(values.password)) {
+    if (!isCasdoorOnly && !validatePassword(values.password)) {
       const errorMsg = t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit";
       message.error(errorMsg);
       setPasswordError({ target: "password", message: errorMsg });
@@ -189,7 +197,7 @@ export function RegisterModal() {
         const result = await oauthService.completeOAuth({
           email: registerModalOptions?.emailReadOnly ? undefined : values.email,
           invite_code: values.inviteCode || "",
-          password: values.password,
+          ...(!isCasdoorOnly ? { password: values.password } : {}),
         });
 
         if (result.error || !result.data) {
@@ -531,130 +539,142 @@ export function RegisterModal() {
             />
           </Form.Item>
 
-          <Form.Item
-            name="password"
-            label={t("auth.passwordLabel")}
-            validateStatus={
-              passwordError.target === "password" &&
-                !form.getFieldError("password").length
-                ? "error"
-                : ""
-            }
-            help={
-              form.getFieldError("password").length
-                ? undefined
-                : passwordError.target === "password"
-                  ? passwordError.message
-                  : authServiceUnavailable
-                    ? t("auth.authServiceUnavailable")
-                    : undefined
-            }
-            rules={[
-              { required: true, message: t("auth.passwordRequired") },
-              {
-                validator: (_, value) => {
-                  if (!value) return Promise.resolve();
-                  if (!validatePassword(value)) {
-                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
-                  }
-                  return Promise.resolve();
-                },
-              },
-            ]}
-            hasFeedback
-          >
-            <Input.Password
-              id="register-password"
-              prefix={<LockKeyhole className="text-gray-400" size={16} />}
-              placeholder={t("auth.passwordRequired")}
-              size="large"
-              onChange={handlePasswordChange}
+          {isCasdoorOnly && (
+            <Alert
+              type="info"
+              showIcon
+              className="mb-4"
+              title={t("auth.casdoorOnlyNotice")}
             />
-          </Form.Item>
+          )}
+          {!isCasdoorOnly && (
+            <>
+              <Form.Item
+                name="password"
+                label={t("auth.passwordLabel")}
+                validateStatus={
+                  passwordError.target === "password" &&
+                    !form.getFieldError("password").length
+                    ? "error"
+                    : ""
+                }
+                help={
+                  form.getFieldError("password").length
+                    ? undefined
+                    : passwordError.target === "password"
+                      ? passwordError.message
+                      : authServiceUnavailable
+                        ? t("auth.authServiceUnavailable")
+                        : undefined
+                }
+                rules={[
+                  { required: true, message: t("auth.passwordRequired") },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.resolve();
+                      if (!validatePassword(value)) {
+                        return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                      }
+                      return Promise.resolve();
+                    },
+                  },
+                ]}
+                hasFeedback
+              >
+                <Input.Password
+                  id="register-password"
+                  prefix={<LockKeyhole className="text-gray-400" size={16} />}
+                  placeholder={t("auth.passwordRequired")}
+                  size="large"
+                  onChange={handlePasswordChange}
+                />
+              </Form.Item>
 
-          {/* Password Strength Indicator */}
-          {passwordValue && (() => {
-            const checks = getPasswordChecks(passwordValue);
-            const levelInfo = getStrengthLevel(passwordValue, t);
-            return (
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
-                  <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
-                    {levelInfo.label}
-                  </span>
-                </div>
-                <div className="flex gap-1">
-                  {[0, 1, 2, 3].map((level) => (
-                    <div
-                      key={level}
-                      className="h-1 flex-1 rounded-full transition-colors"
-                      style={{
-                        backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+              {/* Password Strength Indicator */}
+              {passwordValue && (() => {
+                const checks = getPasswordChecks(passwordValue);
+                const levelInfo = getStrengthLevel(passwordValue, t);
+                return (
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-500">{t("auth.passwordStrength") || "Password strength"}</span>
+                      <span className="text-xs font-medium" style={{ color: levelInfo.color }}>
+                        {levelInfo.label}
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      {[0, 1, 2, 3].map((level) => (
+                        <div
+                          key={level}
+                          className="h-1 flex-1 rounded-full transition-colors"
+                          style={{
+                            backgroundColor: level <= levelInfo.level ? levelInfo.color : "#e5e7eb"
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
-          <Form.Item
-            name="confirmPassword"
-            label={t("auth.confirmPasswordLabel")}
-            validateStatus={
-              passwordError.target === "confirmPassword" &&
-                !form.getFieldError("confirmPassword").length
-                ? "error"
-                : ""
-            }
-            help={
-              form.getFieldError("confirmPassword").length
-                ? undefined
-                : passwordError.target === "confirmPassword"
-                  ? passwordError.message
-                  : authServiceUnavailable
-                    ? t("auth.authServiceUnavailable")
-                    : undefined
-            }
-            dependencies={["password"]}
-            hasFeedback
-            rules={[
-              { required: true, message: t("auth.confirmPasswordRequired") },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  const password = getFieldValue("password");
-                  // First check password length using validation function
-                  if (password && !validatePassword(password)) {
-                    setPasswordError({
-                      target: "password",
-                      message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
-                    });
-                    return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
-                  }
-                  // Then check password match
-                  if (!value || getFieldValue("password") === value) {
-                    setPasswordError({ target: "", message: "" });
-                    return Promise.resolve();
-                  }
-                  setPasswordError({
-                    target: "confirmPassword",
-                    message: t("auth.passwordsDoNotMatch"),
-                  });
-                  return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
-                },
-              }),
-            ]}
-          >
-            <Input.Password
-              id="register-confirm-password"
-              prefix={<ShieldCheck className="text-gray-400" size={16} />}
-              placeholder={t("auth.confirmPasswordRequired")}
-              size="large"
-              onChange={handleConfirmPasswordChange}
-            />
-          </Form.Item>
+              <Form.Item
+                name="confirmPassword"
+                label={t("auth.confirmPasswordLabel")}
+                validateStatus={
+                  passwordError.target === "confirmPassword" &&
+                    !form.getFieldError("confirmPassword").length
+                    ? "error"
+                    : ""
+                }
+                help={
+                  form.getFieldError("confirmPassword").length
+                    ? undefined
+                    : passwordError.target === "confirmPassword"
+                      ? passwordError.message
+                      : authServiceUnavailable
+                        ? t("auth.authServiceUnavailable")
+                        : undefined
+                }
+                dependencies={["password"]}
+                hasFeedback
+                rules={[
+                  { required: true, message: t("auth.confirmPasswordRequired") },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      const password = getFieldValue("password");
+                      // First check password length using validation function
+                      if (password && !validatePassword(password)) {
+                        setPasswordError({
+                          target: "password",
+                          message: t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit",
+                        });
+                        return Promise.reject(new Error(t("auth.passwordStrengthError") || "Password must contain uppercase, lowercase, and digit"));
+                      }
+                      // Then check password match
+                      if (!value || getFieldValue("password") === value) {
+                        setPasswordError({ target: "", message: "" });
+                        return Promise.resolve();
+                      }
+                      setPasswordError({
+                        target: "confirmPassword",
+                        message: t("auth.passwordsDoNotMatch"),
+                      });
+                      return Promise.reject(new Error(t("auth.passwordsDoNotMatch")));
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password
+                  id="register-confirm-password"
+                  prefix={<ShieldCheck className="text-gray-400" size={16} />}
+                  placeholder={t("auth.confirmPasswordRequired")}
+                  size="large"
+                  onChange={handleConfirmPasswordChange}
+                />
+              </Form.Item>
 
+            </>
+          )}
           <Form.Item
             name="inviteCode"
             label={t("auth.inviteCodeLabel")}
@@ -758,6 +778,12 @@ export function RegisterModal() {
                   : t("auth.register")}
             </Button>
           </Form.Item>
+
+          {!isOAuthCompletion && (
+            <Form.Item>
+              <CasdoorSignupButton />
+            </Form.Item>
+          )}
 
           {!isOAuthCompletion && (
             <div className="text-center">

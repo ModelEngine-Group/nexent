@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   keepPreviousData,
   useMutation,
@@ -72,10 +74,11 @@ export function useMyEditableSkills(
   });
 }
 
-export function useMyEditableSkillCounts() {
+export function useMyEditableSkillCounts(enabled = true) {
   return useQuery({
     queryKey: [MY_EDITABLE_SKILL_COUNTS_QUERY_KEY],
     queryFn: () => skillRepositoryService.fetchMyEditableSkillCounts(),
+    enabled,
     staleTime: 60_000,
     refetchOnMount: "always",
   });

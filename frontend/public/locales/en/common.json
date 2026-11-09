@@ -1806,6 +1806,8 @@
   "auth.accessDenied": "You do not have permission to access this page",
   "auth.oauthDivider": "or continue with",
   "auth.oauthLogin": "{{provider}} Login",
+  "auth.casdoorOnlyNotice": "This account signs in through Casdoor only. No Nexent password is needed.",
+  "auth.casdoorSignup": "Sign up with Casdoor",
   "auth.casLogin": "{{provider}} Login",
   "auth.oauthLoginFailed": "Third-party login failed: {{error}}",
   "auth.oauthLoginFailedGeneric": "Third-party login failed. Please try again.",

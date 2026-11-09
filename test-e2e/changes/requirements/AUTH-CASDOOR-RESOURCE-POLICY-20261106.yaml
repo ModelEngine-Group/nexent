@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-RESOURCE-POLICY-20261106
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-RESOURCE-POLICY-20261106
+  title: Classify Casdoor permissions by Nexent resource type
+  description: Reconcile supported Casdoor actions under their matching resource categories and preserve legacy policy compatibility.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR-POLICY-D2-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_casdoor_feature_policy.py
+    behaviors:
+    - Batch enforcement pairs each known action with its own resource category and keeps support for legacy flat policies.
+    - An unrelated category and unrecognized action cannot confer a permission.
+    reason: The current feature policy suite proves request scoping and malformed responses for the flat resource only.
+  notes: Strengthen the existing system-owned D2 HTTP Case without creating a duplicate component Case.

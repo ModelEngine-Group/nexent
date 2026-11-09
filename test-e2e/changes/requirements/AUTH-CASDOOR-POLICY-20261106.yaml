@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-POLICY-20261106
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-POLICY-20261106
+  title: Configure Nexent feature grants in Casdoor
+  description: Reconcile scoped Casdoor feature policies and enforce selected capabilities in the existing Nexent session.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: [AUTH-CASDOOR-ROLE-SYNC-D2-001]
+    added: [AUTH-CASDOOR-POLICY-D2-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/services/test_casdoor_feature_policy.py
+    - frontend/tests/component/casdoorSkillPermissions.test.tsx
+    behaviors:
+    - Only the configured organization and model, enabled approved permissions and recognized actions can grant access.
+    - Missing or expired snapshots deny governed actions, while local accounts and ungoverned actions retain existing checks.
+    - Frontend and backend independently honor Skill repository action grants and revocations.
+    reason: Existing tests cover identity and role reconciliation without feature policy enforcement.
+  notes: The system owns a self-contained D2 Case with disposable PostgreSQL and a controlled Casdoor transport. No new D1 duplicates isolated proofs.

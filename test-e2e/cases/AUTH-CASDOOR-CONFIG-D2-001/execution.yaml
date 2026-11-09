@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-CONFIG-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-CONFIG-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_public_casdoor_configuration]
+  AC-02: [test_incomplete_casdoor_configuration, test_casdoor_login_modes]
+notes: Self-contained production-router HTTP proof. Synthetic settings are restored and TestClient is closed by fixtures; no provider, persistence, process or account resources are created.

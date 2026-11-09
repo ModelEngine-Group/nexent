@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-POLICY-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-FEATURE-POLICY]
+  title: Casdoor 功能授权和撤销在同一 Nexent 会话生效
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise the configured policy through the current user response and real Skill repository HTTP authorization using the same session.
+  preconditions:
+  - NEXENT_AUTH_TEST_DSN points to an isolated PostgreSQL instance that allows creation of a disposable database.
+  test_data:
+    profile: owned PostgreSQL database, synthetic Casdoor-only member and controlled feature model responses
+  steps:
+  - order: 1
+    action: Reconcile a read grant for a USER from the designated model and open the existing repository HTTP route and user authorization endpoint.
+    expected: The same token can read the repository and receives the menu and read action, while install without a grant is denied.
+  - order: 2
+    action: Remove or disable the policy and reconcile again, then repeat the authenticated requests.
+    expected: The original token remains valid and the repository API now denies read, while the menu and action disappear from authorization data.
+  - order: 3
+    action: Grant read under the Skill repository resource, then move the same action to an unrelated resource and reconcile after each edit.
+    expected: The matching resource grants access and the unrelated resource denies it in the same session.
+  expected_results:
+  - Managed actions can be added independently of the user's tenant role.
+  - Revocation also applies to direct API calls without a new login.
+  - The same registered action has authority only under its own resource class or the legacy flat resource.
+  forbidden_side_effects:
+  - No external provider calls, business account changes, leaked credentials, or leftover owned test resources.
+  acceptance:
+  - id: AC-01
+    description: A verified policy grants the selected action, preserving independent denial for ungranted actions.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Removing the policy revokes the original session's API and menu access.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Classified resource policies support same-session grants and reject an action under an unrelated resource.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: Real Nexent FastAPI routes and PostgreSQL with controlled Casdoor policy HTTP responses
+    request_expectations: [A valid Nexent session authorizes existing endpoints after each policy reconciliation]
+    response_expectations: [HTTP status and user permission data agree after grant and revocation]

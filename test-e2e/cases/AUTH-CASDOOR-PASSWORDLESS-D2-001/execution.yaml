@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-PASSWORDLESS-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-PASSWORDLESS-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_passwordless_completion_and_provider_policy]
+  AC-02: [test_passwordless_completion_and_provider_policy]
+  AC-03: [test_completion_input_boundaries]
+notes: Real FastAPI completion and authentication routes with an owned disposable PostgreSQL database. Synthetic signed pending identities stand at the external provider boundary; this does not execute an external OAuth journey. All database resources are removed by fixture teardown.

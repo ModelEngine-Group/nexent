@@ -297,6 +297,7 @@ def get_pending_oauth_info(payload: PendingOAuthIdentity) -> Dict[str, Any]:
         "provider_username": payload.get("provider_username") or "",
         "provider_email": provider_email,
         "email_required": not bool(provider_email),
+        "password_required": payload["provider"] != "casdoor",
     }
 
 
@@ -331,7 +332,7 @@ def _role_from_invitation_type(code_type: str) -> str:
 
 async def complete_pending_oauth_account(
     pending_identity: PendingOAuthIdentity,
-    password: str,
+    password: Optional[str],
     invite_code: str,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -350,7 +351,8 @@ async def complete_pending_oauth_account(
     provider_email = pending.get("provider_email") or ""
     provider_username = pending.get("provider_username") or ""
 
-    if len(password or "") < 6:
+    casdoor_only = provider == "casdoor"
+    if not casdoor_only and len(password or "") < 6:
         raise OAuthLinkError("Password must be at least 6 characters")
 
     final_email = _validate_email(provider_email or email)
@@ -371,7 +373,7 @@ async def complete_pending_oauth_account(
     from management.db.client import get_db_session
     from management.services.permission.identity.authentication import validate_password_strength
 
-    if not validate_password_strength(password):
+    if not casdoor_only and not validate_password_strength(password):
         raise OAuthLinkError("Password must be at least 8 characters with uppercase, lowercase, and digit")
     if find_account_user_id_by_email(final_email):
         raise OAuthLinkError("Email already exists. Please log in first, then link this OAuth account in settings.")
@@ -383,7 +385,15 @@ async def complete_pending_oauth_account(
     is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
     with get_db_session() as session:
-        account = create_account(final_email, hash_password(password), db_session=session)
+        if casdoor_only:
+            from management.services.permission.identity.casdoor_roles import has_initial_role_mapping
+
+            initial_role = {}
+            if tenant_id != ASSET_OWNER_TENANT_ID and has_initial_role_mapping(user_role):
+                initial_role["casdoor_initial_role"] = user_role
+            account = create_account(final_email, None, db_session=session, auth_provider="casdoor", **initial_role)
+        else:
+            account = create_account(final_email, hash_password(password), db_session=session)
         user_id = account["user_id"]
         insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_role=user_role,
                            user_email=final_email, db_session=session)
@@ -428,6 +438,20 @@ async def complete_pending_oauth_account(
             "expires_in_seconds": expiry_seconds,
         },
     }
+
+
+def require_provider_authentication(account: Dict[str, Any], provider: str) -> None:
+    """Enforce the login provider recorded when a Casdoor-only account was created."""
+    metadata = account.get("source_metadata") if isinstance(account, dict) else None
+    if isinstance(metadata, dict) and metadata.get("auth_provider") == "casdoor" and provider != "casdoor":
+        raise OAuthLinkError("This account only supports Casdoor login")
+
+
+def require_provider_unlink(account: Dict[str, Any], provider: str) -> None:
+    """Preserve the required login method of a Casdoor-only account."""
+    metadata = account.get("source_metadata") if isinstance(account, dict) else None
+    if isinstance(metadata, dict) and metadata.get("auth_provider") == "casdoor" and provider == "casdoor":
+        raise OAuthLinkError("Cannot unlink the required Casdoor login")
 
 
 def create_or_update_oauth_account(

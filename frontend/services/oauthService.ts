@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -32,11 +34,12 @@ export interface PendingOAuthInfo {
   provider_username: string;
   provider_email: string;
   email_required: boolean;
+  password_required: boolean;
 }
 
 export interface CompleteOAuthRequest {
   email?: string;
-  password: string;
+  password?: string;
   invite_code: string;
 }
 
@@ -163,6 +166,10 @@ export const oauthService = {
 
   startOAuthLogin: (provider: string): void => {
     window.location.href = `${API_ENDPOINTS.oauth.authorize}?provider=${provider}`;
+  },
+
+  startOAuthSignup: (provider: string): void => {
+    window.location.href = API_ENDPOINTS.oauth.signup(provider);
   },
 
   startOAuthLink: (provider: string): void => {

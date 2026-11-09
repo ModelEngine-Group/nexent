@@ -23,6 +23,9 @@ from management.services.skill.service import SkillService
 from management.services.skill.naming import generate_available_copy_skill_name
 
 from management.services.permission.identity.display import enrich_repository_identities, repository_identity_fields
+from permissions.casdoor_policy import (
+    SKILL_INSTALL, SKILL_PUBLISH, SKILL_READ, SKILL_REVIEW, feature_grants, permission_override, policy_scope,
+)
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -265,11 +268,25 @@ def _get_user_role(user_id: str) -> str:
     return str(user_tenant.get("user_role") or "USER")
 
 
-def ensure_skill_repository_access(user_id: str) -> None:
-    """Reject ordinary users from the Skill Repository API surface."""
+def ensure_skill_repository_access(
+    user_id: str, *, status: str | None = None, detail: bool = False, write: bool = False,
+) -> bool:
+    """Check the requested repository surface, returning whether Casdoor governs it."""
     user_role = _get_user_role(user_id).upper()
+    grants = feature_grants(user_id, user_role)
+    if grants is not None:
+        if write:
+            required = {SKILL_PUBLISH, SKILL_REVIEW}
+        elif detail:
+            required = {SKILL_READ, SKILL_REVIEW}
+        else:
+            required = {SKILL_REVIEW if status not in {None, STATUS_SHARED} else SKILL_READ}
+        if not grants & required:
+            raise ForbiddenError("Skill Repository permission is required")
+        return True
     if user_role == "USER":
         raise ForbiddenError("User role USER is not authorized to access Skill Repository")
+    return False
 
 
 def _can_publish_skill(
@@ -277,8 +294,11 @@ def _can_publish_skill(
     skill: Dict[str, Any],
     user_id: str,
     user_role: str,
+    policy_grant: bool | None,
 ) -> bool:
     """Return whether the user may submit the skill to the repository."""
+    if policy_grant is not None:
+        return policy_grant and (user_role == "ADMIN" or str(skill.get("created_by")) == str(user_id))
     if user_role == "ADMIN":
         return True
     return (
@@ -299,12 +319,13 @@ def _validate_create_listing_permission(
     user_id: str,
     skill_info: Dict[str, Any],
 ) -> None:
-    """Only ADMIN, or DEV who created the skill, may share to marketplace."""
+    """Check the right to submit this skill to the repository."""
     user_role = _get_user_role(user_id)
     if _can_publish_skill(
         skill=skill_info,
         user_id=user_id,
         user_role=user_role,
+        policy_grant=permission_override(user_id, user_role, SKILL_PUBLISH),
     ):
         return
     raise ForbiddenError(
@@ -632,6 +653,18 @@ def _validate_repository_status_transition(
 ) -> Optional[Dict[str, str]]:
     """Validate role, ownership, and allowed status transition."""
     transition = (current_status, new_status)
+    is_review = transition in _ADMIN_REVIEW_STATUS_TRANSITIONS
+    allowed = permission_override(user_id, user_role, SKILL_REVIEW if is_review else SKILL_PUBLISH)
+    if allowed is not None:
+        if not allowed or record.get("publisher_tenant_id") != tenant_id:
+            raise ForbiddenError("Not authorized to update this repository listing")
+        if is_review:
+            return None
+        return _validate_publisher_status_transition(
+            user_role="ADMIN" if user_role == "ADMIN" else "DEV", transition=transition,
+            current_status=current_status, new_status=new_status, record=record,
+            user_id=user_id, tenant_id=tenant_id,
+        )
 
     if user_role == "SU":
         _validate_su_status_transition(transition, current_status, new_status)
@@ -676,6 +709,10 @@ def update_skill_repository_status_impl(
         raise ValueError(_REPOSITORY_LISTING_NOT_FOUND)
 
     current_status = record.get("status")
+    if (current_status == status and policy_scope()
+            and ensure_skill_repository_access(user_id, status=current_status)):
+        enrich_repository_identities([record], "skill")
+        return _to_summary_item(record)
     publisher_updates: Optional[Dict[str, str]] = None
     submitted_by: Optional[str] = None
     if current_status != status:
@@ -809,6 +846,8 @@ def install_skill_from_repository_impl(
     target_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Install a shared skill repository listing into the current tenant."""
+    if policy_scope() and permission_override(user_id, _get_user_role(user_id), SKILL_INSTALL) is False:
+        raise ForbiddenError("Skill Repository install permission is required")
     record = get_skill_repository_by_id_and_publisher(
         skill_repository_id,
         tenant_id,
@@ -909,6 +948,7 @@ def _to_mine_skill_item(
     *,
     user_id: str,
     user_role: str,
+    publish_grant: bool | None,
     repository_by_skill_id: Dict[int, List[Dict[str, Any]]],
     managed_tags_by_skill_id: Dict[str, List[str]],
 ) -> Dict[str, Any]:
@@ -942,6 +982,7 @@ def _to_mine_skill_item(
             skill=skill,
             user_id=user_id,
             user_role=user_role,
+            policy_grant=publish_grant,
         ),
         "repository_info": repository_info,
     }
@@ -1030,11 +1071,13 @@ def list_my_editable_skills_impl(
             if skill.get("skill_id") is not None
         ],
     )
+    publish_grant = permission_override(user_id, user_role, SKILL_PUBLISH)
     items = [
         _to_mine_skill_item(
             skill,
             user_id=user_id,
             user_role=user_role,
+            publish_grant=publish_grant,
             repository_by_skill_id=repository_by_skill_id,
             managed_tags_by_skill_id=managed_tags_by_skill_id,
         )
@@ -1123,16 +1166,18 @@ def list_skill_repository_listings_impl(
     )
     user_role = _get_user_role(user_id)
     enrich_repository_identities(result.get("items", []), "skill")
+    can_publish = permission_override(user_id, user_role, SKILL_PUBLISH)
     return {
         "items": [
             _to_summary_item(
                 record,
                 can_take_down=(
                     record.get("status") == STATUS_SHARED
+                    and can_publish is not False
                     and (
                         user_role in ("ADMIN", "SU")
                         or (
-                            user_role == "DEV"
+                            (user_role == "DEV" or can_publish is True)
                             and str(record.get("publisher_user_id")) == str(user_id)
                         )
                     )

@@ -36,8 +36,11 @@ const STATUS_ACTION_LABEL_KEYS: Partial<
 export function SkillSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
-  const { user } = useAuthorizationContext();
+  const { user, hasPermission } = useAuthorizationContext();
   const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const managed = user?.casdoorFeaturePolicy === true;
+  const canInstall = !managed || hasPermission("skill.repository:install");
+  const canPublish = !managed || hasPermission("skill.repository:publish");
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
   const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<
@@ -259,9 +262,9 @@ export function SkillSpace({ active }: { active: boolean }) {
           total={repositoryTotal}
           onPageChange={setRepositoryPage}
           onRetry={() => refetchRepository()}
-          onInstall={handleInstall}
+          onInstall={canInstall ? handleInstall : undefined}
           onDetailClick={openDetail}
-          showAdminMenu={isAdmin}
+          showAdminMenu={isAdmin && canPublish}
           onTakeDown={confirmTakeDown}
           installingRepositoryId={installingRepositoryId}
           takingDownRepositoryId={updatingRepositoryId}
@@ -280,7 +283,7 @@ export function SkillSpace({ active }: { active: boolean }) {
         centered
         destroyOnHidden
         title={t("skillRepository.copy.title")}
-        open={copyListing != null}
+        open={copyListing != null && canInstall}
         okText={t("skillRepository.copy.confirm")}
         cancelText={t("common.cancel")}
         confirmLoading={installMutation.isPending}

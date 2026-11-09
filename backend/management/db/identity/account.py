@@ -54,11 +54,19 @@ def get_account_by_email(email: str, db_session=None):
 
 
 def create_account(email: str | None, password_hash=None, *, user_id=None, db_session=None,
-                   api_only=False, created_by=None):
-    """Create a login identity or an explicitly passwordless, email-free API identity."""
+                   api_only=False, created_by=None, auth_provider=None, casdoor_initial_role=None):
+    """Create a local login, Casdoor-only identity or email-free API identity."""
     user_id = user_id or str(uuid4())
+    if auth_provider is not None and (
+        auth_provider != "casdoor" or api_only or password_hash is not None
+    ):
+        raise ValueError("Casdoor-only accounts cannot have a local password")
     if api_only and (email is not None or password_hash is not None):
         raise ValueError("API-only accounts cannot have an email or password")
+    if casdoor_initial_role is not None and (
+        auth_provider != "casdoor" or casdoor_initial_role not in {"USER", "DEV", "ADMIN"}
+    ):
+        raise ValueError("Invalid initial Casdoor tenant role")
     email = None if api_only else str(email or "").strip().lower()
     if not api_only and (
         not email
@@ -67,6 +75,13 @@ def create_account(email: str | None, password_hash=None, *, user_id=None, db_se
         or any(character.isspace() for character in email)
     ):
         raise ValueError("Invalid account email")
+    source_metadata: dict[str, str | bool] = {}
+    if api_only:
+        source_metadata["api_only"] = True
+    if auth_provider:
+        source_metadata["auth_provider"] = auth_provider
+    if casdoor_initial_role:
+        source_metadata["casdoor_initial_role"] = casdoor_initial_role
     with get_db_session(db_session) as session:
         lock_account_keys(session, user_id, email)
         if get_account(user_id, session) or (email is not None and get_account_by_email(email, session)):
@@ -86,7 +101,7 @@ def create_account(email: str | None, password_hash=None, *, user_id=None, db_se
             created_by=created_by or user_id,
             updated_by=created_by or user_id,
             delete_flag="N",
-            source_metadata={"api_only": True} if api_only else {},
+            source_metadata=source_metadata,
         )
         session.add(account)
         session.flush()

@@ -3,6 +3,8 @@
 """OAuth provider definitions and configuration lookup helpers."""
 
 from typing import Dict
+
+from consts import const as casdoor_settings
 from contracts.identity import OAuthProviderDefinition
 from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
 
@@ -138,7 +140,22 @@ HUAWEI_PROVIDER = OAuthProviderDefinition(
     client_secret_env="HUAWEI_OAUTH_CLIENT_SECRET",
 )
 
+CASDOOR_PROVIDER = OAuthProviderDefinition(
+    name="casdoor",
+    display_name="Casdoor",
+    icon="casdoor",
+    authorize_url=f"{casdoor_settings.CASDOOR_ENDPOINT}/login/oauth/authorize",
+    authorize_params={"response_type": "code", "scope": "openid profile email"},
+    token_url=f"{casdoor_settings.CASDOOR_BACKEND_ENDPOINT or casdoor_settings.CASDOOR_ENDPOINT}/api/login/oauth/access_token",
+    userinfo_url=f"{casdoor_settings.CASDOOR_BACKEND_ENDPOINT or casdoor_settings.CASDOOR_ENDPOINT}/api/userinfo",
+    userinfo_field_map={"id": "sub", "email": "email", "username": "preferred_username"},
+    client_id_env="CASDOOR_CLIENT_ID",
+    client_secret_env="CASDOOR_CLIENT_SECRET",
+)
+
+
 OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
+    "casdoor": CASDOOR_PROVIDER,
     "github": GITHUB_PROVIDER,
     "wechat": WECHAT_PROVIDER,
     "gde": GDE_PROVIDER,
@@ -152,6 +169,8 @@ def get_provider_definition(provider: str) -> OAuthProviderDefinition:
 
 
 def is_provider_enabled(definition: OAuthProviderDefinition) -> bool:
+    if definition.name == "casdoor":
+        return casdoor_settings.is_casdoor_enabled()
     if definition.enabled_check:
         return get_oauth_setting(definition.enabled_check, "false").lower() in (
             "true",

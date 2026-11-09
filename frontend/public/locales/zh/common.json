@@ -1699,6 +1699,8 @@
   "auth.accessDenied": "您没有权限访问此页面",
   "auth.oauthDivider": "或使用第三方登录",
   "auth.oauthLogin": "{{provider}} 登录",
+  "auth.casdoorOnlyNotice": "此账号仅通过 Casdoor 登录，无需设置 Nexent 密码。",
+  "auth.casdoorSignup": "使用 Casdoor 注册",
   "auth.casLogin": "{{provider}} 登录",
   "auth.oauthLoginFailed": "第三方登录失败：{{error}}",
   "auth.oauthLoginFailedGeneric": "第三方登录失败，请重试",

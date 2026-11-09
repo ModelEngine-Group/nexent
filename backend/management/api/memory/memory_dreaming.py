@@ -30,6 +30,7 @@ from management.services.memory.dreaming.service import (
     get_memory_dreaming_service,
 )
 from gateway.authentication.auth import get_current_user_id
+from permissions.casdoor_policy import permission_override
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
 
@@ -45,12 +46,15 @@ def _resolve_target_user(
         return caller_user_id, tenant_id
     caller = get_user_tenant_by_user_id(caller_user_id) or {}
     caller_role = str(caller.get("user_role") or "").upper()
-    if not check_role_permission(
-        caller_role,
-        permission_category="RESOURCE",
-        permission_type="DREAMING",
-        permission_subtype=tenant_capability,
-    ):
+    allowed = permission_override(caller_user_id, caller_role, f"dreaming:{tenant_capability.lower()}")
+    if allowed is None:
+        allowed = check_role_permission(
+            caller_role,
+            permission_category="RESOURCE",
+            permission_type="DREAMING",
+            permission_subtype=tenant_capability,
+        )
+    if not allowed:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Resource not found")
     target = get_user_tenant_by_user_id(target_user_id) or {}
     if target.get("tenant_id") != tenant_id:

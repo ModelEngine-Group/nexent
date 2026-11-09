@@ -1,0 +1,38 @@
+schema_version: '1.0'
+stage: D4
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-LOGIN-D4-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-LOGIN]
+  title: 从 Nexent 经 Casdoor 认证后回到本地账号会话
+  type: E2E
+  priority: P1
+  status: skipped_by_policy
+  automation: not_applicable
+  objective: Preserve the intended browser acceptance journey while OAuth journeys remain policy-skipped.
+  preconditions:
+  - A Casdoor application and ordinary test user are configured with the exact Nexent callback URL.
+  - Nexent has the matching client credentials and a valid JWT signing secret.
+  test_data:
+    profile: isolated Casdoor application and Nexent test tenant
+  actor: Nexent user
+  steps:
+  - order: 1
+    action: Open Nexent login and select Casdoor, then authenticate at Casdoor.
+    expected: Redirect returns to Nexent with a browser-bound state and authorization code.
+  - order: 2
+    action: Complete the existing account/tenant onboarding for a new user and log in again.
+    expected: Onboarding creates a normal local account; later logins reuse the binding and establish a Nexent session.
+  - order: 3
+    action: Cancel authentication or use an unrelated/expired browser flow.
+    expected: No authenticated session or unintended account binding is created.
+  expected_results:
+  - Casdoor authenticates the user and Nexent enforces its own tenant and role rules.
+  - Subsequent login reuses the local account and invalid flows fail safely.
+  forbidden_side_effects:
+  - No automatic administrator elevation or email-only takeover of an existing account.
+  - No password, code verifier, client secret or token in public responses or reports.
+  journey: [Nexent login, Casdoor authentication, Nexent callback, Account completion if needed, Authenticated Nexent home]
+  final_business_result: [The Casdoor user can sign in to Nexent with local tenant authorization.]
+  failure_evidence: [Sanitized redirect observations and browser trace; never report credentials.]

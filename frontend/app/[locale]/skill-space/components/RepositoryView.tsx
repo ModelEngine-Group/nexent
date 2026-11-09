@@ -51,7 +51,7 @@ export function RepositoryView({
   total: number;
   onPageChange: (page: number) => void;
   onRetry: () => void;
-  onInstall: (listing: SkillRepositoryListingItem) => void;
+  onInstall?: (listing: SkillRepositoryListingItem) => void;
   onDetailClick: (listing: SkillRepositoryListingItem) => void;
   showAdminMenu: boolean;
   onTakeDown: (listing: SkillRepositoryListingItem) => void;
@@ -108,18 +108,20 @@ export function RepositoryView({
                   }
                   onTakeDown={() => onTakeDown(listing)}
                   action={
-                    <Button
-                      type="text"
-                      size="small"
-                      className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
-                      icon={<Copy className="size-3.5" />}
-                      loading={
-                        installingRepositoryId === listing.skill_repository_id
-                      }
-                      onClick={() => onInstall(listing)}
-                    >
-                      {t("skillRepository.repository.copy")}
-                    </Button>
+                    onInstall && (
+                      <Button
+                        type="text"
+                        size="small"
+                        className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                        icon={<Copy className="size-3.5" />}
+                        loading={
+                          installingRepositoryId === listing.skill_repository_id
+                        }
+                        onClick={() => onInstall(listing)}
+                      >
+                        {t("skillRepository.repository.copy")}
+                      </Button>
+                    )
                   }
                 />
               )}

@@ -43,7 +43,15 @@ const SkillDetailModal = dynamic(
 );
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function MySkill({ active }: { active: boolean }) {
+export function MySkill({
+  active,
+  canCreate,
+  canPublish,
+}: {
+  active: boolean;
+  canCreate: boolean;
+  canPublish: boolean;
+}) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const pageSize = REPOSITORY_PAGE_SIZE;
@@ -142,13 +150,21 @@ export function MySkill({ active }: { active: boolean }) {
       ...(mineTagPredicates.length > 0
         ? { tag_predicates: mineTagPredicates }
         : {}),
-      ...(mineOwnership === "all" &&
+      ...(canCreate &&
+      mineOwnership === "all" &&
       !debouncedMineSearch.trim() &&
       mineTagPredicates.length === 0
         ? { new_skill_padding: true }
         : {}),
     }),
-    [debouncedMineSearch, mineOwnership, minePage, mineTagPredicates, pageSize]
+    [
+      canCreate,
+      debouncedMineSearch,
+      mineOwnership,
+      minePage,
+      mineTagPredicates,
+      pageSize,
+    ]
   );
   const {
     data: mineData,
@@ -181,7 +197,7 @@ export function MySkill({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (active) refetchMine().catch(() => {});
-  }, [active, refetchMine]);
+  }, [active, canPublish, refetchMine]);
 
   useEffect(() => {
     const total = mineData?.pagination?.total;
@@ -248,6 +264,7 @@ export function MySkill({ active }: { active: boolean }) {
           total={mineTotal}
           onPageChange={setMinePage}
           onRetry={() => refetchMine()}
+          canPublish={canPublish}
           onCreateSkill={() => {
             setEditingSkill(null);
             setSkillBuildLoaded(true);

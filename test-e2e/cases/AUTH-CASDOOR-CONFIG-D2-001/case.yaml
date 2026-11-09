@@ -1,0 +1,44 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-CASDOOR-CONFIG-D2-001
+  feature_id: AUTH-CASDOOR
+  business_rule_ids: [AUTH-CASDOOR-CONFIG]
+  title: Casdoor 配置完整时公开登录入口且不泄露密钥
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the actual public OAuth configuration HTTP contract without a login journey.
+  preconditions:
+  - Backend Python dependencies are installed; no running database or identity provider is required.
+  test_data:
+    profile: self-contained synthetic Casdoor configuration
+  steps:
+  - order: 1
+    action: Request the actual configuration and provider routes with complete synthetic configuration.
+    expected: Both routes expose the Casdoor provider and return HTTP 200 without secrets.
+  - order: 2
+    action: Repeat with missing credentials, invalid endpoint, disabled mode and forced mode.
+    expected: Incomplete configuration hides Casdoor; disabled mode remains disabled; force selects the sole configured provider.
+  expected_results:
+  - Public provider and configuration envelopes remain compatible and contain only public metadata.
+  - Configuration boundaries preserve the existing login modes.
+  forbidden_side_effects:
+  - No provider/network or persistence calls and no client secret in the response.
+  acceptance:
+  - id: AC-01
+    description: Complete configuration exposes only public provider metadata.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Missing/invalid configuration and login-mode boundaries are enforced.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  contract:
+    protocol: HTTP API through the production FastAPI router
+    request_expectations: [GET /user/oauth/config, GET /user/oauth/providers]
+    response_expectations: [HTTP 200 with the existing message/data envelopes and no secret fields]

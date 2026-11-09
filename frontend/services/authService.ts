@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Authentication service
  *
@@ -354,7 +356,9 @@ export const authService = {
           email: data.data.user.user_email,
           username: data.data.user.username,
           role: data.data.user.user_role,
-          authProvider: data.data.user.auth_provider,
+            authProvider: data.data.user.auth_provider,
+            casdoorRoleSync: data.data.user.casdoor_role_sync === true,
+            casdoorFeaturePolicy: data.data.user.casdoor_feature_policy === true,
           avatarUrl: data.data.user.avatarUrl,
           permissions: data.data.user.permissions.map((permission: string) =>
             permission.toLowerCase()

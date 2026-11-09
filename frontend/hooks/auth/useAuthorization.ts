@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
@@ -21,6 +22,8 @@ import log from "@/lib/logger";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { checkSessionValid } from "@/lib/session";
 import { useGroupList } from "@/hooks/group/useGroupList";
+
+const CASDOOR_ROLE_REFRESH_MS = 15_000;
 
 /**
  * Custom hook for authorization management
@@ -36,8 +39,9 @@ export function useAuthorization(): AuthorizationContextType {
   const [groupIds, setGroupIds] = useState<number[]>([]);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [accessibleRoutes, setAccessibleRoutes] = useState<string[]>([]);
-  const [lastCheckedPath, setLastCheckedPath] = useState<string | null>(null);
+  const lastCheckedPath = useRef<string | null>(null);
   const [isAuthzReady, setIsAuthzReady] = useState(false);
+  const authzGeneration = useRef(0);
 
   // Authz prompt modal state
   const [isAuthzPromptModalOpen, setIsAuthzPromptModalOpen] = useState(false);
@@ -104,6 +108,7 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Clear authorization data from state
   const clearAuthzData = useCallback(() => {
+    authzGeneration.current += 1;
     setUser(null);
     setGroupIds([]);
     setPermissions([]);
@@ -113,9 +118,14 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Fetch authorization data
   const fetchAuthzData = useCallback(() => {
+    const generation = authzGeneration.current;
     return refetch()
       .then((result) => {
-        if (result.data && (result.status === "success" || result.isSuccess)) {
+        if (
+          generation === authzGeneration.current &&
+          result.data &&
+          (result.status === "success" || result.isSuccess)
+        ) {
           applyAuthzData(result.data);
         }
         return result;
@@ -124,6 +134,15 @@ export function useAuthorization(): AuthorizationContextType {
         log.error("Failed to fetch authorization data:", err);
       });
   }, [refetch, applyAuthzData]);
+
+  useEffect(() => {
+    if (!user?.casdoorRoleSync) return;
+
+    const timer = window.setInterval(() => {
+      if (checkSessionValid()) void fetchAuthzData();
+    }, CASDOOR_ROLE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [user?.casdoorRoleSync, fetchAuthzData]);
 
   // Initialize authorization on mount
   useEffect(() => {
@@ -220,7 +239,7 @@ export function useAuthorization(): AuthorizationContextType {
       isLoading ||
       !user ||
       accessibleRoutes.length === 0 ||
-      pathname === lastCheckedPath
+      (pathname === lastCheckedPath.current && hasAccess)
     ) {
       return;
     }
@@ -230,22 +249,19 @@ export function useAuthorization(): AuthorizationContextType {
         pathname: cleanPath,
         accessibleRoutes,
       });
-      if (user) {
+      const redirect = window.setTimeout(() => {
         openAuthzPromptModal();
-      }
-      setTimeout(() => {
         router.replace("/");
       }, 0);
-      return;
+      return () => window.clearTimeout(redirect);
     }
 
-    setLastCheckedPath(pathname);
+    lastCheckedPath.current = pathname;
   }, [
     pathname,
     isLoading,
     user,
     accessibleRoutes,
-    lastCheckedPath,
     hasAccess,
     cleanPath,
     isSharePage,

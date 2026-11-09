@@ -41,6 +41,8 @@ export const API_ENDPOINTS = {
     config: `${API_BASE_URL}/user/oauth/config`,
     providers: `${API_BASE_URL}/user/oauth/providers`,
     authorize: `${API_BASE_URL}/user/oauth/authorize`,
+    signup: (provider: string) =>
+      `${API_BASE_URL}/user/oauth/authorize?provider=${encodeURIComponent(provider)}&signup=true`,
     link: `${API_BASE_URL}/user/oauth/link`,
     pending: `${API_BASE_URL}/user/oauth/pending`,
     complete: `${API_BASE_URL}/user/oauth/complete`,

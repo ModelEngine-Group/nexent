@@ -8,7 +8,8 @@ export function useUserList(
   tenantId: string | null,
   page?: number,
   pageSize?: number,
-  filters?: { search?: string; roles?: string[]; groupIds?: number[] }
+  filters?: { search?: string; roles?: string[]; groupIds?: number[] },
+  autoRefresh = false
 ) {
   const { user } = useAuthorizationContext();
   return useQuery({
@@ -16,6 +17,7 @@ export function useUserList(
     queryFn: () => listUsers(tenantId, page, pageSize, filters),
     enabled: tenantId !== null,
     staleTime: 1000 * 30,
+    refetchInterval: autoRefresh ? 15_000 : false,
     refetchOnMount: "always", // Always refetch when component mounts (e.g., when switching tabs)
   });
 }

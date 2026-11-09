@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -32,6 +34,8 @@ export default function OAuthCompletePage() {
         mode: "oauth_complete",
         email: pending.provider_email || "",
         emailReadOnly: !pending.email_required,
+        oauthProvider: pending.provider,
+        passwordRequired: pending.password_required !== false,
       });
       setStatus("ready");
     });

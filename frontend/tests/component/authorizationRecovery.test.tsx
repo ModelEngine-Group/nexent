@@ -119,6 +119,33 @@ function pendingRequest() {
   });
   return { promise, resolve, reject };
 }
+
+test("refreshes an active Casdoor session and leaves a route revoked by the new role", async () => {
+  state.pathname = "/zh/resource-manage";
+  const before = response();
+  before.user.role = USER_ROLES.ADMIN;
+  before.user.casdoorRoleSync = true;
+  const after = response(["/"]);
+  after.user.role = USER_ROLES.USER;
+  after.user.casdoorRoleSync = true;
+  after.user.permissions = ["chat:read"];
+  const intervals = vi.spyOn(window, "setInterval");
+  state.request.mockResolvedValueOnce(before).mockResolvedValue(after);
+  try {
+    renderHome(false);
+    await waitFor(() => expect(screen.getByTestId("permissions")).toHaveTextContent("resource:manage"));
+    const refresh = intervals.mock.calls.find(([, delay]) => delay === 15_000)?.[0];
+    expect(typeof refresh).toBe("function");
+    await act(async () => {
+      if (typeof refresh === "function") refresh();
+    });
+    await waitFor(() => expect(screen.getByTestId("permissions")).toHaveTextContent("chat:read"));
+    await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/"));
+    expect(state.request).toHaveBeenCalledTimes(2);
+  } finally {
+    intervals.mockRestore();
+  }
+});
 async function retryButton() {
   return screen.findByRole("button", { name: /page.retryAuthorization/ });
 }

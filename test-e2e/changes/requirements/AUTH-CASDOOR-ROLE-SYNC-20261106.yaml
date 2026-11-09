@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-ROLE-SYNC-20261106
+  change_type: requirement
+  requirement_id: AUTH-CASDOOR-ROLE-SYNC-20261106
+  title: Synchronize Casdoor roles for active Nexent sessions
+  description: Reconcile Casdoor-managed tenant roles through the configured organization and explicit mapping, and refresh authorization in open Nexent pages.
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: [AUTH-CASDOOR-PASSWORDLESS-D2-001]
+    added: [AUTH-CASDOOR-ROLE-SYNC-D2-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/services/test_casdoor_role_sync.py
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    behaviors:
+    - Require explicit, organization-scoped mappings to supported tenant roles and select the highest mapped role.
+    - Reconcile only the original verified Casdoor binding of a Casdoor-registered tenant account; preserve the last verified role on provider failure.
+    - Refresh a managed browser session and remove access to the active route when its role changes.
+    reason: Current Casdoor tests cover login, onboarding and provider bindings without reconciliation or periodic permission refresh.
+  notes: System owns the D2 Case. Use an isolated database and synthetic Casdoor HTTP responses; this is not an OAuth browser journey. No additional D1 duplicates UT.

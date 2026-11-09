@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: AUTH-CASDOOR-ROLE-SYNC-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-CASDOOR-ROLE-SYNC-D2-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_role_changes_apply_to_the_same_session]
+  AC-02: [test_role_changes_apply_to_the_same_session]
+  AC-03: [test_role_changes_apply_to_the_same_session]
+  AC-04: [test_invitation_role_is_published_and_can_be_revoked]
+notes: Self-contained FastAPI and PostgreSQL contract with an owned database and managed worker. The Casdoor directory uses a controlled HTTP transport and the Case closes the client and worker and drops its database.

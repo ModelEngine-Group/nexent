@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-CASDOOR-ROLE-ONBOARDING-20261106
+  change_type: bugfix
+  bug_id: AUTH-CASDOOR-ROLE-ONBOARDING-20261106
+  title: Publish initial Casdoor roles and refresh the Nexent user list
+  description: Seed one mapped role from a valid tenant invitation and refresh the user management view when Casdoor later changes the role.
+  observed_behavior: Completion saves the invited role in Nexent without assigning it in Casdoor. The worker can then replace the local role with USER. The open user management list can retain an earlier role.
+  expected_behavior: Casdoor receives the initial invited tenant role once. The worker retries failed writes and uses Casdoor as the role source after confirmation. The open Nexent user list refreshes automatically.
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: The role sync Case starts with existing accounts and does not assert initial membership provisioning after the completion endpoint.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [AUTH-CASDOOR]
+    retired: []
+  affected_cases:
+    existing: [AUTH-CASDOOR-PASSWORDLESS-D2-001]
+    added: []
+    modified: [AUTH-CASDOOR-ROLE-SYNC-D2-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/services/test_casdoor_completion.py
+    - test/backend/services/test_casdoor_role_sync.py
+    - frontend/tests/component/casUserSearch.test.tsx
+    behaviors:
+    - Queue the invitation role only for supported Casdoor-only tenant account creation.
+    - Preserve existing role members, retry failed initial assignments and validate the stable bound subject before any remote write.
+    - Refresh the administrative user list without remounting it.
+    reason: Existing tests cover the original account completion and reverse sync separately, without a provisioning or list refresh regression.
+  notes: System owns the existing D2 Case. The virtual asset tenant and linked local accounts remain outside the tenant role mapping.

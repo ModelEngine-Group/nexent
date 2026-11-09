@@ -1,7 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import type { PropsWithChildren } from "react";
 import { expect, it, vi } from "vitest";
 
@@ -50,4 +54,44 @@ it("isolates CAS/local search caches while retaining existing request arguments"
   ).toEqual(["cas", "local"]);
   unmount();
   client.clear();
+});
+
+it("refreshes a user's role while the management list stays open", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrapper = ({ children }: PropsWithChildren) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  session.list
+    .mockReset()
+    .mockResolvedValueOnce({ users: [{ id: "a", role: "ADMIN" }] })
+    .mockResolvedValue({ users: [{ id: "a", role: "DEV" }] });
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  focusManager.setFocused(true);
+  const { result, unmount } = renderHook(
+    () => useUserList("tenant", 1, 10, {}, true),
+    { wrapper }
+  );
+  try {
+    await waitFor(() =>
+      expect(result.current.data?.users[0]?.role).toBe("ADMIN")
+    );
+    const refresh = intervals.mock.calls.findLast(
+      ([, delay]) => delay === 15_000
+    )?.[0];
+    expect(typeof refresh).toBe("function");
+    await act(async () => {
+      if (typeof refresh === "function") refresh();
+    });
+    await waitFor(() =>
+      expect(result.current.data?.users[0]?.role).toBe("DEV")
+    );
+    expect(session.list).toHaveBeenCalledTimes(2);
+  } finally {
+    unmount();
+    intervals.mockRestore();
+    focusManager.setFocused(undefined);
+    client.clear();
+  }
 });

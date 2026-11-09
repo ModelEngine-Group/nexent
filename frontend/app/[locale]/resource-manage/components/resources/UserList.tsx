@@ -60,11 +60,13 @@ export default function UserList({
   const [roleFilters, setRoleFilters] = useState<string[]>([]);
   const [groupFilters, setGroupFilters] = useState<number[]>([]);
 
-  const { data, isLoading, refetch } = useUserList(tenantId, page, pageSize, {
-    search: keyword,
-    roles: roleFilters,
-    groupIds: groupFilters,
-  });
+  const { data, isLoading, refetch } = useUserList(
+    tenantId,
+    page,
+    pageSize,
+    { search: keyword, roles: roleFilters, groupIds: groupFilters },
+    true
+  );
   const { data: groupsData } = useGroupList(tenantId);
 
   // Reset page to 1 when tenantId changes

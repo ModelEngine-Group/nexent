@@ -259,7 +259,7 @@ async def _create_project_session(principal: CasPrincipal, redirect: str = "/", 
 def _resolve_project_user(principal: CasPrincipal) -> str:
     existing = get_oauth_account_by_provider(CAS_PROVIDER, principal.cas_user_id)
     if existing:
-        require_active_account(existing["user_id"])
+        _require_cas_account(existing["user_id"])
         create_or_update_oauth_account(
             user_id=existing["user_id"],
             provider=CAS_PROVIDER,
@@ -282,7 +282,7 @@ def _resolve_project_user(principal: CasPrincipal) -> str:
             user_id = find_account_user_id_by_email(principal.email)
             if not user_id:
                 raise
-    require_active_account(user_id)
+    _require_cas_account(user_id)
 
     create_or_update_oauth_account(
         user_id=user_id,
@@ -293,6 +293,13 @@ def _resolve_project_user(principal: CasPrincipal) -> str:
         tenant_id=principal.tenant_id,
     )
     return user_id
+
+
+def _require_cas_account(user_id: str) -> None:
+    account = require_active_account(user_id)
+    metadata = account.get("source_metadata") if isinstance(account, dict) else None
+    if isinstance(metadata, dict) and metadata.get("auth_provider") == "casdoor":
+        raise CasAuthenticationError("This account only supports Casdoor login")
 
 
 def _ensure_enabled() -> None:
