@@ -92,6 +92,41 @@ def test_nonoverlapping_manual_parameter_does_not_suppress_thinking_fallback():
     normalized = ensure_outlet_parameter_rules(legacy)
     assert any(r["key"] == "enable_thinking" for r in normalized.parameter_rules)
     assert connectivity_request(normalized)[3]["enable_thinking_extra"] is False
+    created = make("qwen3.7-max", extra_api_parameters=data["extra_api_parameters"])
+    assert any(r["key"] == "enable_thinking" for r in created.parameter_rules)
+    assert connectivity_request(created)[3]["enable_thinking_extra"] is False
+
+
+@pytest.mark.parametrize("path,value,wire_value", [
+    ("/enable_thinking", False, False),
+    ("/enable_thinking", True, True),
+    ("/enable_thinking/type", "disabled", {"type": "disabled"}),
+])
+def test_new_preview_and_reselection_preserve_manual_thinking_path(path, value, wire_value):
+    extras = [{"path": path, "value": value}]
+    request = ModelProfilePreviewRequest(
+        request_model_id="qwen3.7-max", provider_info={"base_url": "https://gateway.invalid/v1"},
+        extra_api_parameters=extras)
+    profile, _ = service.build_outlet_draft(request, "tenant")
+    preview = service.preview_model_profile(request, "tenant")
+    assert not any(r["key"] == "enable_thinking" for r in preview["field_specs"])
+    assert profile.extra_api_parameters == extras
+    assert connectivity_request(profile)[3]["enable_thinking"] == wire_value
+    changed = service.apply_outlet_patch(profile, ModelOutletPatchRequest(
+        expected_revision=1, profile_selection={
+            "catalog_revision": preview["catalog_revision"],
+            "model_profile": {"key": profile.model_profile_key,
+                              "revision": service.get_model_profile_catalog().models[profile.model_profile_key].revision},
+            "provider_profile": None,
+        }))
+    assert changed.extra_api_parameters == extras
+    assert connectivity_request(changed)[3]["enable_thinking"] == wire_value
+
+
+def test_manual_parameters_cannot_override_declared_sampling_paths():
+    with pytest.raises(ModelOutletValidationError) as error:
+        make("qwen3.7-max", extra_api_parameters=[{"path": "/temperature", "value": 0.4}])
+    assert error.value.category == "RESERVED_API_PATH"
 
 
 def test_ac010_legacy_limitation_uses_only_the_explicit_shutdown_preference():

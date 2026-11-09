@@ -231,11 +231,14 @@ def build_outlet_draft(request, tenant_id, *, require_revision=False):
         if bindings["protocol"]["ref"] != request.protocol_id:
             raise ModelOutletValidationError()
         credential_kind = "none" if scheme == "no_auth_v1" else "model_record"
-        from nexent.core.model_service.profiles.outlet_controls import custom_thinking_allowed, custom_thinking_rule
+        from nexent.core.model_service.profiles.outlet_controls import (
+            custom_thinking_allowed, custom_thinking_rule, has_manual_thinking_parameter,
+        )
 
         protocol_rules = openai_chat_parameter_rules()
         model_atom = catalog.models.get(model_key)
-        if provider_key is None and model_atom and custom_thinking_allowed(model_atom.capabilities["reasoning"]):
+        if (provider_key is None and model_atom and custom_thinking_allowed(model_atom.capabilities["reasoning"])
+                and not has_manual_thinking_parameter(request.extra_api_parameters)):
             protocol_rules.append(custom_thinking_rule())
         policy = compose_provider_model_policy(
             catalog, provider_key=provider_key, model_profile_key=model_key,

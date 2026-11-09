@@ -30,6 +30,12 @@ def custom_thinking_allowed(reasoning):
     return reasoning["status"] == "supported" and reasoning.get("can_disable") is not False
 
 
+def has_manual_thinking_parameter(extra_api_parameters):
+    """Keep manual parameters in ownership of the compatible fallback path."""
+    return any(extra["path"] == "/enable_thinking" or
+               extra["path"].startswith("/enable_thinking/") for extra in extra_api_parameters)
+
+
 def ensure_outlet_parameter_rules(profile):
     """Complete old custom outlets without replacing their saved provider policy."""
     profile = ensure_outlet_sampling_rules(profile)
@@ -45,9 +51,7 @@ def ensure_outlet_parameter_rules(profile):
     has_effort_off = any(rule["key"] == "reasoning_effort" and
                         "none" in rule["schema"].get("enum", []) for rule in rules)
     # Saved manual parameters retain ownership of the fallback's wire path.
-    has_extra_toggle = any(extra["path"] == "/enable_thinking" or
-                           extra["path"].startswith("/enable_thinking/")
-                           for extra in data["extra_api_parameters"])
+    has_extra_toggle = has_manual_thinking_parameter(data["extra_api_parameters"])
     if (profile.provider_key is None and custom_thinking_allowed(reasoning)
             and not has_toggle and not has_effort_off and not has_extra_toggle):
         rules.append(custom_thinking_rule())
