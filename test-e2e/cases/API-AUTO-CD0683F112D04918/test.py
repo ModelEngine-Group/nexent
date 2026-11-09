@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from infrastructure.web.app_factory import create_app
+from service_common.http.server.app_factory import create_app
 
 
 class _ManagerState:

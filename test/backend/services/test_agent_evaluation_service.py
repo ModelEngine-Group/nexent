@@ -482,11 +482,11 @@ sys.modules["services.evaluation_prompt_service"] = _eval_prompt_service_module
 _services_pkg.evaluation_prompt_service = _eval_prompt_service_module
 
 _thread_lifecycle_service_module = types.ModuleType(
-    "infrastructure.concurrency"
+    "service_common.concurrency"
 )
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_service_module.config_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = _thread_lifecycle_service_module
+sys.modules["service_common.concurrency"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
 
 # ---- 补齐 management.services.evaluation.sets（agent_evaluation_service.py L64）----

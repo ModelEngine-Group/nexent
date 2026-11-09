@@ -1083,7 +1083,7 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 def active_local_account(monkeypatch):
     # Credential/account-state integration is proved separately by native auth tests.
     # These legacy helpers are exercised with the deployed Gateway boundary disabled.
-    from infrastructure.service_identity import gateway as gateway_boundary
+    from service_common.service_identity import gateway as gateway_boundary
     monkeypatch.setattr(gateway_boundary, "enabled", lambda: False)
     monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
     from management.services.permission.identity import northbound as northbound_auth

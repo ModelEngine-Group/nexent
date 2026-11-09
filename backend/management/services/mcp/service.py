@@ -20,7 +20,7 @@ from management.db.tool.repository import set_mcp_tools_unavailable
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from service_common.http.client import create_httpx_client
 from management.services.mcp.common import (
     logger,
 )

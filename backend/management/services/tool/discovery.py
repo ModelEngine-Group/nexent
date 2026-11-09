@@ -10,7 +10,7 @@ from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS
 from management.db.mcp.remote import get_mcp_records_by_tenant
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from service_common.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.tool.catalog import get_local_tools_classes
 from management.services.tool.common import (

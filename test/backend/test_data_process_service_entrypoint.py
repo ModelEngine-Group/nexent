@@ -28,7 +28,7 @@ def service_module(monkeypatch):
             self.routers.append(router)
 
     fastapi.FastAPI = FakeFastAPI
-    logging_utils = types.ModuleType("infrastructure.logging")
+    logging_utils = types.ModuleType("service_common.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
     constants = types.ModuleType("contracts.constants.environment")
@@ -49,7 +49,7 @@ def service_module(monkeypatch):
         "uvicorn": uvicorn,
         "dotenv": dotenv,
         "fastapi": fastapi,
-        "infrastructure.logging": logging_utils,
+        "service_common.logging": logging_utils,
         "contracts.constants.environment": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)

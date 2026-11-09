@@ -14,10 +14,10 @@ from contracts.constants import environment
 from gateway import application
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from infrastructure.service_identity.gateway import (
+from service_common.service_identity.gateway import (
     IDENTITY_HEADER, IdentityError, identity_context, sign_identity, verify_identity, verify_lookup,
 )
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from service_common.service_identity.middleware import GatewayIdentityMiddleware
 
 KEY = "local-central-auth-fixture-not-for-deployment"
 

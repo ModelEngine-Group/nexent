@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authoritative account, membership and credential-state lookup for Gateway."""
 
-from infrastructure.service_identity.gateway import IdentityError
+from service_common.service_identity.gateway import IdentityError
 
 
 def resolve_gateway_identity(query: dict) -> dict:

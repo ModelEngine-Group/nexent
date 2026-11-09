@@ -21,7 +21,7 @@ from _repository_path import add_repository_root
 add_repository_root()
 
 from contracts.constants.environment import DISABLE_CELERY_FLOWER, DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PARSE_MIN_PROCESSES, DP_PARSE_THREADS_PER_PROCESS, DP_PARSER_STARTUP_TIMEOUT_S, DP_PRELOAD_MODELS, FLOWER_PORT, REDIS_BACKEND_URL, REDIS_PORT, REDIS_URL
-from infrastructure.logging import configure_logging, get_uvicorn_logging_config
+from service_common.logging import configure_logging, get_uvicorn_logging_config
 
 
 # Load environment variables

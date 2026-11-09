@@ -529,7 +529,7 @@ def resolve_executable_knowledge_scope(
     System roots need no persisted Agent ID. Resource authorization remains in
     the existing scope resolver; this adapter never queries Agent repositories.
     """
-    from infrastructure.serialization.containers import clone_runtime_config
+    from service_common.serialization.containers import clone_runtime_config
 
     compiled = clone_runtime_config(root)
     nodes: Dict[str, AgentConfig] = {}

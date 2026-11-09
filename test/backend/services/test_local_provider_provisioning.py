@@ -10,7 +10,7 @@ import pytest
 
 from contracts.errors.exceptions import AccountConflictError, OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
 from management.services.permission.identity import session as gateway
-from infrastructure.security.passwords import verify_password
+from service_common.security.passwords import verify_password
 from management.db.identity import account as accounts
 from management.services.permission.identity import cas, oauth
 

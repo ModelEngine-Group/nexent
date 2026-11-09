@@ -6,8 +6,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from infrastructure.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
-from infrastructure.service_identity.gateway import signing_key
+from service_common.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
+from service_common.service_identity.gateway import signing_key
 
 
 async def resolve_mcp_identity(scope, authorization, *, gateway_url=None, key=None, transport=None):

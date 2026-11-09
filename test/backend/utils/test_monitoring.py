@@ -41,7 +41,7 @@ fake_consts_package.const = fake_consts
 sys.modules.setdefault("consts", fake_consts_package)
 sys.modules.setdefault("contracts.constants.environment", fake_consts)
 
-from infrastructure.observability.bootstrap import monitoring_manager
+from infrastructure.trace.bootstrap import monitoring_manager
 
 
 class TestMonitoringUtilsModule:
@@ -178,7 +178,7 @@ class TestMonitoringUtilsModule:
 
     def test_module_attributes(self):
         """Test that the module has correct attributes."""
-        from infrastructure.observability import bootstrap as monitoring_module
+        from infrastructure.trace import bootstrap as monitoring_module
 
         assert hasattr(monitoring_module, 'monitoring_manager')
         assert hasattr(monitoring_module, '__all__')
@@ -186,8 +186,8 @@ class TestMonitoringUtilsModule:
 
     def test_singleton_behavior(self):
         """Test that monitoring manager maintains singleton behavior."""
-        from infrastructure.observability.bootstrap import monitoring_manager as manager1
-        from infrastructure.observability.bootstrap import monitoring_manager as manager2
+        from infrastructure.trace.bootstrap import monitoring_manager as manager1
+        from infrastructure.trace.bootstrap import monitoring_manager as manager2
 
         assert manager1 is manager2
 
@@ -253,7 +253,7 @@ class TestMonitoringUtilsModule:
     def test_module_uses_backend_constants_when_top_level_import_is_unavailable(self, monkeypatch):
         """The module should support imports from the backend package namespace."""
         import importlib
-        from infrastructure.observability import bootstrap as monitoring_module
+        from infrastructure.trace import bootstrap as monitoring_module
 
         backend_consts = types.ModuleType("backend.contracts.constants.environment")
         for name, value in {

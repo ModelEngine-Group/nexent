@@ -563,7 +563,7 @@ async def _create_knowledge_bases(
     """
     from management.db.identity.group import query_groups_by_tenant
     from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record
-    from infrastructure.serialization.text import convert_string_to_list
+    from service_common.serialization.text import convert_string_to_list
     from management.services.knowledge_base.service import ElasticSearchService
     from management.services.knowledge_base.common import (
         get_vector_db_core,

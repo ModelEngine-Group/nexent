@@ -5,7 +5,7 @@ FastAPI application factory with common configurations and exception handlers.
 
 import logging
 
-from infrastructure.web.health import install_health_contract
+from service_common.http.server.health import install_health_contract
 from contracts.errors.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +58,7 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+        from service_common.service_identity.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
 
@@ -71,7 +71,7 @@ def create_app(
     # Initialize monitoring if enabled
     if enable_monitoring:
         try:
-            from infrastructure.observability.bootstrap import monitoring_manager
+            from infrastructure.trace.bootstrap import monitoring_manager
             monitoring_manager.setup_fastapi_app(app)
         except ImportError:
             logger.warning("Monitoring utilities not available")

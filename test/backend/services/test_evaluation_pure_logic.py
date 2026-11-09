@@ -391,7 +391,7 @@ def _install_sys_modules_stubs() -> None:
     )
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
-        "infrastructure.concurrency",
+        "service_common.concurrency",
         config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )

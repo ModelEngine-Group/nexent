@@ -50,7 +50,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-010")
 def test_content_disposition_sanitizes_header_injection_and_unicode() -> None:
-    from infrastructure.web.file_http import build_content_disposition_header
+    from service_common.http.server.file_http import build_content_disposition_header
 
     header = build_content_disposition_header(' report\\"\r\nX-Evil: yes.txt ')
     assert header.startswith("attachment;")

@@ -262,10 +262,10 @@ sys.modules['management.services.knowledge_base.summary'] = document_vector_util
 sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 
-str_utils_mock = types.ModuleType('infrastructure.serialization.text')
+str_utils_mock = types.ModuleType('service_common.serialization.text')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['infrastructure.serialization.text'] = str_utils_mock
+sys.modules['service_common.serialization.text'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 
 config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')

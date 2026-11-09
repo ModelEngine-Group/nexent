@@ -80,7 +80,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 sys.modules['utils'] = utils_mock
 sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 
-# Stub infrastructure.serialization.text to satisfy imports in management.db.agent.repository
+# Stub service_common.serialization.text to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()
 str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(i) for i in items)
@@ -88,7 +88,7 @@ str_utils_mock.convert_list_to_string = MagicMock(
 str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda s: [] if not s else [int(x) for x in str(s).split(",") if str(x).strip().isdigit()]
 )
-sys.modules['infrastructure.serialization.text'] = str_utils_mock
+sys.modules['service_common.serialization.text'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

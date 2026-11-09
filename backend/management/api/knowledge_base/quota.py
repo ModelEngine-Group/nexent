@@ -23,7 +23,7 @@ from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
 from management.services.knowledge_base.quota import QuotaService
 from management.services.permission.identity.session import get_current_user_id
-from infrastructure.formatting import bytes_to_readable
+from service_common.serialization.formatting import bytes_to_readable
 
 logger = logging.getLogger(__name__)
 

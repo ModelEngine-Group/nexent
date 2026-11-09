@@ -35,7 +35,7 @@ from management.services.permission.asset_owner import (
     resolve_agent_list_permission,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from infrastructure.serialization.text import convert_string_to_list
+from service_common.serialization.text import convert_string_to_list
 
 logger = logging.getLogger(__name__)
 

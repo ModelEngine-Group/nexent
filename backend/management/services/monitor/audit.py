@@ -114,4 +114,4 @@ def record_security_event(
         except Exception:
             pass
 
-from infrastructure.web.request_context import get_client_ip
+from service_common.http.server.request_context import get_client_ip

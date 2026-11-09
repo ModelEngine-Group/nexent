@@ -16,7 +16,7 @@ import pytest
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings, load_settings
 from gateway.security.database_provider import DatabaseIdentityProvider
-from infrastructure.security.identity import IdentityError
+from service_common.security.identity import IdentityError
 from gateway.security.management_client import IdentityUnavailable
 from infrastructure.rdb.identity import IdentityRejected, IdentityRepository, IdentityStoreUnavailable
 

@@ -20,7 +20,7 @@ from management.services.conversation.sharing import (
 from management.services.file.service import get_file_stream_impl, get_preview_stream, resolve_preview_file
 from management.services.permission.identity.session import get_current_user_id
 
-from infrastructure.web.file_http import build_content_disposition_header
+from service_common.http.server.file_http import build_content_disposition_header
 
 logger = logging.getLogger("conversation_share_app")
 

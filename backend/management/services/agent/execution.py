@@ -93,10 +93,10 @@ from management.services.memory.provider import (
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
+from service_common.concurrency import (
     runtime_thread_manager,
 )
 from management.services.configuration.tenant.settings import (

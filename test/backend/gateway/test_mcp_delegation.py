@@ -11,10 +11,10 @@ import pytest
 
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from infrastructure.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
-from infrastructure.service_identity import mcp
-from infrastructure.service_identity.context import identity_context
-from infrastructure.service_identity.credential_client import resolve_mcp_identity
+from service_common.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
+from service_common.service_identity import mcp
+from service_common.service_identity.context import identity_context
+from service_common.service_identity.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -84,7 +84,7 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             closed.append(True)
 
     def transport(request):
-        from infrastructure.security.identity import verify_delegation
+        from service_common.security.identity import verify_delegation
 
         verify_delegation(request.headers["x-nexent-service-token"], request.content, key=KEY)
         assert json.loads(request.content)["path"] == SCOPE["path"]

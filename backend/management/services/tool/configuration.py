@@ -27,7 +27,7 @@ from management.db.tool.repository import check_tool_list_initialized, create_or
 from management.db.identity.user_tenant import get_user_email_map
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
-from infrastructure.http.client import create_httpx_client
+from service_common.http.client import create_httpx_client
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.file.service import validate_urls_access
 from management.services.knowledge_base.service import (

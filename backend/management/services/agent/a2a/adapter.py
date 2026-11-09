@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from infrastructure.serialization.runtime_metadata import validate_runtime_metadata
+from contracts.runtime_metadata import validate_runtime_metadata
 
 logger = logging.getLogger(__name__)
 

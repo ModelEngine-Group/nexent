@@ -20,7 +20,7 @@ from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from infrastructure.rdb.orm import as_dict
 from infrastructure.rdb.client import get_db_session
 from management.db.models import KnowledgeRecord
-from infrastructure.serialization.text import convert_list_to_string
+from service_common.serialization.text import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")
 

@@ -156,7 +156,7 @@ def _code(name):
 def client():
     """Build a FastAPI TestClient with the agent-evaluation router mounted."""
     from fastapi import FastAPI
-    from infrastructure.web.exception_handler import ExceptionHandlerMiddleware
+    from service_common.http.server.exception_handler import ExceptionHandlerMiddleware
 
     app = FastAPI()
     app.add_middleware(ExceptionHandlerMiddleware)

@@ -5,7 +5,7 @@ import json
 
 import httpx
 
-from infrastructure.security.identity import IdentityError, sign_lookup
+from service_common.security.identity import IdentityError, sign_lookup
 
 
 class IdentityUnavailable(RuntimeError):

@@ -11,7 +11,7 @@ from contracts.constants.constants import S3_URL_PREFIX
 from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
-from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
+from infrastructure.trace.knowledge import set_span_attributes, trace_knowledge_operation
 
 
 def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:

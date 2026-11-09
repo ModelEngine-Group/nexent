@@ -29,9 +29,9 @@ from gateway_database import isolated_identity_database
 from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.configuration import load_settings
-from infrastructure.security.identity import sign_delegation, verify_identity
-from infrastructure.service_identity.gateway import identity_context
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from service_common.security.identity import sign_delegation, verify_identity
+from service_common.service_identity.gateway import identity_context
+from service_common.service_identity.middleware import GatewayIdentityMiddleware
 
 
 @contextmanager

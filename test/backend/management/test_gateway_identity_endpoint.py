@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 
 from contracts.constants import environment
-from infrastructure.service_identity.gateway import sign_lookup
+from service_common.service_identity.gateway import sign_lookup
 from management.api.identity import gateway_identity as routes
 
 

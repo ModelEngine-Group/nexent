@@ -26,7 +26,7 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
-from infrastructure.concurrency import runtime_thread_manager
+from service_common.concurrency import runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
     agent_run_manager,

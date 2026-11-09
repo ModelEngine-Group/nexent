@@ -142,7 +142,7 @@ def client():
     of ``TestClient`` as a raw exception.
     """
     from fastapi import FastAPI
-    from infrastructure.web.exception_handler import ExceptionHandlerMiddleware
+    from service_common.http.server.exception_handler import ExceptionHandlerMiddleware
 
     from management.api.evaluation.evaluation_set import router
 

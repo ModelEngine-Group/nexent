@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backend configuration adapter for the pure Gateway identity protocol."""
 
-from infrastructure.security import identity as protocol
-from infrastructure.security.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
-from infrastructure.service_identity.context import identity_context, trusted_identity
+from service_common.security import identity as protocol
+from service_common.security.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
+from service_common.service_identity.context import identity_context, trusted_identity
 
 
 def signing_key():

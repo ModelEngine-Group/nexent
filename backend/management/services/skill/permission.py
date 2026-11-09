@@ -8,7 +8,7 @@ from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_ED
 from contracts.errors.exceptions import ForbiddenError
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from infrastructure.serialization.text import convert_list_to_string
+from service_common.serialization.text import convert_list_to_string
 
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 

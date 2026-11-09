@@ -37,7 +37,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-024")
 def test_runtime_metadata_is_canonical_and_cannot_merge_non_json_values() -> None:
-    from infrastructure.serialization.runtime_metadata import canonical_runtime_metadata_json, validate_runtime_metadata
+    from contracts.runtime_metadata import canonical_runtime_metadata_json, validate_runtime_metadata
 
     left = {"z": 1, "nested": {"b": 2, "a": 1}}
     right = {"nested": {"a": 1, "b": 2}, "z": 1}

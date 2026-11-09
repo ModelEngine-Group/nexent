@@ -10,7 +10,8 @@ RUN if [ -n "$MIRROR" ]; then \
 COPY backend/gateway/ /opt/backend/gateway/
 COPY infrastructure/__init__.py /opt/infrastructure/__init__.py
 COPY infrastructure/rdb/__init__.py infrastructure/rdb/identity.py /opt/infrastructure/rdb/
-COPY infrastructure/security/ /opt/infrastructure/security/
+COPY backend/service_common/__init__.py /opt/backend/service_common/__init__.py
+COPY backend/service_common/security/ /opt/backend/service_common/security/
 COPY backend/gateway_service.py backend/_repository_path.py /opt/backend/
 ENV PYTHONPATH=/opt:/opt/backend
 USER 65532:65532

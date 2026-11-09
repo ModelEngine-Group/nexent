@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from infrastructure.formatting import bytes_to_readable
+from service_common.serialization.formatting import bytes_to_readable
 
 
 def test_bytes_to_readable_handles_unlimited_value():

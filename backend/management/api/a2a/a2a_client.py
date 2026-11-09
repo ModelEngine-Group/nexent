@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import AgentNotFoundError, AppException, ForbiddenError, RuntimeMetadataValidationError
-from infrastructure.http.a2a import AGENT_CARD_TIMEOUT
+from service_common.http.a2a import AGENT_CARD_TIMEOUT
 
 from management.services.agent.a2a.catalog import (
     a2a_client_service,
@@ -29,7 +29,7 @@ from management.services.agent.a2a.service import a2a_server_service
 from management.db.a2a import repository as a2a_agent_db
 from management.services.agent.authorization import require_external_relation_edit
 from management.services.permission.identity.session import get_current_user_info
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     validate_runtime_metadata,
 )
 
@@ -587,7 +587,7 @@ async def test_nacos_connection(
     http_request: Request = None,
 ):
     """Test connectivity to Nacos server without saving the configuration."""
-    from infrastructure.discovery.nacos import NacosClient, NacosConnectionError
+    from management.services.agent.a2a.nacos import NacosClient, NacosConnectionError
 
     try:
         get_current_user_info(authorization, http_request)

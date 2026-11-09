@@ -88,7 +88,7 @@ from management.services.permission.api_keys import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from infrastructure.web.file_http import build_content_disposition_header, build_storage_proxy_url
+from service_common.http.server.file_http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from management.services.northbound import (
     generate_conversation_title,

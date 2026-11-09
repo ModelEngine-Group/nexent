@@ -23,7 +23,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-029")
 def test_hybrid_log_handler_rotates_on_size_and_keeps_machine_readable_output(tmp_path) -> None:
-    from infrastructure.logging import HybridRotatingFileHandler
+    from service_common.logging import HybridRotatingFileHandler
 
     target = tmp_path / "runtime.log"
     handler = HybridRotatingFileHandler(

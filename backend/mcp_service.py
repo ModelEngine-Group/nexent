@@ -25,14 +25,14 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from infrastructure.concurrency import mcp_thread_manager
-from infrastructure.service_identity.gateway import enabled as gateway_identity_enabled
-from infrastructure.service_identity.mcp import TenantMCPRouter as _TenantMCPRouter
+from service_common.concurrency import mcp_thread_manager
+from service_common.service_identity.gateway import enabled as gateway_identity_enabled
+from service_common.service_identity.mcp import TenantMCPRouter as _TenantMCPRouter
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from infrastructure.logging import get_uvicorn_logging_config
+from service_common.logging import get_uvicorn_logging_config
 
 
 logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))

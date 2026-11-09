@@ -5,8 +5,8 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request
 
-from infrastructure.concurrency import config_thread_manager
-from infrastructure.service_identity.gateway import IdentityError, verify_lookup
+from service_common.concurrency import config_thread_manager
+from service_common.service_identity.gateway import IdentityError, verify_lookup
 from management.services.permission.identity.gateway_lookup import resolve_gateway_identity
 from nexent.core.concurrency import ManagedTaskSpec
 

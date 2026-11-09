@@ -52,7 +52,7 @@ from management.services.conversation.service import (
 from management.services.permission.identity.display import enrich_cas_usernames
 from contracts.authentication import AuthenticatedIdentity
 from management.services.configuration.tenant.settings import tenant_config_manager
-from infrastructure.serialization.text import convert_list_to_string, convert_string_to_list
+from service_common.serialization.text import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 

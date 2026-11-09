@@ -54,10 +54,10 @@ from management.services.conversation.service import (
 from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
+from service_common.concurrency import (
     runtime_thread_manager,
 )
 

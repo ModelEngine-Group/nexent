@@ -15,7 +15,7 @@ from gateway.security.delegation import DELEGATION_PATH, delegate_mcp
 from gateway.configuration import load_settings
 from gateway.exposure.middleware import ExposureMiddleware
 from gateway.exposure.registry import default_registry
-from infrastructure.security.identity import IDENTITY_HEADER, IdentityError, sign_identity
+from service_common.security.identity import IDENTITY_HEADER, IdentityError, sign_identity
 from gateway.proxy.http import forward_http
 from gateway.proxy.websocket import forward_websocket
 from gateway.routing import filtered_headers

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from management.api.knowledge_base import vectordatabase as local_app
 import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
 import pytest
-from infrastructure.web.app_factory import register_exception_handlers
+from service_common.http.server.app_factory import register_exception_handlers
 from contracts.errors.exceptions import TokenExpiredError
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbNotFoundError,
@@ -16,7 +16,7 @@ from ext_components.aidp.consts.aidp_exceptions import (
 )
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from infrastructure.web.exception_handler import ExceptionHandlerMiddleware
+from service_common.http.server.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     LanePolicy,
     ThreadManager,

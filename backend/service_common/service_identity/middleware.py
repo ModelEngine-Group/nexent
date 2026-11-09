@@ -3,9 +3,9 @@
 
 from starlette.responses import JSONResponse
 
-from infrastructure.security.policy import canonical_path
-from infrastructure.service_identity.routes import is_runtime_service_request
-from infrastructure.service_identity.gateway import (
+from service_common.security.policy import canonical_path
+from service_common.service_identity.routes import is_runtime_service_request
+from service_common.service_identity.gateway import (
     IDENTITY_HEADER, LOOKUP_PATH, IdentityError, enabled, identity_context, signing_key, verify_identity,
 )
 
@@ -32,7 +32,7 @@ class GatewayIdentityMiddleware:
             return await self.app(scope, receive, send)
         try:
             if self.audience == "runtime" and is_runtime_service_request(method, path):
-                from infrastructure.service_identity.internal_tokens import verify_internal_runtime_jwt
+                from service_common.service_identity.internal_tokens import verify_internal_runtime_jwt
 
                 user_id, tenant_id = verify_internal_runtime_jwt(headers.get("authorization"))
                 identity = {"user_id": user_id, "tenant_id": tenant_id, "kind": "internal"}

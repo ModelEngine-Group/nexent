@@ -13,7 +13,7 @@ import pytest
 
 from contracts.errors.exceptions import AccountConflictError
 from management.cli import account as cli
-from infrastructure.security.passwords import verify_password
+from service_common.security.passwords import verify_password
 
 
 @pytest.fixture

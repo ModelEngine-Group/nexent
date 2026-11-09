@@ -35,7 +35,7 @@ from management.db.models import ModelRecord
 from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
 from management.db.evaluation.evaluator import get_evaluator
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from infrastructure.concurrency import config_thread_manager, runtime_thread_manager
+from service_common.concurrency import config_thread_manager, runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,

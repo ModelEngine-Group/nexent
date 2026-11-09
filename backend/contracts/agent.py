@@ -12,7 +12,7 @@ from contracts.conversation import HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from contracts.agent_prompt import normalize_imported_agent_bundle
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,

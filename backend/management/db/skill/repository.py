@@ -20,7 +20,7 @@ from contracts.constants.environment import MAX_SKILLS_PER_TENANT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db
-from infrastructure.serialization.text import convert_list_to_string, convert_string_to_list
+from service_common.serialization.text import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
 

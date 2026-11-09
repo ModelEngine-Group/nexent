@@ -10,7 +10,7 @@ from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVIC
 from nexent.core.concurrency import ManagerState, get_default_thread_manager
 from management import recovery as startup_recovery_service
 from infrastructure.redis.run_state import runtime_state_service
-from infrastructure.concurrency import config_thread_manager
+from service_common.concurrency import config_thread_manager
 
 
 @pytest.mark.asyncio

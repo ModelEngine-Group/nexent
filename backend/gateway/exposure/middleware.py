@@ -3,7 +3,7 @@
 
 from starlette.responses import JSONResponse
 
-from infrastructure.security.identity import DELEGATION_PATH
+from service_common.security.identity import DELEGATION_PATH
 
 
 class ExposureMiddleware:

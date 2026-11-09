@@ -140,9 +140,9 @@ sys.modules['management.services.permission.identity.session'] = MagicMock()
 sys.modules['management.services.permission.identity.session'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
-sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
+sys.modules['infrastructure.trace.bootstrap'] = MagicMock()
+sys.modules['infrastructure.trace.bootstrap'].monitoring_manager = monitoring_manager_mock
+sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
@@ -155,7 +155,7 @@ sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from infrastructure.web.app_factory import register_exception_handlers
+from service_common.http.server.app_factory import register_exception_handlers
 
 
 

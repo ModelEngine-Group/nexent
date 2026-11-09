@@ -6,7 +6,7 @@ import pytest
 from contracts.errors.exceptions import RuntimeMetadataValidationError
 from contracts.errors.codes import RuntimeMetadataValidationCode
 
-from infrastructure.serialization.runtime_metadata import (
+from contracts.runtime_metadata import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
     MAX_RUNTIME_METADATA_BYTES,
     MAX_RUNTIME_METADATA_DEPTH,

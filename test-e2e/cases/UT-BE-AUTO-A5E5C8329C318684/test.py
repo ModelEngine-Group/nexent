@@ -17,7 +17,7 @@ from nexent.core.concurrency import (
     ManagerState,
     ThreadManager,
 )
-from infrastructure.concurrency import (
+from service_common.concurrency import (
     config_thread_manager,
     mcp_thread_manager,
     northbound_thread_manager,

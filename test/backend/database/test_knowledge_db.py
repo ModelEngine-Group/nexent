@@ -111,7 +111,7 @@ utils_mock.str_utils = MagicMock()
 utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
 sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
-sys.modules['infrastructure.serialization.text'] = utils_mock.str_utils
+sys.modules['service_common.serialization.text'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

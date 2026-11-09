@@ -20,7 +20,7 @@ sys.path.insert(0, backend_path)
 # Import AppException from contracts.errors.exceptions where it is defined
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from infrastructure.web.app_factory import create_app, register_exception_handlers
+from service_common.http.server.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -515,8 +515,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('infrastructure.web.app_factory.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.trace.bootstrap': None}):
+            with patch('service_common.http.server.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +532,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('infrastructure.web.app_factory.logger') as mock_logger:
+        with patch('service_common.http.server.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -551,8 +551,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
-            with patch('infrastructure.web.app_factory.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.trace.bootstrap': mock_module}):
+            with patch('service_common.http.server.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available
@@ -695,7 +695,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('infrastructure.web.app_factory.logger') as mock_logger:
+        with patch('service_common.http.server.app_factory.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 

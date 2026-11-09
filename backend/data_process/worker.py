@@ -91,7 +91,7 @@ def setup_worker_process_resources(**kwargs):
     process_id = os.getpid()
     logger.debug("Initialize worker process pid=%s", process_id)
     try:
-        from infrastructure.observability.bootstrap import monitoring_manager
+        from infrastructure.trace.bootstrap import monitoring_manager
 
         logger.info(
             "Knowledge telemetry initialized in worker process: enabled=%s",
@@ -174,7 +174,7 @@ def task_failure_handler(sender=None, task_id=None, exception=None, **kwds):
 def start_worker():
     """Start a Celery worker with queue-specific pool settings."""
     try:
-        from infrastructure.observability.bootstrap import monitoring_manager
+        from infrastructure.trace.bootstrap import monitoring_manager
 
         logger.info(
             "Knowledge telemetry initialized before worker start: enabled=%s",

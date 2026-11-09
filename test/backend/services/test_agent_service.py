@@ -162,7 +162,7 @@ _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
-_thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
+_thread_lifecycle_module = types.ModuleType("service_common.concurrency")
 _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
@@ -173,7 +173,7 @@ _thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
 )
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
-sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
+sys.modules["service_common.concurrency"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
@@ -299,7 +299,7 @@ sys.modules["management.services.configuration.user.memory"] = memory_config_ser
 sys.modules["management.services.agent.versions"] = agent_version_service_mock
 sys.modules["management.services.skill.service"] = skill_service_mock
 sys.modules["management.services.file.service"] = MagicMock()
-sys.modules["infrastructure.streaming.channels"] = MagicMock()
+sys.modules["management.services.agent.channels"] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
@@ -375,7 +375,7 @@ streaming_channel_manager_mock.complete_channel = AsyncMock(
     side_effect=_complete_test_streaming_channel
 )
 sys.modules[
-    "infrastructure.streaming.channels"
+    "management.services.agent.channels"
 ].streaming_channel_manager = streaming_channel_manager_mock
 setattr(
     services_module, "skill_service", sys.modules["management.services.skill.service"]
@@ -449,7 +449,7 @@ utils_module.__path__ = [
 sys.modules["utils"] = utils_module
 sys.modules["management.services.permission.identity.session"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
-sys.modules["infrastructure.observability.knowledge"] = MagicMock()
+sys.modules["infrastructure.trace.knowledge"] = MagicMock()
 
 
 # Mock str_utils with actual convert_list_to_string implementation
@@ -567,16 +567,16 @@ sys.modules["nexent.core.models.rerank_model"] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules["nexent.memory"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()
-sys.modules["infrastructure.serialization.text"] = MagicMock()
-sys.modules["infrastructure.serialization.text"].convert_list_to_string = mock_convert_list_to_string
-sys.modules["infrastructure.serialization.text"].convert_string_to_list = lambda s: (
+sys.modules["service_common.serialization.text"] = MagicMock()
+sys.modules["service_common.serialization.text"].convert_list_to_string = mock_convert_list_to_string
+sys.modules["service_common.serialization.text"].convert_string_to_list = lambda s: (
     s.split(",") if s else []
 )
 
 sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 sys.modules["management.services.agent.prompt"] = MagicMock()
 sys.modules["management.services.model.invocation"] = MagicMock()
-sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
+sys.modules["infrastructure.trace.bootstrap"] = MagicMock()
 
 # =============================================================================
 # STEP 2: Now import after all mocks are in place
@@ -605,8 +605,8 @@ monitoring_manager_mock.set_span_attributes = MagicMock()
 
 sys.modules["nexent.monitor"].get_monitoring_manager = lambda: monitoring_manager_mock
 sys.modules["nexent.monitor"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].monitoring_manager = monitoring_manager_mock
-sys.modules["infrastructure.observability.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
+sys.modules["infrastructure.trace.bootstrap"].monitoring_manager = monitoring_manager_mock
+sys.modules["infrastructure.trace.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
 
 # Mock storage config validate
 sys.modules["nexent.storage.minio_config"].MinIOStorageConfig = type(
@@ -3921,7 +3921,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in infrastructure.serialization.text
+    # This should match the actual implementation in service_common.serialization.text
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -4007,7 +4007,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in infrastructure.serialization.text
+    # This should match the actual implementation in service_common.serialization.text
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []

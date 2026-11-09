@@ -70,7 +70,7 @@ from management.services.permission.asset_owner import postprocess_knowledge_vis
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.configuration.tenant.settings import tenant_config_manager
-from infrastructure.serialization.text import convert_list_to_string, convert_string_to_list
+from service_common.serialization.text import convert_list_to_string, convert_string_to_list
 
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):

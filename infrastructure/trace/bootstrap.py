@@ -7,7 +7,7 @@ with backend environment variables using OTLP protocol. All other backend module
 should import `monitoring_manager` directly from this module.
 
 Usage:
-    from infrastructure.observability.bootstrap import monitoring_manager
+    from infrastructure.trace.bootstrap import monitoring_manager
 
     @monitoring_manager.monitor_endpoint("my_service.my_function")
     async def my_function():

@@ -21,13 +21,13 @@ from contracts.errors.exceptions import (
 )
 from fastapi import HTTPException, Request
 from management.services.permission.identity.session import extract_bearer_token, require_active_account
-from infrastructure.security.signatures import (
+from service_common.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )
 from management.db.identity.token import get_token_by_access_key, log_token_usage
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from infrastructure.web.request_context import get_user_language
+from service_common.http.server.request_context import get_user_language
 
 logger = logging.getLogger(__name__)
 

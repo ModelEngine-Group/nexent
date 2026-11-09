@@ -88,14 +88,14 @@ from management.services.knowledge_base.scope import (
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from infrastructure.streaming.channels import (
+from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from infrastructure.concurrency import (
+from service_common.concurrency import (
     runtime_thread_manager,
 )
-from infrastructure.web.request_context import get_user_language
-from infrastructure.serialization.runtime_metadata import (
+from service_common.http.server.request_context import get_user_language
+from contracts.runtime_metadata import (
     validate_runtime_metadata,
 )
 

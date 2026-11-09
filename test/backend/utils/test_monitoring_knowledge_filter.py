@@ -9,7 +9,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from infrastructure.observability import knowledge
+from infrastructure.trace import knowledge
 from nexent.monitor.span_processor import MonitoringSpanProcessor
 
 

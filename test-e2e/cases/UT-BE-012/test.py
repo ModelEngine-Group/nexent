@@ -54,7 +54,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-012")
 def test_datamate_url_normalization_and_parts_builder() -> None:
-    from infrastructure.web.file_http import _build_datamate_url_from_parts, _ensure_http_scheme, _normalize_datamate_download_url
+    from service_common.http.server.file_http import _build_datamate_url_from_parts, _ensure_http_scheme, _normalize_datamate_download_url
 
     with pytest.raises(HTTPException, match="must start with http"):
         _ensure_http_scheme("host:8080")

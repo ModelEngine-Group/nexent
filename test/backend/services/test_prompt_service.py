@@ -46,7 +46,7 @@ _MODULE_PATCH_NAMES = [
     'nexent.vector_database',
     'nexent.memory',
     'nexent.monitor',
-    'infrastructure.concurrency',
+    'service_common.concurrency',
 ]
 _MODULE_PATCH_ORIGINALS = {
     name: sys.modules.get(name, _MODULE_PATCH_SENTINEL)
@@ -211,7 +211,7 @@ sys.modules['management.services.agent.prompt'] = MagicMock()
 
 # Mock services
 sys.modules['management.services.agent.service'] = MagicMock()
-thread_lifecycle_stub = types.ModuleType('infrastructure.concurrency')
+thread_lifecycle_stub = types.ModuleType('service_common.concurrency')
 thread_lifecycle_stub.config_thread_manager = MagicMock()
 
 
@@ -225,7 +225,7 @@ def _submit_prompt(_lane, _spec, fn, *args, **kwargs):
 
 
 thread_lifecycle_stub.config_thread_manager.submit.side_effect = _submit_prompt
-sys.modules['infrastructure.concurrency'] = thread_lifecycle_stub
+sys.modules['service_common.concurrency'] = thread_lifecycle_stub
 
 from management.services.agent.prompt_generation import join_info_for_optimize_prompt_section, optimize_prompt_section_impl, _get_enabled_tool_descriptions, PromptOptimizationService, OptimizeRequest, OptimizeResult, _copy_bad_cases_with_scope_instruction, _resolve_knowledge_tool_capabilities
 

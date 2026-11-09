@@ -440,11 +440,11 @@ sys.modules['management.services.file.upload'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
 setattr(sys.modules['backend.utils'], 'file_management_utils', file_management_utils_mock)
 
-str_utils_mock = types.ModuleType('infrastructure.serialization.text')
+str_utils_mock = types.ModuleType('service_common.serialization.text')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['infrastructure.serialization.text'] = str_utils_mock
-sys.modules['infrastructure.serialization.text'] = str_utils_mock
+sys.modules['service_common.serialization.text'] = str_utils_mock
+sys.modules['service_common.serialization.text'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
@@ -465,10 +465,10 @@ sys.modules['management.services.configuration.tenant.settings'] = config_utils_
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
 
-knowledge_telemetry_mock = types.ModuleType('infrastructure.observability.knowledge')
+knowledge_telemetry_mock = types.ModuleType('infrastructure.trace.knowledge')
 knowledge_telemetry_mock.set_span_attributes = MagicMock()
 knowledge_telemetry_mock.trace_knowledge_operation = MagicMock()
-sys.modules['infrastructure.observability.knowledge'] = knowledge_telemetry_mock
+sys.modules['infrastructure.trace.knowledge'] = knowledge_telemetry_mock
 setattr(sys.modules['utils'], 'knowledge_telemetry', knowledge_telemetry_mock)
 
 # Shared mock instances for MinIO
