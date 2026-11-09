@@ -1,12 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
-from contracts.constants.environment import MCP_MANAGEMENT_API
-from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
-from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service
+from contracts.constants.environment import MCP_INTERNAL_TOKEN, MCP_MANAGEMENT_API
+from management.db.tool.outer_api import (
+    delete_openapi_service as db_delete_openapi_service,
+    query_openapi_services_by_tenant,
+    upsert_openapi_service,
+)
 from management.services.tool.common import (
     logger,
 )
@@ -19,7 +23,9 @@ def import_openapi_service(
     tenant_id: str,
     user_id: str,
     service_description: str = None,
+    auth_enabled: Optional[bool] = None,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
     force_update: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -39,6 +45,12 @@ def import_openapi_service(
     Returns:
         Dictionary with import result
     """
+    # Preserve legacy behavior: a non-empty header template implies that
+    # authentication is enabled unless the caller explicitly disables it.
+    effective_auth_enabled = (
+        bool(headers_template) if auth_enabled is None else auth_enabled
+    )
+
     # If service_description not provided, extract from openapi_json info
     if service_description is None:
         info = openapi_json.get("info", {})
@@ -55,7 +67,9 @@ def import_openapi_service(
         tenant_id=tenant_id,
         user_id=user_id,
         description=service_description,
+        auth_enabled=effective_auth_enabled,
         headers_template=headers_template,
+        ssl_verify=ssl_verify,
     )
 
     logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")
@@ -110,7 +124,10 @@ def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                refresh_url, params={"tenant_id": tenant_id}, timeout=30
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+                timeout=30,
             )
             response.raise_for_status()
             result = response.json()
@@ -132,3 +149,52 @@ def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Failed to refresh OpenAPI services in MCP: {e}")
             return {"error": str(e)}
+
+
+def get_openapi_service_tool_map(tenant_id: str) -> Dict[str, int]:
+    """Load the authenticated internal mapping used by the tool catalog sync."""
+    map_url = f"{MCP_MANAGEMENT_API}/internal/tools/openapi-service-map"
+    try:
+        response = requests.get(
+            map_url,
+            params={"tenant_id": tenant_id},
+            headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        tool_map = {
+            item["name"]: int(item["service_id"])
+            for item in response.json().get("data", [])
+            if item.get("name") and item.get("service_id") is not None
+        }
+        # Older MCP runtimes may expose the mounted tools but not the child
+        # service tools through ``get_tools()``. In that case the internal
+        # endpoint returns an empty map even though the OpenAPI tools are
+        # available. FastMCP prefixes mounted tool names with the sanitized
+        # service name, so reconstruct the association from the persisted
+        # service records as a compatibility fallback.
+        services = query_openapi_services_by_tenant(tenant_id)
+        fallback_map: Dict[str, int] = dict(tool_map)
+        for service in sorted(
+            services,
+            key=lambda item: len(str(item.get("mcp_service_name") or "")),
+            reverse=True,
+        ):
+            service_name = str(service.get("mcp_service_name") or "")
+            service_id = service.get("id")
+            if not service_name or service_id is None:
+                continue
+            sanitized_name = re.sub(r"[^a-zA-Z0-9_]", "_", service_name)
+            sanitized_name = re.sub(r"^[^a-zA-Z]+", "", sanitized_name)
+            if sanitized_name:
+                fallback_map.setdefault(f"{sanitized_name}_", int(service_id))
+
+        if not tool_map and fallback_map:
+            logger.warning(
+                "OpenAPI tool map was empty for tenant %s; using persisted service-name fallback",
+                tenant_id,
+            )
+        return fallback_map
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        logger.warning("Failed to load OpenAPI service tool map: %s", exc)
+        return {}

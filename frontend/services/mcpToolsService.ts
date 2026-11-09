@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import log from "@/lib/logger";
 import { fetchWithAuth } from "@/lib/auth";
 import {
@@ -347,6 +349,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       containerStatus: s.container_status as McpContainerStatus,
       authorizationToken: s.authorization_token,
       customHeaders: s.custom_headers ?? undefined,
+      sslVerify: s.ssl_verify ?? undefined,
       communityId: s.market_id ?? undefined,
       isListedInRepository: s.is_listed_in_repository ?? undefined,
       permission: s.permission ?? undefined,

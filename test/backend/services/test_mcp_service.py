@@ -241,6 +241,7 @@ def reset_global_state():
     mcp_service._tenant_mcp_servers = {}
     mcp_service._tenant_mcp_apps = {}
     mcp_service._mcp_management_app = None
+    mcp_service.MCP_INTERNAL_TOKEN = "test-mcp-token"
 
     # Reset mocks
     if hasattr(mcp_service, 'query_available_openapi_services'):
@@ -613,16 +614,67 @@ class TestRegisterOpenapiService:
             "headers_service",
             {"openapi": "3.0.0", "info": {}, "paths": {}},
             "https://api.example.com",
-            headers_template
+            headers_template,
+            auth_enabled=True,
         )
 
         assert result is True
         mock_async_client.assert_called_once_with(
             base_url="https://api.example.com",
             timeout=120.0,
-            headers=headers_template
+            headers=headers_template,
+            verify=True
         )
         mock_fastmcp.from_openapi.assert_called_once()
+
+    @patch.object(mcp_service, 'FastMCP')
+    @patch.object(mcp_service.httpx, 'AsyncClient')
+    def test_register_service_can_disable_ssl_verification(
+        self, mock_async_client, mock_fastmcp
+    ):
+        """Test registration passes the per-service SSL setting to httpx."""
+        mock_async_client.return_value = MagicMock()
+        mock_fastmcp.from_openapi.return_value = MagicMock()
+
+        result = mcp_service.register_openapi_service(
+            "self_signed_service",
+            {"openapi": "3.0.0", "info": {}, "paths": {}},
+            "https://internal.example.com",
+            self._headers_template(),
+            ssl_verify=False,
+            auth_enabled=True,
+        )
+
+        assert result is True
+        mock_async_client.assert_called_once_with(
+            base_url="https://internal.example.com",
+            timeout=120.0,
+            headers=self._headers_template(),
+            verify=False,
+        )
+
+    @patch.object(mcp_service, 'FastMCP')
+    @patch.object(mcp_service.httpx, 'AsyncClient')
+    def test_register_service_reuses_client_during_refresh(
+        self, mock_async_client, mock_fastmcp
+    ):
+        """A refreshed service must keep the client used by existing sessions."""
+        existing_client = MagicMock()
+        mock_fastmcp.from_openapi.return_value = MagicMock()
+
+        result = mcp_service.register_openapi_service(
+            "reused_client_service",
+            {"openapi": "3.0.0", "info": {}, "paths": {}},
+            "https://internal.example.com",
+            self._headers_template(),
+            ssl_verify=False,
+            auth_enabled=True,
+            client=existing_client,
+        )
+
+        assert result is True
+        mock_async_client.assert_not_called()
+        assert mock_fastmcp.from_openapi.call_args.kwargs["client"] is existing_client
 
     @patch.object(mcp_service, 'FastMCP')
     def test_register_service_from_openapi_failure(self, mock_fastmcp):
@@ -832,6 +884,8 @@ class TestRefreshOpenapiServicesByTenant:
                 "Authorization": "Bearer {{token}}",
                 "X-Tenant-ID": "{{tenant_id}}"
             },
+            ssl_verify=True,
+            auth_enabled=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
@@ -980,6 +1034,8 @@ class TestRefreshSingleOpenapiService:
             {"openapi": "3.0.0", "info": {}, "paths": {}},
             "https://api.example.com",
             self._headers_template(),
+            ssl_verify=True,
+            auth_enabled=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
@@ -1095,7 +1151,8 @@ class AsyncTestClient:
         transport = httpx.ASGITransport(app=self.app)
         self._async_client = httpx.AsyncClient(
             transport=transport,
-            base_url="http://test"
+            base_url="http://test",
+            headers={"Authorization": "Bearer test-mcp-token"},
         )
         return self
 

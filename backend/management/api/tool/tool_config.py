@@ -26,6 +26,7 @@ from management.services.tool.configuration import (
 )
 from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.db.identity.user_tenant import get_user_email_map
+from management.db.mcp.remote import delete_mcp_record_by_name_and_url
 from management.services.monitor.audit import record_security_event
 from gateway.authentication.auth import get_current_user_id
 
@@ -218,7 +219,32 @@ async def import_openapi_service_api(
     openapi_json = openapi_service_request.get("openapi_json")
     service_description = openapi_service_request.get("service_description")
     headers_template = openapi_service_request.get("headers_template")
+    auth_enabled_provided = "auth_enabled" in openapi_service_request
+    auth_enabled = openapi_service_request.get(
+        "auth_enabled", bool(headers_template)
+    )
+    ssl_verify = openapi_service_request.get("ssl_verify", True)
     force_update = openapi_service_request.get("force_update", False)
+
+    if not isinstance(auth_enabled, bool):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="auth_enabled must be a boolean"
+        )
+
+    if auth_enabled and not isinstance(headers_template, dict):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="headers_template is required when auth_enabled is true"
+        )
+    if not auth_enabled:
+        headers_template = None
+
+    if not isinstance(ssl_verify, bool):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="ssl_verify must be a boolean"
+        )
 
     if not service_name:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="service_name is required")
@@ -228,15 +254,22 @@ async def import_openapi_service_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="openapi_json is required")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        import_kwargs = {
+            "service_name": service_name,
+            "openapi_json": openapi_json,
+            "server_url": server_url,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "service_description": service_description,
+            "headers_template": headers_template,
+            "ssl_verify": ssl_verify,
+            "force_update": force_update,
+        }
+        if auth_enabled_provided:
+            import_kwargs["auth_enabled"] = auth_enabled
+
         result = import_openapi_service(
-            service_name=service_name,
-            openapi_json=openapi_json,
-            server_url=server_url,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            service_description=service_description,
-            headers_template=headers_template,
-            force_update=force_update,
+            **import_kwargs,
         )
 
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
@@ -297,21 +330,60 @@ async def delete_openapi_service_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        service = None
+        try:
+            service = next(
+                (
+                    item
+                    for item in list_openapi_services(tenant_id)
+                    if item.get("mcp_service_name") == service_name
+                ),
+                None,
+            )
+        except Exception as lookup_error:
+            # The service delete is the primary operation.  Metadata lookup is
+            # only needed to clean up the legacy MCP record and must not prevent
+            # the delete path from running in degraded database environments.
+            logger.warning(
+                "Failed to load OpenAPI service metadata before deletion: %s",
+                lookup_error,
+            )
         deleted = delete_openapi_service(service_name, tenant_id, user_id)
         if not deleted:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Service not found")
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="Service not found"
+            )
+        if service and service.get("server_url"):
+            delete_mcp_record_by_name_and_url(
+                mcp_name=service_name,
+                mcp_server=service["server_url"],
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
-        record_security_event(
-            "tool_openapi_delete",
-            request=http_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            details={"service_name": service_name},
-        )
+        try:
+            tool_sync = await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+        except Exception as sync_error:
+            # Deletion has already succeeded.  Tool catalog synchronization is
+            # a follow-up operation and must not turn a successful delete into
+            # a 500 when MCP or the database is temporarily unavailable.
+            logger.warning(
+                "Failed to synchronize tools after OpenAPI service deletion: %s",
+                sync_error,
+            )
+            tool_sync = {"error": str(sync_error)}
+        record_security_event("tool_openapi_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"service_name": service_name})
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"message": "Service deleted successfully", "status": "success", "mcp_refresh": mcp_result},
+            content={
+                "message": "Service deleted successfully",
+                "status": "success",
+                "mcp_refresh": mcp_result,
+                "tool_sync": tool_sync,
+            }
         )
     except HTTPException:
         raise

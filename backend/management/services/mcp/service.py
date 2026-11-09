@@ -15,6 +15,7 @@ from contracts.errors.exceptions import MCPConnectionError, MCPContainerError, M
 from contracts.tool import MCPConfigRequest
 from management.db.identity.group import query_group_ids_by_user
 from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
+from management.db.tool.outer_api import query_service_by_name, update_openapi_service_ssl_verify
 from management.db.mcp.remote import check_enabled_mcp_name_exists, check_mcp_name_exists, create_mcp_record, delete_mcp_record_by_container_id, delete_mcp_record_by_id, get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_records_by_tenant, update_mcp_record_by_name_and_url, update_mcp_record_container_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_manage_fields_by_id, update_mcp_record_registry_json_by_id, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
 from management.db.tool.repository import set_mcp_tools_unavailable
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
@@ -88,6 +89,7 @@ def update_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    ssl_verify: bool | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -130,6 +132,18 @@ def update_mcp_service(
         market_id if market_id is not None else current_record.get("market_id")
     )
 
+    if (
+        isinstance(current_config_json, dict)
+        and "openapi" in current_config_json
+        and ssl_verify is not None
+    ):
+        update_openapi_service_ssl_verify(
+            service_name=current_record.get("mcp_name") or new_name,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ssl_verify=ssl_verify,
+        )
+
     update_mcp_record_manage_fields_by_id(
         mcp_id=mcp_id,
         tenant_id=tenant_id,
@@ -147,6 +161,30 @@ def update_mcp_service(
         ingroup_permission=ingroup_permission,
         shared_fields=shared_fields,
     )
+
+    if (
+        isinstance(current_config_json, dict)
+        and "openapi" in current_config_json
+        and ssl_verify is not None
+    ):
+        try:
+            from management.services.tool.configuration import (
+                _refresh_openapi_services_in_mcp,
+            )
+
+            refresh_result = _refresh_openapi_services_in_mcp(tenant_id)
+            if (refresh_result or {}).get("error"):
+                logger.warning(
+                    "OpenAPI MCP runtime refresh failed after updating service '%s': %s",
+                    new_name,
+                    refresh_result["error"],
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh OpenAPI MCP runtime after updating service '%s': %s",
+                new_name,
+                exc,
+            )
 
 
 async def update_mcp_service_enabled(
@@ -608,6 +646,9 @@ async def get_remote_mcp_server_list(
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")
+        openapi_service = None
+        if isinstance(config_json, dict) and "openapi" in config_json:
+            openapi_service = query_service_by_name(record["mcp_name"], tenant_id)
 
         # Reuse _is_container_record so an empty config_json (e.g. `{}`) is not
         # misclassified as a container, matching the API/enable path behavior.
@@ -642,6 +683,11 @@ async def get_remote_mcp_server_list(
             "group_ids": record.get("group_ids"),
             "ingroup_permission": record.get("ingroup_permission"),
             "shared_fields": record.get("shared_fields"),
+            "ssl_verify": (
+                openapi_service.get("ssl_verify", True)
+                if openapi_service
+                else None
+            ),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")

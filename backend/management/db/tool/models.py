@@ -34,6 +34,12 @@ class ToolInfo(TableBase):
     source = Column(String(100), doc="Source")
     author = Column(String(100), doc="Tool author")
     usage = Column(String(100), doc="Usage")
+    outer_api_service_id = Column(
+        BigInteger,
+        nullable=True,
+        index=True,
+        doc="Source API-to-MCP service ID; NULL for non-OpenAPI tools",
+    )
     params = Column(JSON, doc="Tool parameter information (json)")
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")
@@ -85,6 +91,18 @@ class OuterApiService(TableBase):
     openapi_json = Column(JSONB, doc="Complete OpenAPI JSON specification")
     server_url = Column(String(500), doc="Base URL of the REST API server")
     headers_template = Column(JSONB, doc="Default headers template as JSON")
+    ssl_verify = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Whether to verify TLS certificates for the target API",
+    )
+    auth_enabled = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether authentication headers are enabled for the target API",
+    )
     tenant_id = Column(String(100), nullable=False,
                        doc="Tenant ID for multi-tenancy")
     is_available = Column(Boolean, default=True,

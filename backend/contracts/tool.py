@@ -54,6 +54,7 @@ class ToolInfo(BaseModel):
     output_type: str
     class_name: str
     usage: Optional[str]
+    outer_api_service_id: Optional[int] = None
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
@@ -114,6 +115,10 @@ class MCPUpdateRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(
         None, description="Custom HTTP headers as JSON object"
     )
+    ssl_verify: bool = Field(
+        default=True,
+        description="Whether to verify TLS certificates for API-type MCP services",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +149,10 @@ class AddMcpServiceRequest(BaseModel):
     )
     custom_headers: Optional[Dict[str, Any]] = Field(
         None, description="Custom HTTP headers as JSON object"
+    )
+    ssl_verify: Optional[bool] = Field(
+        None,
+        description="Whether to verify TLS certificates for API-type MCP services",
     )
     container_config: Optional[Dict[str, Any]] = Field(
         None, description="Container configuration"
@@ -211,6 +220,10 @@ class AddContainerMcpServiceRequest(BaseModel):
     shared_fields: Optional[Dict[str, Any]] = Field(
         None, description="JSON object of field-level sharing flags"
     )
+    ssl_verify: Optional[bool] = Field(
+        None,
+        description="Whether to verify TLS certificates for the MCP service",
+    )
 
     @field_validator("name", "description", "authorization_token", mode="before")
     @classmethod
@@ -247,6 +260,10 @@ class UpdateMcpServiceRequest(BaseModel):
     )
     shared_fields: Optional[Dict[str, Any]] = Field(
         None, description="JSON object of field-level sharing flags"
+    )
+    ssl_verify: Optional[bool] = Field(
+        None,
+        description="Whether to verify TLS certificates for API-type MCP services",
     )
 
     @field_validator(
