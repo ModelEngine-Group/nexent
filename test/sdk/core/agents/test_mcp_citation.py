@@ -261,6 +261,7 @@ def test_maps_data_platform_identity_fields_into_score_details():
     }]
     annotate_mcp_search_results(json.dumps(items), observer, "rag")
     reported = json.loads(observer.messages[0][2])
+    assert reported[0]["filename"] == "doc-9f2"
     assert reported[0]["score_details"] == {
         "chunk_id": "chk-31",
         "knowledge_doc_id": "doc-9f2",
@@ -270,6 +271,36 @@ def test_maps_data_platform_identity_fields_into_score_details():
         "file_url": "https://aidp.example.com/files/9",
         "metadata": {},
     }
+
+
+def test_knowledge_doc_id_falls_back_to_filename():
+    observer = _RecordingObserver()
+    items = [{
+        # Data-platform payload without title/filename: the document id keeps
+        # the citation card traceable through the filename fallback chain.
+        "knowledge_doc_id": "doc-9f2",
+        "chunk_id": "chk-31",
+        "chunk_text": "Data-platform chunk without title or file name fields.",
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["filename"] == "doc-9f2"
+    assert reported[0]["source_type"] == "file"
+    assert reported[0]["score_details"]["knowledge_doc_id"] == "doc-9f2"
+
+
+def test_real_filename_wins_over_knowledge_doc_id_fallback():
+    observer = _RecordingObserver()
+    items = [{
+        "title": "Doc",
+        "filename": "manual.pdf",
+        "knowledge_doc_id": "doc-9f2",
+        "chunk_text": "Chunk body long enough to pass detection thresholds.",
+    }]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag")
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["filename"] == "manual.pdf"
+    assert reported[0]["score_details"]["knowledge_doc_id"] == "doc-9f2"
 
 
 def test_defaults_to_file_source_type_without_url():

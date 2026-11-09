@@ -27,7 +27,9 @@ _TEXT_FIELDS = ("text", "content", "chunk_content", "chunk_text", "chunk", "snip
 _TITLE_FIELDS = ("title", "name", "doc_title", "document_name", "document_title")
 # file_url is the attachment file address used by data-platform RAG chunks.
 _URL_FIELDS = ("url", "link", "source_url", "uri", "web_url", "file_url")
-_FILENAME_FIELDS = ("filename", "file_name", "doc_name")
+# knowledge_doc_id is the last filename fallback so data-platform documents
+# without a real file name stay traceable in the citation UI title chain.
+_FILENAME_FIELDS = ("filename", "file_name", "doc_name", "knowledge_doc_id")
 _DATE_FIELDS = ("published_date", "publish_date", "date", "created_at", "create_time")
 _SCORE_FIELDS = ("score", "similarity", "relevance", "similarity_score")
 # Keys under which a retrieval list is typically nested in a JSON object.
