@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from contracts.annotations import (
+from contracts.conversation import (
     ANNOTATION_COMMENT_MAX_CHARS,
     ANNOTATION_MAX_COUNT,
     ANNOTATION_QUOTED_TEXT_MAX_CHARS,

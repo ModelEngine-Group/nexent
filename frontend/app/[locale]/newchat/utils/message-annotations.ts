@@ -18,7 +18,7 @@ const SOURCE_EXCERPT_MAX_LENGTH = 40;
 /** Default truncation length for quoted text shown inside the chip list. */
 const LIST_QUOTE_MAX_LENGTH = 80;
 
-/** Defensive caps mirrored by the backend (see backend/contracts/annotations.py). */
+/** Defensive caps mirrored by the backend (see backend/contracts/conversation.py). */
 export const MESSAGE_ANNOTATION_QUOTED_TEXT_MAX = 1500;
 export const MESSAGE_ANNOTATION_COMMENT_MAX = 500;
 export const MESSAGE_ANNOTATION_MAX_COUNT = 10;
@@ -83,7 +83,7 @@ export interface MessageAnnotationsControl {
 
 /**
  * Wire shape of one persisted reply annotation (snake_case, matching
- * `backend/contracts/annotations.py::MessageAnnotationItem`).
+ * `backend/contracts/conversation.py::MessageAnnotationItem`).
  */
 export interface MessageAnnotationWireItem {
   quoted_text: string;

@@ -1,11 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.annotations import (
-    MESSAGE_ANNOTATIONS_UNIT_TYPE,
-    format_annotations_for_llm,
-    normalize_message_annotations,
-    parse_message_annotation_unit,
-)
 from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
 from contracts.conversation import ConversationHistory
 from contracts.errors.exceptions import HistorySummaryPersistenceError
@@ -20,7 +14,15 @@ from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSA
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
+from contracts.conversation import (
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    MessageSource,
+    decode_activity_cursor,
+    encode_activity_cursor,
+    format_annotations_for_llm,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from management.db.models import KnowledgeRecord
 
 from management.utils.orm import as_dict

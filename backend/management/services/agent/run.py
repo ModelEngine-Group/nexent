@@ -25,7 +25,7 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import MemoryPreparationException
 from contracts.agent import AgentRequest
-from contracts.annotations import (
+from contracts.conversation import (
     format_annotations_for_llm,
     normalize_message_annotations,
 )

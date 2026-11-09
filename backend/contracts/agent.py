@@ -18,10 +18,9 @@ from pydantic import (
     model_validator,
 )
 
-from contracts.annotations import MessageAnnotationItem
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import ConversationTarget, HistoryItem
+from contracts.conversation import ConversationTarget, HistoryItem, MessageAnnotationItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
