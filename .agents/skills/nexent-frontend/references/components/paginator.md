@@ -12,8 +12,8 @@ Default font Tailwind CSS:
 text-[#191919] text-[14px] ![letter-spacing:0px]
 ```
 
-Use the reusable component:
+Use the native component with the central theme:
 
 ```tsx
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { Pagination } from "antd";
 ```

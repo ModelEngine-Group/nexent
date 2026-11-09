@@ -1678,9 +1678,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }>,
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
-          agent_id: isNl2Agent
-            ? undefined
-            : (requestBody.agent_id as number | undefined),
+          // Older runtimes require agent_id; both fields name the same draft.
+          agent_id: requestBody.agent_id as number | undefined,
           target:
             isNl2Agent && nl2AgentId != null
               ? { type: "agent", id: Number(nl2AgentId) }

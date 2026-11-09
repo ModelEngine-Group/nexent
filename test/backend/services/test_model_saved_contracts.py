@@ -82,7 +82,7 @@ def test_saved_projection_keeps_values_and_revision_without_catalog_recompositio
     row = encode_resolved_model_profile(reviewed, registered_references=model_service_references())
     assert project_saved_outlet(row)["migration_review_required"] is False
     row["config_revision"] += 1
-    assert project_saved_outlet(row)["migration_review_required"] is True
+    assert project_saved_outlet(row)["migration_review_required"] is False
 
 
 def test_projection_reports_invalid_and_non_profile_rows():

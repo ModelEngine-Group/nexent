@@ -141,6 +141,27 @@ def _validate_request_output_limit(profile):
     return profile
 
 
+def _clear_sampling_parameters(profile, cleared):
+    """Treat explicit empty sampling inputs as omission, not provider JSON null."""
+    if not cleared:
+        return profile
+    from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules, validate_saved_parameter_values
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+
+    data = profile.model_dump(mode="json")
+    rules = {rule["key"]: rule for rule in profile.parameter_rules}
+    for key in cleared:
+        rule = rules.get(key)
+        if rule is None:
+            raise ParameterValidationError("PARAMETER_UNKNOWN", "/" + key)
+        if "fixed_value" in rule or not rule["editable"] or "outlet" not in rule["allowed_scopes"]:
+            raise ParameterValidationError("FIXED_PARAMETER", "/" + key)
+        data["parameter_values"].pop(key, None)
+    validate_saved_parameter_values(compile_parameter_rules(profile.parameter_rules), data["parameter_values"])
+    return ResolvedModelProfile.model_validate(data)
+
+
 def _patch_context_limits(data, patch):
     """Bound inherited hidden limits when the user reduces the effective window."""
     context = data["capabilities"]["context"]
@@ -210,14 +231,24 @@ def build_outlet_draft(request, tenant_id, *, require_revision=False):
         if bindings["protocol"]["ref"] != request.protocol_id:
             raise ModelOutletValidationError()
         credential_kind = "none" if scheme == "no_auth_v1" else "model_record"
+        from nexent.core.model_service.profiles.outlet_controls import (
+            custom_thinking_allowed, custom_thinking_rule, has_manual_thinking_parameter,
+        )
+
+        protocol_rules = openai_chat_parameter_rules()
+        model_atom = catalog.models.get(model_key)
+        if (provider_key is None and model_atom and custom_thinking_allowed(model_atom.capabilities["reasoning"])
+                and not has_manual_thinking_parameter(request.extra_api_parameters)):
+            protocol_rules.append(custom_thinking_rule())
         policy = compose_provider_model_policy(
             catalog, provider_key=provider_key, model_profile_key=model_key,
             request_model_id=request.request_model_id, base_bindings=bindings,
             base_instruction=VersionedReference(ref="system_only_v1", version=1),
             registered_references=refs, submitted_values={key: value for key, value in request.parameter_values.items()
+                if not (key in {"temperature", "top_p"} and value is None)
                 if not ((request.thinking_control not in (None, "profile_default") and key == "enable_thinking")
                     or (request.thinking_mode not in (None, "default") and key in {"reasoning_effort", "reasoning_budget_tokens"}))},
-            protocol_parameter_rules=openai_chat_parameter_rules(),
+            protocol_parameter_rules=protocol_rules,
         )
         apply_extra_api_parameters({}, request.extra_api_parameters,
             parameter_paths=[item["api_binding"]["path"] for item in policy.parameter_rules.declarations
@@ -256,6 +287,12 @@ def build_outlet_draft(request, tenant_id, *, require_revision=False):
             from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
 
             profile = LegacyInvocationOptions(configured).resolve(profile)
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+
+        profile = _clear_sampling_parameters(ensure_outlet_parameter_rules(profile), {
+            key for key in ("temperature", "top_p")
+            if key in request.parameter_values and request.parameter_values[key] is None
+        })
         _validate_request_output_limit(profile)
         return profile, {"models": models, "providers": providers}
     except ModelOutletConflictError:
@@ -325,9 +362,9 @@ def get_model_outlet(model_id, tenant_id):
         return None
     if profile.identity.model_type != "llm":
         raise ModelOutletValidationError()
-    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+    from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
-    profile = ensure_outlet_sampling_rules(profile)
+    profile = ensure_outlet_parameter_rules(profile)
     from management.db.model.repository import get_model_by_model_id
 
     row = get_model_by_model_id(model_id, tenant_id) or {}
@@ -366,7 +403,14 @@ def reselect_outlet_profile(profile, request):
     native, _ = build_outlet_draft(draft.model_copy(update={"parameter_values": {},
         "thinking_control": None, "thinking_mode": None}), profile.identity.tenant_id, require_revision=True)
     native_keys = {rule["key"] for rule in native.parameter_rules}
-    if "enable_thinking" in values and "enable_thinking" not in native_keys and draft.thinking_control in (None, "profile_default"):
+    native_toggle = next((rule for rule in native.parameter_rules if rule["key"] == "enable_thinking"), None)
+    saved_toggle = next((rule for rule in profile.parameter_rules if rule["key"] == "enable_thinking"), None)
+    compatible_default = (native_toggle is not None
+        and native_toggle.get("source", {}).get("ref") == "custom_provider_thinking_v1"
+        and saved_toggle is not None
+        and saved_toggle.get("source", {}).get("ref") != "custom_provider_thinking_v1")
+    if ("enable_thinking" in values and ("enable_thinking" not in native_keys or compatible_default)
+            and draft.thinking_control in (None, "profile_default")):
         from nexent.core.model_service.profiles.thinking_configuration import THINKING_FORMATS
 
         binding = next((rule.get("api_binding") for rule in profile.parameter_rules if rule["key"] == "enable_thinking"), None)
@@ -421,13 +465,16 @@ def apply_outlet_patch(profile, request):
 
     _validate_credential_input(request.api_key)
     previous_rules = {rule["key"]: rule for rule in profile.parameter_rules}
-    profile = reselect_outlet_profile(profile, request)
+    cleared = {key for key in ("temperature", "top_p")
+               if key in request.parameter_values and request.parameter_values[key] is None}
+    submitted = {key: value for key, value in request.parameter_values.items() if key not in cleared}
+    profile = reselect_outlet_profile(profile, request.model_copy(update={"parameter_values": submitted}))
     try:
         from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
 
-        from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
-        profile = ensure_outlet_sampling_rules(profile)
+        profile = ensure_outlet_parameter_rules(profile)
         metadata = profile.provenance.provider_metadata if request.profile_selection is not None else {}
         control = request.thinking_control
         mode = request.thinking_mode
@@ -457,15 +504,17 @@ def apply_outlet_patch(profile, request):
             same = key not in removed and key in values and json_values_equal(values[key], request.parameter_values[key])
             if not same and (not rules[key]["editable"] or "outlet" not in rules[key]["allowed_scopes"]):
                 raise ParameterValidationError("FIXED_PARAMETER", "/" + key)
-        for key in removed:
+        for key in set(removed) | cleared:
             values.pop(key, None)
-        values.update(request.parameter_values)
+        values.update(submitted)
         if request.reset_parameters:
-            values = apply_parameter_values(compiled, request.parameter_values, scope="outlet", saved_values={})
-            values.setdefault("temperature", 0.7)
-            values.setdefault("top_p", 1.0)
+            values = apply_parameter_values(compiled, submitted, scope="outlet", saved_values={})
+            for key in cleared:
+                values.pop(key, None)
         data = profile.model_dump(mode="json")
         data["parameter_values"] = validate_saved_parameter_values(compiled, values)
+        if profile.capabilities.reasoning.can_disable is False and values.get("enable_thinking") is False:
+            raise ParameterValidationError("FIXED_PARAMETER", "/enable_thinking")
         if request.context_limits is not None:
             _patch_context_limits(data, request.context_limits.model_dump(exclude_unset=True))
         if request.context_configuration is not None:
@@ -538,7 +587,9 @@ def _load_validation_outlet(model_id, tenant_id):
         profile = decode_resolved_model_profile(row, registered_references=model_service_references())
         if profile.identity.tenant_id != tenant_id or profile.identity.model_type != "llm" or profile.outlet_id != model_id:
             raise ModelOutletValidationError()
-        return profile, row.get("api_key"), row.get("http_headers") or {}
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+
+        return ensure_outlet_parameter_rules(profile), row.get("api_key"), row.get("http_headers") or {}
     except ProfileStorageError:
         raise ModelOutletValidationError("PROFILE_STORAGE_INVALID") from None
 

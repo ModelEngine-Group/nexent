@@ -94,7 +94,7 @@ def test_clarification_ends_run_without_executor_verifier_or_next_model_call(bui
 
 @pytest.mark.parametrize("output", [
     f"<code>record(); {CODE}</code>",
-    f"<code>x = {CODE}</code>",
+    f"<code>x = {CODE}; print(other)</code>",
     f"<code>{CODE}; record()</code>",
     f"<code>record()</code>\n<code>{CODE}</code>",
     f"<code>{CODE}</code>\n<code>record()</code>",
@@ -115,7 +115,8 @@ def test_structured_model_output_uses_same_terminal_parser(build_agent):
     assert len(model.calls) == 1
 
 
-def test_invalid_options_get_schema_feedback_before_repair(build_agent):
+@pytest.mark.parametrize("strict", [False, True])
+def test_invalid_options_get_schema_feedback_before_repair(build_agent, strict):
     question = {
         "id": "scope", "type": "single_choice", "title": "Which scope?",
         "options": [{"id": f"item_{index}", "label": f"Item {index}"} for index in range(13)],
@@ -123,7 +124,7 @@ def test_invalid_options_get_schema_feedback_before_repair(build_agent):
     agent, model, observer = build_agent([
         f"思考：需要确认范围。\n代码：\n<code>ask_user(questions={[question]!r})</code>",
         f"<code>{CODE}</code>",
-    ], enable_protocol_repair_retry=True)
+    ], enable_protocol_repair_retry=strict)
     assert str(agent.run("Help")) == "1. Which region?"
     assert len(model.calls) == 2
     feedback = "\n".join(
@@ -133,6 +134,86 @@ def test_invalid_options_get_schema_feedback_before_repair(build_agent):
     assert "questions.0.options: too_long" in feedback
     assert "2-12 options" in feedback
     assert sum(event["type"] == "human_interaction" for event in events(observer)) == 1
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("suffix", ["", "\nprint(result)"])
+def test_assigned_form_emits_one_card_without_any_execution(build_agent, strict, suffix):
+    agent, model, observer = build_agent(
+        [f"<code>result = {CODE}{suffix}</code>"], enable_protocol_repair_retry=strict,
+    )
+    executor = MagicMock(wraps=agent.python_executor)
+    agent.python_executor = executor
+    assert str(agent.run("Help", max_steps=1)) == "1. Which region?"
+    assert len(model.calls) == 1
+    executor.assert_not_called()
+    assert sum(event["type"] == "human_interaction" for event in events(observer)) == 1
+
+
+@pytest.mark.parametrize("language,marker", [("zh", "重试"), ("en", "retry")])
+def test_legacy_invalid_forms_stop_after_three_and_next_run_can_recover(build_agent, language, marker):
+    invalid = f"<code>{CODE}; record()</code>"
+    agent, model, observer = build_agent([invalid] * 4 + [f"<code>{CODE}</code>"])
+    agent.lang = language
+    executor = MagicMock(wraps=agent.python_executor)
+    agent.python_executor = executor
+    result = str(agent.run("Keep my original requirements", max_steps=5))
+    assert marker in result
+    assert len(model.calls) == 3
+    executor.assert_not_called()
+    assert not any(event["type"] == "human_interaction" for event in events(observer))
+    assert str(agent.run("Retry the original request")) == "1. Which region?"
+    assert len(model.calls) == 5
+    assert sum(event["type"] == "human_interaction" for event in events(observer)) == 1
+
+
+def test_successful_business_action_resets_consecutive_clarification_failures(build_agent):
+    invalid = f"<code>{CODE}; record()</code>"
+    tool = RecordTool()
+    agent, model, observer = build_agent(
+        [invalid, invalid, "<code>record()</code>", invalid, invalid, f"<code>{CODE}</code>"], [tool],
+    )
+    assert str(agent.run("Help", max_steps=6)) == "1. Which region?"
+    assert len(model.calls) == 6
+    assert tool.calls == 1
+    assert sum(event["type"] == "human_interaction" for event in events(observer)) == 1
+
+
+def test_cancellation_preempts_legacy_invalid_form_repair(build_agent, monkeypatch):
+    from nexent.core.agents.cores.smolagents import core_agent
+
+    agent, model, observer = build_agent([f"<code>{CODE}; record()</code>"])
+    extract = core_agent.extract_clarification_form
+
+    def cancel_during_validation(code, tool_name):
+        try:
+            return extract(code, tool_name)
+        finally:
+            agent.stop_event.set()
+
+    monkeypatch.setattr(core_agent, "extract_clarification_form", cancel_during_validation)
+    executor = MagicMock(wraps=agent.python_executor)
+    agent.python_executor = executor
+    with pytest.raises(RunTerminated):
+        agent.run("Help")
+    assert len(model.calls) == 1
+    executor.assert_not_called()
+    assert not any(event["type"] == "human_interaction" for event in events(observer))
+
+
+def test_strict_invalid_forms_keep_existing_three_generation_limit(build_agent):
+    from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolExhaustedError
+
+    agent, model, observer = build_agent(
+        [f"<code>{CODE}; record()</code>"] * 3, enable_protocol_repair_retry=True,
+    )
+    executor = MagicMock(wraps=agent.python_executor)
+    agent.python_executor = executor
+    with pytest.raises(ModelOutputProtocolExhaustedError):
+        agent.run("Keep the original creation requirements")
+    assert len(model.calls) == 3
+    executor.assert_not_called()
+    assert not any(event["type"] == "human_interaction" for event in events(observer))
 
 
 def test_stop_after_generation_publishes_no_card_or_extra_model_call(build_agent):

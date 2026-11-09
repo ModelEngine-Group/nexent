@@ -24,7 +24,7 @@ def cli(mocker):
     mocker.patch.object(migrate, "source_stack_configuration", return_value={"selected": True})
     preflight = MagicMock()
     preflight.__enter__.return_value = preflight
-    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = (False,)
+    preflight.cursor.return_value.__enter__.return_value.fetchone.return_value = ({"complete": False, "legacy": True},)
     mocker.patch("psycopg2.connect", side_effect=[preflight, source, target])
     mocker.patch.object(migration, "read_source_users", return_value=[])
     importer = mocker.patch.object(migration, "import_users", return_value={"inserted": 0})

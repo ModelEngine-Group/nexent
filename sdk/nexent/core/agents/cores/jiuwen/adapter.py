@@ -646,7 +646,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             if getattr(self, "scope", None) is not None and self.scope.cancelled:
                 raise RunTerminated() from None
             self.events.output(ProcessType.HUMAN_INTERACTION,
-                               json.dumps({"schema_version": 1, **requested.form.model_dump(mode="json")},
+                               json.dumps({"schema_version": 1, **requested.form.model_dump(mode="json", exclude_none=True)},
                                           ensure_ascii=False))
             self.events.waiting_for_input = True
             self._run_completed = True

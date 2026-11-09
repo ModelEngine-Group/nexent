@@ -580,6 +580,7 @@ class CoreAgent(CodeAgent):
         if self.output_protocol not in ("code_action", "final_envelope"):
             raise ValueError(f"Unsupported output protocol: {self.output_protocol}")
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self.lang = getattr(observer, "lang", "en")
         self.clarification_tool_name = None
         if kwargs.pop("enable_clarification", False) and self.output_protocol == "code_action":
@@ -1586,6 +1587,17 @@ Additional Args:
                 except ModelOutputProtocolError as protocol_error:
                     if not legacy_code_action:
                         raise
+                    if self.stop_event.is_set():
+                        raise RunTerminated()
+                    self._consecutive_clarification_errors = getattr(self, "_consecutive_clarification_errors", 0) + 1
+                    if self._consecutive_clarification_errors >= 3:
+                        hint = (
+                            "确认选项暂时无法生成，请重试当前请求。已保留本轮需求。"
+                            if str(getattr(self, "lang", "en")).lower().startswith("zh") else
+                            "The confirmation options could not be generated. Please retry this request; "
+                            "your requirements remain in the conversation."
+                        )
+                        raise RuntimeFinalAnswer(hint, source="clarification_protocol_failure") from protocol_error
                     try:
                         ast.parse(code_action)
                     except SyntaxError as syntax_error:
@@ -1599,9 +1611,10 @@ Additional Args:
                         ) from protocol_error
                     raise AgentExecutionError(
                         "Legacy code action could not be parsed for optional clarification: "
-                        f"{protocol_error.reason.value}",
+                        f"{protocol_error.reason.value}. {protocol_error.repair_instruction}",
                         self.logger,
                     ) from protocol_error
+            self._consecutive_clarification_errors = 0
             if form is not None:
                 form = self._screen_clarification(form)
                 if self.stop_event.is_set():
@@ -1616,7 +1629,7 @@ Additional Args:
                 self._pending_thought_continuation = False
                 self.observer.add_message(
                     self.agent_name, ProcessType.HUMAN_INTERACTION,
-                    {"schema_version": 1, **form.model_dump(mode="json")},
+                    {"schema_version": 1, **form.model_dump(mode="json", exclude_none=True)},
                 )
                 raise RuntimeFinalAnswer(render_question_text(form), source="clarification")
             code_action = _remove_parallel_executor_import(code_action)
@@ -2087,6 +2100,7 @@ Additional Args:
         self._emitted_step_count = None
         returned_final_answer = False
         self._consecutive_protocol_errors = 0
+        self._consecutive_clarification_errors = 0
         self._protocol_repair_messages: list[ChatMessage] = []
         self._pending_thought_continuation = False
         final_verification_round = 0

@@ -16,7 +16,7 @@ def normalize_form(value: dict[str, Any]) -> dict[str, Any]:
     raw = dict(value)
     if type(raw.pop("schema_version", None)) is not int or value["schema_version"] != 1:
         raise ValueError("Unsupported clarification schema version")
-    return {"schema_version": 1, **ClarificationForm.model_validate(raw).model_dump()}
+    return {"schema_version": 1, **ClarificationForm.model_validate(raw).model_dump(exclude_none=True)}
 
 
 class ClarificationAnswer(BaseModel):

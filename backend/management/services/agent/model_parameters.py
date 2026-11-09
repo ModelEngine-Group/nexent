@@ -3,7 +3,7 @@
 """Apply explicit per-Agent values to an immutable saved model outlet."""
 
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
-from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
 
 def merge_agent_model_parameters(profile, entry):
@@ -16,7 +16,7 @@ def _apply_agent_parameters(profile, entry):
     from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
     from nexent.core.model_service.profiles.request_parameters import overlay_extra_api_parameters
 
-    resolved = overlay_profile_parameters(ensure_outlet_sampling_rules(profile), entry["parameter_values"], scope="outlet")
+    resolved = overlay_profile_parameters(ensure_outlet_parameter_rules(profile), entry["parameter_values"], scope="outlet")
     if entry.get("custom_overrides") is not None:
         data = resolved.model_dump(mode="json")
         data["extra_api_parameters"] = overlay_extra_api_parameters(resolved, entry["custom_overrides"])

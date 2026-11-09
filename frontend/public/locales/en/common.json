@@ -2183,6 +2183,7 @@
   "agentConfig.list.new": "New agent",
   "agentConfig.list.configure": "Configure",
   "agentConfig.list.publish": "Publish",
+  "agentConfig.list.listing": "List in repository",
   "agentConfig.list.updatedAt": "Updated {{date}}",
   "agentConfig.list.createdAt": "Created {{date}}",
   "agentConfig.list.online": "Online",
@@ -4751,6 +4752,9 @@
   "agent.validation.namePattern": "Use a valid Python identifier of 1–100 characters. Unicode letters are supported; Python keywords are not allowed.",
   "agent.validation.authorRequired": "Please enter an author name",
   "agent.validation.descriptionRequired": "Please enter an agent description",
+  "agent.promptVisibility.hidden": "Confidential",
+  "agent.promptVisibility.explanation": "The asset administrator has protected this prompt. Your account cannot view it.",
+  "agent.validation.promptRequired": "Please enter an agent prompt",
   "agent.validation.descriptionMaxLength": "Agent description cannot exceed {{max}} characters",
   "agent.validation.modelRequired": "Please select an LLM model",
   "agent.validation.maxStepRequired": "Please enter max steps",
@@ -6597,6 +6601,7 @@
     "manualThinkingHint": "Manually specified reasoning parameters. Verify that the model service supports this format.",
     "otherProfile": "Other",
     "sharedCredential": "Uses the shared batch API key",
+    "serviceSamplingDefault": "Leave empty to use the model service default",
     "samplingGroup": "Sampling",
     "requestGroup": "Request settings",
     "modelParameters": "Model parameters",
@@ -6735,5 +6740,11 @@
     "reviewedHint": "An administrator has reviewed this configuration version. The migration source is retained.",
     "failedHint": "This outlet could not be migrated. An administrator must review and resolve its configuration."
   },
-  "modelProfile.selectionCheckFailed": "Check failed"
+  "modelProfile.selectionCheckFailed": "Check failed",
+  "workbench.creationConfirmation.title": "Choose a creation mode",
+  "workbench.creationConfirmation.description": "AI has prepared the requirements from this conversation. Confirm a creation mode or continue chatting.",
+  "workbench.creationConfirmation.hint": "Submit your choice to enter a creation mode or continue this conversation.",
+  "workbench.creationConfirmation.noPermission": "You do not have permission to enter this creation mode.",
+  "workbench.creationConfirmation.saveFailed": "Could not save the confirmation. Please retry.",
+  "workbench.creationConfirmation.originalRequest": "Original user request:"
 }

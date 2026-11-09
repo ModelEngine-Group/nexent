@@ -43,8 +43,28 @@ def test_exclusive_complete_literal_form_is_valid(text):
     c = control()
     calls = [call(EXECUTION_TOOL, {"code": "ask_user(questions=" + repr(FORM["questions"]) + ")"})] if text else [
         call(c.name, FORM)]
-    assert c.form_for(calls, text_protocol=text).model_dump(mode="json") == {
+    assert c.form_for(calls, text_protocol=text).model_dump(mode="json", exclude_none=True) == {
         "questions": [{**FORM["questions"][0], "options": [], "allow_other": False, "placeholder": ""}]}
+
+
+@pytest.mark.parametrize("suffix", ["", "\nprint(answer)"])
+def test_text_form_accepts_inert_assignment_without_executing_it(suffix):
+    code = f"answer = ask_user(questions={FORM['questions']!r}){suffix}"
+    form = control().form_for([call(EXECUTION_TOOL, {"code": code})], text_protocol=True)
+    assert form.questions[0].id == "birth"
+
+
+@pytest.mark.parametrize("text", [False, True])
+def test_creation_confirmation_keeps_the_request_in_both_protocols(text):
+    form = {"questions": [{"id": "workbench_creation_mode", "type": "single_choice",
+        "title": "Create an Agent?", "creation_request": "Summarize the supplied report.",
+        "options": [{"id": "agent_create", "label": "Create"},
+                    {"id": "continue_chat", "label": "Continue chat"}]}]}
+    calls = [call(EXECUTION_TOOL, {"code": f"ask_user(questions={form['questions']!r})"})] if text else [
+        call("ask_user", form)]
+    result = control().form_for(calls, text_protocol=text)
+    assert result.questions[0].creation_request == "Summarize the supplied report."
+    assert [option.id for option in result.questions[0].options] == ["agent_create", "continue_chat"]
 
 
 @pytest.mark.parametrize("code", [
@@ -143,3 +163,4 @@ def test_adapter_publishes_one_public_card_without_a_fake_final_or_cancel(loop_m
     card = next(e for e in events if e["type"] == "human_interaction")
     assert isinstance(card["content"], str)
     assert json.loads(card["content"])["questions"][0]["id"] == "birth"
+    assert "creation_request" not in json.loads(card["content"])["questions"][0]

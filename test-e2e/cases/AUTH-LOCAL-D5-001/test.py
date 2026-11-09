@@ -204,7 +204,10 @@ def test_account_migration_conflict_rolls_back_all_users(target):
         import_users(connection, [first, conflict], dry_run=False)
     assert first["id"] in str(error.value) and conflict["id"] in str(error.value)
     assert count(target) == 0
-    with psycopg2.connect(target) as connection:
+    with pytest.raises(MigrationConflict, match=conflict["id"]), psycopg2.connect(target) as connection:
+        import_users(connection, [first], dry_run=False)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id=%s", (conflict["id"],))
         import_users(connection, [first], dry_run=False)
     with psycopg2.connect(target) as connection:
         assert import_users(connection, [conflict], dry_run=False)["complete"]
@@ -458,3 +461,13 @@ def test_consolidated_schema_provider_identities_and_final_email_conflicts():
     spec.loader.exec_module(module)
     module.assert_consolidated_schema(ROOT)
     module.assert_legacy_account_columns(ROOT)
+
+
+@pytest.mark.parametrize("scenario", ["valid", "source-empty", "source-passwordless", "existing-empty", "existing-partial", "excluded"])
+def test_account_data_coverage_and_safe_recovery(scenario):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("account_coverage_proof", Path(__file__).with_name("completeness.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_account_coverage(scenario)

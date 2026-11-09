@@ -4,7 +4,7 @@
 
 import type { ReactNode } from "react";
 import { Tooltip } from "antd";
-import { StandardQuestionIcon } from "@/components/common/StandardQuestionIcon";
+import { QuestionCircleOutlined } from "@ant-design/icons";
 
 interface AgentSettingHintProps {
   label: string;
@@ -26,7 +26,7 @@ export function AgentSettingHint({
           aria-label={label}
           className="inline-flex shrink-0 cursor-help items-center justify-center border-0 bg-transparent p-0 text-sm text-gray-400 hover:text-gray-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         >
-          <StandardQuestionIcon aria-hidden />
+          <QuestionCircleOutlined aria-hidden />
         </button>
       </Tooltip>
     </div>

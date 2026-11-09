@@ -48,7 +48,12 @@ def assert_consolidated_schema(root):
                     cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE user_role IS NOT NULL")
                     assert cursor.fetchone()[0] == len(members)
                 continue
+            # A revoked binding alone cannot establish passwordless provenance
+            # for an otherwise active member absent from the source snapshot.
+            with pytest.raises(MigrationConflict, match="deleted-binding"), psycopg2.connect(dsn) as connection:
+                import_users(connection, rows, dry_run=False)
             with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id='deleted-binding'")
                 import_users(connection, rows, dry_run=False)
                 cursor.execute("SELECT user_id,user_role,password_login_enabled,password_hash,delete_flag FROM nexent.user_account_t ORDER BY user_id")
                 accounts = {r[0]: r[1:] for r in cursor.fetchall()}

@@ -430,7 +430,7 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         return parse_clarification_call(code, tool_name)
     except ValidationError as exc:
         # Report schema locations and error types without echoing rejected values.
-        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder"}
+        fields = {"questions", "id", "type", "title", "required", "options", "label", "allow_other", "placeholder", "creation_request"}
         issues = []
         for error in exc.errors(include_url=False, include_input=False)[:5]:
             location = ".".join(
@@ -441,7 +441,16 @@ def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm |
         raise ModelOutputProtocolError(
             ProtocolErrorReason.INVALID_CLARIFICATION_FORM,
             "code_action",
-            repair_hint="Invalid fields: " + "; ".join(issues) + ".",
+            repair_hint=f"Use <code>{tool_name}(questions=[...])</code>. Invalid fields: " + "; ".join(issues) + ".",
         ) from exc
     except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError) as exc:
-        raise ModelOutputProtocolError(ProtocolErrorReason.MALFORMED_ACTION, "code_action") from exc
+        raise ModelOutputProtocolError(
+            ProtocolErrorReason.MALFORMED_ACTION,
+            "code_action",
+            repair_hint=(
+                f"The clarification was not executed. Return <code>{tool_name}(questions=[...])</code> "
+                "as a terminal action with literal question data only. Do not mix it with business tools, "
+                "imports, dynamic expressions, or other statements. Assignment is optional; only a single "
+                "print of that same result is accepted after it. " + CLARIFICATION_SCHEMA_GUIDANCE
+            ),
+        ) from exc

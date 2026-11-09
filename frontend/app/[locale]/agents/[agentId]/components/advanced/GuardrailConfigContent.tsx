@@ -238,7 +238,7 @@ function AiMultiResult({
               alignItems: "flex-start",
               padding: "10px 12px",
               border: `0.5px solid ${token.colorBorderSecondary}`,
-              borderRadius: 8,
+              borderRadius: "var(--radius-control)",
               background: token.colorBgContainer,
             }}
           >
@@ -847,7 +847,7 @@ const GuardrailConfigContent = forwardRef<
                 style={{
                   padding: "10px 12px",
                   border: `0.5px solid ${token.colorBorderSecondary}`,
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-control)",
                   background: token.colorBgContainer,
                   cursor: "pointer",
                   transition: "border-color 0.15s, box-shadow 0.15s",
@@ -1014,7 +1014,7 @@ const GuardrailConfigContent = forwardRef<
               fontSize: 10,
               margin: 0,
               padding: "1px 8px",
-              borderRadius: 10,
+              borderRadius: "var(--radius-control)",
               background: aiModeBg,
               color: aiModeColor,
               border: "none",
@@ -1050,7 +1050,7 @@ const GuardrailConfigContent = forwardRef<
             padding: 16,
             background: "#F8FBFE",
             border: `0.5px solid #E6F1FB`,
-            borderRadius: 10,
+            borderRadius: "var(--radius-control)",
           }}
         >
           <Input.TextArea
@@ -1058,7 +1058,7 @@ const GuardrailConfigContent = forwardRef<
             onChange={(e) => setAiInput(e.target.value)}
             placeholder={t("agent.guardrail.ai.placeholder") || "Describe what you want to match or block. AI will determine single or multi."}
             autoSize={{ minRows: 2, maxRows: 4 }}
-            style={{ fontSize: 13, borderRadius: 8, marginBottom: 12 }}
+            style={{ fontSize: 13, borderRadius: "var(--radius-control)", marginBottom: 12 }}
           />
 
           {/* Example chips + Generate button */}
@@ -1085,7 +1085,7 @@ const GuardrailConfigContent = forwardRef<
                   fontSize: 11,
                   padding: "2px 8px",
                   border: `0.5px solid #B5D4F4`,
-                  borderRadius: 10,
+                  borderRadius: "var(--radius-control)",
                   cursor: "pointer",
                   color: "#185FA5",
                   background: "#fff",
@@ -1164,7 +1164,7 @@ const GuardrailConfigContent = forwardRef<
             padding: "12px 16px",
             background: "#fff",
             border: "1px dashed #D1D5DB",
-            borderRadius: 6,
+            borderRadius: "var(--radius-control)",
           }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {t("agent.guardrail.disabledHint") || "Guardrail is disabled. Toggle the switch to enable."}
@@ -1238,7 +1238,7 @@ const GuardrailConfigContent = forwardRef<
               padding: 16,
               background: "#F8FBFE",
               border: `0.5px solid #E6F1FB`,
-              borderRadius: 10,
+              borderRadius: "var(--radius-control)",
             }}>
               <Input.TextArea
                 value={testText}

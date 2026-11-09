@@ -259,6 +259,8 @@ def overlay_profile_parameters(profile, submitted, *, scope):
     values = overlay_saved_parameter_values(
         compiled, submitted, scope=scope, saved_values=inherited,
     )
+    if profile.capabilities.reasoning.can_disable is False and values.get("enable_thinking") is False:
+        raise ParameterValidationError("FIXED_PARAMETER", "/enable_thinking")
     data = profile.model_dump(mode="json")
     data["parameter_values"] = values
     return profile.__class__.model_validate(data)

@@ -2076,6 +2076,7 @@
   "agentConfig.list.new": "新建智能体",
   "agentConfig.list.configure": "配置",
   "agentConfig.list.publish": "发布",
+  "agentConfig.list.listing": "上架",
   "agentConfig.list.updatedAt": "更新于{{date}}",
   "agentConfig.list.createdAt": "创建于{{date}}",
   "agentConfig.list.online": "已上线",
@@ -4690,6 +4691,9 @@
   "agent.validation.namePattern": "变量名须为 1–100 个字符的合法 Python 标识符，支持中文等 Unicode 字符，不能使用 Python 关键字",
   "agent.validation.authorRequired": "请输入作者名称",
   "agent.validation.descriptionRequired": "请输入智能体描述",
+  "agent.promptVisibility.hidden": "保密",
+  "agent.promptVisibility.explanation": "提示词由资产管理员保密，当前账号无权查看。",
+  "agent.validation.promptRequired": "请输入智能体提示词",
   "agent.validation.descriptionMaxLength": "智能体描述不能超过 {{max}} 个字符",
   "agent.validation.modelRequired": "请选择大语言模型",
   "agent.validation.maxStepRequired": "请输入最大运行步数",
@@ -6595,6 +6599,7 @@
     "manualThinkingHint": "手动指定的思考参数，请确认模型服务支持此格式。",
     "otherProfile": "其他",
     "sharedCredential": "使用批量添加的 API Key",
+    "serviceSamplingDefault": "留空使用模型服务默认值",
     "samplingGroup": "采样配置",
     "requestGroup": "请求配置",
     "modelParameters": "模型参数",
@@ -6733,5 +6738,11 @@
     "reviewedHint": "管理员已检查当前配置版本，保留旧版本迁移来源标识。",
     "failedHint": "此模型出口未能完成迁移，请管理员检查并处理配置异常。"
   },
-  "modelProfile.selectionCheckFailed": "检测失败"
+  "modelProfile.selectionCheckFailed": "检测失败",
+  "workbench.creationConfirmation.title": "选择创建模式",
+  "workbench.creationConfirmation.description": "AI 已根据当前对话整理创建需求。选择后确认进入对应模式，也可以继续普通对话。",
+  "workbench.creationConfirmation.hint": "选择后提交，确认进入创建模式或继续当前对话。",
+  "workbench.creationConfirmation.noPermission": "你没有进入该创建模式的权限。",
+  "workbench.creationConfirmation.saveFailed": "保存确认失败，请重试。",
+  "workbench.creationConfirmation.originalRequest": "用户原始需求："
 }

@@ -13,8 +13,28 @@ def test_static_form_and_full_text_fallback():
     assert render_question_text(form) == "1. Which region?"
 
 
+@pytest.mark.parametrize("tool_name", ["ask_user", "nexent_ask_user_2"])
+@pytest.mark.parametrize("suffix", ["", "\nprint(answer)", "; print(answer)"])
+def test_literal_assignment_is_a_terminal_form_without_execution(tool_name, suffix):
+    form = extract_clarification_form(f"answer = {tool_name}(questions={QUESTIONS}){suffix}", tool_name)
+    assert form.questions[0].id == "scope"
+    assert render_question_text(form) == "1. Which region?"
+
+
 @pytest.mark.parametrize("code", [
-    f"answer = ask_user(questions={QUESTIONS})",
+    f"answer = ask_user(questions={QUESTIONS}); print(other)",
+    f"answer = ask_user(questions={QUESTIONS}); print(answer, 'extra')",
+    f"answer = ask_user(questions={QUESTIONS}); print(answer, flush=True)",
+    f"answer = ask_user(questions={QUESTIONS}); print(str(answer))",
+    f"answer = ask_user(questions={QUESTIONS}); record()",
+    f"answer = ask_user(questions={QUESTIONS}); print(answer); record()",
+    f"print = ask_user(questions={QUESTIONS}); print(print)",
+    f"ask_user = ask_user(questions={QUESTIONS})",
+    f"a = b = ask_user(questions={QUESTIONS})",
+    f"a, b = ask_user(questions={QUESTIONS})",
+    f"obj.value = ask_user(questions={QUESTIONS})",
+    f"items[0] = ask_user(questions={QUESTIONS})",
+    f"answer: str = ask_user(questions={QUESTIONS})",
     f"record(); ask_user(questions={QUESTIONS})",
     f"ask_user(questions={QUESTIONS}); record()",
     f"if True:\n    ask_user(questions={QUESTIONS})",
@@ -60,6 +80,13 @@ def test_empty_form_has_schema_repair_feedback():
         extract_clarification_form("ask_user(questions=[])", "ask_user")
     assert error.value.reason.value == "invalid_clarification_form"
     assert "questions: too_short" in error.value.repair_instruction
+
+
+def test_oversized_clarification_keeps_the_existing_action_size_limit():
+    code = f"# {'x' * 131072}\nanswer = ask_user(questions={QUESTIONS})"
+    with pytest.raises(ModelOutputProtocolError) as error:
+        extract_clarification_form(code, "ask_user")
+    assert error.value.reason.value == "malformed_action"
 
 
 def test_ordinary_code_and_string_mentions_remain_executable():

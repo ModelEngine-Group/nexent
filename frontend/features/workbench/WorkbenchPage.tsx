@@ -37,6 +37,8 @@ import {
 import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
 import { useConversationScopedState } from "./hooks/useConversationScopedState";
+import { useCreationModeConfirmation } from "./hooks/useCreationModeConfirmation";
+import { CreationModeConfirmationContext } from "@/components/interaction/creation-mode-context";
 import { WorkbenchConversationLayout } from "./components/WorkbenchConversationLayout";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
@@ -56,6 +58,7 @@ import {
   changeAgentTopology,
   changeCreationThread,
   returnFromCreation,
+  startWorkbenchConversation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
 import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
@@ -1190,6 +1193,29 @@ const HomeContent: FC = () => {
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
+  const cacheCurrentThread = useCallback(() => {
+    const currentId = runtime.threads.getState().mainThreadId;
+    if (!currentId) return;
+    const snapshot = {
+      state: structuredClone(workbenchState),
+      skillDraft: structuredClone(skillDraftRef.current),
+      savedSkillName,
+      selectedAgent,
+      scope: knowledgeScope,
+      preview: knowledgePreview,
+    };
+    setLocalThreadSnapshots((snapshots) =>
+      new Map(snapshots).set(currentId, snapshot)
+    );
+  }, [
+    runtime,
+    workbenchState,
+    savedSkillName,
+    selectedAgent,
+    knowledgeScope,
+    knowledgePreview,
+  ]);
+
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
     shouldRestoreAgentRef.current = false;
@@ -1197,14 +1223,32 @@ const HomeContent: FC = () => {
   }, [onBack]);
 
   const handleNewConversation = useCallback(async () => {
-    handlePrepareNewConversation();
-    await runtime.threads.switchToNewThread();
-    // Re-fetch the conversation list: the thread the user just left only
-    // became a server-side conversation when its first message was sent, and
-    // without a reload it would disappear from the sidebar until a manual
-    // page refresh (the newchat page already reloads at this point).
-    await runtime.threads.reload();
-  }, [handlePrepareNewConversation, runtime]);
+    try {
+      cacheCurrentThread();
+      await startWorkbenchConversation(runtime, () => {
+        handlePrepareNewConversation();
+        creationReturnRef.current = null;
+        skillDraftRef.current = initialSkillCreationDraft;
+        setSkillDraft(initialSkillCreationDraft);
+        setSavedSkillName(null);
+        resetNl2AgentFlow(null);
+      });
+      // Include the conversation just persisted by its first send.
+      await runtime.threads.reload();
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.conversationCreateFailed")
+      );
+    }
+  }, [
+    cacheCurrentThread,
+    handlePrepareNewConversation,
+    runtime,
+    resetNl2AgentFlow,
+    t,
+  ]);
 
   const applyAgentMounts = useCallback(
     async (mounts: import("@/features/workbench").WorkbenchAgentMount[]) => {
@@ -1302,19 +1346,7 @@ const HomeContent: FC = () => {
       }
       if (mode === workbenchState.config.mode) return true;
       const currentId = runtime.threads.getState().mainThreadId;
-      if (currentId) {
-        const snapshot = {
-          state: structuredClone(workbenchState),
-          skillDraft: structuredClone(skillDraftRef.current),
-          savedSkillName,
-          selectedAgent,
-          scope: knowledgeScope,
-          preview: knowledgePreview,
-        };
-        setLocalThreadSnapshots((snapshots) =>
-          new Map(snapshots).set(currentId, snapshot)
-        );
-      }
+      cacheCurrentThread();
       if (mode === "generic_chat" && creationReturnRef.current) {
         const returnId = creationReturnRef.current;
         await returnFromCreation(runtime, returnId, () => {
@@ -1355,6 +1387,16 @@ const HomeContent: FC = () => {
       return false;
     }
   };
+
+  const creationConfirmation = useCreationModeConfirmation({
+    runtime,
+    mode: workbenchState.config.mode,
+    conversationId: activeConversationId,
+    canCreateAgent: hasPermission("agent:create"),
+    canCreateSkill: hasPermission("skill:create"),
+    changeMode: changeCreationMode,
+    onSaved: (id) => conversationDetails.invalidate(id),
+  });
 
   const handleSaveSkill = async (
     payload: NonNullable<ReturnType<typeof buildSkillSavePayload>>
@@ -1604,6 +1646,8 @@ const HomeContent: FC = () => {
   );
 
   return (
-    <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
+    <CreationModeConfirmationContext.Provider value={creationConfirmation}>
+      <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
+    </CreationModeConfirmationContext.Provider>
   );
 };

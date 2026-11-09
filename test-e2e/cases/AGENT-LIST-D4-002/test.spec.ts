@@ -102,7 +102,7 @@ async function mockList(page, rows = agentRows()) {
           auth_provider: "local",
           group_ids: [],
           permissions: [],
-          accessibleRoutes: ["/agents"],
+          accessibleRoutes: ["/agents", "/evaluation"],
         },
       },
     }),
@@ -113,6 +113,17 @@ async function mockList(page, rows = agentRows()) {
   // The page resolves the default resource tag library before it renders the
   // list, so the catch-all stub above must be narrowed here.
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
+  await page.route("**/api/tag-libraries/assignments/agent/*", (route) =>
+    json(route, { assignments: [] }),
+  );
+  await page.route("**/api/repository/agent?*", (route) =>
+    json(route, { items: [], pagination: { page: 1, page_size: 100, total: 0 } }),
+  );
+  for (const endpoint of ["evaluators", "evaluation-sets", "agent-evaluations"]) {
+    await page.route(`**/api/${endpoint}*`, (route) =>
+      json(route, { data: [], items: [] }),
+    );
+  }
   await page.route("**/api/agent/check_name", (route) =>
     json(route, route.request().postDataJSON().items.map(() => ({
       name_conflict: false,
@@ -452,27 +463,31 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     name: label("zh", "agentConfig.list.publish"),
     exact: true,
   });
-  await expect(configure).toBeVisible();
-  await expect(publish).toBeEnabled();
-  await configure.click();
-  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
+  await expect(configure).toHaveCount(0);
+  await expect(publish).toHaveCount(0);
+  await expect(page.getByRole("menuitem").nth(0)).toHaveText(label("zh", "agentConfig.list.listing"));
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText(label("zh", "agentRepository.mine.evaluate"));
+  await page.getByRole("menuitem", { name: label("zh", "agentConfig.list.listing"), exact: true }).click();
+  const listingDialog = page.getByRole("dialog", { name: label("zh", "agentRepository.mine.applyModal.title"), exact: true });
+  await expect(listingDialog).toBeVisible();
+  await expect(listingDialog).toContainText("健康小助手");
+  await expect(listingDialog.locator(".ant-spin-spinning")).toHaveCount(0);
+  await listingDialog.getByPlaceholder(label("zh", "repository.mine.applyModal.contentPlaceholder")).fill("Synthetic listing cancelled without submission");
+  expect(fixture.requests.some((request) => request.pathname === "/api/repository/agent" && new URLSearchParams(request.query).get("agent_id") === "1")).toBe(true);
+  await listingDialog.getByRole("button", { name: label("zh", "common.cancel"), exact: true }).click();
+  await expect(listingDialog).toHaveCount(0);
+  noPresentationMutation(fixture);
+  await more.click();
+  await page.getByRole("menuitem", { name: label("zh", "agentRepository.mine.evaluate"), exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/zh/evaluation" && url.searchParams.has("agent_ids"));
+  expect(JSON.parse(new URL(page.url()).searchParams.get("agent_ids")!)).toEqual([1]);
   noPresentationMutation(fixture);
   await page.goto(`${baseUrl}/zh/agents`);
   await expect(cards).toHaveCount(8);
   await more.click();
-  await expect(
-    page.getByRole("menuitem", {
-      name: label("zh", "agentConfig.list.publish"),
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page
-    .getByRole("menuitem", {
-      name: label("zh", "agentConfig.list.publish"),
-      exact: true,
-    })
-    .click();
-  await expect(page).toHaveURL(/\/zh\/agents\/1\?publish=1$/);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-card-body").first().click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
   noPresentationMutation(fixture);
   await page.goto(`${baseUrl}/zh/agents`);
   await expect(cards).toHaveCount(8);
@@ -481,7 +496,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await page.keyboard.press("Enter");
   await expect(
     page.getByRole("menuitem", {
-      name: label("zh", "agentConfig.list.configure"),
+      name: label("zh", "agentConfig.list.listing"),
       exact: true,
     }),
   ).toBeVisible();
@@ -499,7 +514,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
       name: label("zh", "agentConfig.list.publish"),
       exact: true,
     }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
 
@@ -636,13 +651,13 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await expect(narrowMore).toBeInViewport();
   await narrowMore.click();
   await expect(page.getByRole("menu")).toBeVisible();
-  const narrowConfigure = page.getByRole("menuitem", {
-    name: label("zh", "agentConfig.list.configure"),
+  const narrowListing = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.listing"),
     exact: true,
   });
-  await expect(narrowConfigure).toBeVisible();
-  await expect(narrowConfigure).toBeInViewport();
-  await narrowConfigure.click({ trial: true });
+  await expect(narrowListing).toBeVisible();
+  await expect(narrowListing).toBeInViewport();
+  await narrowListing.click({ trial: true });
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   const narrowLastBody = page
@@ -690,12 +705,12 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
       exact: true,
     })
     .click();
-  const narrowCardConfigure = page.getByRole("menuitem", {
-    name: label("zh", "agentConfig.list.configure"),
+  const narrowCardListing = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.listing"),
     exact: true,
   });
-  await expect(narrowCardConfigure).toBeVisible();
-  await expect(narrowCardConfigure).toBeInViewport();
+  await expect(narrowCardListing).toBeVisible();
+  await expect(narrowCardListing).toBeInViewport();
   await page.keyboard.press("Escape");
   noPresentationMutation(fixture);
   await narrowCreate.click();
@@ -775,10 +790,13 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
     name: label("en", "agentConfig.list.publish"),
     exact: true,
   });
-  await expect(configure).toBeVisible();
-  await expect(publish).toBeVisible();
+  await expect(configure).toHaveCount(0);
+  await expect(publish).toHaveCount(0);
+  await expect(page.getByRole("menuitem").nth(0)).toHaveText(label("en", "agentConfig.list.listing"));
+  await expect(page.getByRole("menuitem").nth(1)).toHaveText(label("en", "agentRepository.mine.evaluate"));
   noPresentationMutation(fixture);
-  await configure.click();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("agent-card-body").first().click();
   await expect(page).toHaveURL(/\/en\/agents\/1$/);
 });
 

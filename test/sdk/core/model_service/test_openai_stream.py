@@ -69,8 +69,9 @@ def test_identical_terminal_usage_is_idempotent(openai_profile, stream_request):
     usage = {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2}
     first = decoder.push(frame({"content": "OK"}, finish="stop", usage=usage))
     repeated = decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
-    assert sum(event.type == "usage" for event in first + repeated) == 1
+    assert not any(event.type == "usage" for event in first + repeated)
     completed = decoder.push(SSEEvent("[DONE]"))
+    assert sum(event.type == "usage" for event in first + repeated + completed) == 1
     assert completed[-1].message.usage.input_tokens == 0
     assert completed[-1].message.usage.output_tokens == 2
 
@@ -79,7 +80,8 @@ def test_interleaved_reasoning_text_and_tools_complete_with_stable_ids(
     openai_profile, stream_request
 ):
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
-    events = decoder.push(frame({"role": "assistant", "reasoning_content": "thinking"}))
+    events = decoder.push(frame({"role": "assistant", "reasoning_content": "thinking"},
+                                usage={"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10}))
     events += decoder.push(
         frame(
             {
@@ -88,7 +90,7 @@ def test_interleaved_reasoning_text_and_tools_complete_with_stable_ids(
                     tool(2, "sea", '{"q":', "call-two"),
                     tool(0, "calc", '{"n":', "call-zero"),
                 ],
-            }
+            }, usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
         )
     )
     events += decoder.push(
@@ -145,6 +147,7 @@ def test_interleaved_reasoning_text_and_tools_complete_with_stable_ids(
     }
     assert all(call.local_call_id == ids[call.index] for call in complete.tool_calls)
     assert complete.usage.total_tokens == 14
+    assert len([event for event in events if event.type == "usage"]) == 1
     assert decoder.finish() == []
     with pytest.raises(ModelAdapterError, match="^MODEL_STREAM_CLOSED$"):
         decoder.push(frame({"content": "late"}))
@@ -297,16 +300,61 @@ def test_total_stream_and_tool_limits_cannot_be_bypassed_by_small_chunks(
         decoder.push(frame({"tool_calls": [tool(2, "two", "{}", "two")]}))
 
 
-def test_duplicate_usage_is_explicit_without_replacing_reported_values(
+def test_cumulative_usage_keeps_latest_values_and_emits_only_at_completion(
     openai_profile, stream_request
 ):
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
     first = decoder.push(frame({}, finish="stop", usage={"prompt_tokens": 0}))
-    assert first[0].usage.input_tokens == 0
-    with pytest.raises(ModelAdapterError, match="^MODEL_USAGE_CONFLICT$"):
-        decoder.push(
-            SSEEvent(json.dumps({"choices": [], "usage": {"prompt_tokens": 1}}))
-        )
+    assert first == []
+    assert decoder.push(SSEEvent(json.dumps({"choices": [], "usage": {"prompt_tokens": 1}}))) == []
+    events = decoder.finish()
+    assert [event.type for event in events] == ["usage", "message_completed"]
+    assert events[0].usage == events[1].message.usage
+    assert events[0].usage.input_tokens == 1
+
+
+def test_cumulative_usage_merges_optional_details_without_summing(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    events = decoder.push(frame({"content": "OK"}, usage={
+        "prompt_tokens": 8, "completion_tokens": 0, "total_tokens": 8,
+        "prompt_tokens_details": {"cached_tokens": 4},
+    }))
+    for usage in [
+        {"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9},
+        {"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9},
+        {"completion_tokens_details": {"reasoning_tokens": 1}},
+        {"prompt_tokens": None, "prompt_tokens_details": None, "completion_tokens_details": {}},
+        {"prompt_tokens_details": {"cached_tokens": 0}},
+    ]:
+        events += decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
+    events += decoder.push(frame(finish="stop"))
+    events += decoder.push(SSEEvent("[DONE]"))
+    assert [event.type for event in events] == ["text_delta", "usage", "message_completed"]
+    usage = events[-1].message.usage
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (8, 1, 9)
+    assert usage.cached_input_tokens == 0 and usage.reasoning_tokens == 1
+    assert events[-2].usage == usage
+
+
+@pytest.mark.parametrize("raw", [
+    {"completion_tokens": -1}, {"completion_tokens": "1"}, {"completion_tokens": True},
+    {"completion_tokens_details": {"reasoning_tokens": -1}}, {"prompt_tokens_details": []},
+])
+def test_invalid_later_usage_still_closes_stream(openai_profile, stream_request, raw):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({"content": "OK"}, usage={"prompt_tokens": 8, "completion_tokens": 0}))
+    with pytest.raises(ModelAdapterError, match="^MODEL_USAGE_INVALID$"):
+        decoder.push(SSEEvent(json.dumps({"choices": [], "usage": raw})))
+    with pytest.raises(ModelAdapterError, match="^MODEL_STREAM_CLOSED$"):
+        decoder.push(frame(finish="stop"))
+
+
+def test_provider_usage_correction_uses_last_non_null_values(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame(finish="stop", usage={"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11}))
+    decoder.push(SSEEvent(json.dumps({"choices": [], "usage": {"completion_tokens": 2, "total_tokens": 10}})))
+    usage = decoder.finish()[-1].message.usage
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens) == (8, 2, 10)
 
 
 @pytest.mark.parametrize(

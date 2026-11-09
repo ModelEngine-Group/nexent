@@ -4,6 +4,7 @@ clarification_policy: |-
   该能力并非每次会话都必须使用，当用户请求清晰且无关键事实缺失时可直接回答。
   不要询问可选的偏好信息、用户已提供的信息或工具能够取得或已经取得的事实。只有缺少的信息会阻止智能体正确或安全地继续运行，或者上下文无法消除会显著改变结果的歧义时，才使用人在回路能力。
   每轮会话中需要用户澄清时，仅调用一次 ask_user(questions=[...]) ，其中仅包括需要确认的关键核心问题；只有存在相互独立的阻塞项时才可询问更多问题。
+  ask_user 是终止当前回合并展示确认选项的声明式动作。请在独立的 <code>...</code> 中直接调用，无需赋值或 print；普通业务工具保存变量、打印结果的规则不适用于该动作。调用后停止，等待用户选择，不再追加其他动作或文字回答。
   问题标题使用用户语言，每个问题只询问一个事实，并尽可能提供有用选项。每个问题包含 id、type、title 和 required；type 为 text、single_choice 或 multiple_choice。选择题还要在问题对象上直接提供 options [{id,label}] 和 allow_other，不要嵌套 choices 对象。示例：
   <code>
   ask_user(questions=[{"id": "topic", "type": "text", "title": "通知的主题是什么？", "required": True}])

@@ -9,15 +9,17 @@ from nexent.core.model_service.profiles.parameter_rules import (
 )
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.protocol_parameters import (
-    OUTLET_TOKEN_LIMIT_KEYS, ensure_outlet_sampling_rules, without_outlet_token_limits,
+    OUTLET_TOKEN_LIMIT_KEYS, without_outlet_token_limits,
 )
+
+from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
 
 
 def merge_model_preferences(profile, preferences):
     """Do not discard invalid stored choices or apply creation defaults during a run."""
     if not isinstance(preferences, dict):
         raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
-    profile = ensure_outlet_sampling_rules(profile)
+    profile = ensure_outlet_parameter_rules(profile)
     try:
         resolved = overlay_profile_parameters(profile, without_outlet_token_limits(preferences), scope="conversation")
         values = resolved.parameter_values
@@ -112,7 +114,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
     profile = get_resolved_model_record(outlet_id, tenant_id, registered_references=model_service_references())
     if profile is None or profile.identity.model_type != "llm":
         raise ModelOutletValidationError("MODEL_OUTLET_NOT_AVAILABLE")
-    profile = ensure_outlet_sampling_rules(profile)
+    profile = ensure_outlet_parameter_rules(profile)
     values = saved["model_parameter_preferences"].get(str(outlet_id), {})
     if isinstance(values, dict):
         values = without_outlet_token_limits(values)
@@ -128,6 +130,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
         issues.append({"category": error.category, "field": error.path})
     return {"parameter_values": values, "defaults": defaults,
             "reasoning_status": profile.capabilities.reasoning.status,
+            "reasoning_can_disable": profile.capabilities.reasoning.can_disable,
             "output_limit": profile.capabilities.context.output_limit,
             "field_specs": profile.parameter_rules, "config_revision": profile.config_revision, "issues": issues}
 

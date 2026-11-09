@@ -13,8 +13,9 @@ import uuid
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
-from suite_runtime import BatchLock, logged, now, save
+from suite_runtime import BatchLock, deployment_lock, logged, now, save
 from daily_git import run_git
+from daily_recovery import prepare_daily_retry
 
 
 def git(repo, *args, log_dir=None):
@@ -66,37 +67,35 @@ def main(argv=None):
             state = {"branch": args.branch, "started_at": now(), "status": "PREPARING"}
             save(directory / "status.json", state)
             try:
-                if (home / "state/deployment-exceptions/pending.json").exists():
-                    raise RuntimeError("Pending deployment-mode recovery must be resolved before synchronization")
-                if (home / "state/deployment-guard/pending.json").exists():
-                    raise RuntimeError("Pending deployment recovery must be resolved before synchronization")
-                state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
-                env = os.environ.copy()
-                # Daily reports local asset problems without rewriting tracked views.
-                command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
-                           "--phase", "implementation", "--daily-report", str(directory / "asset-validation.json")]
-                if logged(command, repo, env, directory / "validate.log", 180):
-                    raise RuntimeError("Formal asset validation failed; inspect local launcher log")
-                if git(repo, "status", "--porcelain", "--untracked-files=normal", log_dir=directory / "git"):
-                    raise RuntimeError("Derived generation changed tracked assets; repair them on the product branch")
-                # Import only after checkout synchronization; use this exact revision's code.
-                import static_assets
-                import suite
-                static_assets.apply(home, repo / "test-e2e/infra/assets")
-                records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
-                problems = suite.doctor(repo, home, records)
-                if problems:
-                    save(directory / "doctor.json", {"ready": False, "problems": problems})
-                    raise RuntimeError("Runtime preflight failed; inspect local doctor.json")
-                settings = suite.config(repo, home)
-                state["status"] = "EXECUTING"
-                save(directory / "status.json", state)
-                # execute() does not acquire another lock; all normal entrypoints use the same lock.
-                code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
-                state["status"] = "PASSED" if code == 0 else "FAILED"
-                return code
+                with deployment_lock(repo), prepare_daily_retry(repo, home, directory):
+                    state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
+                    env = os.environ.copy()
+                    # Daily reports local asset problems without rewriting tracked views.
+                    command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
+                               "--phase", "implementation", "--daily-report", str(directory / "asset-validation.json")]
+                    if logged(command, repo, env, directory / "validate.log", 180):
+                        raise RuntimeError("Formal asset validation failed; inspect local launcher log")
+                    if git(repo, "status", "--porcelain", "--untracked-files=normal", log_dir=directory / "git"):
+                        raise RuntimeError("Derived generation changed tracked assets; repair them on the product branch")
+                    # Import only after checkout synchronization; use this exact revision's code.
+                    import static_assets
+                    import suite
+                    static_assets.apply(home, repo / "test-e2e/infra/assets")
+                    records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
+                    problems = suite.doctor(repo, home, records)
+                    if problems:
+                        save(directory / "doctor.json", {"ready": False, "problems": problems})
+                        raise RuntimeError("Runtime preflight failed; inspect local doctor.json")
+                    settings = suite.config(repo, home)
+                    state["status"] = "EXECUTING"
+                    save(directory / "status.json", state)
+                    code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
+                    state["status"] = "PASSED" if code == 0 else "FAILED"
+                    return code
             except (Exception, KeyboardInterrupt) as exc:
                 state.update(status="INCOMPLETE", error=str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)
+                if isinstance(exc, RuntimeError) and str(exc) == "another daily run is active":
+                    raise
                 return 2
             finally:
                 state["finished_at"] = now()

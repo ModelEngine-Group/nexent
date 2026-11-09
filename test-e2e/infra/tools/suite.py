@@ -330,7 +330,12 @@ def worker(repo, home, record, directory, settings):
 
 def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
     from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
-    assert_recovered(home)
+    assert_recovered(home, allow_retry=daily)
+    if daily:
+        from daily_recovery import current_retry
+        retry = current_retry(home)
+    else:
+        retry = None
     validation = None
     if daily:
         from validation_policy import evaluate
@@ -352,6 +357,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
                                 execute_one=partial(_execute, validation_report=validation) if daily else _execute,
                                 all_records=all_records, hook=execute_hooks,
                                 machine_env=machine_environment, validation_report=validation)
+    if retry is not None:
+        raise RuntimeError("Pending Daily recovery requires an enabled deployment campaign")
     return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest,
                     validation_report=validation)
 
