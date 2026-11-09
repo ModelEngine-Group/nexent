@@ -10,7 +10,7 @@ from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.agent import AgentRequest
 from gateway.downstream.internal_tokens import generate_internal_runtime_jwt
-from http_api.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 
 _HOP_BY_HOP_HEADERS = {

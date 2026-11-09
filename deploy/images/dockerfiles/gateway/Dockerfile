@@ -14,7 +14,8 @@ COPY backend/gateway/security/ /opt/backend/gateway/security/
 COPY backend/gateway/mcp/ /opt/backend/gateway/mcp/
 COPY infrastructure/__init__.py /opt/infrastructure/__init__.py
 COPY infrastructure/rdb/__init__.py infrastructure/rdb/identity.py /opt/infrastructure/rdb/
-COPY backend/gateway_service.py backend/_repository_path.py /opt/backend/
+COPY backend/__init__.py /opt/backend/__init__.py
+COPY backend/http/gateway_service.py /opt/backend/http/gateway_service.py
 ENV PYTHONPATH=/opt:/opt/backend
 USER 65532:65532
 EXPOSE 5013

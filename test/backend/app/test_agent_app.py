@@ -155,7 +155,7 @@ sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
-from http_api.server.app_factory import register_exception_handlers
+from backend.http.server.app_factory import register_exception_handlers
 
 
 

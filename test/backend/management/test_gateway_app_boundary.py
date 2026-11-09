@@ -11,7 +11,7 @@ from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
 from gateway.downstream import internal_tokens
 from gateway.downstream.identity import IDENTITY_HEADER, identity_context, sign_identity
-from http_api.server.app_factory import create_app
+from backend.http.server.app_factory import create_app
 
 
 def test_application_factory_enforces_gateway_identity_and_preserves_health(monkeypatch):

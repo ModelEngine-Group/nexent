@@ -83,7 +83,7 @@ v2.5.0
 
 ### 📺 版本显示
 
-后端服务启动时会在日志中打印版本信息（`backend/config_service.py` 与 `backend/runtime_service.py`）：
+后端服务启动时会在日志中打印版本信息（`backend/http/config_service.py` 与 `backend/http/runtime_service.py`）：
 
 ```python
 logger.info(f"APP version is: {APP_VERSION}")
@@ -102,8 +102,8 @@ v2.5.0
 
    ```bash
    # 启动后端服务
-   cd backend
-   python config_service.py
+   export PYTHONPATH="$PWD/backend"
+   python -m backend.http.config_service
 
    # 查看启动日志中的版本信息
    # 输出示例：APP version is: v2.5.0

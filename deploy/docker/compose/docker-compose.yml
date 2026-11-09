@@ -117,7 +117,7 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/config_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.config_service"]
 
   nexent-runtime:
     image: ${NEXENT_IMAGE}
@@ -156,7 +156,7 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/runtime_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.runtime_service"]
 
   nexent-mcp:
     image: ${NEXENT_IMAGE}
@@ -193,7 +193,7 @@ services:
         max-file: "3" # Maximum number of log files to keep
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/mcp_service.py"]
+    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.mcp_service"]
 
   # Keep the public service name and port for existing clients.
   nexent-gateway:
@@ -218,7 +218,7 @@ services:
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
-    entrypoint: ["python", "backend/gateway_service.py"]
+    entrypoint: ["python", "-m", "backend.http.gateway_service"]
     healthcheck:
       test: ["CMD", "python", "-m", "gateway.healthcheck"]
       interval: 30s
@@ -313,7 +313,7 @@ services:
       - nexent
     entrypoint: >
       /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py'
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python -m backend.http.data_process_service'
       "
 
     logging:

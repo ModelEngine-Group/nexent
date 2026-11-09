@@ -5,10 +5,6 @@ import logging
 
 import uvicorn
 
-from _repository_path import add_repository_root
-
-add_repository_root()
-
 from gateway.application import create_gateway_app
 from gateway.configuration import load_settings
 

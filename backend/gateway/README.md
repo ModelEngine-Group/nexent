@@ -1,6 +1,6 @@
 # Gateway service
 
-Gateway listens on 5013 and handles both ordinary backend forwarding to Management5010/Runtime5014 and Northbound APIs. Run `python backend/gateway_service.py` from the repository root. The Dockerfile declares no application ENTRYPOINT/CMD; Compose and Helm provide the Python command.
+Gateway listens on 5013 and handles both ordinary backend forwarding to Management5010/Runtime5014 and Northbound APIs. From the repository root, set `PYTHONPATH` to the absolute `backend/` directory and run `python -m backend.http.gateway_service`. The Dockerfile declares no application ENTRYPOINT/CMD; Compose and Helm provide the Python command.
 
 ## Authentication and source boundary
 

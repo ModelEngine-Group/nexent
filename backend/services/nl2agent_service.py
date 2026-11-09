@@ -66,7 +66,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from http_api.client import create_httpx_client
+from backend.http.client import create_httpx_client
 
 from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,

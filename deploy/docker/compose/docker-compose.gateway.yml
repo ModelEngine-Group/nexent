@@ -6,7 +6,7 @@ services:
       context: ../../..
       dockerfile: deploy/images/dockerfiles/gateway/Dockerfile
     restart: unless-stopped
-    entrypoint: ["python", "backend/gateway_service.py"]
+    entrypoint: ["python", "-m", "backend.http.gateway_service"]
     ports:
       - "${NEXENT_GATEWAY_PORT:-5016}:5013"
     environment:

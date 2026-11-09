@@ -39,7 +39,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/mcp_service.py
+            - -m
+            - backend.http.mcp_service
           envFrom:
             - configMapRef:
                 name: nexent-config

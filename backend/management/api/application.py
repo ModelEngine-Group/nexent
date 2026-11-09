@@ -5,7 +5,7 @@ from management.api.identity.gateway_identity import router as gateway_identity_
 import logging
 from contextlib import asynccontextmanager
 
-from http_api.server.app_factory import create_app
+from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.skill.skill_repository import skill_repository_router

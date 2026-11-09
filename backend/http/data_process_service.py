@@ -10,18 +10,15 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from _repository_path import add_repository_root
-
-add_repository_root()
-
 from contracts.constants.environment import DISABLE_CELERY_FLOWER, DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PARSE_MIN_PROCESSES, DP_PARSE_THREADS_PER_PROCESS, DP_PARSER_STARTUP_TIMEOUT_S, DP_PRELOAD_MODELS, FLOWER_PORT, REDIS_BACKEND_URL, REDIS_PORT, REDIS_URL
-from process_logging import configure_logging, get_uvicorn_logging_config
+from backend.http.logging import configure_logging, get_uvicorn_logging_config
 
 
 # Load environment variables
@@ -186,15 +183,7 @@ except Exception as e_exec:
                     config["concurrency"],
                 )
 
-                # Get the backend directory path to ensure correct module import
-                # This should resolve to the 'backend' directory where this service script is located.
-                backend_dir = os.path.dirname(os.path.abspath(__file__))
-                if not os.path.isdir(os.path.join(backend_dir, "data_process")) :
-                     # if this service script itself is not in backend, but one level up
-                     possible_backend_dir = os.path.join(backend_dir, "backend")
-                     if os.path.isdir(os.path.join(possible_backend_dir, "data_process")):
-                         backend_dir = possible_backend_dir
-
+                backend_dir = str(Path(__file__).resolve().parents[1])
 
                 # Set environment variables for the worker process
                 worker_env = os.environ.copy()
@@ -349,7 +338,7 @@ except Exception as e_exec:
             redis_url = REDIS_URL
 
             # Get the backend directory path to ensure correct module import
-            backend_dir = os.path.dirname(os.path.abspath(__file__))
+            backend_dir = str(Path(__file__).resolve().parents[1])
 
             # Set up environment variables for Flower configuration
             flower_env = os.environ.copy()
@@ -679,8 +668,8 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python data_process_service.py                           # Start all services (Redis, Workers, Flower)
-  python data_process_service.py --disable-celery-flower   # Skip Flower monitoring
+  python -m backend.http.data_process_service                           # Start all services (Redis, Workers, Flower)
+  python -m backend.http.data_process_service --disable-celery-flower   # Skip Flower monitoring
         """
     )
 

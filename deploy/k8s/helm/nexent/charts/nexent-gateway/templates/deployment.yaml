@@ -37,7 +37,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          command: ["python", "backend/gateway_service.py"]
+          command: ["python", "-m", "backend.http.gateway_service"]
           env:
             - name: TZ
               valueFrom:

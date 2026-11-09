@@ -108,9 +108,11 @@ def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_p
     backend = tmp_path / "backend"
     assert not (backend / "gateway/downstream").exists()
     code = """import json,sys
-sys.path.insert(0, sys.argv[1])
+sys.path[:0] = sys.argv[1:3]
 sys.modules["bcrypt"] = None
-import gateway_service
+import http.client
+import logging.handlers
+from backend.http import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
@@ -119,14 +121,14 @@ print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()
     env["MAX_KNOWLEDGE_FILE_SIZE_MB"] = "invalid-business-setting"
-    result = subprocess.run([sys.executable, "-I", "-c", code, str(backend)], cwd=tmp_path,
+    result = subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path), str(backend)], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["imported"] is True
 
 
 def test_launcher_uses_injected_settings_and_does_not_trust_forwarded_headers(monkeypatch):
-    import gateway_service
+    from backend.http import gateway_service
 
     settings = GatewaySettings(host="127.0.0.1", port=5099, jwt_secret="launcher-fixture")
     calls = []

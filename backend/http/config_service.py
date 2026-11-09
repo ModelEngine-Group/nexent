@@ -1,13 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Executable Management launcher retained for deployment command compatibility."""
+
 import logging
 import logging.config
 import warnings
 
 import uvicorn
-
-from _repository_path import add_repository_root
-
-add_repository_root()
 
 from contracts.constants.environment import APP_VERSION
 
@@ -19,18 +17,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from runtime.api.application import app
-from process_logging import (
+from management.api.application import app
+from backend.http.logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )
 
 
-logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime", "model_call"]))
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["config"]))
 configure_elasticsearch_logging()
-logger = logging.getLogger("runtime")
+logger = logging.getLogger("config")
 
 if __name__ == "__main__":
     logger.info("Starting server initialization...")
     logger.info(f"APP version is: {APP_VERSION}")
-    uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info", log_config=get_uvicorn_logging_config(categories=["runtime", "model_call"]))
+    uvicorn.run(app, host="0.0.0.0", port=5010, log_level="info", log_config=get_uvicorn_logging_config(categories=["config"]))

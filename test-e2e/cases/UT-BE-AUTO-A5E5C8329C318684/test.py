@@ -19,7 +19,7 @@ from nexent.core.concurrency import (
     ThreadManagerBase,
 )
 from management.thread_management import config_thread_manager
-from mcp_runtime.thread_management import mcp_thread_manager
+from backend.mcp.thread_management import mcp_thread_manager
 from runtime.thread_management import runtime_thread_manager
 
 CASE_ID = 'UT-BE-AUTO-A5E5C8329C318684'

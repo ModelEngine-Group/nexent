@@ -13,10 +13,6 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
-from _repository_path import add_repository_root
-
-add_repository_root()
-
 from management.db.tool.outer_api import query_available_openapi_services
 from contracts.constants.environment import TOKEN
 from mcp.types import Tool as MCPTool
@@ -25,7 +21,7 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from mcp_runtime.thread_management import mcp_thread_manager
+from backend.mcp.thread_management import mcp_thread_manager
 from gateway.downstream.identity import enabled as gateway_identity_enabled, signing_key
 from gateway.mcp.credential_client import resolve_mcp_identity
 from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
@@ -33,7 +29,7 @@ from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from process_logging import get_uvicorn_logging_config
+from backend.http.logging import get_uvicorn_logging_config
 
 
 logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))

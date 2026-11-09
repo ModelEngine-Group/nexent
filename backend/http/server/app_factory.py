@@ -5,7 +5,7 @@ FastAPI application factory with common configurations and exception handlers.
 
 import logging
 
-from http_api.server.health import install_health_contract
+from backend.http.server.health import install_health_contract
 from contracts.errors.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

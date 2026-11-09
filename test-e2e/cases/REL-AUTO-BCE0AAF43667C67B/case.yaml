@@ -17,11 +17,11 @@ case:
 
     3) 关停未按 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 优雅关停，或 finally 中未清理默认线程管理器，造成线程泄漏、任务丢失或进程无法干净退出。'
   preconditions:
-  - '- 本地测试环境可启动 northbound 应用（backend/config_service.py 入口，port 5010）；不要求外部模型服务在线。
+  - '- 本地测试环境可启动 northbound 应用（backend/http/config_service.py 入口，port 5010）；不要求外部模型服务在线。
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   test_data:
-    legacy_asset_declaration: '- 本地测试环境可启动 northbound 应用（backend/config_service.py 入口，port 5010）；不要求外部模型服务在线。
+    legacy_asset_declaration: '- 本地测试环境可启动 northbound 应用（backend/http/config_service.py 入口，port 5010）；不要求外部模型服务在线。
 
       - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
@@ -65,7 +65,7 @@ case:
 
     3) 关停未按 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 优雅关停，或 finally 中未清理默认线程管理器，造成线程泄漏、任务丢失或进程无法干净退出。'
   condition:
-  - '- 本地测试环境可启动 northbound 应用（backend/config_service.py 入口，port 5010）；不要求外部模型服务在线。
+  - '- 本地测试环境可启动 northbound 应用（backend/http/config_service.py 入口，port 5010）；不要求外部模型服务在线。
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   metrics:

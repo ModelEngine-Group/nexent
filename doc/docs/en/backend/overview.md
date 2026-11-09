@@ -81,11 +81,12 @@ backend/
 │   └── ...
 ├── consts/                       # Constants definition (const.py is the single source of environment variables / model.py)
 ├── prompts/                      # Prompt templates
-├── config_service.py             # Config service entry point
-├── runtime_service.py            # Runtime service entry point
-├── northbound_service.py         # Northbound open API service entry point (port 5013)
-├── data_process_service.py       # Data processing service entry point
-├── mcp_service.py                # MCP service entry point
+├── http/
+│   ├── gateway_service.py
+│   ├── config_service.py
+│   ├── runtime_service.py
+│   ├── data_process_service.py
+│   └── mcp_service.py
 └── pyproject.toml                # Python dependencies (managed with uv; install with uv sync)
 ```
 
@@ -226,12 +227,15 @@ uv pip install -e "../sdk[dev]"
 ```
 
 ### Service Startup
+
+Run these commands from the repository root.
 ```bash
-cd backend
-python data_process_service.py   # Data processing service
-python config_service.py         # Config service
-python runtime_service.py        # Runtime service
-python mcp_service.py            # MCP service
+export PYTHONPATH="$PWD/backend"
+python -m backend.http.gateway_service
+python -m backend.http.data_process_service   # Data processing service
+python -m backend.http.config_service         # Config service
+python -m backend.http.runtime_service        # Runtime service
+python -m backend.http.mcp_service            # MCP service
 ```
 
 ## Performance and Scalability

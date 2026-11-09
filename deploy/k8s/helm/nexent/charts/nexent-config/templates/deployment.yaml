@@ -48,7 +48,8 @@ spec:
           command:
             - /opt/nexent/scripts/start-backend.sh
             - python
-            - backend/config_service.py
+            - -m
+            - backend.http.config_service
           envFrom:
             - configMapRef:
                 name: nexent-config

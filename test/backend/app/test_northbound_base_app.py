@@ -269,12 +269,12 @@ file_management_app_module.build_content_disposition_header = MagicMock(
 )
 sys.modules["management.api.file.file_management"] = file_management_app_module
 
-# Mock http_api.server.app_factory (imported by northbound_base_app)
-app_factory_module = types.ModuleType("http_api.server.app_factory")
+# Mock backend.http.server.app_factory (imported by northbound_base_app)
+app_factory_module = types.ModuleType("backend.http.server.app_factory")
 
 # Import real register_exception_handlers to apply to the app
 try:
-    from http_api.server.app_factory import register_exception_handlers as _real_register_exception_handlers
+    from backend.http.server.app_factory import register_exception_handlers as _real_register_exception_handlers
 except Exception:
     _real_register_exception_handlers = None
 
@@ -297,7 +297,7 @@ def register_exception_handlers(app):
 
 app_factory_module.register_exception_handlers = register_exception_handlers
 app_factory_module.create_app = None  # placeholder
-sys.modules['http_api.server.app_factory'] = app_factory_module
+sys.modules['backend.http.server.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",

@@ -77,7 +77,7 @@ def test_compose_gateway_has_no_business_dependencies(filename):
     compose = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))
     gateway = compose["services"]["nexent-gateway"]
     assert "NEXENT_GATEWAY_IMAGE" in gateway["image"]
-    assert gateway["entrypoint"] == ["python", "backend/gateway_service.py"]
+    assert gateway["entrypoint"] == ["python", "-m", "backend.http.gateway_service"]
     assert gateway["environment"]["GATEWAY_PORT"] == "5013"
     assert "nexent-northbound" not in compose["services"]
     assert "NEXENT_POSTGRES_PASSWORD" in gateway["environment"]
@@ -120,7 +120,7 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     pod = deployment["spec"]["template"]["spec"]
     container = pod["containers"][0]
     assert container["image"] == "nexent/nexent-gateway:latest"
-    assert container["command"] == ["python", "backend/gateway_service.py"]
+    assert container["command"] == ["python", "-m", "backend.http.gateway_service"]
     assert container["securityContext"]["runAsNonRoot"] is True
     assert not {"envFrom", "volumeMounts"} & container.keys()
     assert "volumes" not in pod
