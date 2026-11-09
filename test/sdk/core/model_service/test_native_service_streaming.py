@@ -295,3 +295,13 @@ def test_completion_only_intermediate_text_and_tool_calls_are_preserved(native_p
         e["content"] for e in events if e["type"] == "model_output_deep_thinking"
     ] == ["Provider thought"]
     assert not any(e["type"] == "final_answer" for e in events)
+
+
+
+def test_runtime_wrapper_exposes_token_event_diagnostics(native_profile):
+    delegate = LegacyChatModel(native_profile, EventService(None))
+    adapter = NativeServiceModel(delegate)
+    delegate.last_finish_reason = "tool_calls"
+    delegate.last_prompt_cache_usage = object()
+    assert adapter.last_finish_reason == "tool_calls"
+    assert adapter.last_prompt_cache_usage is delegate.last_prompt_cache_usage

@@ -1,12 +1,12 @@
 {
   "date": "2026-11-09",
-  "affected_python_tests": 152,
+  "affected_python_tests": 153,
   "python_failures": 0,
   "frontend_adapter_and_cancellation_tests": 20,
   "formal": [
     {
       "case_id": "AGENT-NATIVE-D2-002",
-      "run_id": "20261109T130138726354Z-AGENT-NATIVE-D2-002",
+      "run_id": "20261109T130828678903Z-AGENT-NATIVE-D2-002",
       "summary": {
         "tests": 2,
         "failures": 0,
@@ -28,7 +28,7 @@
     },
     {
       "case_id": "AGENT-NATIVE-D5-001",
-      "run_id": "20261109T130016806033Z-AGENT-NATIVE-D5-001",
+      "run_id": "20261109T130853308646Z-AGENT-NATIVE-D5-001",
       "summary": {
         "tests": 1,
         "failures": 0,
@@ -90,5 +90,6 @@
     "reasoning_displayed_live_and_after_reload": true,
     "public_final_answer": 323,
     "screenshot": "reasoning-browser.png"
-  }
+  },
+  "token_metadata_verification": "Native wrapper exposes delegate finish/cache values; final deployed API case asserts a real finish reason in token_count events."
 }

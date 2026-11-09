@@ -33,7 +33,7 @@ To change the allowance deliberately, use **Model Configuration → edit glm-5.3
 
 - Provider `reasoning_delta` is forwarded as `model_output_deep_thinking`, with attempt and step identity, on both experimental branches. Public `text_delta` continues as plain `model_output`.
 - Completion-only text/reasoning is emitted when no deltas were received, without duplicating streamed output or replaying reasoning as a final answer.
-- Native model-service calls reuse response reset, retry/cached-usage diagnostics and terminal error conversion. Cancelled/failed attempts retain rollback behavior.
+- Native model-service calls reuse response reset, retry/cached-usage diagnostics and terminal error conversion. Narrow read-only wrapper accessors expose finish/cache values to the existing token-event consumer. Cancelled/failed attempts retain rollback behavior.
 - Length errors remain failures and include available requested/output/reasoning counters. No partial tools execute and no truncated text is marked final.
 - The existing chat renderer displays reasoning separately; live and saved-history adapter tests verify that separation. No frontend product change was needed.
 

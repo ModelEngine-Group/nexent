@@ -23,6 +23,14 @@ class NativeServiceModel(Model):
         super().__init__(model_id=delegate.model_id)
         self.delegate = delegate
 
+    @property
+    def last_finish_reason(self):
+        return self.delegate.last_finish_reason
+
+    @property
+    def last_prompt_cache_usage(self):
+        return self.delegate.last_prompt_cache_usage
+
     def _request(self, messages, tools, schemas, parameters):
         model = self.delegate
         controls = dict(parameters)

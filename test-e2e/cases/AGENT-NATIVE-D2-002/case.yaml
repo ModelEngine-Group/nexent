@@ -18,7 +18,7 @@
     "automation": "automated",
     "objective": "Verify actual provider reasoning and completed answers over SSE using two configured reasoning-capable models without changing definitions.",
     "preconditions": [
-      "Deployed native runtime, existing test tenant administrator, existing authorized Agent and two available configured reasoning-capable model IDs supplied by operator."
+      "Deployed native runtime, existing test tenant administrator, existing authorized Agent and two available configured reasoning-capable model IDs supplied by operator. The supplied models must be configured to return provider text reasoning for this request."
     ],
     "test_data": {
       "model_indexes": [
@@ -30,7 +30,7 @@
       {
         "order": 1,
         "action": "Sign in and snapshot the existing Agent definition. Run the short arithmetic request with each supplied model through deployed /agent/run.",
-        "expected": "Reasoning SSE events have attempt/step identity, public/final output stays separate and one final completion contains 323."
+        "expected": "Reasoning SSE events have attempt/step identity, public/final output stays separate and one final completion contains 323. Token metadata exposes the actual terminal finish reason."
       },
       {
         "order": 2,
@@ -44,7 +44,7 @@
       }
     ],
     "expected_results": [
-      "Actual reasoning, public text and final completion follow their distinct SSE contracts.",
+      "Actual reasoning, public text and final completion follow their distinct SSE contracts. Token metadata exposes the terminal finish reason.",
       "Semantic Agent definition is unchanged.",
       "HTTP sessions are closed."
     ],

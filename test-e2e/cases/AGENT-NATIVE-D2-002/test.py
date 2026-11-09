@@ -50,6 +50,9 @@ def test_reasoning_stream_and_unchanged_definition(model_index):
         finals = [e for e in events if e.get("type") == "final_answer"
                   and e.get("answer_phase") == "complete" and not e.get("invocation_id")]
         assert len(finals) == 1
+        token_events = [json.loads(e["content"]) for e in events if e.get("type") == "token_count"]
+        assert token_events
+        assert token_events[-1]["output_finish_reason"] in {"stop", "tool_calls"}
         answer = finals[0].get("content") or "".join(str(e.get("content", "")) for e in events
             if e.get("step_id") == finals[0].get("step_id") and e.get("type") == "model_output")
         assert "323" in answer
