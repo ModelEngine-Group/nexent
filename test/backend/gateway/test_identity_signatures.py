@@ -6,10 +6,10 @@ import time
 import jwt
 import pytest
 
-from service_common.service_identity.gateway import (
+from gateway.downstream.identity import (
     IdentityError, sign_identity, verify_identity, sign_lookup, verify_lookup,
 )
-from service_common.security.policy import is_public_request
+from gateway.security.policy import is_public_request
 
 KEY = "local-signature-fixture-which-is-not-a-deployment-secret"
 IDENTITY = {"user_id": "u1", "tenant_id": "t1", "role": "USER", "kind": "session", "language": "zh"}
@@ -72,7 +72,7 @@ def test_public_policy_has_method_and_path_boundaries(method, path, expected):
 
 def test_signing_key_requires_configuration_and_separates_session_key(monkeypatch):
     from contracts.constants import environment
-    from service_common.service_identity.gateway import signing_key
+    from gateway.downstream.identity import signing_key
 
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
     monkeypatch.setattr(environment, "JWT_SECRET", "")

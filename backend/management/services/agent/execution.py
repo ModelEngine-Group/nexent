@@ -96,7 +96,7 @@ from infrastructure.redis.run_state import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from thread_management.runtime import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )

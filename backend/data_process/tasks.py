@@ -23,7 +23,7 @@ from contracts.errors.codes import ErrorCode
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.file.upload import get_file_size
-from service_common.ingestion.errors import (
+from contracts.errors.ingestion import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )

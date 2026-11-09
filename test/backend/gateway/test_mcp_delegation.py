@@ -11,10 +11,10 @@ import pytest
 
 from test.backend.gateway.http_identity_fixture import create_gateway_app
 from gateway.configuration import GatewaySettings
-from service_common.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
-from api_to_mcp import identity_router as mcp
-from service_common.service_identity.context import identity_context
-from api_to_mcp.credential_client import resolve_mcp_identity
+from gateway.security.identity import IdentityError, sign_delegation, sign_identity, sign_lookup, verify_identity
+from gateway.mcp import identity_router as mcp
+from gateway.security.context import identity_context
+from gateway.mcp.credential_client import resolve_mcp_identity
 
 KEY = "local-mcp-delegation-fixture-only"
 PRINCIPAL = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
@@ -84,7 +84,7 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
             closed.append(True)
 
     def transport(request):
-        from service_common.security.identity import verify_delegation
+        from gateway.security.identity import verify_delegation
 
         verify_delegation(request.headers["x-nexent-service-token"], request.content, key=KEY)
         assert json.loads(request.content)["path"] == SCOPE["path"]
@@ -105,7 +105,6 @@ async def test_mcp_client_verifies_response_binding_and_closes_client(variant):
 async def test_mcp_router_uses_delegated_identity_and_restores_context(monkeypatch, variant):
     principal = {**PRINCIPAL, "tenant_id": "t2" if variant == "tenant" else "t1"}
     resolver = AsyncMock(return_value=principal, side_effect=IdentityError() if variant == "error" else None)
-    monkeypatch.setattr(mcp, "resolve_mcp_identity", resolver)
     reached, sent = [], []
 
     async def sink(scope, receive, send):
@@ -114,7 +113,7 @@ async def test_mcp_router_uses_delegated_identity_and_restores_context(monkeypat
         await send({"type": "http.response.start", "status": 200})
 
     router = mcp.TenantMCPRouter(get_app=lambda tenant: sink, refresh=lambda tenant: None,
-                                internal_token="internal", gateway_required=True,
+                                internal_token="internal", gateway_required=True, resolve_identity=resolver,
                                 legacy_identity=lambda value: pytest.fail("Local external auth was called"))
     scope = {**SCOPE, "headers": [(b"authorization", b"Bearer test")] * (2 if variant == "duplicate" else 1)}
     parent = identity_context.set({"parent": True})

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -11,6 +12,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextvars import copy_context
 from typing import Callable, Mapping
 
+from .base import ThreadManagerBase
 from .bounded_executor import BoundedExecutor
 from .context import _reset_current_thread_manager, _set_current_thread_manager
 from .errors import (
@@ -80,7 +82,7 @@ def _structured_event(
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-class ThreadManager:
+class ThreadManager(ThreadManagerBase):
     """Own bounded thread execution for one service process."""
 
     def __init__(

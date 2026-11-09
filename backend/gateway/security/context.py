@@ -3,7 +3,7 @@
 
 from contextvars import ContextVar
 
-from service_common.security.identity import IdentityError
+from gateway.security.identity import IdentityError
 
 identity_context = ContextVar("gateway_identity", default=None)
 

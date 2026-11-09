@@ -4,6 +4,7 @@
 import ast
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from gateway.configuration import GatewaySettings, load_settings
-from service_common.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
+from gateway.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
 
 
 BACKEND = Path(__file__).resolve().parents[3] / "backend"
@@ -53,7 +54,7 @@ def test_invalid_configuration_fails_before_startup(name, value):
 
 def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monkeypatch):
     from contracts.constants import environment
-    from service_common.service_identity.gateway import sign_identity as backend_sign, signing_key
+    from gateway.downstream.identity import sign_identity as backend_sign, signing_key
 
     identity = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
     key = derive_signing_key("master-fixture")
@@ -69,8 +70,10 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "infrastructure", "service_common"}
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "infrastructure"}
     for path in (BACKEND / "gateway").rglob("*.py"):
+        if path.relative_to(BACKEND / "gateway").parts[0] == "downstream":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             modules = [node.module] if isinstance(node, ast.ImportFrom) else [item.name for item in node.names] if isinstance(node, ast.Import) else []
@@ -78,25 +81,32 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
                 assert module and module.split(".")[0] in allowed, (path, module)
                 if module.startswith("infrastructure"):
                     assert module == "infrastructure.rdb.identity", (path, module)
-                if module.startswith("service_common"):
-                    assert module.startswith("service_common.security."), (path, module)
+                assert not module.startswith("gateway.downstream"), (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
                 assert path.name == "configuration.py", path
 
 
 def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_path):
-    shutil.copytree(BACKEND / "gateway", tmp_path / "backend/gateway", ignore=shutil.ignore_patterns("__pycache__"))
+    repository = BACKEND.parent
+    dockerfile = repository / "deploy/images/dockerfiles/gateway/Dockerfile"
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("COPY "):
+            continue
+        *sources, destination = shlex.split(line)[1:]
+        if not destination.startswith("/opt/"):
+            continue
+        target = tmp_path / destination.removeprefix("/opt/")
+        for source in sources:
+            for entry in repository.glob(source):
+                if entry.is_dir():
+                    shutil.copytree(entry, target, dirs_exist_ok=True,
+                                    ignore=shutil.ignore_patterns("__pycache__"))
+                else:
+                    output = target / entry.name if destination.endswith("/") else target
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(entry, output)
     backend = tmp_path / "backend"
-    for file in ("gateway_service.py", "_repository_path.py"):
-        shutil.copy2(BACKEND / file, backend / file)
-    infrastructure = tmp_path / "infrastructure"
-    (infrastructure / "rdb").mkdir(parents=True)
-    for file in ("__init__.py", "rdb/__init__.py", "rdb/identity.py"):
-        shutil.copy2(BACKEND.parent / "infrastructure" / file, infrastructure / file)
-    service_common = backend / "service_common"
-    shutil.copytree(BACKEND / "service_common/security", service_common / "security",
-                    ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy2(BACKEND / "service_common/__init__.py", service_common)
+    assert not (backend / "gateway/downstream").exists()
     code = """import json,sys
 sys.path.insert(0, sys.argv[1])
 sys.modules["bcrypt"] = None
@@ -104,7 +114,7 @@ import gateway_service
 from gateway.configuration import load_settings
 from gateway.application import create_gateway_app
 app=create_gateway_app(settings=load_settings({'GATEWAY_AUTH_ENABLED':'false'}))
-assert not {'management','runtime','contracts','infrastructure.rdb.client','service_common.service_identity','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
+assert not {'management','runtime','contracts','infrastructure.rdb.client','gateway.downstream','nexent','dotenv','sqlalchemy'} & sys.modules.keys()
 print(json.dumps({'imported':True,'routes':len(app.routes)}))
 """
     env = os.environ.copy()

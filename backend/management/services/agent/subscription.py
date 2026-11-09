@@ -91,7 +91,7 @@ from infrastructure.redis.run_state import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from thread_management.runtime import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
 from contracts.runtime_metadata import (
     validate_runtime_metadata,

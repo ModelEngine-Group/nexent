@@ -8,8 +8,7 @@ import uuid
 
 import jwt
 
-from service_common.security.policy import is_public_request
-from service_common.security.request_path import canonical_path
+from gateway.security.policy import canonical_path, is_public_request
 
 IDENTITY_HEADER = "x-nexent-identity"
 ISSUER = "nexent-gateway"

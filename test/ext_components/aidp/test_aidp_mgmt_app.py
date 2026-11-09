@@ -95,7 +95,7 @@ from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
     UpdateKbRequest,
     aidp_mgmt_router,
 )
-from service_common.http.server.app_factory import register_exception_handlers
+from http_api.server.app_factory import register_exception_handlers
 
 SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"

@@ -52,7 +52,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
 )
-from service_common.http.client import create_httpx_client
+from http_api.client import create_httpx_client
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:

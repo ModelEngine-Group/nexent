@@ -6,7 +6,7 @@ import json
 from starlette.requests import Request
 
 from gateway.security.credentials import resolve_identity
-from service_common.security.identity import DELEGATION_PATH, IdentityError, sign_identity, verify_delegation
+from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_identity, verify_delegation
 
 
 async def delegate_mcp(request, *, settings, identity_lookup=None):

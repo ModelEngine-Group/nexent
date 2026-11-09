@@ -3,7 +3,7 @@
 
 import jwt
 
-from service_common.security.identity import require_key
+from gateway.security.identity import require_key
 
 
 def encode_token(claims, *, key):

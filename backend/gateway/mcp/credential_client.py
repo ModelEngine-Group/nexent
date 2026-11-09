@@ -6,20 +6,14 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from service_common.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
-from service_common.service_identity.gateway import signing_key
+from gateway.security.identity import DELEGATION_PATH, IdentityError, sign_delegation, verify_identity
 
 
-async def resolve_mcp_identity(scope, authorization, *, gateway_url=None, key=None, transport=None):
-    if gateway_url is None:
-        from contracts.constants.environment import GATEWAY_SERVICE_URL
-
-        gateway_url = GATEWAY_SERVICE_URL
+async def resolve_mcp_identity(scope, authorization, *, gateway_url, key, transport=None):
     origin = urlsplit(gateway_url)
     if (origin.scheme not in {"http", "https"} or not origin.netloc or origin.username or origin.password
             or origin.path not in {"", "/"} or origin.query or origin.fragment):
         raise IdentityError("Invalid Gateway origin")
-    key = signing_key() if key is None else key
     method, path, query = scope.get("method", "GET"), scope["path"], scope.get("query_string", b"")
     body = json.dumps({"authorization": authorization, "method": method, "path": path,
                        "query": query.hex()}, separators=(",", ":"), sort_keys=True).encode()

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from service_common.http.server.health import install_health_contract
+from http_api.server.health import install_health_contract
 
 
 def test_live_and_ready_are_dependency_free_process_health():

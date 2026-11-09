@@ -11,7 +11,7 @@ import re
 from starlette.convertors import CONVERTOR_TYPES
 from starlette.routing import compile_path
 
-from service_common.security.policy import is_public_request
+from gateway.security.policy import is_public_request
 
 
 def valid_path(path, raw_path=None):

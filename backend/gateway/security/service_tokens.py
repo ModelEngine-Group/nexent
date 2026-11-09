@@ -4,7 +4,7 @@ from typing import Optional
 
 import jwt
 
-from service_common.security.identity import IdentityError, bearer_token
+from gateway.security.identity import IdentityError, bearer_token
 
 INTERNAL_RUNTIME_JWT_ISSUER = "nexent-northbound"
 INTERNAL_RUNTIME_JWT_AUDIENCE = "nexent-runtime"

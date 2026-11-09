@@ -284,7 +284,7 @@ def generate_pending_oauth_token(
         "iat": now,
         "exp": now + expires_in,
     }
-    from service_common.security.token_codec import encode_token
+    from gateway.security.token_codec import encode_token
 
     return encode_token(payload, key=JWT_SECRET)
 

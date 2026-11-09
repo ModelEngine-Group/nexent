@@ -5,8 +5,7 @@ import logging
 import re
 from typing import Any, Callable, Dict
 
-from service_common.service_identity.context import identity_context
-from api_to_mcp.credential_client import resolve_mcp_identity
+from gateway.security.context import identity_context
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +13,15 @@ logger = logging.getLogger(__name__)
 class TenantMCPRouter:
     """Dispatch /mcp/{tenant_id}/... requests to the tenant's MCP app."""
 
-    def __init__(self, *, get_app, refresh, internal_token, gateway_required, legacy_identity=None):
+    def __init__(self, *, get_app, refresh, internal_token, gateway_required,
+                 resolve_identity=None, legacy_identity=None):
+        if gateway_required and resolve_identity is None:
+            raise ValueError("Gateway MCP identity resolver is required")
         self.get_app = get_app
         self.refresh = refresh
         self.internal_token = internal_token
         self.gateway_required = gateway_required
+        self.resolve_identity = resolve_identity
         self.legacy_identity = legacy_identity
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
@@ -44,7 +47,7 @@ class TenantMCPRouter:
         if authorization:
             try:
                 if self.gateway_required:
-                    principal = await resolve_mcp_identity(scope, authorization.decode("latin-1"))
+                    principal = await self.resolve_identity(scope, authorization.decode("latin-1"))
                     authenticated_tenant_id = principal["tenant_id"]
                 else:
                     _, authenticated_tenant_id = self.legacy_identity(authorization.decode("latin-1"))

@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from management.api.application import app
-from service_common.logging import (
+from process_logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )

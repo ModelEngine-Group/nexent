@@ -5,7 +5,7 @@ FastAPI application factory with common configurations and exception handlers.
 
 import logging
 
-from service_common.http.server.health import install_health_contract
+from http_api.server.health import install_health_contract
 from contracts.errors.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,7 +59,7 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from service_common.service_identity.middleware import GatewayIdentityMiddleware
+        from gateway.downstream.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(
             GatewayIdentityMiddleware,

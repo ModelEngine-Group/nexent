@@ -150,14 +150,14 @@ logging.config = logging_config_mod  # patch the actual logging module too
 # Stub utils
 stub_utils = types.ModuleType("utils")
 stub_utils.__path__ = [os.path.abspath(os.path.join(current_dir, "../../../backend/utils"))]
-stub_utils.logging_utils = types.ModuleType("service_common.logging")
+stub_utils.logging_utils = types.ModuleType("process_logging")
 stub_utils.logging_utils.configure_logging = MagicMock()
 stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
 stub_utils.logging_utils.get_uvicorn_logging_config = MagicMock(
     return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
 )
 sys.modules['utils'] = stub_utils
-sys.modules['service_common.logging'] = stub_utils.logging_utils
+sys.modules['process_logging'] = stub_utils.logging_utils
 
 # Stub database
 stub_database = types.ModuleType("database")
@@ -195,9 +195,9 @@ sys.modules["nexent"] = stub_nexent
 sys.modules["nexent.core"] = stub_nexent_core
 sys.modules["nexent.core.concurrency"] = stub_concurrency
 
-stub_thread_lifecycle = types.ModuleType("thread_management.mcp")
+stub_thread_lifecycle = types.ModuleType("mcp_runtime.thread_management")
 stub_thread_lifecycle.mcp_thread_manager = MagicMock()
-sys.modules["thread_management.mcp"] = stub_thread_lifecycle
+sys.modules["mcp_runtime.thread_management"] = stub_thread_lifecycle
 
 # Stub http
 stub_http = types.ModuleType("http")

@@ -108,7 +108,7 @@ base_app_mod.app = MagicMock()
 
 # Stub logging_utils so runtime_service can import get_uvicorn_logging_config
 # (it was migrated from configure_logging to dictConfig)
-logging_utils_mod = types.ModuleType("service_common.logging")
+logging_utils_mod = types.ModuleType("process_logging")
 logging_utils_mod.configure_logging = MagicMock()
 logging_utils_mod.configure_elasticsearch_logging = MagicMock()
 logging_utils_mod.get_uvicorn_logging_config = MagicMock(
@@ -122,7 +122,7 @@ sys.modules.setdefault("backend", backend_pkg)
 sys.modules["backend.apps"] = apps_pkg
 sys.modules["backend.apps.base_app"] = base_app_mod
 sys.modules.setdefault("utils", utils_mod)
-sys.modules["service_common.logging"] = logging_utils_mod
+sys.modules["process_logging"] = logging_utils_mod
 
 # Also stub non-namespaced imports used by the application
 apps_pkg_flat = types.ModuleType("apps")
@@ -162,10 +162,10 @@ class TestMainServiceModuleIntegration:
         expected_call = call(categories=["runtime", "model_call"])
         try:
             with patch(
-                'service_common.logging.get_uvicorn_logging_config',
+                'process_logging.get_uvicorn_logging_config',
                 return_value=self.RUNTIME_LOGGING_CONFIG,
             ) as mock_get_config, patch(
-                'service_common.logging.configure_elasticsearch_logging'
+                'process_logging.configure_elasticsearch_logging'
             ) as mock_configure_es, patch('uvicorn.run') as mock_uvicorn_run:
                 runpy.run_module("runtime_service", run_name="__main__")
         finally:

@@ -4,7 +4,7 @@
 import pytest
 
 from nexent.core.concurrency import ManagedTaskSpec
-from thread_management.management import config_thread_manager
+from management.thread_management import config_thread_manager
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_st
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
-from service_common.service_identity.internal_tokens import verify_internal_runtime_jwt
+from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 
 agent_runtime_router = APIRouter(prefix="/agent")
 

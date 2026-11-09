@@ -33,7 +33,7 @@ from management.services.file.service import (
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from management.services.permission.identity.session import get_current_user_id
 from management.services.knowledge_base.ingestion import trigger_data_process
-from service_common.ingestion.errors import classify_ingestion_exception
+from contracts.errors.ingestion import classify_ingestion_exception
 
 
 logger = logging.getLogger("file_management_app")

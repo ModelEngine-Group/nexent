@@ -21,7 +21,7 @@ from contracts.constants.environment import (
     TOKEN,
 )
 from contracts.tool import ToolParamsRequest
-from service_common.http.client import create_httpx_client
+from http_api.client import create_httpx_client
 from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot

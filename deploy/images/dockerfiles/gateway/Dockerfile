@@ -7,11 +7,13 @@ RUN if [ -n "$MIRROR" ]; then \
     else \
       pip install --no-cache-dir -r /tmp/gateway-requirements.txt; \
     fi
-COPY backend/gateway/ /opt/backend/gateway/
+COPY backend/gateway/*.py /opt/backend/gateway/
+COPY backend/gateway/exposure/ /opt/backend/gateway/exposure/
+COPY backend/gateway/proxy/ /opt/backend/gateway/proxy/
+COPY backend/gateway/security/ /opt/backend/gateway/security/
+COPY backend/gateway/mcp/ /opt/backend/gateway/mcp/
 COPY infrastructure/__init__.py /opt/infrastructure/__init__.py
 COPY infrastructure/rdb/__init__.py infrastructure/rdb/identity.py /opt/infrastructure/rdb/
-COPY backend/service_common/__init__.py /opt/backend/service_common/__init__.py
-COPY backend/service_common/security/ /opt/backend/service_common/security/
 COPY backend/gateway_service.py backend/_repository_path.py /opt/backend/
 ENV PYTHONPATH=/opt:/opt/backend
 USER 65532:65532

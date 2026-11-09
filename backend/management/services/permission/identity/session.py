@@ -12,7 +12,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
-from service_common.security import token_codec
+from gateway.security import token_codec
 from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, JWT_SECRET, JWT_ISSUER
 from contracts.authentication import (
     AuthenticatedIdentity,
@@ -31,7 +31,7 @@ from contracts.errors.exceptions import (
 )
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from service_common.service_identity.internal_tokens import (
+from gateway.downstream.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE,
@@ -54,7 +54,7 @@ from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
 def _gateway_identity(kind="session"):
-    from service_common.service_identity.gateway import IdentityError, enabled, trusted_identity
+    from gateway.downstream.identity import IdentityError, enabled, trusted_identity
 
     try:
         identity = trusted_identity(kind)
@@ -436,7 +436,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
 def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     """Translate the shared bearer syntax failure into the backend domain error."""
-    from service_common.service_identity.gateway import IdentityError, bearer_token
+    from gateway.downstream.identity import IdentityError, bearer_token
 
     try:
         return bearer_token(authorization)
@@ -446,7 +446,7 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Compatibility export of the common service-token verifier."""
-    from service_common.service_identity.internal_tokens import verify_internal_runtime_jwt as verify
+    from gateway.downstream.internal_tokens import verify_internal_runtime_jwt as verify
 
     return verify(authorization, secret=JWT_SECRET)
 

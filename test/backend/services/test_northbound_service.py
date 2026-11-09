@@ -203,7 +203,7 @@ runtime_proxy_mod.forward_agent_run = AsyncMock()
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["management.services.agent.runtime_client"] = runtime_proxy_mod
 
-thread_lifecycle_mod = types.ModuleType("thread_management.management")
+thread_lifecycle_mod = types.ModuleType("management.thread_management")
 thread_lifecycle_mod.config_thread_manager = MagicMock()
 
 
@@ -214,7 +214,7 @@ async def _run_managed_test_task(_lane, _spec, func, *args, **kwargs):
 thread_lifecycle_mod.config_thread_manager.run = AsyncMock(
     side_effect=_run_managed_test_task
 )
-sys.modules["thread_management.management"] = thread_lifecycle_mod
+sys.modules["management.thread_management"] = thread_lifecycle_mod
 
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("management.services.conversation.service")

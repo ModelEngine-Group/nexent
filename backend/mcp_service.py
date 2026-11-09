@@ -25,14 +25,15 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from thread_management.mcp import mcp_thread_manager
-from service_common.service_identity.gateway import enabled as gateway_identity_enabled
-from api_to_mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
+from mcp_runtime.thread_management import mcp_thread_manager
+from gateway.downstream.identity import enabled as gateway_identity_enabled, signing_key
+from gateway.mcp.credential_client import resolve_mcp_identity
+from gateway.mcp.identity_router import TenantMCPRouter as _TenantMCPRouter
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from service_common.logging import get_uvicorn_logging_config
+from process_logging import get_uvicorn_logging_config
 
 
 logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))
@@ -459,13 +460,19 @@ def _legacy_mcp_identity(authorization):
     return get_current_user_id(authorization)
 
 
+async def _resolve_gateway_mcp_identity(scope, authorization):
+    from contracts.constants.environment import GATEWAY_SERVICE_URL
+
+    return await resolve_mcp_identity(scope, authorization, gateway_url=GATEWAY_SERVICE_URL, key=signing_key())
+
+
 class TenantMCPRouter(_TenantMCPRouter):
     """Bind the process registry and deployment trust policy to the MCP boundary."""
 
     def __init__(self):
         super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
                          internal_token=TOKEN, gateway_required=gateway_identity_enabled(),
-                         legacy_identity=_legacy_mcp_identity)
+                         resolve_identity=_resolve_gateway_mcp_identity, legacy_identity=_legacy_mcp_identity)
 
 
 

@@ -4,7 +4,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from service_common.http.server.app_factory import create_app
+from http_api.server.app_factory import create_app
 from runtime.api.agent.execution import agent_runtime_router as agent_router
 from management.api.automation.agent_automation import (
     conversation_automation_router,
@@ -26,7 +26,7 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from thread_management.runtime import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")

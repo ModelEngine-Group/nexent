@@ -310,7 +310,7 @@ sys.modules['management.services.knowledge_base.service'].ElasticSearchService.f
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['management.services.agent.prompt'] = MagicMock()
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
-sys.modules['service_common.http.client'] = MagicMock()
+sys.modules['http_api.client'] = MagicMock()
 sys.modules['management.services.tool.langchain'] = MagicMock()
 sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()

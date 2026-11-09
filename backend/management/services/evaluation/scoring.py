@@ -9,7 +9,7 @@ from typing import Any
 from contracts.errors.codes import ErrorCode
 from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.errors.exceptions import AppException
-from thread_management.runtime import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,
     _EVENT_LABELS,

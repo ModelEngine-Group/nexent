@@ -5,7 +5,7 @@ from management.services.permission.identity import northbound as northbound_aut
 
 
 def test_api_key_authentication_queries_credential_and_account_once(monkeypatch):
-    from service_common.service_identity.gateway import identity_context
+    from gateway.downstream.identity import identity_context
 
     calls = []
 

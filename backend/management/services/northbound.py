@@ -26,7 +26,7 @@ from management.services.agent.service import (
     get_agent_by_name_impl,
 )
 from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
-from thread_management.management import config_thread_manager
+from management.thread_management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
 from management.services.knowledge_base.scope import (

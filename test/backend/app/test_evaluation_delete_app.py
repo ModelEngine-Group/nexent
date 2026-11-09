@@ -46,7 +46,7 @@ _STUB_SYMBOLS = {
     "management.services.evaluation.spreadsheet": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
-    "thread_management.management": ("config_thread_manager",),
+    "management.thread_management": ("config_thread_manager",),
 }
 for _module_name, _symbols in _STUB_SYMBOLS.items():
     _module = types.ModuleType(_module_name)

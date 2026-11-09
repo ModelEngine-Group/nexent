@@ -57,7 +57,7 @@ from management.services.configuration.user.memory import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from thread_management.runtime import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 

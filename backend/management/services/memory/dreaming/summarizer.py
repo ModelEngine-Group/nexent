@@ -20,7 +20,7 @@ from nexent.monitor import (
     agent_monitoring_context,
     set_monitoring_operation,
 )
-from thread_management.management import config_thread_manager
+from management.thread_management import config_thread_manager
 from management.services.model.names import (
     get_model_name_from_config,
 )

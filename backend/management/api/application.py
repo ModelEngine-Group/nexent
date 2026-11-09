@@ -5,7 +5,7 @@ from management.api.identity.gateway_identity import router as gateway_identity_
 import logging
 from contextlib import asynccontextmanager
 
-from service_common.http.server.app_factory import create_app
+from http_api.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.skill.skill_repository import skill_repository_router
@@ -56,7 +56,7 @@ from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABL
 from nexent.core.concurrency import (
     ManagedTaskSpec,
 )
-from thread_management.management import config_thread_manager
+from management.thread_management import config_thread_manager
 
 logger = logging.getLogger("base_app")
 
