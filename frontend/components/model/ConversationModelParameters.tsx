@@ -60,6 +60,7 @@ function usePreferenceView({
         issues: [],
         output_limit: outlet.profile.capabilities?.context?.output_limit,
         reasoning_status: outlet.profile.capabilities?.reasoning?.status,
+        reasoning_can_disable: outlet.profile.capabilities?.reasoning?.can_disable,
       } satisfies ConversationModelPreferenceView;
     },
     enabled: Boolean(conversationId || draftScope),
@@ -267,6 +268,7 @@ export function ConversationModelParameters({
           checked={enabled}
           disabled={
             state.alwaysOn ||
+            (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
             advancedOpen ||
             (!conversationId && !draftScope) ||

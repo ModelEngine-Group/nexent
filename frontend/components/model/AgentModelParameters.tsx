@@ -154,6 +154,7 @@ function Editor({
           reasoningSupported={
             outlet.profile.capabilities.reasoning?.status === "supported"
           }
+          canDisable={outlet.profile.capabilities.reasoning?.can_disable}
           rules={rules}
           values={parameters}
           defaults={defaults}

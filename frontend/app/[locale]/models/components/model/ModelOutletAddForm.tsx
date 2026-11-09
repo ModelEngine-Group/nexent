@@ -12,6 +12,7 @@ import { ModelOutletForm } from "@/components/model/ModelOutletForm";
 import {
   ModelThinkingSettings,
   thinkingDegreeKeys,
+  thinkingEnabled,
 } from "@/components/model/ModelThinkingSettings";
 import { parseRequestParameters } from "@/components/model/RequestParametersEditor";
 import { ModelRequestSettings } from "@/components/model/ModelRequestSettings";
@@ -295,9 +296,7 @@ export function ModelOutletAddForm({
     delete_parameters: resetParameters
       ? []
       : Object.keys(editing!.profile.parameter_values).filter(
-          (key) =>
-            !Object.hasOwn(request.parameter_values ?? {}, key) &&
-            !["temperature", "top_p"].includes(key)
+          (key) => !Object.hasOwn(request.parameter_values ?? {}, key)
         ),
     // The hidden input limit is inherited; let the backend bound it to the window.
     context_limits: request.context_limits
@@ -628,7 +627,23 @@ export function ModelOutletAddForm({
     },
   });
   const changeValue = (key: string, value: unknown) =>
-    setValues((previous) => ({ ...previous, [key]: value }));
+    setValues((previous) => ({
+      ...previous,
+      // The UI's implicit on-state must be explicit when submitting a dependent value.
+      ...(thinkingDegreeKeys.includes(key) &&
+      value !== undefined &&
+      previous.enable_thinking === undefined &&
+      view?.field_specs.some((rule) => rule.key === "enable_thinking") &&
+      thinkingEnabled(
+        view.field_specs,
+        { ...view.parameter_values, ...previous },
+        (view.capabilities.reasoning as { status?: string } | undefined)
+          ?.status === "supported"
+      )
+        ? { enable_thinking: true }
+        : {}),
+      [key]: value,
+    }));
   const resetValue = (key: string) =>
     setValues((previous) => {
       const next = { ...previous };
@@ -906,16 +921,6 @@ export function ModelOutletAddForm({
                   type="error"
                   showIcon
                   description={previewDiagnostic}
-                  action={
-                    parsedExtras !== null ? (
-                      <Button
-                        loading={preview.isFetching}
-                        onClick={() => preview.refetch()}
-                      >
-                        {t("modelProfile.retryPreview")}
-                      </Button>
-                    ) : undefined
-                  }
                   title={t(
                     parsedExtras === null
                       ? "modelProfile.extrasInvalid"
@@ -981,62 +986,103 @@ export function ModelOutletAddForm({
               </div>
             }
             thinking={
-              <ModelThinkingSettings
-                layout="panel"
-                reasoningSupported={
-                  (
-                    view?.capabilities.reasoning as
-                      { status?: string } | undefined
-                  )?.status === "supported"
-                }
-                outputLimit={limits.output_limit ?? inheritedOutputLimit}
-                prefillReady={
-                  !!preview.data &&
-                  !preview.isFetching &&
-                  JSON.stringify(debounced) === JSON.stringify(draft)
-                }
-                rules={view?.field_specs ?? []}
-                values={values}
-                defaults={view?.parameter_values}
-                mode={thinkingMode}
-                pending={save.isPending}
-                onToggle={(enabled) => {
-                  if (
-                    !(view?.field_specs ?? []).some(
-                      (rule) => rule.key === "enable_thinking" && rule.visible
+              <div className="space-y-3">
+                {view &&
+                  ("selected" in view
+                    ? view.selected.provider === null
+                    : !editing?.profile.provider_key) &&
+                  view.field_specs.some(
+                    (rule) => rule.key === "enable_thinking" && rule.editable
+                  ) && (
+                    <Form.Item
+                      label={t("modelProfile.thinkingControl")}
+                      tooltip={t("modelProfile.thinkingControlHelp")}
+                    >
+                      <Select
+                        aria-label={t("modelProfile.thinkingControl")}
+                        value={thinkingControl}
+                        disabled={save.isPending}
+                        onChange={(format: ThinkingControlFormat) =>
+                          setThinkingControl(format)
+                        }
+                        options={(
+                          [
+                            "profile_default",
+                            "enable_thinking",
+                            "thinking_type",
+                            "chat_template",
+                          ] as const
+                        ).map((format) => ({
+                          value: format,
+                          label: t(`modelProfile.thinkingFormat.${format}`),
+                        }))}
+                        getPopupContainer={(trigger) => trigger.parentElement!}
+                      />
+                    </Form.Item>
+                  )}
+                <ModelThinkingSettings
+                  layout="panel"
+                  reasoningSupported={
+                    (
+                      view?.capabilities.reasoning as
+                        { status?: string } | undefined
+                    )?.status === "supported"
+                  }
+                  canDisable={
+                    (
+                      view?.capabilities.reasoning as
+                        { can_disable?: boolean | null } | undefined
+                    )?.can_disable
+                  }
+                  outputLimit={limits.output_limit ?? inheritedOutputLimit}
+                  prefillReady={
+                    !!preview.data &&
+                    !preview.isFetching &&
+                    JSON.stringify(debounced) === JSON.stringify(draft)
+                  }
+                  rules={view?.field_specs ?? []}
+                  values={values}
+                  defaults={view?.parameter_values}
+                  mode={thinkingMode}
+                  pending={save.isPending}
+                  onToggle={(enabled) => {
+                    if (
+                      !(view?.field_specs ?? []).some(
+                        (rule) => rule.key === "enable_thinking" && rule.visible
+                      )
                     )
-                  )
-                    setThinkingControl(
-                      thinkingControl === "profile_default"
-                        ? "enable_thinking"
-                        : thinkingControl
-                    );
-                  setValues((previous) => {
-                    const next = {
-                      ...previous,
-                      enable_thinking: enabled,
-                    };
-                    if (!enabled)
-                      thinkingDegreeKeys.forEach(
-                        (key) => delete (next as Record<string, unknown>)[key]
+                      setThinkingControl(
+                        thinkingControl === "profile_default"
+                          ? "enable_thinking"
+                          : thinkingControl
                       );
-                    return next;
-                  });
-                }}
-                onModeChange={(mode) => {
-                  setThinkingMode(mode);
-                  setValues((previous) => {
-                    const next = { ...previous };
-                    thinkingDegreeKeys.forEach((key) => delete next[key]);
-                    return next;
-                  });
-                }}
-                onValueChange={(key, value) =>
-                  value === undefined
-                    ? resetValue(key)
-                    : changeValue(key, value)
-                }
-              />
+                    setValues((previous) => {
+                      const next = {
+                        ...previous,
+                        enable_thinking: enabled,
+                      };
+                      if (!enabled)
+                        thinkingDegreeKeys.forEach(
+                          (key) => delete (next as Record<string, unknown>)[key]
+                        );
+                      return next;
+                    });
+                  }}
+                  onModeChange={(mode) => {
+                    setThinkingMode(mode);
+                    setValues((previous) => {
+                      const next = { ...previous };
+                      thinkingDegreeKeys.forEach((key) => delete next[key]);
+                      return next;
+                    });
+                  }}
+                  onValueChange={(key, value) =>
+                    value === undefined
+                      ? resetValue(key)
+                      : changeValue(key, value)
+                  }
+                />
+              </div>
             }
             capacity={
               <ModelCapacityFields

@@ -319,8 +319,6 @@ describe("LLM outlet onboarding", () => {
     await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
     expect(api.createModelOutlet.mock.calls[0][0].parameter_values).toEqual({
       custom_options: { enabled: false, retries: 0 },
-      temperature: 0.7,
-      top_p: 1,
     });
   }, 15000);
 });
@@ -559,7 +557,7 @@ it("offers Top P as an explicit numeric value without creating a default", async
     { name: "top_p" },
     { timeout: 7000 }
   );
-  expect(field).toHaveValue("1");
+  expect(field).toHaveValue("");
   expect(field).toHaveAttribute("aria-valuemin", "0");
   expect(field).toHaveAttribute("aria-valuemax", "1");
   fireEvent.change(field, { target: { value: "0.85" } });
@@ -668,18 +666,17 @@ it("edits output capability without adding a request output parameter", async ()
   ).not.toHaveProperty("max_output_tokens");
 }, 15000);
 
-it("retries a failed preview without clearing the requested model", async () => {
-  api.previewModelProfile
-    .mockRejectedValueOnce(new ApiError("request_failed", "Connection error"))
-    .mockResolvedValue(preview);
+it("keeps real preview errors visible without a business revalidation button", async () => {
+  api.previewModelProfile.mockRejectedValue(
+    new ApiError("request_failed", "Connection error")
+  );
   setup();
   fillIdentity("deepseek-v4-pro");
   await screen.findByText("modelProfile.previewFailed");
   expect(saveButton()).toBeDisabled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "modelProfile.retryPreview" })
-  );
-  await waitForSaveReady();
+  expect(
+    screen.queryByRole("button", { name: "modelProfile.retryPreview" })
+  ).not.toBeInTheDocument();
   expect(screen.getByLabelText("modelProfile.requestModel")).toHaveValue(
     "deepseek-v4-pro"
   );
@@ -958,7 +955,7 @@ it("S-04 freezes connection identity only while saving", async () => {
 }, 20000);
 
 it.each([false, true])(
-  "AC-FIX-09 prefills fallback sampling while asking for an unmatched/ambiguous profile (%s)",
+  "AC-005 leaves sampling empty while asking for an unmatched/ambiguous profile (%s)",
   async (ambiguous) => {
     const candidates = ambiguous
       ? ["vendor-one/model-one", "vendor-two/model-two"]
@@ -979,14 +976,12 @@ it.each([false, true])(
     expect(screen.getByText("modelProfile.chooseProfile")).toBeVisible();
     fireEvent.click(screen.getByText("modelProfile.advanced"));
     expect(screen.getByRole("spinbutton", { name: "temperature" })).toHaveValue(
-      "0.7"
+      ""
     );
-    expect(screen.getByRole("spinbutton", { name: "top_p" })).toHaveValue("1");
+    expect(screen.getByRole("spinbutton", { name: "top_p" })).toHaveValue("");
     fireEvent.click(saveButton());
     await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledOnce());
-    expect(
-      api.createModelOutlet.mock.calls[0][0].parameter_values
-    ).toMatchObject({ temperature: 0.7, top_p: 1 });
+    expect(api.createModelOutlet.mock.calls[0][0].parameter_values).toEqual({});
     expect(api.createModelOutlet.mock.calls[0][0].model_profile).toBeNull();
   },
   15000
@@ -1218,10 +1213,7 @@ describe("single draft connectivity", () => {
         request_model_id: "custom-model",
         api_key: "draft-only-key",
         catalog_revision: "catalog-v1",
-        parameter_values: {
-          temperature: expect.any(Number),
-          top_p: expect.any(Number),
-        },
+        parameter_values: {},
       },
     });
     expect(api.createModelOutlet).not.toHaveBeenCalled();
@@ -1411,3 +1403,48 @@ it("FD-05 does not persist an unavailable result for a failed management request
   await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
   expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBeUndefined();
 });
+
+it("includes the implicit thinking toggle when the user selects an effort", async () => {
+  api.previewModelProfile.mockImplementation(async (draft) => ({
+    ...preview,
+    parameter_values: draft.parameter_values ?? {},
+    capabilities: {
+      ...preview.capabilities,
+      reasoning: { status: "supported" },
+    },
+    field_specs: [
+      {
+        key: "enable_thinking",
+        visible: true,
+        editable: true,
+        required: false,
+        allowed_scopes: ["outlet", "conversation"],
+        schema: { type: "boolean" },
+        source: { ref: "custom_provider_thinking_v1" },
+      },
+    ],
+  }));
+  setup();
+  fillIdentity("qwen3.7-max");
+  await waitForSaveReady();
+  expect(
+    screen.getByRole("switch", { name: "modelProfile.thinkingToggle" })
+  ).toBeChecked();
+  fireEvent.mouseDown(
+    screen.getByRole("combobox", { name: "modelProfile.thinkingMode" })
+  );
+  fireEvent.click(
+    await screen.findByText("modelProfile.thinkingModeOption.effort")
+  );
+  fireEvent.mouseDown(
+    await screen.findByRole("combobox", { name: "modelProfile.thinkingDegree" })
+  );
+  fireEvent.click(await screen.findByText("modelProfile.thinkingLevel.low"));
+  await waitFor(
+    () =>
+      expect(
+        api.previewModelProfile.mock.lastCall?.[0].parameter_values
+      ).toMatchObject({ enable_thinking: true, reasoning_effort: "low" }),
+    { timeout: 7000 }
+  );
+}, 15000);
