@@ -16,9 +16,7 @@ import {
   useActiveQuestionId,
   type QuestionMessageLike,
 } from "@/app/newchat/utils/question-directory";
-import { QuestionDirectoryButton } from "@/app/newchat/ui/question-directory";
 import { QuestionDirectoryRail } from "@/app/newchat/ui/question-directory-rail";
-import { TooltipProvider } from "@/components/ui/tooltip";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -92,7 +90,7 @@ test("QuestionDirectoryRail previews question and reply on keyboard focus", asyn
   fireEvent.focus(
     screen.getByRole("button", { name: "chat.questions.jump:1" })
   );
-  const preview = await screen.findByRole("tooltip");
+  const preview = await screen.findByRole("dialog");
   expect(preview.textContent).toContain("question u1");
   expect(preview.textContent).toContain("question a1");
 });
@@ -130,7 +128,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       if (this === second) return rect(0, 15, 32, 15);
       if (this === third) return rect(0, 30, 32, 15);
       // A tall preview beside the ticks overlaps the diagonal hover corridor.
-      if (this.getAttribute("role") === "tooltip") return rect(40, 0, 288, 300);
+      if (this.getAttribute("role") === "dialog") return rect(40, 0, 288, 300);
       return rect(0, 0, 0, 0);
     });
   try {
@@ -139,7 +137,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientX: 31,
       clientY: 38,
     });
-    expect((await screen.findByRole("tooltip")).textContent).toContain(
+    expect((await screen.findByRole("dialog")).textContent).toContain(
       "question u3"
     );
     fireEvent.pointerLeave(third, {
@@ -153,7 +151,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientY: 25,
     });
     await waitFor(() => {
-      const previews = screen.getAllByRole("tooltip");
+      const previews = screen.getAllByRole("dialog");
       expect(previews).toHaveLength(1);
       expect(previews[0].textContent).toContain("question u2");
       expect(previews[0].textContent).not.toContain("question u3");
@@ -163,27 +161,99 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientX: 0,
       clientY: 15,
     });
-    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   } finally {
     bounds.mockRestore();
   }
 });
 
-test("QuestionDirectoryRail retains the searchable full directory", async () => {
+test("QuestionDirectoryRail has no expanded-directory entry or search popover", () => {
   const questions = collectQuestionDirectory([
     makeMessage("u1", "user"),
     makeMessage("u2", "user"),
   ]);
-  render(<QuestionDirectoryRail questions={questions} onJump={vi.fn()} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  render(<QuestionDirectoryRail questions={questions} onJump={() => {}} />);
+  expect(screen.getAllByRole("button")).toHaveLength(2);
+  expect(
+    screen.queryByRole("button", { name: "chat.questions.viewAll:2" })
+  ).toBeNull();
+  expect(
+    screen.queryByRole("textbox", { name: "chat.questions.search" })
+  ).toBeNull();
+});
+
+test("bookmark action is interactive, preserves preview and requests explicit desired state", async () => {
+  const questions = collectQuestionDirectory([makeMessage("u1", "user")]);
+  const onBookmark = vi.fn();
+  const { rerender, container } = render(
+    <QuestionDirectoryRail
+      questions={questions}
+      onJump={vi.fn()}
+      onBookmark={onBookmark}
+      bookmarkedIds={new Set()}
+    />
   );
-  const search = await screen.findByRole("textbox", {
-    name: "chat.questions.search",
+  const tick = screen.getByRole("button", { name: "chat.questions.jump:1" });
+  fireEvent.pointerMove(tick, { pointerType: "mouse" });
+  const card = await screen.findByRole("dialog");
+  fireEvent.pointerLeave(tick);
+  fireEvent.pointerEnter(card);
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.bookmark" })
+  );
+  expect(onBookmark).toHaveBeenCalledWith("u1", true);
+  rerender(
+    <QuestionDirectoryRail
+      questions={questions}
+      onJump={vi.fn()}
+      onBookmark={onBookmark}
+      bookmarkedIds={new Set(["u1"])}
+    />
+  );
+  expect(
+    container.querySelector('[data-slot="question-rail-bookmark"]')
+  ).not.toBeNull();
+  const remove = screen.getByRole("button", {
+    name: "chat.questions.unbookmark",
   });
-  fireEvent.change(search, { target: { value: "u2" } });
-  expect(screen.queryByText("question u1")).toBeNull();
-  expect(screen.getByText("question u2")).toBeTruthy();
+  expect(remove).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(remove);
+  expect(onBookmark).toHaveBeenLastCalledWith("u1", false);
+  fireEvent.keyDown(card, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("unknown or pending bookmark state is disabled and read failures can retry", async () => {
+  const onBookmark = vi.fn();
+  const retry = vi.fn();
+  render(
+    <QuestionDirectoryRail
+      questions={collectQuestionDirectory([makeMessage("u1", "user")])}
+      onJump={vi.fn()}
+      onBookmark={onBookmark}
+      canBookmark={() => false}
+      bookmarkFailed
+      onBookmarkRetry={retry}
+    />
+  );
+  fireEvent.focus(
+    screen.getByRole("button", { name: "chat.questions.jump:1" })
+  );
+  const button = await screen.findByRole("button", {
+    name: "chat.questions.bookmark",
+  });
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(onBookmark).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "chat.questions.bookmarkFailed"
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.bookmarkRetry" })
+  );
+  expect(retry).toHaveBeenCalledOnce();
 });
 
 test("QuestionDirectoryRail keeps the active tick visible without scrolling chat", () => {
@@ -369,235 +439,4 @@ test("useActiveQuestionId tracks the last question above the viewport midline", 
 
   unmount();
   getRectSpy.mockRestore();
-});
-
-const renderDirectoryButton = (
-  props: Partial<Parameters<typeof QuestionDirectoryButton>[0]> = {}
-) =>
-  render(
-    <TooltipProvider>
-      <QuestionDirectoryButton
-        questions={collectQuestionDirectory([
-          makeMessage("u1", "user", {
-            content: [{ type: "text", text: "第一问是什么" }],
-          }),
-          makeMessage("a1", "assistant", {
-            content: [
-              { type: "text", text: "这是第一问的回答,用于悬停预览。" },
-            ],
-          }),
-          makeMessage("u2", "user", {
-            content: [{ type: "file", filename: "data.csv" }],
-            attachments: [{ name: "data.csv" }],
-          }),
-        ])}
-        onJump={() => {}}
-        {...props}
-      />
-    </TooltipProvider>
-  );
-
-test("QuestionDirectoryButton hides without questions", () => {
-  const { container } = render(
-    <TooltipProvider>
-      <QuestionDirectoryButton questions={[]} onJump={() => {}} />
-    </TooltipProvider>
-  );
-
-  expect(container.firstChild).toBeNull();
-});
-
-test("QuestionDirectoryButton lists questions and jumps on click", async () => {
-  const onJump = vi.fn();
-  renderDirectoryButton({ onJump });
-
-  // The trigger shows the question count.
-  const trigger = screen.getByRole("button", {
-    name: "chat.questions.viewAll:2",
-  });
-  fireEvent.click(trigger);
-
-  // The popover lists both questions with jump affordances.
-  expect(await screen.findByText("第一问是什么")).toBeTruthy();
-  expect(screen.getByText("data.csv")).toBeTruthy();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.jump:1" })
-  );
-
-  expect(onJump).toHaveBeenCalledWith("u1");
-  // Clicking an entry closes the popover.
-  await waitFor(() => expect(screen.queryByText("第一问是什么")).toBeNull());
-});
-
-test("QuestionDirectoryButton filters questions by keyword", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const searchBox = await screen.findByRole("textbox", {
-    name: "chat.questions.search",
-  });
-
-  fireEvent.change(searchBox, { target: { value: "第一问" } });
-  await waitFor(() => expect(screen.getByText("第一问是什么")).toBeTruthy());
-  expect(screen.queryByText("data.csv")).toBeNull();
-
-  // Filtering is case-insensitive and matches attachment turns.
-  fireEvent.change(searchBox, { target: { value: "DATA" } });
-  await waitFor(() => expect(screen.getByText("data.csv")).toBeTruthy());
-  expect(screen.queryByText("第一问是什么")).toBeNull();
-});
-
-test("QuestionDirectoryButton shows an empty state for unmatched keywords", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const searchBox = await screen.findByRole("textbox", {
-    name: "chat.questions.search",
-  });
-
-  fireEvent.change(searchBox, { target: { value: "不存在的关键词" } });
-
-  await waitFor(() =>
-    expect(screen.getByTestId("question-directory-no-matches")).toBeTruthy()
-  );
-  expect(screen.queryByText("第一问是什么")).toBeNull();
-  expect(screen.queryByText("data.csv")).toBeNull();
-});
-
-test("QuestionDirectoryButton resets the keyword when the popover closes", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const searchBox = await screen.findByRole("textbox", {
-    name: "chat.questions.search",
-  });
-  fireEvent.change(searchBox, { target: { value: "data" } });
-  await waitFor(() => expect(screen.getByText("data.csv")).toBeTruthy());
-
-  // Close via the trigger; reopening must show the unfiltered directory again.
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-
-  await waitFor(() => expect(screen.getByText("第一问是什么")).toBeTruthy());
-  expect(screen.getByText("data.csv")).toBeTruthy();
-});
-
-test("QuestionDirectoryButton marks the current question row", async () => {
-  renderDirectoryButton({ activeMessageId: "u1" });
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-
-  const activeRow = await screen.findByRole("button", {
-    name: "chat.questions.jump:1",
-  });
-  expect(activeRow.getAttribute("aria-current")).toBe("location");
-  expect(screen.getByTestId("question-directory-active").textContent).toBe(
-    "chat.questions.current"
-  );
-
-  const otherRow = screen.getByRole("button", {
-    name: "chat.questions.jump:2",
-  });
-  expect(otherRow.getAttribute("aria-current")).toBeNull();
-});
-
-test("QuestionDirectoryButton previews the question and reply on hover", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const row = await screen.findByRole("button", {
-    name: "chat.questions.jump:1",
-  });
-
-  fireEvent.mouseEnter(row);
-
-  const card = await screen.findByTestId("question-directory-preview");
-  expect(card.textContent).toContain("第一问是什么");
-  expect(card.textContent).toContain("这是第一问的回答,用于悬停预览。");
-
-  fireEvent.mouseLeave(row);
-  await waitFor(() =>
-    expect(screen.queryByTestId("question-directory-preview")).toBeNull()
-  );
-});
-
-test("QuestionDirectoryButton previews a question without a reply on hover", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const row = await screen.findByRole("button", {
-    name: "chat.questions.jump:2",
-  });
-
-  fireEvent.mouseEnter(row);
-
-  const card = await screen.findByTestId("question-directory-preview");
-  expect(card.textContent).toContain("data.csv");
-  expect(card.textContent).toContain("chat.questions.noReply");
-});
-
-test("QuestionDirectoryButton clears the hover preview when a question is clicked", async () => {
-  const onJump = vi.fn();
-  renderDirectoryButton({ onJump });
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const row = await screen.findByRole("button", {
-    name: "chat.questions.jump:1",
-  });
-
-  fireEvent.mouseEnter(row);
-  await waitFor(() =>
-    expect(screen.getByTestId("question-directory-preview")).toBeTruthy()
-  );
-
-  // Clicking a row closes the popover programmatically (not through
-  // onOpenChange); the portaled preview card must not survive that close.
-  fireEvent.click(row);
-
-  expect(onJump).toHaveBeenCalledWith("u1");
-  await waitFor(() =>
-    expect(screen.queryByTestId("question-directory-preview")).toBeNull()
-  );
-});
-
-test("QuestionDirectoryButton hides the hover preview when the directory list scrolls", async () => {
-  renderDirectoryButton();
-
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
-  );
-  const row = await screen.findByRole("button", {
-    name: "chat.questions.jump:1",
-  });
-
-  fireEvent.mouseEnter(row);
-  await waitFor(() =>
-    expect(screen.getByTestId("question-directory-preview")).toBeTruthy()
-  );
-
-  // Wheel-scrolling moves rows under a stationary pointer without firing
-  // mouseleave, so the preview must be dropped when the list scrolls.
-  fireEvent.scroll(row.closest("ul")!);
-
-  expect(screen.queryByTestId("question-directory-preview")).toBeNull();
 });

@@ -24,7 +24,6 @@ ANNOTATION_QUOTED_TEXT_MAX_CHARS = 1500
 ANNOTATION_COMMENT_MAX_CHARS = 500
 ANNOTATION_SOURCE_EXCERPT_MAX_CHARS = 120
 ANNOTATION_MAX_COUNT = 10
-ANNOTATION_CONTEXT_MAX_CHARS = 200
 
 
 class MessageAnnotationItem(BaseModel):
@@ -32,14 +31,13 @@ class MessageAnnotationItem(BaseModel):
 
     Length caps are enforced by ``normalize_message_annotations`` (truncating
     rather than rejecting) so oversized client payloads degrade gracefully
-    instead of failing the whole send.
+    instead of failing the whole send. Legacy neighboring-context fields are
+    ignored when reading requests and persisted units.
     """
 
     quoted_text: str
     comment: Optional[str] = None
     source_excerpt: Optional[str] = None
-    context_before: Optional[str] = None
-    context_after: Optional[str] = None
 
 
 def normalize_message_annotations(
@@ -71,8 +69,6 @@ def normalize_message_annotations(
             continue
         comment = (annotation.comment or "").strip() or None
         excerpt = (annotation.source_excerpt or "").strip() or None
-        before = (annotation.context_before or "").strip() or None
-        after = (annotation.context_after or "").strip() or None
         annotations.append(
             MessageAnnotationItem(
                 quoted_text=quoted[:ANNOTATION_QUOTED_TEXT_MAX_CHARS],
@@ -82,8 +78,6 @@ def normalize_message_annotations(
                     if excerpt
                     else None
                 ),
-                context_before=before[-ANNOTATION_CONTEXT_MAX_CHARS:] if before else None,
-                context_after=after[:ANNOTATION_CONTEXT_MAX_CHARS] if after else None,
             )
         )
         if len(annotations) >= ANNOTATION_MAX_COUNT:
@@ -110,16 +104,8 @@ def parse_message_annotation_unit(unit_content: Optional[str]) -> Optional[List[
 def _annotation_block(index: int, annotation: MessageAnnotationItem) -> str:
     # The reply intro is a UI label, not reliable model-facing context.
     lines = [f"{index}. Quote:"]
-    if annotation.context_before:
-        lines.append("Context before (not selected):")
-        lines.extend(f"> {line}" for line in annotation.context_before.split("\n"))
-    if annotation.context_before or annotation.context_after:
-        lines.append("Selected text:")
     for line in annotation.quoted_text.split("\n"):
         lines.append(f"> {line}" if line else ">")
-    if annotation.context_after:
-        lines.append("Context after (not selected):")
-        lines.extend(f"> {line}" for line in annotation.context_after.split("\n"))
     if annotation.comment:
         lines.append(f"Comment: {annotation.comment}")
     return "\n".join(lines)

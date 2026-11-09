@@ -30,6 +30,7 @@ import {
   type SheetGrid,
 } from "@/lib/spreadsheetGrid";
 import log from "@/lib/logger";
+import styles from "./rawStreamPreviewViewer.module.css";
 
 const PdfViewer = dynamic(
   () =>
@@ -348,7 +349,8 @@ export function RawStreamPreviewViewer(
           body,
           docxStyleRef.current ?? undefined,
           {
-            inWrapper: false,
+            // Default paper styling is scoped to the renderer's page wrapper.
+            inWrapper: true,
             breakPages: true,
             ignoreLastRenderedPageBreak: true,
             renderHeaders: true,
@@ -433,7 +435,10 @@ export function RawStreamPreviewViewer(
       )}
       <div className="h-full overflow-auto bg-gray-200 p-4">
         <div ref={docxStyleRef} />
-        <div ref={docxBodyRef} className="mx-auto max-w-[900px]" />
+        <div
+          ref={docxBodyRef}
+          className={`mx-auto max-w-[900px] ${styles.docxPages}`}
+        />
       </div>
     </div>
   );

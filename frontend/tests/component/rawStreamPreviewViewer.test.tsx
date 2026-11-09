@@ -115,8 +115,10 @@ describe("RawStreamPreviewViewer", () => {
     // never passes the sanitizer, so the option has to stay off.
     const options = vi.mocked(renderAsync).mock.calls[0]?.[3] as {
       renderAltChunks?: boolean;
+      inWrapper?: boolean;
     };
     expect(options?.renderAltChunks).toBe(false);
+    expect(options?.inWrapper).toBe(true);
     // The link pass still runs over whatever docx-preview produced.
     expect(document.querySelector("a")?.hasAttribute("href")).toBe(false);
   });

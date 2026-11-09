@@ -40,6 +40,8 @@ export interface ConversationArtifactsPanelProps {
     attachment: ArtifactAttachmentLike
   ) => Promise<void> | void;
   className?: string;
+  /** Route previews into the conversation's document surface when provided. */
+  onPreview?: (artifact: ConversationArtifact) => void;
 }
 
 /** Formats an artifact creation time without importing a date library. */
@@ -63,7 +65,7 @@ const formatGeneratedAt = (value: Date | undefined): string => {
  */
 export const ConversationArtifactsPanel: FC<
   ConversationArtifactsPanelProps
-> = ({ open, artifacts, onClose, onAddToComposer, className }) => {
+> = ({ open, artifacts, onClose, onAddToComposer, className, onPreview }) => {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState<ArtifactAttachmentLike | null>(
     null
@@ -188,7 +190,11 @@ export const ConversationArtifactsPanel: FC<
                       <TooltipIconButton
                         tooltip={t("chat.artifacts.preview")}
                         type="button"
-                        onClick={() => setPreviewing(attachment)}
+                        onClick={() =>
+                          onPreview
+                            ? onPreview(artifact)
+                            : setPreviewing(attachment)
+                        }
                       >
                         <EyeIcon className="size-4" />
                       </TooltipIconButton>

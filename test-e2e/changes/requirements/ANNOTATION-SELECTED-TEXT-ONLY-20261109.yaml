@@ -1,0 +1,45 @@
+schema_version: "1.0"
+change:
+  change_id: ANNOTATION-SELECTED-TEXT-ONLY-20261109
+  change_type: requirement
+  requirement_id: ANNOTATION-SELECTED-TEXT-ONLY-20261109
+  title: Send only the selected quote and optional comment
+  description: >-
+    Stop capturing neighboring text when creating reply annotations. Omit
+    context_before/context_after from outgoing payloads and normalized history.
+    The backend ignores legacy context fields and never adds them to model-facing
+    annotation blocks. Preserve selected text, optional comments, source display
+    labels, quote/comment limits, multiple annotations, selection safety checks
+    and the clean persisted user-message body. No history deletion or SQL changes.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/messageAnnotation.test.tsx
+      - test/backend/services/test_message_annotations.py
+    behaviors:
+      - Capture selected text without reading neighboring paragraphs.
+      - Drop old context keys during creation, outgoing mapping and history normalization.
+      - Ignore even malformed legacy context values without discarding valid quotes.
+      - Model input contains only selected quote and comment per annotation.
+      - Retain multi-quote formatting, selection boundaries and existing length caps.
+    reason: >-
+      Strengthen existing annotation component/contract UT; preserve existing
+      formal Cases without duplicating UT in a new D1. Deployed model-input
+      verification remains separate from local tests. No model/provider,
+      persistence schema or API route changes.
+  notes: >-
+    Explicitly supersedes automatic neighboring-context capture in
+    ADD-TO-CHAT-LOCAL-CONTEXT-20261105. Existing JSON units are read compatibly;
+    no data migration is needed. Other pending bookmark and rail changes stay
+    intact. External nexent-doc is absent; SPEC synchronization remains pending.
+    No deployment, commit or push is included.

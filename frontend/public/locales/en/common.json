@@ -6765,5 +6765,9 @@
   "workbench.creationConfirmation.hint": "Submit your choice to enter a creation mode or continue this conversation.",
   "workbench.creationConfirmation.noPermission": "You do not have permission to enter this creation mode.",
   "workbench.creationConfirmation.saveFailed": "Could not save the confirmation. Please retry.",
-  "workbench.creationConfirmation.originalRequest": "Original user request:"
+  "workbench.creationConfirmation.originalRequest": "Original user request:",
+  "chat.questions.bookmark": "Bookmark question",
+  "chat.questions.bookmarkFailed": "Could not load or save question bookmarks",
+  "chat.questions.bookmarkRetry": "Retry",
+  "chat.questions.unbookmark": "Remove bookmark"
 }

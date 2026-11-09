@@ -67,6 +67,9 @@ import {
 } from "../ui/artifacts-panel";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
+import { QuestionBookmarkRail } from "../ui/question-bookmark-rail";
+import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
+import { ArtifactDocumentPanel } from "../components/artifact-document-panel";
 import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
 import {
   fetchArtifactFile,
@@ -372,7 +375,6 @@ export const Thread: FC<ThreadProps> = ({
   // top of the thread. Same single-pass pattern as the artifacts aggregation.
   const questionDirectory = useQuestionDirectory(messages);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const openArtifactsPanel = useCallback(() => setArtifactsOpen(true), []);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
       (item) => item.id === s.threads.mainThreadId
@@ -409,6 +411,18 @@ export const Thread: FC<ThreadProps> = ({
     isLoading,
     readOnly,
   });
+
+  const artifactPreview = useAutoArtifactPreview({
+    scopeKey: threadId,
+    artifacts: conversationArtifacts,
+    isRunning,
+    isLoading,
+    enabled: !readOnly && !isShareMode && !configurationLayout && !debugLayout,
+  });
+  const openArtifactsPanel = useCallback(() => {
+    artifactPreview.close();
+    setArtifactsOpen(true);
+  }, [artifactPreview.close]);
 
   const aui = useAui();
   const [isBranching, setIsBranching] = useState(false);
@@ -615,6 +629,7 @@ export const Thread: FC<ThreadProps> = ({
               selection={selection}
               onPanelClose={close}
               conversationArtifacts={conversationArtifacts}
+              artifactPreview={artifactPreview}
               artifactsOpen={artifactsOpen}
               onArtifactsOpenChange={setArtifactsOpen}
               questionDirectory={questionDirectory}
@@ -722,6 +737,7 @@ interface ThreadViewProps {
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
   conversationArtifacts: ConversationArtifact[];
+  artifactPreview: ReturnType<typeof useAutoArtifactPreview>;
   artifactsOpen: boolean;
   onArtifactsOpenChange: (open: boolean) => void;
   questionDirectory: QuestionDirectoryEntry[];
@@ -783,6 +799,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   selection,
   onPanelClose,
   conversationArtifacts,
+  artifactPreview,
   artifactsOpen,
   onArtifactsOpenChange,
   questionDirectory,
@@ -969,7 +986,10 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
 
         <ConversationArtifactsToolbarEntry />
-        <QuestionDirectoryRail
+        <QuestionBookmarkRail
+          conversationId={conversationId}
+          isRunning={isRunning}
+          readOnly={readOnly || isShareMode}
           questions={questionDirectory}
           onJump={handleJumpToQuestion}
           activeMessageId={activeQuestionId}
@@ -1117,7 +1137,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         messageId={selection?.messageId}
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
-        open={selection !== null}
+        open={selection !== null && !artifactPreview.selected}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
         selectionToken={selection ?? undefined}
@@ -1125,8 +1145,9 @@ const ThreadView: FC<ThreadViewProps> = ({
       />
 
       <ConversationArtifactsPanel
-        open={artifactsOpen}
+        open={artifactsOpen && !artifactPreview.selected}
         artifacts={conversationArtifacts}
+        onPreview={artifactPreview.open}
         onClose={() => onArtifactsOpenChange(false)}
         onAddToComposer={
           showComposer && !isShareMode && !readOnly
@@ -1134,6 +1155,18 @@ const ThreadView: FC<ThreadViewProps> = ({
             : undefined
         }
       />
+
+      {/* The document surface occupies a sibling column without covering desktop chat. */}
+      {artifactPreview.selected && (
+        <ArtifactDocumentPanel
+          artifact={artifactPreview.selected}
+          onClose={artifactPreview.close}
+          onShowArtifacts={() => {
+            artifactPreview.close();
+            onArtifactsOpenChange(true);
+          }}
+        />
+      )}
 
       {/* Mounted only while quotable so the bubble state resets whenever the
           thread turns read-only, enters share mode, or switches to a preview

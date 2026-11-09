@@ -21,15 +21,14 @@ from contracts.annotations import (
     normalize_message_annotations,
     parse_message_annotation_unit,
 )
-from contracts.agent import AgentRequest
 
 ANNOTATION = {
     'quoted_text': 'quoted reply text',
     'comment': 'note',
     'source_excerpt': 'reply intro',
-    'context_before': 'Redis shares the cache.',
-    'context_after': 'Consider expiration.',
 }
+
+LEGACY_ANNOTATION = dict(ANNOTATION, context_before='Redis shares the cache.', context_after='Consider expiration.')
 
 
 def test_normalize_validates_trims_and_drops_unusable_entries():
@@ -86,28 +85,24 @@ def test_format_without_annotations_returns_text_unchanged():
     assert format_annotations_for_llm('why stop?', []) == 'why stop?'
 
 
-def test_context_caps_keep_nearest_text_and_reject_invalid_fields():
+def test_legacy_context_is_ignored_even_when_malformed():
     normalized = normalize_message_annotations([{
         'quoted_text': 'selected',
         'context_before': 'x' * 250 + ' nearest',
         'context_after': 'nearest ' + 'y' * 250,
     }])
-    assert len(normalized[0].context_before) == 200
-    assert normalized[0].context_before.endswith(' nearest')
-    assert len(normalized[0].context_after) == 200
-    assert normalized[0].context_after.startswith('nearest ')
-    assert normalize_message_annotations([{'quoted_text': 'q', 'context_before': {}}]) is None
+    assert normalized[0].model_dump() == {'quoted_text': 'selected', 'comment': None, 'source_excerpt': None}
+    malformed = normalize_message_annotations([{'quoted_text': 'q', 'context_before': {}, 'context_after': 42}])
+    assert malformed[0].quoted_text == 'q'
     legacy = normalize_message_annotations([{'quoted_text': 'legacy', 'source_excerpt': 'intro'}])
-    assert legacy[0].context_before is None
+    assert 'context_before' not in legacy[0].model_dump()
     assert format_annotations_for_llm('', legacy) == '1. Quote:\n> legacy'
 
 
-def test_context_is_distinct_from_selection_and_source_label_is_ui_only():
-    merged = format_annotations_for_llm('why?', normalize_message_annotations([ANNOTATION]))
+def test_format_ignores_legacy_context_and_keeps_source_label_ui_only():
+    merged = format_annotations_for_llm('why?', normalize_message_annotations([LEGACY_ANNOTATION]))
     assert merged == (
-        '1. Quote:\nContext before (not selected):\n> Redis shares the cache.\n'
-        'Selected text:\n> quoted reply text\n'
-        'Context after (not selected):\n> Consider expiration.\n'
+        '1. Quote:\n> quoted reply text\n'
         'Comment: note\n\n---\n\nwhy?'
     )
     assert 'reply intro' not in merged
@@ -157,7 +152,14 @@ def test_parse_unit_round_trips_and_rejects_invalid_payloads():
     assert parse_message_annotation_unit(json.dumps([{'quoted_text': ''}])) is None
 
 
+def test_parse_legacy_units_never_restores_context_to_model_input():
+    parsed = parse_message_annotation_unit(json.dumps([LEGACY_ANNOTATION]))
+    assert parsed[0].model_dump() == ANNOTATION
+    assert format_annotations_for_llm('', parsed) == '1. Quote:\n> quoted reply text\nComment: note'
+
+
 def test_agent_request_retains_structured_annotations():
+    from contracts.agent import AgentRequest
     request = AgentRequest(query='why stop?', conversation_id=1, annotations=[ANNOTATION])
 
     assert request.annotations[0].comment == 'note'
@@ -166,6 +168,7 @@ def test_agent_request_retains_structured_annotations():
 
 
 def test_service_passes_annotations_to_atomic_message_save(monkeypatch):
+    from contracts.agent import AgentRequest
     from management.services.conversation import service
 
     captured = []
@@ -221,7 +224,8 @@ def message_db(monkeypatch):
             'CREATE TABLE nexent.conversation_message_t '
             '(message_id INTEGER PRIMARY KEY, conversation_id INTEGER, message_index INTEGER, '
             'message_role TEXT, message_source TEXT, message_content TEXT, minio_files TEXT, '
-            'opinion_flag TEXT, status TEXT, delete_flag TEXT, created_by TEXT, updated_by TEXT, '
+            'opinion_flag TEXT, question_bookmarked BOOLEAN NOT NULL DEFAULT FALSE, '
+            'status TEXT, delete_flag TEXT, created_by TEXT, updated_by TEXT, '
             'create_time DATETIME, update_time DATETIME)')
         connection.exec_driver_sql(
             'CREATE TABLE nexent.conversation_message_unit_t '
@@ -317,10 +321,7 @@ def test_historical_turns_merge_annotations_into_model_facing_text(message_db):
     assert len(turns) == 1
     assert turns[0]['user_message'] == (
         '1. Quote:\n'
-        'Context before (not selected):\n> Redis shares the cache.\n'
-        'Selected text:\n'
         '> quoted reply text\n'
-        'Context after (not selected):\n> Consider expiration.\n'
         'Comment: note\n\n---\n\nwhy stop?'
     )
     assert turns[0]['assistant_final_answer'] == 'because of the quota'

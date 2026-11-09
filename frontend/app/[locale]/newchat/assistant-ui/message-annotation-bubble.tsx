@@ -136,8 +136,6 @@ export const MessageAnnotationBubble: FC<{
       quotedText: current.target.text,
       comment: current.comment.trim() || undefined,
       sourceMessageId: current.target.messageId,
-      contextBefore: current.target.contextBefore,
-      contextAfter: current.target.contextAfter,
     });
     setPhase({ kind: "hidden" });
     // Drop the text selection so the bubble does not re-open for the same

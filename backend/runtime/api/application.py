@@ -14,6 +14,7 @@ from runtime.api.evaluation.execution import router as agent_evaluation_runtime_
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from management.api.conversation.conversation_management import router as conversation_management_router
 from management.api.conversation.workbench_pins import router as workbench_pins_router
+from management.api.conversation.question_bookmarks import router as question_bookmarks_router
 from management.api.conversation.conversation_share import router as conversation_share_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
@@ -109,6 +110,7 @@ app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
+app.include_router(question_bookmarks_router)
 app.include_router(conversation_management_router)
 app.include_router(conversation_share_router)
 app.include_router(file_management_router)

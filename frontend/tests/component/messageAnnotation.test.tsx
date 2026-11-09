@@ -49,30 +49,33 @@ const makeAnnotation = (
 afterEach(cleanup);
 
 describe("toMessageAnnotationWireItems", () => {
-  test("preserves nearby snapshots through outgoing and history mappings", () => {
+  test("drops legacy context from creation, outgoing and history mappings", () => {
     const annotation = createMessageAnnotation(
       {
         quotedText: "this approach",
         sourceMessageId: "assistant-1",
         contextBefore: "x".repeat(250) + "Redis ",
         contextAfter: " shares state." + "y".repeat(250),
-      },
+      } as Parameters<typeof createMessageAnnotation>[0],
       [],
       "snapshot"
     );
     const wire = toMessageAnnotationWireItems([annotation]);
-    expect(wire[0].context_before).toHaveLength(200);
-    expect(wire[0].context_before?.endsWith("Redis ")).toBe(true);
-    expect(wire[0].context_after).toHaveLength(200);
-    expect(wire[0].context_after?.startsWith(" shares state.")).toBe(true);
-    const restored = fromMessageAnnotationWireItems(wire);
-    expect(restored[0].context_before).toBe(wire[0].context_before?.trim());
-    expect(restored[0].context_after).toBe(wire[0].context_after?.trim());
-    expect(
-      fromMessageAnnotationWireItems([
-        { quoted_text: "q", context_before: 42, context_after: {} },
-      ])[0].context_before
-    ).toBeUndefined();
+    expect(annotation).not.toHaveProperty("contextBefore");
+    expect(annotation).not.toHaveProperty("contextAfter");
+    expect(wire[0]).toEqual({
+      quoted_text: "this approach",
+      comment: null,
+      source_excerpt: null,
+    });
+    const restored = fromMessageAnnotationWireItems([
+      { ...wire[0], context_before: "old before", context_after: "old after" },
+      { quoted_text: "q", context_before: 42, context_after: {} },
+    ]);
+    expect(restored).toEqual([
+      wire[0],
+      { quoted_text: "q", comment: null, source_excerpt: null },
+    ]);
   });
   test("maps camelCase annotations onto the snake_case wire shape", () => {
     const items = toMessageAnnotationWireItems([
@@ -282,7 +285,7 @@ describe("createMessageAnnotation", () => {
 });
 
 describe("resolveAnnotationSelection", () => {
-  test("captures the selected occurrence and freezes its surrounding paragraph", () => {
+  test("captures only the selected occurrence without surrounding paragraph text", () => {
     const root = document.createElement("div");
     root.dataset.role = "assistant";
     root.dataset.messageId = "a1";
@@ -299,15 +302,16 @@ describe("resolveAnnotationSelection", () => {
     selection.addRange(range);
     const target = resolveAnnotationSelection(selection)!;
     expect(target.text).toBe("same");
-    expect(target.contextBefore).toBe("local cache: same. Redis cache:");
-    expect(target.contextAfter).toBe("is shared.");
+    expect(target.messageId).toBe("a1");
+    expect(target).not.toHaveProperty("contextBefore");
+    expect(target).not.toHaveProperty("contextAfter");
     paragraph.textContent = "replacement";
-    expect(target.contextAfter).toBe("is shared.");
+    expect(target.text).toBe("same");
     selection.removeAllRanges();
     root.remove();
   });
 
-  test("uses nearby paragraphs at boundaries, excludes tools and caps both sides", () => {
+  test("ignores neighboring paragraphs while still rejecting selections across tools", () => {
     const root = document.createElement("div");
     root.dataset.role = "assistant";
     root.dataset.messageId = "a1";
@@ -320,8 +324,9 @@ describe("resolveAnnotationSelection", () => {
     selection.removeAllRanges();
     selection.addRange(range);
     const target = resolveAnnotationSelection(selection)!;
-    expect(target.contextBefore).toBe("b".repeat(200));
-    expect(target.contextAfter).toBe("a".repeat(200));
+    expect(target.text).toBe("quote");
+    expect(target).not.toHaveProperty("contextBefore");
+    expect(target).not.toHaveProperty("contextAfter");
     // Crossing an excluded card is invalid even with valid endpoints.
     range.setStart(root.querySelectorAll("p")[0].firstChild!, 0);
     range.setEnd(node, 5);

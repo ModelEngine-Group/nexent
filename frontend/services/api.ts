@@ -66,6 +66,10 @@ export const API_ENDPOINTS = {
     agentGroupConversationIds: (agentId: number) =>
       `${API_BASE_URL}/conversation/agent_groups/${agentId}/conversation_ids`,
     workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
+    questionBookmarks: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/question_bookmarks`,
+    questionBookmark: (id: number, messageId: number) =>
+      `${API_BASE_URL}/conversation/${id}/question_bookmarks/${messageId}`,
     workbenchPin: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
