@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AOS-MODEL-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_agentos_model_over_http
+  profiles: [mock]
+acceptance_bindings:
+  AC-01: [test_agentos_model_over_http]
+  AC-02: [test_agentos_model_over_http]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

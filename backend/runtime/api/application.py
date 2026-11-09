@@ -7,11 +7,15 @@ from contextlib import asynccontextmanager
 from backend.http.server.app_factory import create_app
 from runtime.agentos.compatibility import create_compatibility_router
 from runtime.agentos.middleware import AgentOSMiddleware
+from runtime.agentos.model import create_model_router
+from runtime.model.service import ModelService
 from runtime.api.agent.execution import (
     agent_runtime_router as agent_router,
     run_agentos_compatibility,
     stop_agentos_compatibility,
 )
+from infrastructure.rdb.model_records import get_model_by_model_id
+from infrastructure.model_adapter import get_adapter_from_config
 from management.api.automation.agent_automation import (
     conversation_automation_router,
     router as agent_automation_router,
@@ -113,6 +117,7 @@ app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 app.include_router(create_compatibility_router(run_agentos_compatibility, stop_agentos_compatibility))
 
+app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(agent_router)
 app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)

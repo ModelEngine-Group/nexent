@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: AOS-MODEL-20261109
+  change_type: requirement
+  title: Introduce typed AgentOS model operations
+  description: Establish tenant-scoped model access and invocation in Runtime using the existing model records and SDK adapters.
+  affected_features:
+    existing: []
+    added: [AOS-MODEL]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AOS-TRANSPORT-D3-001]
+    added: [AOS-MODEL-D3-001]
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Model input rejects provider connection overrides.
+    - Wrong tenant, revision or modality never reaches the SDK.
+    - Model metadata omits credentials.
+    reason: Existing adapter and legacy model management tests do not exercise the new AgentOS model contract.
+    test_selectors:
+    - test/backend/services/test_agentos_model.py
+  requirement_id: AOS-REQ-008

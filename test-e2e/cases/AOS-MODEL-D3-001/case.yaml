@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D3
+module: MODEL-MANAGEMENT
+case:
+  case_id: AOS-MODEL-D3-001
+  feature_id: AOS-MODEL
+  requirement_ids: [AOS-REQ-007, AOS-REQ-008]
+  business_rule_ids: [AOS-MODEL-RULE-01]
+  title: AgentOS Model over local HTTP
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove model invocation through signed Management to Runtime HTTP and the SDK to a controlled provider.
+  preconditions:
+  - Local loopback sockets and Python backend dependencies are available.
+  test_data:
+    profile: mock
+    model: A synthetic tenant model and provider credential
+  steps:
+  - order: 1
+    action: Request model metadata and invoke the model through AgentOS.
+    expected: Runtime returns metadata with revision and no provider secret. The provider receives the tenant model and returns the answer.
+  - order: 2
+    action: Invoke with a foreign tenant, stale revision or incompatible operation.
+    expected: Runtime rejects each invalid request before it reaches the provider.
+  expected_results:
+  - Metadata and inference traverse the signed transport with the configured tenant model.
+  - Rejected requests produce no provider calls.
+  forbidden_side_effects:
+  - AgentOS metadata must not expose provider credentials.
+  - The case must not leave temporary servers running.
+  integration_boundary:
+  - Management HTTP client, Runtime middleware and model service, SDK adapter, controlled provider.
+  observations:
+  - HTTP errors, model revision, provider request count and response content.
+  cleanup:
+  - Stop temporary loopback servers.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  acceptance:
+  - id: AC-01
+    description: Signed model metadata and invocation reach Runtime and the SDK provider.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Tenant, revision and modality checks run before inference.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [2]

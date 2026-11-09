@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import patch
 
+from contracts.agentos import ModelResult
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 
@@ -68,152 +69,171 @@ class TestExtractJsonObject(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class TestGenerateGuardrailRulesImpl(unittest.TestCase):
+class TestGenerateGuardrailRulesImpl(unittest.IsolatedAsyncioTestCase):
     """Tests for generate_guardrail_rules_impl."""
 
-    def test_empty_description_raises(self):
+    async def test_empty_description_raises(self):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         with self.assertRaises(AppException) as ctx:
-            generate_guardrail_rules_impl(
+            await generate_guardrail_rules_impl(
                 description="",
                 model_id=1,
                 tenant_id="t",
+                user_id="u",
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
-    def test_whitespace_description_raises(self):
+    async def test_whitespace_description_raises(self):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         with self.assertRaises(AppException) as ctx:
-            generate_guardrail_rules_impl(
+            await generate_guardrail_rules_impl(
                 description="   ",
                 model_id=1,
                 tenant_id="t",
+                user_id="u",
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_empty_llm_response_raises(self, mock_template, mock_llm):
+    async def test_empty_llm_response_raises(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = "   "
+        mock_llm.return_value = ModelResult(revision="1", output={"content": "   "})
 
         with self.assertRaises(AppException) as ctx:
-            generate_guardrail_rules_impl(
+            await generate_guardrail_rules_impl(
                 description="block phone numbers",
                 model_id=1,
                 tenant_id="t",
+                user_id="u",
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_invalid_json_response_raises(self, mock_template, mock_llm):
+    async def test_invalid_json_response_raises(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = "no json here at all"
+        mock_llm.return_value = ModelResult(revision="1", output={"content": "no json here at all"})
 
         with self.assertRaises(AppException) as ctx:
-            generate_guardrail_rules_impl(
+            await generate_guardrail_rules_impl(
                 description="block phone numbers",
                 model_id=1,
                 tenant_id="t",
+                user_id="u",
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_unknown_type_raises(self, mock_template, mock_llm):
+    async def test_unknown_type_raises(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = '{"type": "unknown_type", "data": []}'
+        mock_llm.return_value = ModelResult(revision="1", output={"content": '{"type": "unknown_type", "data": []}'})
 
         with self.assertRaises(AppException) as ctx:
-            generate_guardrail_rules_impl(
+            await generate_guardrail_rules_impl(
                 description="block phone numbers",
                 model_id=1,
                 tenant_id="t",
+                user_id="u",
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
         self.assertIn("Unknown guardrail result type", ctx.exception.message)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_single_type_success(self, mock_template, mock_llm):
+    async def test_single_type_success(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = '{"type": "single", "candidates": [{"pattern": "1[3-9]\\d{9}", "desc": "phone"}]}'
+        mock_llm.return_value = ModelResult(revision="1", output={"content": '{"type": "single", "candidates": [{"pattern": "1[3-9]\\d{9}", "desc": "phone"}]}'})
 
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description="block phone numbers",
             model_id=1,
             tenant_id="t",
+            user_id="u",
         )
+        mock_llm.assert_awaited_once()
+        invocation, user_id, tenant_id = mock_llm.await_args.args
+        self.assertEqual((user_id, tenant_id), ("u", "t"))
+        self.assertEqual(invocation.model_id, 1)
+        self.assertEqual([item.role for item in invocation.input], ["system", "user"])
         self.assertEqual(result["type"], "single")
         self.assertIsInstance(result["candidates"], list)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_multi_type_success(self, mock_template, mock_llm):
+    async def test_multi_type_success(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = '{"type": "multi", "rules": [{"name": "r1", "pattern": "\\d", "severity": "high", "desc": "d"}]}'
+        mock_llm.return_value = ModelResult(revision="1", output={"content": '{"type": "multi", "rules": [{"name": "r1", "pattern": "\\d", "severity": "high", "desc": "d"}]}'})
 
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description="block sensitive patterns",
             model_id=1,
             tenant_id="t",
+            user_id="u",
         )
         self.assertEqual(result["type"], "multi")
         self.assertIsInstance(result["rules"], list)
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_single_type_with_non_list_candidates(self, mock_template, mock_llm):
+    async def test_single_type_with_non_list_candidates(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = '{"type": "single", "candidates": "not_a_list"}'
+        mock_llm.return_value = ModelResult(revision="1", output={"content": '{"type": "single", "candidates": "not_a_list"}'})
 
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description="block phone numbers",
             model_id=1,
             tenant_id="t",
+            user_id="u",
         )
+        mock_llm.assert_awaited_once()
+        invocation, user_id, tenant_id = mock_llm.await_args.args
+        self.assertEqual((user_id, tenant_id), ("u", "t"))
+        self.assertEqual(invocation.model_id, 1)
+        self.assertEqual([item.role for item in invocation.input], ["system", "user"])
         self.assertEqual(result["type"], "single")
         self.assertEqual(result["candidates"], [])
 
-    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.AgentOSClient.invoke_model')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    def test_multi_type_with_non_list_rules(self, mock_template, mock_llm):
+    async def test_multi_type_with_non_list_rules(self, mock_template, mock_llm):
         from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
         }
-        mock_llm.return_value = '{"type": "multi", "rules": "not_a_list"}'
+        mock_llm.return_value = ModelResult(revision="1", output={"content": '{"type": "multi", "rules": "not_a_list"}'})
 
-        result = generate_guardrail_rules_impl(
+        result = await generate_guardrail_rules_impl(
             description="block sensitive patterns",
             model_id=1,
             tenant_id="t",
+            user_id="u",
         )
         self.assertEqual(result["type"], "multi")
         self.assertEqual(result["rules"], [])

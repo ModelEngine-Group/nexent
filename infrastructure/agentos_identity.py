@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import jwt
 
-from contracts.agentos import CompatibilityOperation
+from contracts.agentos import AgentOSOperation
 from contracts.constants import environment
 
 _ISSUER = "nexent-management"
@@ -38,7 +38,7 @@ def _signing_key() -> bytes:
     return hmac.digest(secret.encode(), b"nexent/agentos/v1/management-to-runtime", "sha256")
 
 
-def sign_call(operation: CompatibilityOperation, body: bytes, principal: ServicePrincipal) -> str:
+def sign_call(operation: AgentOSOperation, body: bytes, principal: ServicePrincipal) -> str:
     now = int(time.time())
     return jwt.encode(
         {
@@ -56,7 +56,7 @@ def sign_call(operation: CompatibilityOperation, body: bytes, principal: Service
     )
 
 
-def verify_call(token: str, operation: CompatibilityOperation, body: bytes) -> ServicePrincipal:
+def verify_call(token: str, operation: AgentOSOperation, body: bytes) -> ServicePrincipal:
     try:
         claims = jwt.decode(
             token,

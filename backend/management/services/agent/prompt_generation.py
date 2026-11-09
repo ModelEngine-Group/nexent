@@ -6,10 +6,18 @@ from typing import Optional
 
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
+from backend.http.client import create_httpx_client
+from contracts.agentos import ChatInvocation, ChatMessage
 from contracts.constants.constants import LANGUAGE
+from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException
-from management.services.model.invocation import call_llm_for_system_prompt
+from contracts.errors.exceptions import (
+    AppException,
+    RuntimeServiceTimeoutError,
+    RuntimeServiceUnavailableError,
+    RuntimeUpstreamError,
+)
+from management.clients.agentos import AgentOSClient
 
 logger = logging.getLogger("prompt_service")
 
@@ -49,10 +57,11 @@ def _extract_json_object(raw: str) -> Optional[dict]:
         return None
 
 
-def generate_guardrail_rules_impl(
+async def generate_guardrail_rules_impl(
     description: str,
     model_id: int,
     tenant_id: str,
+    user_id: str,
     language: str = LANGUAGE["ZH"],
 ) -> dict:
     """Generate guardrail regex rules from a natural-language description via LLM.
@@ -67,6 +76,7 @@ def generate_guardrail_rules_impl(
         description: Natural-language description of what to match or block.
         model_id: ID of the LLM model used for generation.
         tenant_id: Tenant ID for model resolution and monitoring.
+        user_id: Authenticated user initiating generation.
         language: Language code ('zh' or 'en') selecting the prompt template.
 
     Returns:
@@ -88,12 +98,23 @@ def generate_guardrail_rules_impl(
 
     prompt = compose_auxiliary_prompt(language, "guardrail_regex", {"description": description})
 
-    raw = call_llm_for_system_prompt(
+    request = ChatInvocation(
         model_id=model_id,
-        user_prompt=prompt.user,
-        system_prompt=prompt.system,
-        tenant_id=tenant_id,
-    ).strip()
+        input=[
+            ChatMessage(role="system", content=prompt.system),
+            ChatMessage(role="user", content=prompt.user),
+        ],
+    )
+    client = AgentOSClient(RUNTIME_SERVICE_URL, create_httpx_client)
+    try:
+        result = await client.invoke_model(request, user_id, tenant_id)
+    except RuntimeUpstreamError as exc:
+        code = ErrorCode.MODEL_NOT_FOUND if exc.status_code == 404 else ErrorCode.MODEL_PROMPT_GENERATION_FAILED
+        raise AppException(code) from exc
+    except (RuntimeServiceUnavailableError, RuntimeServiceTimeoutError) as exc:
+        raise AppException(ErrorCode.MODEL_CONNECTION_ERROR) from exc
+    content = result.output.get("content") if isinstance(result.output, dict) else None
+    raw = content.strip() if isinstance(content, str) else ""
 
     # Diagnostic log: record raw LLM output (for troubleshooting "bad format" issues)
     logger.info("[guardrail] desc=%r model_id=%s raw(500)=%s", description[:80], model_id, (raw or "")[:500])

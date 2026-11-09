@@ -2,8 +2,9 @@
 """Neutral AgentOS v1 transport and transitional Agent request shapes."""
 
 from enum import Enum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt
 
 NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -28,3 +29,77 @@ class CompatibilityStop(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     conversation_id: PositiveInt
+
+
+class ModelOperation(str, Enum):
+    GET = NAMESPACE + "v1/model/get"
+    INVOKE = NAMESPACE + "v1/model/invoke"
+
+
+AgentOSOperation = CompatibilityOperation | ModelOperation
+OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
+    operation.value: operation
+    for operations in (CompatibilityOperation, ModelOperation)
+    for operation in operations
+}
+
+
+class ModelReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    model_id: PositiveInt
+
+
+class ModelInvokeBase(ModelReference):
+    expected_revision: str | None = None
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
+class ChatInvocation(ModelInvokeBase):
+    operation: Literal["chat"] = "chat"
+    input: Annotated[list[ChatMessage], Field(min_length=1)]
+
+
+class EmbeddingInvocation(ModelInvokeBase):
+    operation: Literal["embedding"] = "embedding"
+    input: Annotated[list[str], Field(min_length=1)]
+
+
+class RerankInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: str
+    documents: Annotated[list[str], Field(min_length=1)]
+
+
+class RerankOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    top_n: PositiveInt | None = None
+
+
+class RerankInvocation(ModelInvokeBase):
+    operation: Literal["rerank"] = "rerank"
+    input: RerankInput
+    options: RerankOptions | None = None
+
+
+ModelInvocation = Annotated[
+    ChatInvocation | EmbeddingInvocation | RerankInvocation,
+    Field(discriminator="operation"),
+]
+
+
+class ModelMetadata(ModelReference):
+    model_type: str
+    display_name: str | None
+    revision: str
+    profile_version: str | None = None
+
+
+class ModelResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    revision: str
+    output: JsonValue

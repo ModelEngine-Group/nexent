@@ -3,7 +3,7 @@
 
 from starlette.responses import JSONResponse
 
-from contracts.agentos import BODY_KEY, MAX_REQUEST_BYTES, NAMESPACE, PRINCIPAL_KEY, CompatibilityOperation
+from contracts.agentos import BODY_KEY, MAX_REQUEST_BYTES, NAMESPACE, OPERATIONS_BY_PATH, PRINCIPAL_KEY
 from gateway.security.context import identity_context
 from infrastructure.agentos_identity import AgentOSIdentityError, verify_call
 
@@ -23,9 +23,8 @@ class AgentOSMiddleware:
             return
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        try:
-            operation = CompatibilityOperation(path)
-        except ValueError:
+        operation = OPERATIONS_BY_PATH.get(path)
+        if operation is None:
             return await self._error(scope, receive, send, 404, "AGENTOS_OPERATION_NOT_FOUND")
         if scope["method"] != "POST" or scope["query_string"]:
             return await self._error(scope, receive, send, 400, "AGENTOS_INVALID_REQUEST")
