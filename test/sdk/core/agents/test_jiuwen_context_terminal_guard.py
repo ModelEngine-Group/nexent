@@ -13,6 +13,7 @@ from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 @pytest.mark.parametrize("has_mcp", [False, True])
 async def test_healthy_model_preparation_preserves_messages_and_calls_cm_once(has_mcp):
     adapter = object.__new__(JiuwenAdapter)
+    adapter.run_info = SimpleNamespace(observer=SimpleNamespace(boundary_reached=False))
     adapter.mcp = SimpleNamespace(terminal_error=None) if has_mcp else None
     prepared = [{"role": "user", "content": "CURRENT"}]
     adapter.context_bridge = SimpleNamespace(
@@ -26,6 +27,7 @@ async def test_healthy_model_preparation_preserves_messages_and_calls_cm_once(ha
 @pytest.mark.asyncio
 async def test_recorded_mcp_failure_blocks_cm_and_preserves_the_original_error():
     adapter = object.__new__(JiuwenAdapter)
+    adapter.run_info = SimpleNamespace(observer=SimpleNamespace(boundary_reached=False))
     error = MCPToolTimeoutError("controlled timeout")
     adapter.mcp = SimpleNamespace(terminal_error=error)
     adapter.context_bridge = SimpleNamespace(prepare_messages=AsyncMock())
@@ -38,6 +40,7 @@ async def test_recorded_mcp_failure_blocks_cm_and_preserves_the_original_error()
 @pytest.mark.asyncio
 async def test_mcp_failure_during_cm_blocks_the_prepared_request():
     adapter = object.__new__(JiuwenAdapter)
+    adapter.run_info = SimpleNamespace(observer=SimpleNamespace(boundary_reached=False))
     error = MCPToolTimeoutError("controlled timeout")
     adapter.mcp = SimpleNamespace(terminal_error=None)
 
@@ -57,6 +60,7 @@ async def test_mcp_failure_during_cm_blocks_the_prepared_request():
 @pytest.mark.asyncio
 async def test_cm_exception_is_preserved_without_retrying_preparation():
     adapter = object.__new__(JiuwenAdapter)
+    adapter.run_info = SimpleNamespace(observer=SimpleNamespace(boundary_reached=False))
     error = ValueError("controlled CM failure")
     adapter.mcp = None
     adapter.context_bridge = SimpleNamespace(

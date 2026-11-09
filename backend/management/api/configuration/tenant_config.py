@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from contracts.constants.environment import APP_VERSION, DEPLOYMENT_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE
+from contracts.constants.environment import NEXENT_AGENT_CORE
 
 logger = logging.getLogger("tenant_config_app")
 router = APIRouter(prefix="/tenant_config")
@@ -23,6 +24,7 @@ def get_deployment_version():
             content={
                 "deployment_version": DEPLOYMENT_VERSION,
                 "app_version": APP_VERSION,
+                "agent_core": NEXENT_AGENT_CORE,
                 "enable_aidp_knowledge": ENABLE_AIDP_KNOWLEDGE,
                 "enable_agent_workbench": ENABLE_AGENT_WORKBENCH,
                 "hide_home_page": HIDE_HOME_PAGE,

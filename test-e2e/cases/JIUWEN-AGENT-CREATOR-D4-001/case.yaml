@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-AGENT-CREATOR-D4-001
+  feature_id: AGENT-CORE-CONFIG
+  requirement_ids:
+  - JIUWEN-NL2AGENT-CARD-20261109
+  - NL2AGENT-RESULT-GATE-20261109
+  business_rule_ids:
+  - AGENT-CORE-CONFIG-RULE-004
+  - AGENT-CORE-CONFIG-RULE-005
+  title: Workbench creator completion cards and draft actions agree across Core deployments
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove native MCP-produced interactive cards through the deployed creator
+    and unified UI.
+  preconditions:
+  - Operator-selected Local smolagents or Jiuwen deployment, authorized Workbench
+    account and real model. The outer campaign owns any deployment changes and restoration;
+    this Case never deploys.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Request a new Agent through Workbench Agent creation with a unique marker.
+    expected: Actual nl2a_wrapper returns one requirement clarification card and run
+      stops awaiting submission without generated prompt fields. No generated-result
+      card appears; a separate current-draft action is available after the run.
+  - order: 2
+    action: Open the separate draft editor and return to pending history; submit clarification,
+      then reopen and refresh the conversation.
+    expected: Pending card stays interactive; submission causes a new run, submitted
+      history retains the card and answers without terminal errors or extra automatic
+      generation. The draft action targets the same owned Agent, creates no run, and
+      only a matching completion event creates one result card; live and history agree.
+  - order: 3
+    action: Remove only the uniquely owned draft and conversation, verify original
+      data and remove private auth files.
+    expected: Owned resources are reclaimed; all original configurations and histories
+      are unchanged.
+  expected_results:
+  - A real MCP-produced clarification card is visible and waits for the user. The
+    separate draft action remains available without a premature result card.
+  - Card submission resumes once and pending/submitted history is restored correctly.
+    Exactly one generated-result card follows verified completion, never a final-answer
+    fallback.
+  - Cleanup removes only owned data and restores machine test configuration.
+  forbidden_side_effects:
+  - No mocked provider, source record changes, fake terminal, credential disclosure
+    or unowned deletion.
+  actor: Authorized Workbench user
+  journey:
+  - Create draft
+  - Clarify
+  - Submit
+  - Reload history
+  - Clean owned resources
+  final_business_result:
+  - The creator waits at a real interactive card and continues after submission.
+  failure_evidence:
+  - Audited browser assertions, sanitized event types and source fingerprints.
+  cleanup:
+  - Delete only owned draft and conversation and remove private auth files.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 900
+  acceptance:
+  - id: AC-01
+    description: Real creator interaction and persisted history preserve submission
+      boundaries.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1

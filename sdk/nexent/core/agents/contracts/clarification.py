@@ -2,6 +2,7 @@
 
 """Declarative clarification DTOs and deterministic pure validation."""
 
+import ast
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -86,3 +87,37 @@ def choose_clarification_tool_name(occupied: set[str]) -> str:
         candidate = "nexent_ask_user" + (f"_{suffix}" if suffix else "")
         suffix += 1
     return candidate
+
+
+def parse_clarification_call(code: str, tool_name: str) -> ClarificationForm | None:
+    """Recognize an exclusive literal terminal call without executing Python."""
+    tree = ast.parse(code)
+    references = any(
+        (isinstance(node, ast.Name) and node.id == tool_name)
+        or (isinstance(node, ast.Attribute) and node.attr == tool_name)
+        or (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == tool_name)
+        or (isinstance(node, ast.arg) and node.arg == tool_name)
+        or (isinstance(node, ast.alias) and tool_name in (node.name, node.asname))
+        for node in ast.walk(tree)
+    )
+    if not references:
+        return None
+    if len(code) > 131072 or len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
+        raise ValueError("Expected a standalone clarification call")
+    call = tree.body[0].value
+    if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
+            or call.func.id != tool_name or call.args or len(call.keywords) != 1
+            or call.keywords[0].arg != "questions"):
+        raise ValueError("Expected only the questions keyword")
+    literal = call.keywords[0].value
+    nodes = list(ast.walk(literal))
+    if len(nodes) > 4096 or any(
+        not isinstance(node, (ast.List, ast.Dict, ast.Constant, ast.Load)) for node in nodes
+    ):
+        raise ValueError("Questions must be literal data")
+    for node in nodes:
+        if isinstance(node, ast.Dict):
+            keys = [ast.literal_eval(key) for key in node.keys]
+            if len(set(keys)) != len(keys):
+                raise ValueError("Duplicate fields are not allowed")
+    return ClarificationForm.model_validate({"questions": ast.literal_eval(literal)})

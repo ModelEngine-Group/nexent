@@ -65,7 +65,8 @@ case:
   - Multi-turn and bidirectional configuration changes preserve history and recall
     marker/fact without replay on follow-ups; common original UI components render
     both Core outputs. Usage presentation retains shared capacity with CM off/on,
-    and legacy unknown history stays compatible.
+      and legacy unknown history stays compatible. Live and reloaded reasoning step
+      labels never display serialized step_count event metadata.
   - Child document generation, actual downloaded docx content and follow-up/history
     rendering pass with no internal context or protocol wrappers.
   forbidden_side_effects:

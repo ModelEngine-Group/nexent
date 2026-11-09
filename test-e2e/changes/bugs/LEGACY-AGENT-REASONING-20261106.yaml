@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: LEGACY-AGENT-REASONING-20261106
+  change_type: bugfix
+  bug_id: LEGACY-AGENT-REASONING-20261106
+  title: Normalize historical Agent reasoning against frozen outlet rules before session controls
+  description: Read legacy auto omission and identity-bound custom body aliases without rewriting saved Agent
+    versions; keep canonical parameter and protected-field validation strict.
+  observed_behavior: A published Agent contains auto outside the effort domain and a custom enable_thinking
+    body alias. Preflight and history PATCH reject the Agent before applying low or disabled session values.
+  expected_behavior: Historical omission inherits the outlet; declared identity body aliases keep original
+    custom precedence and validate as normal values. Both Cores can run, save low/off preferences and restore
+    history without modifying Agent versions or global outlets.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing UT and provider-wire D3 cover canonical Agent/session layers but omit the combination
+      of legacy auto and custom bound enable_thinking in ordinary Agent roots.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - CHAT-MODEL-CONTROLS
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - CHAT-MODEL-CONTROLS-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Legacy inheritance, session low/off, and canonical idempotency preserve Agent/outlet data.
+    - Read and explicit save use the same saved-profile conversion as runtime.
+    - Canonical invalid values, fixed fields and protected paths remain rejected.
+    reason: Existing isolated tests own parameter validation; strengthen provider-wire D3 for real endpoint,
+      persistence and both Core boundaries without another D1.
+    test_selectors:
+    - test/backend/services/test_agent_legacy_parameter_compatibility.py
+    - test/backend/services/test_agent_model_parameters.py
+    - test/backend/services/test_conversation_model_preferences_service.py
+    - test/backend/services/test_model_saved_contracts.py
+  notes: 'Owner: ../nexent-doc/nexent/agent-workbench/specs/model-controls/spec.md; integration notes in runtime-agent-core-factory
+    SPEC. Existing D3 isolated PostgreSQL schema, HTTP provider/MCP and threads are case-owned and cleaned;
+    preparation remains explicitly self-contained. No migration, source Agent changes, canonical auto swallowing,
+    provider guessing or relaxed protected-field policy.'

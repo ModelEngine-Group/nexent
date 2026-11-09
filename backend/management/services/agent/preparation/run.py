@@ -425,6 +425,7 @@ async def create_agent_run_info(
         if selected is None:
             raise ValueError("MODEL_OUTLET_NOT_FOUND")
         selected.resolved_profile = compile_bound_model_profile(selected, agent_config)
+        selected.prompt_cache = None
 
     agent_run_info = build_run_info(
         query=final_query,
@@ -568,5 +569,7 @@ def _capture_child_model_configs(config, models, tenant_id):
                 selected.resolved_profile = compile_model_runtime_profile(selected, child)
         elif child.agent_core == "jiuwen":
             selected.resolved_profile = compile_bound_model_profile(selected, child)
+        if child.agent_core == "jiuwen":
+            selected.prompt_cache = None
         child.runtime_model_config = selected.model_copy(deep=True)
         _capture_child_model_configs(child, models, tenant_id)

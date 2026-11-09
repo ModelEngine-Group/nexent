@@ -1,10 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Portable Agent configuration keeps Core and context policy choices."""
+"""Portable Agent configuration keeps context policy without a per-Agent Core."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pydantic import ValidationError
 
 from contracts.agent import ExportAndImportAgentInfo
 from management.services.agent import transfer
@@ -39,11 +38,11 @@ def boundary(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
 @pytest.mark.parametrize("cm", [True, False])
-async def test_export_preserves_core_and_cm(boundary, monkeypatch, core, cm):
+async def test_export_omits_legacy_core_and_preserves_cm(boundary, monkeypatch, core, cm):
     source = snapshot(core, cm)
     monkeypatch.setattr(transfer, "search_agent_info_by_agent_id", lambda **_: source)
     result = await transfer.export_agent_by_agent_id(7, "tenant", "user")
-    assert result.agent_core == core
+    assert "agent_core" not in result.model_dump()
     assert result.enable_context_manager is cm
     assert result.prompt == source["prompt"]
     assert source == snapshot(core, cm)
@@ -52,12 +51,12 @@ async def test_export_preserves_core_and_cm(boundary, monkeypatch, core, cm):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
 @pytest.mark.parametrize("cm", [True, False])
-async def test_import_preserves_core_and_cm(boundary, core, cm):
+async def test_import_ignores_legacy_core_and_preserves_cm(boundary, core, cm):
     portable = ExportAndImportAgentInfo(**snapshot(core, cm))
     result = await transfer.import_agent_by_agent_id(portable, "tenant", "user")
     assert result == 42
     saved = boundary.call_args.kwargs["agent_info"]
-    assert saved["agent_core"] == core
+    assert "agent_core" not in saved
     assert saved["enable_context_manager"] is cm
     assert saved["prompt"] == portable.prompt
 
@@ -67,14 +66,15 @@ def test_legacy_portable_defaults():
     del fields["agent_core"]
     del fields["enable_context_manager"]
     portable = ExportAndImportAgentInfo(**fields)
-    assert portable.agent_core == "smolagents"
+    assert "agent_core" not in portable.model_dump()
     assert portable.enable_context_manager is True
 
 
 @pytest.mark.parametrize("core", ["unknown", ""])
-def test_invalid_core_rejected(core):
-    with pytest.raises(ValidationError):
-        ExportAndImportAgentInfo(**snapshot(core))
+def test_obsolete_core_is_ignored(core):
+    portable = ExportAndImportAgentInfo(**snapshot(core))
+    assert "agent_core" not in portable.model_dump()
+    assert "agent_core" not in ExportAndImportAgentInfo.model_fields
 
 
 @pytest.mark.asyncio

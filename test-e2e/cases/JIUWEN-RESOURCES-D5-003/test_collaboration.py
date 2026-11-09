@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import sys
 from pathlib import Path
@@ -6,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT/'sdk'), str(ROOT/'backend'), str(ROOT/'test-e2e/infra/automation')]
 from jiuwen_collaboration_runtime import run_collaboration
 from jiuwen_bridge_runtime import stop_infrastructure
+from jiuwen_parallel_runtime import run_parallel_roots
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup():
@@ -41,3 +44,13 @@ def test_nested_stop_and_recovery(monkeypatch, child, fault, protocol):
         recovered, state, output, cores = asyncio.run(run_collaboration(patch, child_core=child, protocol=protocol))
     assert recovered.attempt_outcome == "completed" and "CHILD_DONE" in str(output)
     assert len(state["child"] if child == "jiuwen" else state["remote"]) == (2 if child == "jiuwen" else 1)
+
+
+def test_cancelled_root_does_not_stop_parallel_root_sessions(monkeypatch):
+    infos, outputs, state = asyncio.run(run_parallel_roots(monkeypatch, "native", cancel_one=True))
+    assert infos[0].attempt_outcome == "stopped"
+    for info, events in zip(infos[1:], outputs[1:]):
+        assert info.attempt_outcome == "completed"
+        children = [event for event in events if event.get("type") == "run_terminal" and event.get("invocation_id")]
+        assert len(children) == 3 and all(event["status"] == "completed" for event in children)
+    assert not [effect for effect in state["effects"] if effect.startswith("0:")]

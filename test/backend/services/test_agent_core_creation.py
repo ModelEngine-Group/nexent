@@ -5,7 +5,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import ValidationError
 
 from contracts.agent import AgentInfoRequest
 from contracts.authentication import AuthenticatedIdentity
@@ -26,14 +25,14 @@ def create_boundary(monkeypatch):
 @pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
 @pytest.mark.parametrize("flag,expected", [(None, True), (False, False), (True, True)])
 async def test_create_preserves_context_manager_flag(create_boundary, core, flag, expected):
-    payload = {"name": "context-test", "display_name": "Context test", "agent_core": core}
+    payload = {"name": "context_test", "display_name": "Context test", "agent_core": core}
     if flag is not None:
         payload["enable_context_manager"] = flag
     result = await service.update_agent_info_impl(AgentInfoRequest(**payload), AuthenticatedIdentity("user", "tenant"))
     assert result["agent_id"] == 42
     config = create_boundary.call_args.kwargs["agent_info"]
     assert config["enable_context_manager"] is expected
-    assert config["agent_core"] == core
+    assert "agent_core" not in config
 
 
 @pytest.mark.asyncio
@@ -46,7 +45,15 @@ async def test_create_database_failure_is_not_reported_as_success(create_boundar
         )
 
 
-def test_unknown_core_is_rejected_before_creation(create_boundary):
-    with pytest.raises(ValidationError):
-        AgentInfoRequest(agent_core="unknown")
+@pytest.mark.parametrize("legacy_core", ["unknown", "", "jiuwen", "smolagents"])
+def test_legacy_core_input_is_ignored_before_creation(create_boundary, legacy_core):
+    request = AgentInfoRequest(agent_core=legacy_core)
+    assert "agent_core" not in request.model_dump()
+    assert "agent_core" not in AgentInfoRequest.model_fields
     create_boundary.assert_not_called()
+
+
+def test_agent_orm_has_no_core_column():
+    from management.db.agent.models import AgentInfo
+
+    assert "agent_core" not in AgentInfo.__table__.columns

@@ -25,6 +25,8 @@ class JiuwenEventAdapter:
         self.step_number = 0
         self._lock = threading.RLock()
         self.capacity_provider = capacity_provider
+        self.artifact_output = False
+        self.waiting_for_input = False
 
     def _capacity(self):
         return self.capacity_provider() if self.capacity_provider is not None else None
@@ -50,7 +52,7 @@ class JiuwenEventAdapter:
 
     def _model_text(self, block, key, text, kind):
         block["received"].add(key)
-        visible = block["filters"][key].push(text)
+        visible = text if self.artifact_output and key == "text" else block["filters"][key].push(text)
         block[key] += visible
         if visible:
             self.output(kind, visible, block_id=block["id"], phase="partial")
@@ -127,7 +129,7 @@ class JiuwenEventAdapter:
             if not isinstance(output, str) or not output.strip():
                 raise RuntimeError("Jiuwen returned no final answer")
             try:
-                self.final_answer = normalize_public_answer(output)
+                self.final_answer = output if self.artifact_output else normalize_public_answer(output)
             except AnswerBoundaryError:
                 self.last_error = self.error("JIUWEN_FINAL_OUTPUT_INVALID")
                 raise
@@ -143,14 +145,14 @@ class JiuwenEventAdapter:
         if self.result is not None:
             return self.result
         error = error or self.last_error
-        if status == "completed" and self.final_answer is None and error is None:
+        if status == "completed" and self.final_answer is None and error is None and not self.waiting_for_input:
             error = self.error("JIUWEN_TERMINAL_MISSING")
         if error is not None and status == "completed":
             status = "failed"
         if status == "failed" and error is None:
             error = self.error("JIUWEN_EXECUTION_FAILED")
         final_ids = []
-        if status == "completed":
+        if status == "completed" and not self.waiting_for_input:
             matching = next((b for b in reversed(self.blocks) if b["text"].strip() == self.final_answer), None)
             if matching is None:
                 matching = {"id": uuid.uuid4().hex, "text": self.final_answer}
@@ -158,11 +160,12 @@ class JiuwenEventAdapter:
                 self.output(ProcessType.MODEL_OUTPUT, self.final_answer, block_id=matching["id"], phase="partial")
             final_ids = [matching["id"]]
         result = RunResult(turn_id=self.turn_id, status=status,
-            end_reason="runner_answer" if status == "completed" else "cancelled" if status == "stopped"
-            else (error.category if error else "JIUWEN_EXECUTION_FAILED"),
-            final_content=self.final_answer if status == "completed" else "", final_block_ids=final_ids,
+            end_reason=("awaiting_input" if self.waiting_for_input else "runner_answer" if status == "completed"
+                        else "cancelled" if status == "stopped"
+                        else error.category if error else "JIUWEN_EXECUTION_FAILED"),
+            final_content=(self.final_answer or "") if status == "completed" else "", final_block_ids=final_ids,
             error=error if status != "completed" else None)
-        if status == "completed":
+        if status == "completed" and not self.waiting_for_input:
             self.observer.add_message(self.agent_name, ProcessType.FINAL_ANSWER, self.final_answer)
         self.output(ProcessType.RUN_TERMINAL, result.model_dump_json(), **result.model_dump(exclude={"turn_id"}))
         self.result = result

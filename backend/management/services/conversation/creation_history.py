@@ -8,6 +8,7 @@ from typing import Any
 
 from contracts.conversation import MessageRequest, MessageUnit
 from contracts.agent import WorkbenchSessionConfig
+from infrastructure.runtime_output import is_runtime_event
 from management.db.conversation.repository import get_conversation_history
 from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (
@@ -155,7 +156,7 @@ async def persist_creation_stream(
                     if isinstance(raw_content, str)
                     else json.dumps(raw_content, ensure_ascii=False)
                 )
-                if kind in {
+                if is_runtime_event(chunk) or kind in {
                     "skill_body", "file_content", "agent_new_run",
                     "target_files", "model_attempt_control", "done",
                 }:

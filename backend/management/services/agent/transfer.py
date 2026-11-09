@@ -431,7 +431,6 @@ async def export_agent_by_agent_id(
         )
 
     agent_info = ExportAndImportAgentInfo(
-        agent_core=agent_info.get("agent_core") or "smolagents",
         enable_context_manager=bool(agent_info.get("enable_context_manager", True)),
         agent_id=agent_id,
         tenant_id=agent_info["tenant_id"],
@@ -608,7 +607,6 @@ async def import_agent_by_agent_id(
     user_group_ids = _get_user_group_ids(user_id, tenant_id)
     new_agent = create_agent(
         agent_info={
-            "agent_core": import_agent_info.agent_core,
             "enable_context_manager": import_agent_info.enable_context_manager,
             "name": agent_names["name"],
             "display_name": agent_names["display_name"],

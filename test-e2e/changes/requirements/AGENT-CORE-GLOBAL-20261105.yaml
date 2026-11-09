@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-CORE-GLOBAL-20261105
+  change_type: requirement
+  requirement_id: AGENT-CORE-GLOBAL-20261105
+  title: Select the local execution Core through deployment configuration
+  description: Replace per-Agent runtime selection with one injected global policy; preserve configuration and creator
+    contracts.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - AGENT-CORE-CONFIG
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AGENT-CORE-GLOBAL-D3-001
+    modified:
+    - AGENT-CORE-UI-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Strict global configuration and all local roots/children override legacy saved Core without mutating definitions.
+    - Creators retain identity, model parameters, artifact data and interactive completion semantics.
+    - Editor uses the deployment Core and never persists a per-Agent Core selection.
+    - Remove per-Agent Core from API persistence, portable exports, ORM and unmerged SQL; ignore legacy imported
+      selections while retaining CM and resources.
+    reason: Existing per-Agent tests do not prove deployment-wide authority or creator protocol compatibility.
+    test_selectors:
+    - test/backend/agents/test_global_agent_core.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/backend/services/test_nl2skill_service.py
+    - frontend/tests/component/globalAgentCore.test.tsx
+    - test/backend/services/test_agent_core_creation.py
+    - test/backend/services/test_agent_transfer_core_context.py
+    - frontend/tests/component/agentCore.test.tsx
+  notes: Primary owner agent_config. No new D1. D3 owns loopback HTTP and runtime cleanup; D4 uses controlled existing
+    HTTP fixtures. Advanced verification/retry and fast-path optimizations are excluded. User authorized removing
+    the feature-only migration absent from origin/develop; no live database column is dropped.

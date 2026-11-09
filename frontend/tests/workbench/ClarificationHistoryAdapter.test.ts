@@ -81,3 +81,64 @@ it("does not share answers across history loads or infer submission for legacy c
     "data.submitted"
   );
 });
+
+it("restores a Jiuwen terminal form through the same history parser and saved response identity", async () => {
+  const envelope = {
+    schema_version: 1,
+    runtime_mode: "native_agent",
+    agent_core: "jiuwen",
+    turn_id: "clarification-turn",
+  };
+  const history = await restore([
+    {
+      role: "assistant",
+      message_id: 10,
+      status: "completed",
+      message: [
+        {
+          type: "human_interaction",
+          unit_index: 7,
+          content: JSON.stringify({
+            ...envelope,
+            type: "human_interaction",
+            sequence: 1,
+            content: JSON.stringify(form),
+          }),
+        },
+        {
+          type: "run_terminal",
+          unit_index: 8,
+          content: JSON.stringify({
+            ...envelope,
+            type: "run_terminal",
+            sequence: 2,
+            content: "",
+            status: "completed",
+            end_reason: "awaiting_input",
+            final_content: "",
+            final_block_ids: [],
+          }),
+        },
+      ],
+    },
+    {
+      role: "user",
+      message_id: 11,
+      message: "Saved goal",
+      clarification_response: response,
+    },
+  ]);
+  expect(history.messages[0].message.content).toEqual([
+    expect.objectContaining({
+      type: "data",
+      name: "clarification",
+      data: expect.objectContaining({
+        submitted: true,
+        answers: response.answers,
+      }),
+    }),
+  ]);
+  expect(history.messages[1].message.content).toEqual([
+    { type: "text", text: "Saved goal" },
+  ]);
+});

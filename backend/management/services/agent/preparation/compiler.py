@@ -20,6 +20,7 @@ from management.db.agent.repository import (
 )
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.context import build_context_inputs
+from management.services.agent.core_policy import apply_agent_core_policy
 from management.services.agent.preparation.resources import (
     _build_effective_knowledge_base_summary,
     _get_external_a2a_agents,
@@ -709,7 +710,6 @@ async def create_agent_config(
     )
 
     agent_config = AgentConfig(
-        agent_core=agent_info.get("agent_core") or "smolagents",
         name="undefined" if agent_info["name"] is None else agent_info["name"],
         display_name=agent_info.get("display_name"),
         description="undefined"
@@ -741,7 +741,7 @@ async def create_agent_config(
     agent_config.runtime_ref = f"agent:{agent_id}:v{int(version_no)}"
     agent_config.display_name = agent_info.get("display_name") or agent_config.name
     agent_config.origin = "PERSISTED"
-    return agent_config
+    return apply_agent_core_policy(agent_config)
 
 
 def _select_agent_model_id(

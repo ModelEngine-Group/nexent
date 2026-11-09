@@ -1,4 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
+import json
 import sys
 from pathlib import Path
 import pytest
@@ -6,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT/'sdk'), str(ROOT/'backend'), str(ROOT/'test-e2e/infra/automation')]
 from jiuwen_collaboration_runtime import run_collaboration
 from jiuwen_bridge_runtime import stop_infrastructure
+from jiuwen_parallel_runtime import run_parallel_roots
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup():
@@ -54,3 +58,22 @@ def test_configured_collaboration(monkeypatch, parent, child, protocol, remote_p
         assert "PARENT_SYSTEM_ONLY" not in str(body) and "PARENT_TASK_ONLY" not in str(body)
         assert "CHILD_TASK_ONLY" in str(body)
         assert "parent-only" not in str(body) and "child-only" not in str(body)
+
+
+@pytest.mark.parametrize("protocol", ["native", "text"])
+def test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop(monkeypatch, protocol):
+    infos, outputs, state = asyncio.run(run_parallel_roots(monkeypatch, protocol))
+    assert len(infos) == len(outputs) == 6
+    for info, events in zip(infos, outputs):
+        assert info.attempt_outcome == "completed"
+        assert not [event for event in events if event.get("type") == "error"]
+        starts = [event for event in events if event.get("type") == "subagent_start"]
+        ends = [event for event in events if event.get("type") == "subagent_end"]
+        terminals = [event for event in events if event.get("type") == "run_terminal" and event.get("invocation_id")]
+        assert len(starts) == len(ends) == len(terminals) == 3
+        assert {event["invocation_id"] for event in starts} == {event["invocation_id"] for event in terminals}
+        assert all(event["status"] == "completed" for event in terminals)
+        assert "bound to a different event loop" not in str(events)
+        own = info.agent_config.name[-1]
+        assert all(f"child_{own}_" in json.loads(event["content"])["invocation_name"] for event in starts)
+    assert all(len(requests) == 4 for requests in state["requests"].values())

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -24,6 +26,7 @@ it("shows the completed Agent's summary and links to its development page", () =
       agentId={42}
       name="Invoice Agent"
       description="Processes invoices"
+      completed
     />
   );
   expect(screen.getByText("Processes invoices")).toBeInTheDocument();
@@ -42,7 +45,7 @@ it("loads the generated Agent details when restored from a message", async () =>
       description: "回答售前与售后问题",
     },
   });
-  render(<AgentCreationResultCard agentId={42} />);
+  render(<AgentCreationResultCard agentId={42} completed />);
   expect(await screen.findByText("智能客服助手")).toBeInTheDocument();
   expect(screen.getByText("回答售前与售后问题")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /进入智能体开发/ })).toHaveAttribute(
@@ -55,8 +58,11 @@ it("does not claim completion when only an Agent draft was saved", () => {
   render(
     <AgentCreationResultCard agentId={42} name="客服助手" completed={false} />
   );
-  expect(screen.getByText("草稿已保存")).toBeInTheDocument();
+  expect(screen.queryByText("草稿已保存")).not.toBeInTheDocument();
   expect(screen.queryByText("草稿已生成")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("link", { name: /进入智能体开发/ })
+  ).not.toBeInTheDocument();
 });
 
 it("saves the generated Skill only when the user confirms", async () => {

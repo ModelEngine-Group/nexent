@@ -2227,7 +2227,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return true;
     };
     const deliveredNl2AgentStates = new Set<string>();
-    const upsertCreatedAgentPart = (completed: boolean) => {
+    const upsertCreatedAgentPart = () => {
       if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
@@ -2235,12 +2235,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (part) => part.type === "data" && part.name === "nl2agent-created"
       );
       if (existing) {
-        existing.data.completed ||= completed;
+        existing.data.completed = true;
       } else {
         contentParts.push({
           type: "data",
           name: "nl2agent-created",
-          data: { agentId, completed },
+          data: { agentId, completed: true },
         });
       }
     };
@@ -2256,8 +2256,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         if (deliveredNl2AgentStates.has(eventKey)) return;
         deliveredNl2AgentStates.add(eventKey);
       }
-      if (event.event === "agent_generation_completed")
-        upsertCreatedAgentPart(true);
+      if (
+        event.event === "agent_generation_completed" &&
+        event.agent_id === Number(nl2AgentId)
+      )
+        upsertCreatedAgentPart();
       custom?.onNl2AgentState?.(event);
     };
     let verificationPanel: VerificationPanelPart | null = null;
@@ -2620,7 +2623,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning(chunk.invocation_id);
             if (!chunk.invocation_id && chunk.answer_phase !== "delta")
               completeVerificationPanel();
-            upsertCreatedAgentPart(false);
             yield buildStreamResult(contentParts);
             continue;
           }
@@ -3065,7 +3067,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning(chunk.invocation_id);
               if (!chunk.invocation_id && chunk.answer_phase !== "delta")
                 completeVerificationPanel();
-              upsertCreatedAgentPart(false);
               yield buildStreamResult(contentParts);
             } else if (chunk.type === "warning") {
               flushOpenReasoning();

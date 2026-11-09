@@ -1,35 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
-import { Alert, Select, Switch } from "antd";
+import { Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useAgentStore } from "@/stores/agentStore";
-import type { AgentCore } from "@/types/agentConfig";
 
-export default function AgentCoreSelector() {
+export default function ContextManagerSetting() {
   const { t } = useTranslation("common");
   const agent = useAgentStore((state) => state.editedAgent);
   const update = useAgentStore((state) => state.updateAgentConfig);
   const readOnly = useAgentReadOnly();
   if (!agent) return null;
-  const core = agent.agent_core ?? "smolagents";
   return (
     <div className="flex flex-col gap-3">
-      <label htmlFor="agent-core">{t("agent.core.label")}</label>
-      <Select<AgentCore>
-        id="agent-core"
-        aria-label={t("agent.core.label")}
-        value={core}
-        disabled={readOnly}
-        options={[
-          { value: "smolagents", label: "smolagents" },
-          { value: "jiuwen", label: "Jiuwen" },
-        ]}
-        onChange={(agent_core) => update({ agent_core })}
-      />
-      {core === "jiuwen" && (
-        <Alert type="info" showIcon title={t("agent.core.jiuwenHint")} />
-      )}
       <div className="flex items-center justify-between gap-3">
         <label htmlFor="agent-context-manager">
           {t("agent.core.contextManager")}

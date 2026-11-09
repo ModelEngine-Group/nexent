@@ -4,6 +4,7 @@
 
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from management.services.agent.core_policy import apply_agent_core_policy
 
 NL2SKILL_NAME = "nl2skill_main"
 
@@ -18,7 +19,8 @@ def create_nl2skill_agent_config(
     if not system_prompt.strip():
         raise ValueError("Skill creation system prompt must not be empty")
 
-    return AgentConfig(
+    config = AgentConfig(
+        response_mode="artifact",
         agent_id=system_ref.agent_id if system_ref else None,
         version_no=0 if system_ref else None,
         runtime_ref=f"agent:{system_ref.agent_id}:v0" if system_ref else None,
@@ -55,3 +57,4 @@ def create_nl2skill_agent_config(
         ],
         enable_planning=False,
     )
+    return apply_agent_core_policy(config)

@@ -1550,7 +1550,8 @@ const AssistantMessage: FC<{
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
         {showAgentCreationResult &&
-        typeof createdAgent?.agentId === "number" &&
+        createdAgent?.completed === true &&
+        typeof createdAgent.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
             agentId={createdAgent.agentId}

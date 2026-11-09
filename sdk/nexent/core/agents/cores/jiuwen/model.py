@@ -16,6 +16,7 @@ from openjiuwen.core.foundation.llm.schema.message import AssistantMessage, Usag
 from openjiuwen.core.foundation.llm.schema.message_chunk import AssistantMessageChunk
 from openjiuwen.core.foundation.llm.schema.tool_call import ToolCall as NativeToolCall
 
+from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested
 from nexent.core.agents.cores.jiuwen.messages import resource_view
 from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, JiuwenProtocolError, parse_execution_blocks
 from nexent.core.concurrency.cancellation import RunTerminated
@@ -27,7 +28,7 @@ from nexent.core.model_service.service import ModelServiceError
 
 _ARGUMENT_ERRORS = frozenset({
     "INVALID_TOOL_ARGUMENTS", "JIUWEN_NESTED_EXECUTION_BLOCK",
-    "JIUWEN_INVALID_EXECUTION_BLOCK", "JIUWEN_EMPTY_EXECUTION_BLOCK",
+    "JIUWEN_INVALID_EXECUTION_BLOCK", "JIUWEN_EMPTY_EXECUTION_BLOCK", "JIUWEN_INVALID_CLARIFICATION",
 })
 
 
@@ -42,7 +43,7 @@ class JiuwenServiceModel(Model):
 
     def __init__(self, service, profile, scope, *, prefix=(), run_id=None, deadline=None,
                  on_step=None, on_event=None, validate_input=None, prepare_messages=None,
-                 on_error=None, on_recovery=None, delegation=None):
+                 on_error=None, on_recovery=None, delegation=None, artifact_output=False, clarification=None):
         # Model's public invoke/stream seam is used without its provider-client constructor.
         self.service = service
         self.profile = ResolvedModelProfile.model_validate(profile.model_dump())
@@ -54,7 +55,8 @@ class JiuwenServiceModel(Model):
         self.model_config = ModelRequestConfig(model=self.profile.identity.request_model_id)
         self.model_client_config = None
         self._client = None
-        self.text_protocol = self.profile.capabilities.tools.status != "supported"
+        self.artifact_output = artifact_output
+        self.text_protocol = not artifact_output and self.profile.capabilities.tools.status != "supported"
         self.converter = ResourceConverterRegistry().resolve(self.profile.bindings.native_converter)
         self.prepare_messages = prepare_messages
         self.on_error = on_error
@@ -67,6 +69,8 @@ class JiuwenServiceModel(Model):
         self.delegation = delegation
         self.delegation_corrections = 0
         self._delegation_failure = None
+        self.clarification = clarification
+        self._clarification_form = None
 
     def _check_cancelled(self):
         if self.scope.cancelled:
@@ -90,7 +94,11 @@ class JiuwenServiceModel(Model):
             raise JiuwenProtocolError("JIUWEN_MODEL_IDENTITY_MISMATCH")
         view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
         if self.delegation is not None:
+            terminal = [tool for tool in view.tool_definitions
+                        if self.clarification is not None and tool.name == self.clarification.name]
             view = self.delegation.constrain(view)
+            if terminal and not any(tool.name == self.clarification.name for tool in view.tool_definitions):
+                view = view.model_copy(update={"tool_definitions": [*view.tool_definitions, *terminal]})
         if self.validate_input is not None:
             self.validate_input(view)
         self.logical_requests += 1
@@ -108,6 +116,7 @@ class JiuwenServiceModel(Model):
 
     def _completion(self, message, request, definitions):
         self._check_cancelled()
+        self._clarification_form = None
         if message.refusal is not None:
             self._fail(request, "MODEL_RESPONSE_REFUSED")
         if message.finish_reason not in {"stop", "tool_calls"}:
@@ -146,7 +155,12 @@ class JiuwenServiceModel(Model):
                                             arguments=json.dumps({"code": block.code}), index=0))
         if not calls and not content.strip():
             self._fail(request, "MODEL_EMPTY_RESPONSE")
-        if self.delegation is not None:
+        if self.clarification is not None:
+            try:
+                self._clarification_form = self.clarification.form_for(calls, text_protocol=self.text_protocol)
+            except JiuwenProtocolError as error:
+                self._fail(request, str(error))
+        if self.delegation is not None and self._clarification_form is None:
             try:
                 self.delegation.validate_calls(calls)
             except JiuwenProtocolError as error:
@@ -172,6 +186,8 @@ class JiuwenServiceModel(Model):
         native = self._completion(message, request, definitions)
         if self.on_event is not None:
             self.on_event(SimpleNamespace(type="message_completed", message=message))
+        if self._clarification_form is not None:
+            raise ClarificationRequested(self._clarification_form)
         return native
 
     async def _stream_once(self, messages, *, tools=None, **kwargs):
@@ -208,6 +224,8 @@ class JiuwenServiceModel(Model):
                             self._fail(request, "MODEL_STREAM_COMPLETION_MISMATCH")
                         if self.on_event is not None:
                             self.on_event(event)
+                        if self._clarification_form is not None:
+                            raise ClarificationRequested(self._clarification_form)
                         completed = True
                         # Only complete validated calls are exposed; never forward tool_call_delta to execution.
                         yield AssistantMessageChunk(

@@ -328,3 +328,52 @@ def test_saved_preferences_use_native_agent_defaults_for_read_patch_and_continua
     assert runtime.post("/api/agent/run", label="budget-B", conversation_id=conversation_id, version_no=0).status_code == 200
     assert runtime.provider.wire[-1]["enable_thinking"] is False and "thinking_budget" not in runtime.provider.wire[-1]
     assert runtime.draft() == before and runtime.model_records() == models_before
+
+
+@pytest.mark.parametrize("core", ["smolagents", "jiuwen"])
+def test_legacy_agent_reasoning_reaches_provider_and_history_controls(runtime, monkeypatch, core):
+    """AC-02: old omission/body aliases retain precedence before session low/off."""
+    from copy import deepcopy
+    from sqlalchemy import update
+    from management.db.models import AgentInfo
+    from management.services.agent import core_policy
+
+    monkeypatch.setattr(core_policy, "NEXENT_AGENT_CORE", core)
+    if core == "jiuwen":
+        runtime.provider.responder = lambda _body: "Reasoning controls completed."
+    identifier = runtime.models["selected-B"]
+    overrides = deepcopy(runtime.draft()["model_params_override"])
+    overrides[str(identifier)] = {"extra_params": {"enable_thinking": True, "reasoning_effort": "auto",
+                                                  "__custom__": {"enable_thinking": False}}}
+    with runtime.storage["sessions"]() as session:
+        session.execute(update(AgentInfo).where(AgentInfo.agent_id == runtime.agent_id,
+            AgentInfo.version_no == 0).values(model_params_override=overrides))
+    before, models_before = runtime.draft(), runtime.model_records()
+    response = runtime.post("/api/agent/run", version_no=0)
+    assert response.status_code == 200, response.text
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert not any(event.get("type") == "error" for event in events), response.text
+    assert runtime.runs[-1].agent_config.agent_core == core
+    assert runtime.provider.wire[-1]["enable_thinking"] is False
+    assert "reasoning_effort" not in runtime.provider.wire[-1]
+    cid = int(response.headers["conversation_id"])
+    endpoint = f"/api/conversation/{cid}/model_preferences/{identifier}"
+    headers = {"Authorization": "Bearer fixture-creator"}
+    initial = runtime.client.get(endpoint, headers=headers).json()["data"]
+    assert not initial["issues"] and initial["defaults"]["enable_thinking"] is False
+    for values in [{"enable_thinking": True, "reasoning_effort": "low"}, {"enable_thinking": False}]:
+        patch = {"parameter_values": values}
+        if values["enable_thinking"] is False:
+            patch["delete_parameters"] = ["reasoning_effort"]
+        saved = runtime.client.patch(endpoint, headers=headers, json=patch)
+        assert saved.status_code == 200, saved.text
+        restored = runtime.client.get(endpoint, headers=headers).json()["data"]
+        assert not restored["issues"] and restored["parameter_values"] == values
+        resumed = runtime.post("/api/agent/run", conversation_id=cid, version_no=0)
+        assert resumed.status_code == 200, resumed.text
+        assert '"type": "error"' not in resumed.text
+        wire = runtime.provider.wire[-1]
+        assert wire["model"] == "fixture-selected-B"
+        assert wire["enable_thinking"] is values["enable_thinking"]
+        assert wire.get("reasoning_effort") == values.get("reasoning_effort")
+    assert runtime.draft() == before and runtime.model_records() == models_before

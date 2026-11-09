@@ -19,7 +19,7 @@ from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
 
-async def run_worker(monkeypatch, protocol, scenario="normal"):
+async def run_worker(monkeypatch, protocol, scenario="normal", *, configure_run=None):
     def forbidden(*args, **kwargs):
         raise AssertionError("Native HTTP client or CodeAgent was constructed")
 
@@ -66,6 +66,9 @@ async def run_worker(monkeypatch, protocol, scenario="normal"):
                                     tools=[ToolConfig(name="add", class_name="BridgeAddTool",
                                                       source="local", params={})]),
         )
+        if configure_run is not None:
+            configure_run(info)
+
         async def cancel_after_first_response():
             while not state["requests"]:
                 await asyncio.sleep(0.01)

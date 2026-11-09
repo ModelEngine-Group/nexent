@@ -2549,7 +2549,6 @@ class TestCreateAgentConfig:
 
             # Verify that AgentConfig was called correctly
             mock_agent_config.assert_called_once_with(
-                agent_core="smolagents",
                 name="test_agent",
                 display_name=None,
                 description="test description",
@@ -2639,8 +2638,7 @@ class TestCreateAgentConfig:
 
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
-                    agent_core="smolagents",
-                    name="test_agent",
+                        name="test_agent",
                     display_name=None,
                     description="test description",
                     prompt_templates=ANY,
@@ -2984,7 +2982,6 @@ class TestCreateAgentConfig:
             result = await create_agent_config("agent_1", "tenant_1", "user_1", "zh", "test query")
 
             mock_agent_config.assert_called_with(
-                agent_core="smolagents",
                 name="test_agent",
                 display_name=None,
                 description="test description",

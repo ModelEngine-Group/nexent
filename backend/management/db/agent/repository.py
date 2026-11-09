@@ -299,7 +299,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :return: Created agent object
     """
     info_with_metadata = dict(agent_info)
-    info_with_metadata.setdefault("agent_core", "smolagents")
     info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.setdefault("is_main_agent", True)
     info_with_metadata.setdefault("verification_config", None)
@@ -329,7 +328,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         # Directly extract agent_id and return as dict
         result = {
             "agent_id": new_agent.agent_id,
-            "agent_core": new_agent.agent_core,
             "tenant_id": new_agent.tenant_id,
             "name": new_agent.name,
             "system_key": getattr(new_agent, "system_key", None),

@@ -15,6 +15,8 @@ from types import SimpleNamespace
 from nexent.core.agents.context.models import ContextItem, ContextItemType
 from nexent.core.agents.context.rendering import ContextItemRenderer
 from nexent.core.agents.contracts.adapter import AgentCoreAdapter, UnsupportedAgentCoreConfig
+from nexent.core.agents.contracts.clarification import render_question_text
+from nexent.core.agents.cores.jiuwen.clarification import ClarificationRequested, JiuwenClarification
 from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
 from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
@@ -83,6 +85,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             getattr(run_info, "observer", None),
             getattr(getattr(run_info, "agent_config", None), "name", "jiuwen"), self.owner_id,
             capacity_provider=lambda: self.context_bridge.capacity_metadata() if self.context_bridge else None)
+        self.artifact_output = getattr(run_info.agent_config, "response_mode", "chat") == "artifact"
+        self.events.artifact_output = self.artifact_output
         self._active_resource = ContextVar("jiuwen_resource", default=None)
         self._run_completed = False
         self.tool_configs = []
@@ -107,10 +111,16 @@ class JiuwenAdapter(AgentCoreAdapter):
             *(getattr(config, "worker_agents", None) or []),
             *self.external_agents,
         ])
+        occupied = {*reserved_names, *(child.invocation_name for child in self.external_agents)}
+        self.clarification = JiuwenClarification(occupied) if (
+            getattr(config, "response_mode", "chat") == "chat"
+            and getattr(getattr(run_info, "observer", None), "enable_nl2a_wrapper", False) is not True
+        ) else None
 
     @classmethod
     def capabilities(cls):
-        return frozenset({"tools", "mcp", "skills", "streaming", "history", "cancellation", "workers", "a2a"})
+        return frozenset({"tools", "mcp", "skills", "streaming", "history", "cancellation", "workers", "a2a",
+                          "human_interaction"})
 
     def validate(self):
         config = self.run_info.agent_config
@@ -123,8 +133,12 @@ class JiuwenAdapter(AgentCoreAdapter):
             config.verification_config.guardrail_config and config.verification_config.guardrail_config.enabled
         ):
             unsupported.append("verification_config")
-        if config.enable_protocol_repair_retry or config.output_protocol != "code_action":
+        if config.enable_protocol_repair_retry or (
+            config.output_protocol != "code_action" and not self.artifact_output
+        ):
             unsupported.append("smolagents output protocol")
+        if self.artifact_output and (config.tools or config.worker_agents or self.external_agents):
+            unsupported.append("artifact output cannot execute tools or collaborators")
         if config.provide_run_summary:
             unsupported.append("provide_run_summary")
         if config.model_name and any(model.cite_name == config.model_name and model.prompt_cache
@@ -149,7 +163,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         if (self.model_config.model_name != profile.identity.request_model_id
                 or self.model_config.url.rstrip("/") != profile.connection.base_url.rstrip("/")):
             raise UnsupportedAgentCoreConfig("Jiuwen model outlet identity mismatch")
-        self.text_protocol = profile.capabilities.tools.status != "supported"
+        self.text_protocol = not self.artifact_output and profile.capabilities.tools.status != "supported"
         self.tool_configs = list(config.tools)
         registry = {tool.name or tool.class_name: tool for tool in self.tool_configs}
         if len(registry) != len(self.tool_configs):
@@ -180,6 +194,8 @@ class JiuwenAdapter(AgentCoreAdapter):
 
     @contextmanager
     def _observe_tool(self, name, arguments):
+        if getattr(self.run_info.observer, "boundary_reached", False) is True:
+            raise asyncio.CancelledError()
         call_id = uuid.uuid4().hex
         provider_id = self.events.tool_call(name, arguments, call_id)
         token = self._active_resource.set((call_id, provider_id))
@@ -194,20 +210,35 @@ class JiuwenAdapter(AgentCoreAdapter):
             self._active_resource.reset(token)
 
     def _resource_result(self, result):
+        value = result.model_dump() if hasattr(result, "model_dump") else result
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                pass
+        is_error = isinstance(value, dict) and (value.get("success") is False or value.get("isError") is True
+                                                or value.get("status") in ("error", "failed"))
         active = self._active_resource.get()
         if active is not None:
-            value = result.model_dump() if hasattr(result, "model_dump") else result
-            if isinstance(value, str):
-                try:
-                    value = json.loads(value)
-                except ValueError:
-                    pass
-            is_error = isinstance(value, dict) and (value.get("success") is False or value.get("isError") is True
-                                                    or value.get("status") in ("error", "failed"))
             rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
             self.events.tool_result(*active, rendered, is_error)
         # Keep legacy side channels for artifacts and existing consumers.
-        self.run_info.observer.add_message(self.run_info.agent_config.name, ProcessType.EXECUTION_LOGS, str(result))
+        log_text = str(result)
+        if getattr(self.run_info.agent_config, "response_mode", "chat") == "python_workflow":
+            if is_error:
+                return
+            # MCPTool.invoke wraps the compact transport text in one result
+            # field. Decode that carrier, never arbitrary nested business JSON.
+            if isinstance(value, dict) and set(value) == {"result"} and isinstance(value["result"], str):
+                log_text = value["result"]
+            elif isinstance(value, dict) and isinstance(value.get("logs"), str):
+                log_text = value["logs"]
+            elif isinstance(value, dict) and isinstance(value.get("content"), list):
+                log_text = "\n".join(
+                    part["text"] for part in value["content"]
+                    if isinstance(part, dict) and isinstance(part.get("text"), str)
+                )
+        self.run_info.observer.add_message(self.run_info.agent_config.name, ProcessType.EXECUTION_LOGS, log_text)
 
     def prepare(self):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
@@ -276,6 +307,9 @@ class JiuwenAdapter(AgentCoreAdapter):
             ))
         # Reuse file/sandbox infrastructure, never construct a smolagents Agent.
         self.resources.agent = SimpleNamespace(tools=self.business_tools, python_executor=None)
+        if self.clarification is not None:
+            # A configured class may expose a different runtime tool name.
+            self.clarification = JiuwenClarification(set(self.business_tools) | self.visible_tool_names)
         self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
@@ -296,10 +330,21 @@ class JiuwenAdapter(AgentCoreAdapter):
             enable_tool_resilience_rail=False, enable_skill_discovery=False,
             parallel_tool_calls=False,
         )
+        if self.clarification is not None:
+            # Publish the schema for native callers. The model boundary handles
+            # terminal forms before Runner can dispatch any tool in the response.
+            def terminal_only(**_arguments):
+                raise RuntimeError("Clarification escaped the model boundary")
+
+            card = ToolCard(name=self.clarification.name,
+                            description="Ask for essential missing user information and end this turn awaiting input.",
+                            input_params=self.clarification.schema)
+            self.native_agent.ability_manager.add_ability(card, LocalFunction(card, terminal_only))
         if any(config.class_name == "ParallelExecutorTool" and
                (config.name or "parallel_executor") in self.visible_tool_names for config in self.tool_configs):
             self._bind_parallel_tool()
-        self._bind_text_executor()
+        if not self.artifact_output:
+            self._bind_text_executor()
 
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
@@ -370,8 +415,25 @@ class JiuwenAdapter(AgentCoreAdapter):
             config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
             getattr(getattr(self.run_info, "observer", None), "lang", "en"),
         )
-        protocol = "" if self.text_protocol else NATIVE_PROTOCOL_INSTRUCTION
-        return "\n\n".join(text for text in (*shared, self.delegation.instruction, protocol) if text)
+        protocol = "" if self.text_protocol or self.artifact_output else NATIVE_PROTOCOL_INSTRUCTION
+        if self.artifact_output:
+            shared = [config.instructions or "", *(
+                item.content.get("text", "") for item in _get_authorized_context_items(self.run_info) or ()
+                if item.type == ContextItemType.SYSTEM
+            )]
+        if getattr(config, "response_mode", "chat") == "python_workflow" and not self.text_protocol:
+            protocol += (
+                "\nThe shared creation workflow describes Python action PAYLOADS. Its code tags and print examples "
+                "are not the response wire format. Execute each complete action by calling nexent_execute_python "
+                "with that Python as the code argument; never emit executable tags in a native response. "
+                "Keep the workflow's authorization, fields, card boundaries and completion rules. "
+                "Return completion summaries as ordinary text. Target Agent prompts use Core-neutral tool-use "
+                "examples, without requiring Python actions or final_answer tags."
+            )
+        clarification = self.clarification.instructions(
+            getattr(getattr(self.run_info, "observer", None), "lang", "en"), text_protocol=self.text_protocol,
+        ) if self.clarification is not None else ""
+        return "\n\n".join(text for text in (*shared, self.delegation.instruction, protocol, clarification) if text)
 
     def _create_model(self):
         from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
@@ -426,7 +488,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                                   run_id=self.owner_id, deadline=info.model_deadline,
                                   on_step=on_step, on_event=on_event, validate_input=validate_input,
                                   on_error=self.events.record_error, on_recovery=self.events.recovery,
-                                  delegation=self.delegation)
+                                  delegation=self.delegation, artifact_output=self.artifact_output,
+                                  clarification=self.clarification)
 
     def _bind_text_executor(self):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
@@ -536,6 +599,8 @@ class JiuwenAdapter(AgentCoreAdapter):
 
     async def _prepare_model_messages(self, messages, tools):
         """Stop native loop retries at the model boundary after a resource failure."""
+        if getattr(self.run_info.observer, "boundary_reached", False) is True:
+            raise asyncio.CancelledError()
         if self.mcp is not None and self.mcp.terminal_error is not None:
             raise self.mcp.terminal_error
         prepared = await self.context_bridge.prepare_messages(messages, tools)
@@ -543,21 +608,58 @@ class JiuwenAdapter(AgentCoreAdapter):
             raise self.mcp.terminal_error
         return prepared
 
+    def _connect_mcp(self):
+        """Establish blocking session owners on the admitted Agent worker."""
+        from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection
+
+        info = self.run_info
+        mcp_tools = [tool for tool in self.tool_configs if tool.source == "mcp" and
+                     (tool.name or tool.class_name) in self.visible_tool_names]
+        if mcp_tools:
+            self.mcp = JiuwenMCPCollection(
+                authorized_tools=mcp_tools, observe=self._observe_tool, manager=self.manager,
+                emit_result=self._resource_result, user_context=info.user_context,
+                server_parameters=info.mcp_host, cancellation_scope=self.scope,
+                tool_timeout_seconds=info.mcp_tool_timeout_seconds,
+                close_timeout_seconds=info.mcp_close_timeout_seconds,
+                connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
+            )
+            for tool in self.mcp.__enter__().tools:
+                self.native_agent.ability_manager.add_ability(tool.card, tool)
+
     def run(self):
+        from nexent.core.agents.cores.jiuwen.execution_loop import get_execution_loop
+
         try:
-            answer = asyncio.run(self._run_async())
+            self._connect_mcp()
+            answer = get_execution_loop(self.manager).run(self._run_async, cancel=self.scope.cancel)
+            if getattr(self.run_info.observer, "boundary_reached", False):
+                self.events.waiting_for_input = True
+                self._run_completed = True
+                return ""
             if self.events.final_answer is None:
                 self.events.last_error = self.events.error("JIUWEN_TERMINAL_MISSING")
                 raise RuntimeError("Jiuwen stream ended without a terminal answer")
             self._run_completed = True
             return answer
+        except ClarificationRequested as requested:
+            if getattr(self, "scope", None) is not None and self.scope.cancelled:
+                raise RunTerminated() from None
+            self.events.output(ProcessType.HUMAN_INTERACTION,
+                               json.dumps({"schema_version": 1, **requested.form.model_dump(mode="json")},
+                                          ensure_ascii=False))
+            self.events.waiting_for_input = True
+            self._run_completed = True
+            return render_question_text(requested.form)
         except asyncio.CancelledError:
+            if getattr(self.run_info.observer, "boundary_reached", False):
+                self.events.waiting_for_input = True
+                self._run_completed = True
+                return ""
             raise RunTerminated() from None
 
     async def _run_async(self):
         from openjiuwen.core.runner import Runner
-
-        from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection
 
         info = self.run_info
         current = asyncio.current_task()
@@ -575,21 +677,6 @@ class JiuwenAdapter(AgentCoreAdapter):
         watcher = asyncio.create_task(watch_stop())
         events = self.events
         try:
-            mcp_tools = [tool for tool in self.tool_configs if tool.source == "mcp" and
-                         (tool.name or tool.class_name) in self.visible_tool_names]
-            if mcp_tools:
-                self.mcp = JiuwenMCPCollection(
-                    authorized_tools=mcp_tools, observe=self._observe_tool, manager=self.manager,
-                    emit_result=self._resource_result,
-                    user_context=info.user_context,
-                    server_parameters=info.mcp_host, cancellation_scope=self.scope,
-                    tool_timeout_seconds=info.mcp_tool_timeout_seconds,
-                    close_timeout_seconds=info.mcp_close_timeout_seconds,
-                    connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
-                )
-                collection = self.mcp.__enter__()
-                for tool in collection.tools:
-                    self.native_agent.ability_manager.add_ability(tool.card, tool)
             info.observer.add_message(info.agent_config.name, ProcessType.AGENT_NEW_RUN, self.query)
             for event in info.agent_config.pre_run_tool_events:
                 info.observer.add_message(
@@ -626,8 +713,12 @@ class JiuwenAdapter(AgentCoreAdapter):
             self._run_completed = False
             raise
         finally:
-            status = "stopped" if self.run_info.stop_event.is_set() else (
-                "completed" if self._run_completed else "failed")
+            if self.events.waiting_for_input:
+                status = "completed"
+            elif self.run_info.stop_event.is_set():
+                status = "stopped"
+            else:
+                status = "completed" if self._run_completed else "failed"
             self.run_info.run_result = self.events.finish(status)
 
     def _close_resources(self):

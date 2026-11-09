@@ -57,10 +57,6 @@ class AgentInfo(TableBase):
     author = Column(String(100), doc="Agent author")
     model_ids = Column(
         ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
-    agent_core = Column(
-        String(30), nullable=False, default="smolagents", server_default=text("'smolagents'"),
-        comment="Execution core for this immutable agent version: smolagents or jiuwen",
-    )
     max_steps = Column(Integer, doc="Maximum number of steps")
     prompt = Column(
         Text,

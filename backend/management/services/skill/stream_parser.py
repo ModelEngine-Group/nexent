@@ -3,6 +3,7 @@
 """Request-local routing of Skill observer output and attempt boundaries."""
 
 from copy import deepcopy
+import json
 from typing import Any
 
 from management.services.skill.classifier import ContentClassifier
@@ -16,6 +17,34 @@ PARSABLE_MODEL_TYPES = frozenset(
         "model_thinking_output",
     }
 )
+
+
+def _business_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Keep creator provenance without claiming to be a native runtime envelope."""
+    if (type(event.get("schema_version")) is int and event["schema_version"] == 1
+            and event.get("runtime_mode") == "native_agent"
+            and isinstance(event.get("turn_id"), str) and event["turn_id"]):
+        return {key: value for key, value in event.items() if key not in {"schema_version", "runtime_mode"}}
+    return event
+
+
+def project_skill_history_units(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Read old creator artifact wrappers without changing their saved contents."""
+    projected = []
+    for unit in units:
+        item = unit
+        if unit.get("unit_type") in {"skill_body", "file_content"}:
+            try:
+                event = json.loads(unit.get("unit_content", ""))
+            except (ValueError, TypeError):
+                event = None
+            if (isinstance(event, dict) and event.get("type") == unit["unit_type"]
+                    and isinstance(event.get("content"), str)):
+                business = _business_event(event)
+                if business is not event:
+                    item = {**unit, "unit_content": json.dumps(business, ensure_ascii=False)}
+        projected.append(item)
+    return projected
 
 
 class SkillStreamParser:
@@ -39,9 +68,12 @@ class SkillStreamParser:
 
     def flush(self) -> list[dict[str, Any]]:
         """Flush with the producing chunk's metadata, before attempt commit."""
-        return [{**self.source, **event} for event in self.classifier.flush()]
+        return [_business_event({**self.source, **event}) for event in self.classifier.flush()]
 
     def process(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
+        return [_business_event(event) for event in self._process(chunk)]
+
+    def _process(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
         kind = chunk.get("type")
         # Provider reasoning can quote the entire output protocol. It is never
         # a generated file and must not advance the answer classifier state.

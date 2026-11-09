@@ -4,23 +4,33 @@ module:
   name: Agent core configuration
 feature:
   feature_id: AGENT-CORE-CONFIG
-  name: Selectable agent core configuration
+  name: Deployment-wide agent core configuration
   status: active
-  description: Select an agent core while preserving supported resources and enforcing
-    unsupported configuration constraints.
+  description: A deployment selects one execution core without rewriting saved Agent
+    definitions.
   business_rules:
   - rule_id: AGENT-CORE-CONFIG-RULE-001
-    description: Core defaults to smolagents, persists through saves/reloads and cannot
-      be changed in read-only mode.
+    description: Deployment NEXENT_AGENT_CORE alone chooses every local root and child
+      Core. No editable or read-only per-Agent Core control or persisted field exists;
+      SDK parameters and historical runtime source tags remain internal.
   - rule_id: AGENT-CORE-CONFIG-RULE-002
-    description: Core selection preserves all policies and bindings; unsupported controls
-      are disabled without changing stored values.
+    description: The editor has no per-Agent Core field; deployment Core controls
+      capability restrictions while saved policies/resources remain intact and CM
+      stays editable.
   - rule_id: AGENT-CORE-CONFIG-RULE-003
     description: Creation preserves explicit false or true context manager flags and
       omitted true default.
+  - rule_id: AGENT-CORE-CONFIG-RULE-004
+    description: Creators retain authenticated identity, model bindings and business
+      output contracts under either Core; artifact data is never executed.
+  - rule_id: AGENT-CORE-CONFIG-RULE-005
+    description: Under either Core, creator result cards require a matching agent_generation_completed
+      event in live and saved history. Clarification and answers never infer completion;
+      editable drafts have a separate Workbench action disabled during generation.
   required_test_stages:
   - D4
   source:
     requirement_ids:
     - AGENT-CORE-UI-20261013
+    - AGENT-CORE-GLOBAL-20261105
     spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

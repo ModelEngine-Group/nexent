@@ -12,6 +12,24 @@ def is_runtime_event(event):
             and event.get("agent_core") == "jiuwen")
 
 
+def _restore_duplicate_runtime_envelope(event):
+    """Repair the old non-text double wrapper only when all event metadata agrees."""
+    if event.get("type") not in {"step_count", "tool", "tool_result", "step_observation", "run_terminal"}:
+        return event
+    try:
+        nested = json.loads(event.get("content", ""))
+    except (ValueError, TypeError):
+        return event
+    if (
+        isinstance(nested, dict)
+        and is_runtime_event(nested)
+        and {key: value for key, value in nested.items() if key != "content"}
+        == {key: value for key, value in event.items() if key != "content"}
+    ):
+        return nested
+    return event
+
+
 def project_runtime_history(content, units):
     """Clean proven runtime records for display without rewriting audit data or user messages."""
     parsed = []
@@ -37,13 +55,21 @@ def project_runtime_history(content, units):
     for unit, event in zip(units, parsed):
         item = dict(unit)
         if event:
+            if event.get("type") == item.get("unit_type"):
+                event = _restore_duplicate_runtime_envelope(event)
             event = dict(event)
             kind = event.get("type")
             if kind in {"model_output", "model_output_deep_thinking"}:
                 key = (event.get("turn_id"), event.get("invocation_id"), event.get("block_id"), kind)
                 event["content"] = filters.setdefault(key, PublicTextFilter()).push(event.get("content", ""))
             elif kind == "run_terminal" and event.get("status") == "completed":
-                event["final_content"], invalid = final(event.get("final_content", ""))
+                # A terminal clarification intentionally has no final answer. Keep
+                # its explicit state without weakening normal answer validation.
+                waiting = (event.get("end_reason") == "awaiting_input"
+                           and event.get("final_content") == ""
+                           and event.get("final_block_ids") == []
+                           and event.get("error") is None)
+                event["final_content"], invalid = ("", False) if waiting else final(event.get("final_content", ""))
                 if invalid:
                     event.update(status="failed", final_block_ids=[], end_reason="JIUWEN_FINAL_OUTPUT_INVALID",
                                  error={"category": "JIUWEN_FINAL_OUTPUT_INVALID", "scope": "protocol",

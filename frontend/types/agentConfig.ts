@@ -10,7 +10,6 @@ export type AgentConfigUpdate = Partial<
   Pick<
     Agent,
     | "name"
-    | "agent_core"
     | "enable_context_manager"
     | "display_name"
     | "author"
@@ -150,7 +149,6 @@ export interface ModelParamsOverrideEntry {
 }
 
 export interface Agent {
-  agent_core?: AgentCore;
   id: string;
   name: string;
   display_name?: string;
@@ -216,8 +214,6 @@ export interface Agent {
   icon_url?: string;
   repository_info?: MyAgentRepositoryInfoItem[];
 }
-
-export type AgentCore = "smolagents" | "jiuwen";
 
 export interface Tool {
   updated_by_cas_username?: string | null;

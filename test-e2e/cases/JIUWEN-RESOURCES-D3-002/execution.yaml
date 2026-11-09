@@ -3,11 +3,12 @@ case_id: JIUWEN-RESOURCES-D3-002
 implementations:
 - framework: pytest
   file: test_collaboration.py
-  selector: test_configured_collaboration
+  selector: test_
 timeout_seconds: 180
 acceptance_bindings:
   AC-01:
   - test_configured_collaboration
+  - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop
 preparation:
   families: []
   anchors: false

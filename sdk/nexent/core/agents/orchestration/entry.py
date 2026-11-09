@@ -298,10 +298,13 @@ async def agent_run(
     worker_finished = False
     try:
         while not execution.future.done():
-            if agent_run_info.stop_event.is_set():
+            if (agent_run_info.stop_event.is_set()
+                    and getattr(observer, "boundary_reached", False) is not True):
                 # Stop consuming the old turn even while provider I/O is blocked.
                 # The finally block cancels its managed worker and close hooks.
                 raise asyncio.CancelledError
+            # A creator card uses the stop signal to halt the model loop. Drain
+            # its owned worker and terminal result instead of cancelling cleanup.
             cached_message = observer.get_cached_message()
             for message in cached_message:
                 yield message

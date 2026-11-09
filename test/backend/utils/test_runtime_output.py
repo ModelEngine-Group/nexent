@@ -42,3 +42,42 @@ def test_fragment_join_preserves_native_envelope_and_block_boundaries():
     assert restored["content"]=="First second" and restored["block_id"]=="a"
     assert restored["runtime_mode"]=="native_agent"
     assert json.loads(serialize_stream_unit_content(terminal(),""))["final_block_ids"]==["block"]
+
+
+@pytest.mark.parametrize("kind", ["step_count", "tool", "tool_result", "step_observation", "run_terminal"])
+def test_non_mergeable_native_units_are_serialized_once(kind):
+    event = {**terminal(), "type": kind, "content": "**Step 1**", "local_call_id": "call"}
+    serialized = serialize_stream_unit_content(event, event["content"])
+    unit = {"type": kind, "content": serialized, "unit_content": serialized,
+            "_runtime_envelope": dict(event), "unit_index": 2}
+    assert finalize_buffered_unit_fragments([unit]) == len(serialized.encode("utf-8"))
+    assert json.loads(unit["unit_content"]) == event
+    assert unit["content"] == unit["unit_content"]
+    assert "_runtime_envelope" not in unit
+
+
+def test_plain_units_and_intentional_json_text_remain_unchanged():
+    raw = json.dumps(terminal())
+    plain = {"content": raw, "unit_content": raw}
+    event = {**terminal(), "type": "model_output", "block_id": "literal", "content": raw}
+    streamed = {"content": "", "unit_content": "", "_runtime_envelope": dict(event),
+                "_content_fragments": [raw[:10], raw[10:]]}
+    finalize_buffered_unit_fragments([plain, streamed])
+    assert plain == {"content": raw, "unit_content": raw}
+    assert json.loads(streamed["unit_content"]) == event
+
+
+def test_native_human_form_roundtrips_without_wrapping_its_schema():
+    from infrastructure.runtime_output import project_runtime_history
+
+    form = {"schema_version": 1, "questions": [{"id": "birth", "type": "text", "title": "Birth date?"}]}
+    event = {**terminal(), "type": "human_interaction", "content": json.dumps(form)}
+    serialized = serialize_stream_unit_content(event, event["content"])
+    unit = {"type": "human_interaction", "content": serialized, "unit_content": serialized,
+            "_runtime_envelope": event, "unit_index": 7}
+    finalize_buffered_unit_fragments([unit])
+    _, restored, invalid = project_runtime_history("", [{"unit_type": "human_interaction",
+        "unit_content": unit["unit_content"], "unit_index": 7}])
+    assert not invalid
+    assert json.loads(json.loads(restored[0]["unit_content"])["content"]) == form
+    assert json.loads(unit["unit_content"])["sequence"] == event["sequence"]

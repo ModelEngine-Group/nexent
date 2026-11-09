@@ -310,6 +310,9 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    response_mode: Literal["chat", "artifact", "python_workflow"] = Field(
+        default="chat", description="Application-selected output contract, independent of the execution Core",
+    )
     agent_core: str = Field(
         default="smolagents", pattern=r"^[a-z][a-z0-9_]{0,29}$",
         description="Execution core selected by the AgentCoreFactory",

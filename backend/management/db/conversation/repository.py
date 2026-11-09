@@ -471,7 +471,7 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
     if source is None or source.message_role != 'assistant' or source.status != 'completed':
         raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification is no longer available")
     units = session.execute(select(
-        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index,
+        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index, ConversationMessageUnit.unit_type,
     ).where(
         ConversationMessageUnit.conversation_id == conversation_id,
         ConversationMessageUnit.message_id == source.message_id,
@@ -483,7 +483,16 @@ def _resolve_clarification_response(session, conversation_id, user_id, role, raw
         if response.unit_index is not None and unit.unit_index != response.unit_index:
             continue
         try:
-            if normalize_form(json.loads(unit.unit_content)) == response.form:
+            saved = json.loads(unit.unit_content)
+            if (isinstance(saved, dict) and type(saved.get('schema_version')) is int
+                    and saved['schema_version'] == 1 and saved.get('runtime_mode') == 'native_agent'
+                    and saved.get('type') == unit.unit_type == 'human_interaction'
+                    and isinstance(saved.get('turn_id'), str) and saved['turn_id'].strip()
+                    and isinstance(saved.get('content'), str)):
+                # Only the owned persisted event may carry a single public envelope.
+                # Client forms remain strict data; nested envelopes are not interpreted.
+                saved = json.loads(saved['content'])
+            if normalize_form(saved) == response.form:
                 matches.append(unit)
         except (TypeError, ValueError):
             continue

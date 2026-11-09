@@ -30,7 +30,9 @@ def finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int
             unit["content"] = content
             unit["unit_content"] = content
         envelope = unit.pop("_runtime_envelope", None)
-        if envelope is not None:
+        # Non-mergeable units were already serialized when buffered. Only joined
+        # text fragments need their original envelope reconstructed here.
+        if envelope is not None and fragments is not None:
             envelope["content"] = unit["content"]
             unit["content"] = unit["unit_content"] = json.dumps(envelope, ensure_ascii=False)
         finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))

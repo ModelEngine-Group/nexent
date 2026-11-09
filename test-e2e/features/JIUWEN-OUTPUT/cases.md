@@ -5,4 +5,5 @@
 - D3 [JIUWEN-OUTPUT-D3-001](../../cases/JIUWEN-OUTPUT-D3-001/case.yaml) · active
 - D4 [JIUWEN-OUTPUT-D4-001](../../cases/JIUWEN-OUTPUT-D4-001/case.yaml) · active
 - D4 [JIUWEN-REAL-UI-D4-001](../../cases/JIUWEN-REAL-UI-D4-001/case.yaml) · active
+- D4 [JIUWEN-SKILL-CREATOR-D4-001](../../cases/JIUWEN-SKILL-CREATOR-D4-001/case.yaml) · active
 - D5 [JIUWEN-OUTPUT-D5-001](../../cases/JIUWEN-OUTPUT-D5-001/case.yaml) · active

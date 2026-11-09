@@ -3,7 +3,6 @@
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";
-import { compatibleCorePatch } from "@/lib/agentCore";
 import { queryClient } from "@/lib/queryClient";
 import {
   searchToolConfig,
@@ -20,7 +19,6 @@ import {
 export type AgentDraft = Pick<
   Agent,
   | "name"
-  | "agent_core"
   | "display_name"
   | "description"
   | "author"
@@ -111,7 +109,6 @@ interface AgentStoreState {
 }
 
 const toDraft = (agent: Agent): AgentDraft => ({
-  agent_core: agent.agent_core ?? "smolagents",
   name: agent.name,
   display_name: agent.display_name || "",
   description: agent.description || "",
@@ -272,7 +269,6 @@ const applyQueuedPatches = (
 
 const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   agent_id: agentId,
-  ...(patch.agent_core !== undefined ? { agent_core: patch.agent_core } : {}),
   ...(patch.name !== undefined ? { name: patch.name } : {}),
   ...(patch.display_name !== undefined
     ? { display_name: patch.display_name }
@@ -313,9 +309,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt !== undefined
-    ? { prompt: patch.prompt }
-    : {}),
+  ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
@@ -564,9 +558,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
 
     const task: AgentSaveTask = {
       agentId,
-      patch: cloneDraft(
-        compatibleCorePatch(useAgentStore.getState().editedAgent, patch)
-      ),
+      patch: cloneDraft(patch),
       ...options,
     };
     saveQueue = [...saveQueue, task];

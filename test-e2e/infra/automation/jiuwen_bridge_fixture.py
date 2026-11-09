@@ -74,7 +74,9 @@ async def provider(scenario, protocol):
             call = {"id": "provider-call-1", "type": "function", "function": {
                 "name": "add", "arguments": '{"a":2,"b":3}' if scenario != "bad_args" else '{"a":',
             }}
-            if scenario == "cancel":
+            if scenario == "artifact":
+                content, calls = '<final_answer>\n<skill>\nExample <code>print(1)</code>\n</skill>\n<file path="scripts/example.py">\nprint(1)\n</file>\n<summary>\ndone\n</summary>\n</final_answer>', []
+            elif scenario == "cancel":
                 content, calls = "PARTIAL_BEFORE_CANCEL", []
             elif scenario == "plain":
                 content, calls = "Example only: ```python\nadd(2, 3)\n```", []
@@ -93,6 +95,40 @@ async def provider(scenario, protocol):
                     content = ('<completed_action_history read_only="true">MODEL_PRIVATE_HISTORY'
                                '{"tool":"add","arguments":{"a":2,"b":3}}</completed_action_history>'
                                '<final_answer>SPIKE_FINAL_RESULT_5</final_answer>')
+            if scenario == "creator":
+                code = 'print(\'<nl2a>{"subtype":"requirement_clarification","agent_id":42,"questions":[]}</nl2a>\')'
+                content = "" if protocol == "native" else "<code>" + code + "</code>"
+                calls = [{"id": "creator-call", "type": "function", "function": {
+                    "name": "nexent_execute_python", "arguments": json.dumps({"code": code}),
+                }}] if protocol == "native" else []
+                call = calls[0] if calls else call
+            if scenario == "creator_mcp":
+                content = "" if protocol == "native" else '<code>print(nl2a_wrapper(agent_id=42))</code>'
+                calls = [{"id": "creator-mcp", "type": "function", "function": {
+                    "name": "nl2a_wrapper", "arguments": '{"agent_id":42}'}},
+                    {"id": "forbidden-after-card", "type": "function", "function": {
+                        "name": "forbidden_effect", "arguments": '{}'}}] if protocol == "native" else []
+                call = calls[0] if calls else call
+            if scenario.startswith("clarify"):
+                questions = [{"id": "birth", "type": "text", "title": "Please provide your birth date", "required": True}]
+                if scenario == "clarify_bad":
+                    questions = []
+                if scenario == "clarify_answered":
+                    content, calls = "ANSWER_USING_SUPPLIED_BIRTH_DATE", []
+                elif protocol == "native":
+                    name = next((tool["function"]["name"] for tool in body.get("tools", [])
+                                 if "ask_user" in tool["function"]["name"]), "ask_user")
+                    calls = [{"id": "clarify-call", "type": "function", "function": {
+                        "name": name, "arguments": json.dumps({"questions": questions})}}]
+                    if scenario == "clarify_mixed":
+                        calls.append(call)
+                    content = ""
+                    call = calls[0]
+                else:
+                    action = "ask_user(questions=" + repr(questions) + ")"
+                    if scenario == "clarify_mixed":
+                        action = "add(a=2,b=3); " + action
+                    content, calls = "<code>" + action + "</code>", []
             finish = "tool_calls" if calls else "stop"
             if scenario == "unknown_finish":
                 finish = "mystery_control"
@@ -107,7 +143,7 @@ async def provider(scenario, protocol):
                     await writer.drain()
                 if calls:
                     await frame({"tool_calls": [{"index": 0, "id": call["id"], "type": "function", "function": {
-                        "name": "add", "arguments": '{"a":',
+                        "name": call["function"]["name"], "arguments": call["function"]["arguments"][:len(call["function"]["arguments"])//2],
                     }}]})
                     await asyncio.sleep(0.02)
                     state["first_fragment_no_tool"] = not state["tool_calls"]
@@ -117,8 +153,10 @@ async def provider(scenario, protocol):
                         await frame({"tool_calls": [{"index": 0, "id": "", "type": "function",
                                                       "function": {"arguments": ""}}]})
                     await frame({"tool_calls": [{"index": 0, "function": {
-                        "arguments": '2,"b":3}' if scenario != "bad_args" else "",
+                        "arguments": call["function"]["arguments"][len(call["function"]["arguments"])//2:] if scenario != "bad_args" else "",
                     }}]})
+                    for index, additional in enumerate(calls[1:], 1):
+                        await frame({"tool_calls": [{"index": index, **additional}]})
                 else:
                     half = len(content) // 2
                     await frame({"content": content[:half]})

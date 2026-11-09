@@ -204,6 +204,8 @@ async def build_nl2skill_run_info(
     tenant_id: str,
     language: str,
     system_ref=None,
+    *,
+    user_id: str | None = None,
 ) -> AgentRunInfo:
     """Build all request-scoped objects for one NL2Skill turn."""
 
@@ -275,6 +277,9 @@ async def build_nl2skill_run_info(
         sandbox_config=None,
         redis_client=None,
     )
+    from management.services.agent.core_policy import prepare_creator_core
+
+    prepare_creator_core(run_info, tenant_id=tenant_id, user_id=user_id)
     run_info.context_input = build_authorized_context_input(
         run_info, historical_context={"conversation_turns": _skill_history_turns(run_info.history)},
     )
@@ -301,10 +306,12 @@ async def create_nl2skill_stream(
     tenant_id: str,
     language: str,
     system_ref=None,
+    *,
+    user_id: str | None = None,
 ) -> AsyncIterator[str]:
     """Create the SSE payload stream for one ephemeral NL2Skill turn."""
 
-    run_info = await build_nl2skill_run_info(request, tenant_id, language, system_ref=system_ref)
+    run_info = await build_nl2skill_run_info(request, tenant_id, language, system_ref=system_ref, user_id=user_id)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     target_file_set = set(target_files)
 
@@ -352,6 +359,10 @@ async def create_nl2skill_stream(
                     if is_allowed_write(event):
                         yield serialize(event)
 
+            result = getattr(run_info, "run_result", None)
+            if result is not None and result.status != "completed":
+                yield serialize({"type": "error", "content": "NL2Skill execution did not complete."})
+                return
             for event in parser.flush():
                 if is_allowed_write(event):
                     yield serialize(event)

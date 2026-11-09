@@ -1,108 +1,61 @@
-# 可选 Agent Core：接入与验证说明
+# Agent Core 接入与部署配置
 
-## 2026-10-16 当前接入方式（M6）
+Nexent 保存智能体的业务配置，后端统一工厂选择 Core Adapter。Jiuwen Adapter 将配置、可信模型出口和授权资源转换为 Jiuwen 可以运行的对象，调用其 Runner，再把过程和结果转换为公共输出。SDK 目录采用 contracts、factory、orchestration、resources、output、context、sandbox 和 cores/{smolagents,jiuwen} 分层；models 目录位置不变，不恢复旧别名。
 
-Nexent 继续保存智能体配置，Factory 选择 Jiuwen Adapter，Jiuwen Runner 负责推理循环。模型统一经 ModelService 发送；原生工具调用和受控文本协议共用授权资源入口，不运行 CodeAgent 循环。
+## 系统级 Core 选择
 
-- 依赖固定 `openjiuwen==0.1.19`；SDK 安装 `nexent[jiuwen]`。公共模型服务集成至固定 6dc5ed0bb 基线的必要增量，不表示重新核验了 Jiuwen 最新发布。
-- 原生/text 均支持已授权工具、MCP、Skills 和显式 parallel；文本执行使用现有 Python/沙箱及远端回调上下文。MCP 的保存参数、隐藏身份、超时/会话所有权沿用 Nexent；Skills 按 root+name 白名单读取，脚本运行在配置指定的后端。
-- 页面切换 Core 只修改 core，保留工具、MCP、Skills、协作绑定、模型和所有策略值。Jiuwen 不支持的选项仍禁用编辑并在运行前明确拒绝；需要先在 smolagents 下关闭尚未支持的能力，再运行 Jiuwen。
-- 子智能体逐调用经工厂选择自身 Core，按自身版本绑定模型出口/参数；Jiuwen↔smolagents 和 Jiuwen→Jiuwen 已验证。A2A 复用现有代理，每调用独立客户端并传递可信身份，远端自行选择其 Core/模型。页面允许 Jiuwen 编辑协作绑定。
-- CM 复用现有 ContextManager，遵循保存开关与预算；配置页变更 Core 并按既有发布流程生效后，原会话可重开续聊，历史工具/附件作为只读事实，已有摘要仍可加载。仍未支持 Planning、运行总结、协议修复、校验/护栏及 provider prompt-cache 策略；公共 StepObservation/RunResult 已接入实时与历史展示，工具/结果、显式推理、子调用分组和失败/停止保留真实状态；终答仅由明确终态确认。保留绑定不表示已实现执行，不静默切回其他 Core。
-- 完整可信 `ResolvedModelProfile` 在管理侧保存，运行时恢复、验证并按请求预算生成独立快照；不按别名猜出口，不在运行时重新读 catalog，不走原生 HTTP。凭据只按 tenant/出口引用捕获，不进入模型资源视图。
+在部署共同使用的 `.env` 中配置：
 
-M5 本地验证：515 项 Python UT、16 项前端组件、8 个正式 Case / 54 项检查通过。复用 SSE 与数据库执行单元，刷新后不按当前 Core 猜测旧输出；失败/停止保留过程，A2A 不虚构远端步骤。实际框架/资源/隔离数据库和受控 API 浏览器分别证明执行与展示，不等同于已部署的商业模型验收。证据见原 SPEC task.md 的 M5 历史记录；当时待实施的 AC-018 已在下述 M6 完成。
-
-M6 已部署并通过选定真实出口：DeepSeek 原生工具协议、Qwen 受控文本协议，工具/MCP/Skills、两种子 Core 与 A2A 均完成实际执行桥验证。固定参数纠正每步骤 1 次/每轮 3 次（含已知 code 参数错误），空/仅推理/length 每轮 1 次；物理重试仍归 ModelService。原 Code 协议修复开关继续按 Jiuwen 能力校验。失败不切模型/Core，坏块不执行，历史任务不重放。
-
-数据库在事务锁中分配用户/助手序号，空客户端历史也能从原会话续聊；私有运行边界不改变 HTTP schema。M6 862 项 Python UT、16 项前端组件和 10 个正式 Case / 72 项检查通过；真实模型与受控资源、浏览器受控 API 的边界详见原 SPEC task.md。应用访问 `http://localhost:3000`，镜像使用 `jiuwen-m6-20261016` 标签。全局正式资产门禁仍被既有 F-111-RULE-02 引用阻塞。
-
-### 统一输出与原有会话页面（2026-10-16）
-
-不同Core输出在 `frontend/lib/nexentOutputAdapter.ts` 统一转换为原有Nexent事件，然后进入原有实时/历史解析器。页面使用同一套Reasoning、ToolFallback、Markdown和SubAgentContainer，不按Core选择渲染器；已移除M5的runtime-output专用路径。历史记录按自身保存的协议解析，智能体切换Core后仍可加载旧记录。
-
-工具/MCP/Skills映射原工具卡，子智能体/A2A沿用原分组；只有封口后的成功终态生成终答，失败/停止保留partial。token用量绑定本条消息，未知显示未知，不借用其他轮计数。新Core需在执行端满足公共事实合同；其注册与配置校验仍独立适配。
-
-本轮Web已部署 `nexent/nexent-web:jiuwen-unified-ui-20261016`，后端保持jiuwen-image-20261016。63项前端UT、TypeScript及定向lint通过，既有D3/D5回归和最终部署上的固定浏览器旅程通过；真实后端旧历史加载/刷新通过，未触发新Agent运行。标准prepared入口/全局资产门禁仍被既有F-111-RULE-02缺失引用阻塞，不声明完整发布门禁通过。完整证据见原SPEC新增UO记录。
-
-### 共享容量展示补齐（2026-10-19）
-
-Jiuwen公共StepObservation.context_capacity现从已有ContextManager读取容量、阈值、有效输入上限和处理模式，经Observer及共用输出Adapter映射到原token_count。CM关闭仍保留容量，原用量百分比/详情组件无需Core分支。旧历史缺字段时保留未知，不用当前模型值回填。
-
-main/Web已部署jiuwen-capacity-20261019。108项Python UT、43项前端UT及既有D3/D5回归通过；文件解析助手8轮真实业务验证覆盖两Core、CM开关和刷新，窗口/阈值与用量形式一致。正式D4仍因AIDP列表502为FAIL，prepared入口仍有F-111引用阻塞；详见原SPEC容量补齐记录，不宣称完整发布通过。
-
-### 升级与存量出口回填
-
-1. 核对现有 Core 字段迁移记录；已应用的 v2.7.2_1010 不重复执行，不改旧 SQL。
-2. 部署代码前应用新增 [模型快照迁移](../deploy/sql/migrations/v2.7.2_1015_runtime_outlet_snapshot.sql)。它只加过渡 JSONB 字段，保留旧模型 API/列。
-3. 在配置好后端数据库连接的部署环境使用 Python 3.11 执行 `backend/scripts/migrate_runtime_outlets.py --tenant-id <tenant>`，默认 dry run；确认结果后加 `--apply` 写入。失败项不能作为可运行的 Jiuwen 出口；重复 apply 对未变化档案幂等。
-4. 后续模型管理保存、健康检查和租户默认模型写入会在同一事务维护快照。普通修改按冻结声明校验、行锁合并和递增 revision。旁路修改旧列使档案陈旧时，Jiuwen 提前拒绝，需要通过管理保存或迁移修复。
-
-M4 本地验证：753 项 Python UT、4 项前端组件、10 个正式 Case / 54 项测试通过；包含真实隔离 PostgreSQL 的双向配置 Core 变更、长历史摘要、CM 开关、故障/取消恢复和浏览器旧会话续聊。完整发布工作流及商业模型验证不在本轮证明范围；显式版本绑定不改写，未部署。证据见原 SPEC task.md 的 M4 记录。
-
-上轮已在隔离 PostgreSQL 验证迁移、回填、并发和回滚。本轮完成 853 项 Python UT、4 项前端组件回归和 7 个正式 Case / 39 项检查，含混合 Core、子工具授权隔离、A2A、取消/超时/容量耗尽恢复与页面协作编辑。文本父子同时执行需要相应 sandbox worker 容量；协作排队和执行受有限总 deadline 控制。未修改现有应用数据库、未重建部署容器；具体证据与边界详见原 SPEC task.md。全局资产门禁仍被既有 F-111-RULE-02 引用阻塞；不声明全局通过或真实商业模型验收完成。
-
----
-
-## 以下为首版历史说明（不作为当前启用操作）
-
-## 本次实现
-
-Nexent 继续保存智能体、模型、工具、MCP 和 Skills 配置。执行时，`AgentCoreFactory` 根据 `agent_core` 创建 Adapter，由 Adapter 编译配置并执行所选 Core。
-
-```text
-Nexent 配置 → AgentCoreFactory → AgentCoreAdapter
-                                ├─ SmolagentsAdapter → 现有执行链路
-                                └─ JiuwenAdapter → create_deep_agent → Runner.run_agent_streaming
+```dotenv
+NEXENT_AGENT_CORE=jiuwen
 ```
 
-Jiuwen 路径使用原生模型客户端、LocalFunction、MCPTool 和 SkillUseRail。Nexent 原有工具的业务函数及沙箱设施继续复用；Jiuwen 负责模型循环、工具选择和调用。不会在该路径创建 smolagents Agent。
+支持 `smolagents` 和 `jiuwen`，未配置时默认 `smolagents`；空值或未知值在后端启动时拒绝。配置仅由 `backend/contracts/constants/environment.py` 读取，再由应用层注入 SDK，SDK 不读环境变量。
 
-## 如何启用
+变更后重启全部相关后端角色并刷新页面。Core 统一作用于普通会话、调试、工作台、本地主智能体和子智能体、NL2Agent 与 NL2Skills；远端 A2A 的内部 Core 仍由远端系统决定。模型出口、模型参数、工具和授权仍分别属于各智能体，不因统一选核而共用模型或扩大权限。
 
-1. 先执行新增迁移 `deploy/sql/migrations/v2.6.0_1010_agent_core_factory.sql`。迁移为每个智能体版本添加 `agent_core`，存量数据默认 `smolagents`。
-2. 后端依赖固定为 `openjiuwen==0.1.18`；单独使用 SDK 时安装 `nexent[jiuwen]`。
-3. 通过现有 `POST /agent/update` 接口，在原请求中增加以下字段，并使用现有版本发布流程：
+智能体配置页面不再显示 Core 字段或选择器。创建、更新、发布版本和导入导出不保存逐智能体 Core；旧客户端/导出包中的 `agent_core` 被忽略。上下文管理器开关、模型、资源绑定与业务提示继续保存。不兼容的非安全执行选项只在运行副本中归一，已启用的未支持护栏明确拒绝，不静默移除安全配置。
 
-```json
-{
-  "agent_core": "jiuwen",
-  "enable_context_manager": false,
-  "provide_run_summary": false,
-  "enable_planning": false,
-  "enable_protocol_repair_retry": false
-}
-```
+本特性未合并的 `v2.7.2_1010_agent_core_factory.sql` 已删除，ORM 不再要求 `ag_tenant_agent_t.agent_core`。新环境无需为选核新增列；旧测试库若已有多余列，新代码直接忽略，不自动 DROP 或重写业务数据。此结论只针对 Core 选核，上游其他功能的数据库迁移仍需按版本执行。
 
-以上为字段片段；请求仍需携带原接口要求的智能体标识等字段。模型需要支持 OpenAI 兼容的工具调用协议。Skills 使用 Nexent 解析后的授权快照，MCP 使用 Nexent 解析后的服务器地址及认证配置。
+SDK 独立调用仍支持显式注入 `AgentConfig(agent_core="jiuwen", ...)`，用于工厂及其他集成；系统内运行参数统一由后端部署策略生成。公共事件中的 `agent_core` 是历史运行来源标签，继续保留，不是智能体配置项。
 
-SDK 直接调用时设置 `AgentConfig(agent_core="jiuwen", ...)`。省略该字段或设置为 `smolagents`，使用原执行链路。当前没有新增前端选择控件。
+## Jiuwen 执行边界
 
-## 当前能力与边界
+- Jiuwen 负责 Agent loop；模型发送只走 Nexent 统一 ModelService 和可信 `ResolvedModelProfile`，不构造另一套提供商 HTTP 客户端。
+- 普通工具、MCP、Skills、知识库、子智能体和 A2A 通过公共授权资源桥执行。子智能体使用自己的模型出口、版本和授权；本地 Core 遵循同一全局策略。
+- Python 与文件生成使用 Nexent 受控执行器和配置的沙箱。Skills 是授权本地资源，不是待下载的 S3 文件；脚本只执行授权清单中真实存在的内容。
+- ContextManager 和数据库历史沿用 Nexent 的预算、开关、摘要及检查点；已有历史作为事实载入，不重放旧任务。变更部署 Core 后原会话仍按公共历史合同加载。
+- StepObservation、RunResult、工具/子调用、推理和容量经过公共输出协议，前端共用既有解析和渲染，不按 Core 增加另一套卡片。
 
-| 能力 | 当前实现 |
-| --- | --- |
-| 本地、内置及现有业务工具 | 业务函数绑定为原生 Jiuwen LocalFunction |
-| MCP | 原生 Jiuwen MCPTool；只暴露已配置且可见的工具，保留认证、用户上下文注入和超时控制 |
-| Skills | 原生 Rail 加载授权目录；读取与脚本通过原生工具调用，沿用 Nexent 脚本执行及沙箱后端 |
-| 并行工具 | 原生工具调用及授权工具列表的 parallel_executor |
-| 上下文、历史与流式结果 | 编译授权业务上下文和历史；转换为现有 MessageObserver 事件 |
-| 停止与资源回收 | 每次运行独立 owner/session，取消及清理只作用于当前运行 |
-| 保存、版本及导入导出 | 保留 agent_core；旧配置默认 smolagents |
+## 人在回路
 
-首版明确拒绝：子智能体、外部 A2A、Nexent Planning/Verification/Guardrail、协议修复、运行总结、自适应上下文压缩、模型提供方 Prompt Cache 策略及非默认 smolagents 输出协议。检查会返回配置错误；不会自动回退到 smolagents。关闭上下文压缩后仍执行已解析的输入预算检查。
+普通 Jiuwen 会话提供终止型 `ask_user` 能力。原生模式使用 JSON 工具调用，文本模式使用独立完整的字面量调用；两者共用 `ClarificationForm` 和缺少关键信息时的澄清策略。名称与业务工具冲突时使用避让名称。
 
-Skills 自动增加的宿主机 bash/read_file 能力已关闭。脚本实际运行位置沿用智能体的 Nexent 沙箱配置。同步业务函数无法被 Python 强制终止时，沿用 ThreadManager 的取消和 STUCK 标记，不能保证强制终止该函数。
+完整响应校验通过后，后端发出一个既有 `human_interaction` 表单并以 `completed/awaiting_input` 结束本轮，不进入 Python 沙箱、不执行同批其他工具、不继续请求模型，也不把等待答案当作取消。用户提交走原有普通消息及历史恢复链路。普通文字回答不会被自动识别为表单；信息充分时模型应直接作答。NL2Agent/NL2Skills 继续使用各自的业务卡片/产物协议。
 
-## 扩展其他 Core
+## 验证与部署状态
 
-继承 `AgentCoreAdapter`，实现 `capabilities()`、`validate()`、`run()`，按需实现 `prepare()` 和 `close()`，随后调用 `AgentCoreFactory.register("new_core", NewCoreAdapter)`。SDK 配置支持注册名；后端 API 当前仅开放 `smolagents` 和 `jiuwen`，接入新 Core 时同时扩展其配置校验。
+实现、传统 UT、受控 D3/D5、固定页面 D4、真实模型验收和已部署镜像分别记录，不用某一层通过替代其余层。最新进度及未完成范围见 [SPEC task](../../nexent-doc/docs/Developing/runtime-agent-core-factory/task.md)。2026-11-05 已重新构建并部署 `core-global-hitl-20261105` 后端/Web 镜像，当前全局 `jiuwen`。实际核对两种部署值均不显示逐智能体 Core 设置；算卦助手使用原 qwen3.8-max 出口的澄清卡片、提交续聊及已保存会话历史刷新验证通过。澄清提交在后端识别已保存的单层公共原生信封，仍使用既有表单身份和原子保存校验。工作台五模式与 NL2Agent/NL2Skills 完整真实业务旅程仍需单独验收。保存会话应从其历史入口（`thread_id`）打开；`agent_id` 是新会话入口，本轮没有修改该导航语义。
 
-## 验证结果
 
-- 新增正式 D1/D2/D3/D5 用例共 6 个，覆盖工厂、配置、事件、API 边界、原生执行、取消、MCP 超时和运行隔离。
-- D3 真实调用 Jiuwen Runner、MCP 客户端、本地工具和 Skill 脚本；仅模型响应及 MCP 服务由确定性本地服务提供。
-- Legacy 回归：SDK 执行 45 个、SDK 配置 69 个、数据库操作 67 个、后端配置构建 254 个测试通过。
-- 外部模型服务、远端沙箱和实际数据库迁移尚未执行，不能据此宣称生产环境验收完成。
+2026-11-06 后端已更新为 `jiuwen-loop-20261106`，Web沿用11-05版本。旧Agent思考参数在公共兼容边界按可信出口转换，保留原自定义字段优先级；会话低强度或关闭思考均可保存和运行，无需清空原智能体或历史配置。新格式参数与受保护字段仍严格校验。
 
-固定测试位于 `test/automation/{d1,d2,d3,d5}`；用例契约和实现绑定位于 `test/cases`、`test/manifests/agent-core-factory.yaml`。
+Jiuwen 的进程级 Runner 及回调框架由 `cores/jiuwen/execution_loop.py` 的稳定循环服务承载，归应用 `ThreadManager` 的 `background-service` 通道拥有，占一个专用服务名额。各主/子调用以独立协程并发运行、各自传递上下文与取消范围；服务自身在空 Context 中启动。单运行取消不会停止全局服务，应用退出排空任务后在原循环关闭 Runner；容量不足不另开非托管线程。阻塞 MCP 连接建立留在 Agent 工作线程。此修复避免跨事件循环竞争同一异步锁，不串行整个 Agent 执行，不修改前端渲染、模型或数据库合同。
+
+最终镜像中原沙箱多子智能体与 deepseek-v4-flash 的两个并发会话各三轮通过：6次主调用、18次首次子调用全部成功，实时与历史一致，原配置及历史未改。SDK UT 466项通过，受控并发、取消隔离及 MCP/Skills 资源回归另行记录；完整工作区仍有3项既有无关资产门禁错误。具体 Case、准备清理及交付证据见 SPEC，不将这些结果等同于全部模型或浏览器业务验收。
+
+2026-11-06 澄清历史读边界已修复，并按 `latest` 构建，经根 `deploy.sh --defaults docker --image-source local-latest --sandbox-mode full` 部署。正常 `completed/awaiting_input` 的空正文、空最终块、无错误结果表示等待用户输入，历史加载保留此终态；不将其当作缺少最终回答，也不改写数据库原记录。普通空回答、畸形协议、失败/停止和不符合上述形状的记录继续原校验。前端共用现有卡片和历史解析，无新增 Core 分支；具体回归和真实模型页面结果见 SPEC 最新记录。
+
+2026-11-09 Skill创建历史的业务事件边界已修复并重新部署latest。NL2Skill流在保存文件/摘要等业务事件前去除原生运行信封的判别字段，保留文件正文和追踪信息；可信Skill创建历史对旧文件包装做同样的只读投影，避免公共前端误报NEXENT_TERMINAL_MISSING或显示空文件。无需SQL或前端Core分支。121项UT、受控D3及真实工作台生成、保存、历史重开/刷新D4通过，截图旧记录3个文件逐项一致且原数据未改写；各Core真实模型验收范围见SPEC。
+
+2026-11-09 NL2Agent原生MCP交互边界已修复并部署latest。Jiuwen python_workflow识别MCPTool单层result文本并发出既有nl2a/nl2a_state；有效卡片阻止后续模型和工具派发，公共流排空拥有的工作线程与真实等待终态，普通取消保持原行为。卡片后已派发工具结果仍透传且边界保持；创建持久化和公共历史保留完整原生工具/结果身份。前端不增加Core分支。真实工作台完成卡片、提交续接及历史刷新，原配置/历史未改；详细验证和剩余门禁见SPEC。
+
+
+## NL2Agent结果与草稿入口
+
+工作台使用同一套公共实时/历史规则：只有可信且目标Agent ID一致的`agent_generation_completed`才生成结果跳转卡，消息内去重；后续普通回答不降级完成状态。澄清、空回答、字段保存和等待终态均不会产生结果卡，历史缺少完成事件时也不从正文推测成功，不改写原记录。
+
+提前编辑从工作台工具栏的“编辑当前草稿”进入，绑定当前线程草稿目标；没有草稿或退出创建模式时隐藏，运行期间禁用且不提供可点击链接。打开草稿不会自动提交澄清或触发生成，用户返回原会话可以继续提交。
+
+2026-11-09主/Web latest已重新构建部署。smolagents和Jiuwen分别用真实模型完成澄清、提前编辑返回、提交生成、结果卡及历史重开/刷新；当前部署恢复为jiuwen，私有配置逐字节还原、原数据未变。定向前端96项、Python复用96项、8变体D3通过；两次提供商TLS失败保留为失败，最终同版本重跑通过。全量前端与全工作区资产的既有阻塞另见SPEC task，不能由这些定向结果推出全量通过。

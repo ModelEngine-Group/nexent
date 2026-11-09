@@ -777,7 +777,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const state = parseNl2AgentState(part.content);
             if (
               getCreatorMode(detail) === "agent_create" &&
-              state?.event === "agent_generation_completed"
+              state?.event === "agent_generation_completed" &&
+              state.agent_id === detail.target?.id &&
+              !content.some(
+                (item) =>
+                  item.type === "data" && item.name === "nl2agent-created"
+              )
             ) {
               content.push({
                 type: "data",
@@ -1230,28 +1235,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
 
         flushReasoning();
-
-        // Older creation turns may have returned a final answer without the
-        // trusted completion event. Show the saved draft, not a false success.
-        if (
-          getCreatorMode(detail) === "agent_create" &&
-          detail.target?.type === "agent" &&
-          Number.isInteger(detail.target.id) &&
-          detail.target.id > 0 &&
-          messageParts.some(
-            (part) =>
-              part.type === "final_answer" && Boolean(part.content?.trim())
-          ) &&
-          !content.some(
-            (part) => part.type === "data" && part.name === "nl2agent-created"
-          )
-        ) {
-          content.push({
-            type: "data",
-            name: "nl2agent-created",
-            data: { agentId: detail.target.id, completed: false },
-          });
-        }
 
         for (const [path, fileContent] of historicalSkillFiles) {
           const extension = path.split(".").pop()?.toLowerCase();

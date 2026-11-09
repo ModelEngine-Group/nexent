@@ -33,7 +33,7 @@ from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
-from infrastructure.runtime_output import project_runtime_history
+from infrastructure.runtime_output import is_runtime_event, project_runtime_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -892,6 +892,12 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
             else:
                 # Assistant message: message is an array, need to process search_content_placeholder
+                config = history_data.get("workbench_config")
+                if (history_data.get("agent_system_key") == "nl2skill_main"
+                        or isinstance(config, dict) and config.get("mode") == "skill_create"):
+                    from management.services.skill.stream_parser import project_skill_history_units
+
+                    message_units = project_skill_history_units(message_units)
                 message_content, message_units, invalid_runtime_answer = project_runtime_history(
                     message_content, message_units
                 )
@@ -949,7 +955,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 tool_data = json.loads(unit_content)
                             except (json.JSONDecodeError, TypeError):
                                 tool_data = None
-                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                            if (isinstance(tool_data, dict) and 'content' in tool_data
+                                    and not is_runtime_event(tool_data)):
                                 processed_unit['content'] = tool_data.get('content', '')
                                 processed_unit['tool_name'] = tool_data.get('tool_name')
                                 processed_unit['tool_arguments'] = tool_data.get('tool_arguments')

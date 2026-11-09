@@ -40,10 +40,52 @@ def test_factory_service_protocol_loop(monkeypatch, protocol, scenario):
     assert "Tool execution error" not in observations
     if protocol == "native":
         assert [tool["function"]["name"] for tool in state["requests"][0]["tools"]] == [
-            "add", "nexent_execute_python",
+            "add", "ask_user", "nexent_execute_python",
         ]
         assert any(item.get("tool_call_id") == "provider-call-1" and item["content"] == "5"
                    for item in state["requests"][1]["messages"])
     else:
         assert "historical_tool_result" in observations
         assert any('"logs": "5' in str(item) for item in state["requests"][1]["messages"])
+
+
+@pytest.mark.parametrize("protocol", ["native", "text", "unknown"])
+@pytest.mark.parametrize("scenario", ["clarify", "clarify_bad", "clarify_mixed"])
+def test_terminal_clarification_runtime(monkeypatch, protocol, scenario):
+    """Exercise the real Jiuwen loop, complete response gate and next-run boundary."""
+    def missing(info):
+        info.query = "I need a reading; required birth details are missing."
+        info.agent_config.instructions = "Ask the user when essential birth data is missing."
+
+    info, state, output = asyncio.run(run_worker(monkeypatch, protocol, scenario, configure_run=missing))
+    cards = [event for event in output if event.get("type") == "human_interaction"]
+    assert not state["tool_calls"]
+    assert not info.stop_event.is_set()
+    if scenario == "clarify":
+        assert info.attempt_outcome == "completed", output[-1:]
+        assert info.run_result.end_reason == "awaiting_input"
+        assert len(state["requests"]) == 1
+        assert len(cards) == 1
+        payload = json.loads(cards[0]["content"]) if isinstance(cards[0]["content"], str) else cards[0]["content"]
+        assert payload["schema_version"] == 1 and payload["questions"][0]["id"] == "birth"
+        assert not any(event.get("type") in {"tool", "error", "final_answer"} for event in output)
+        assert any(event.get("type") == "step_observation" for event in output)
+
+        def answered(next_info):
+            next_info.query = "My birth date is 1999-08-26, 06:50, male. Use these supplied details."
+            from nexent.core.agents.contracts.run import AgentHistory
+
+            next_info.history = [AgentHistory(role="user", content=info.query),
+                                 AgentHistory(role="assistant", content="Please provide your birth date")]
+
+        following, state2, output2 = asyncio.run(run_worker(
+            monkeypatch, protocol, "clarify_answered", configure_run=answered))
+        assert following.attempt_outcome == "completed" and following.run_result.end_reason == "runner_answer"
+        assert len(state2["requests"]) == 1 and not state2["tool_calls"]
+        assert not any(event.get("type") == "human_interaction" for event in output2)
+        assert following.run_result.final_content == "ANSWER_USING_SUPPLIED_BIRTH_DATE"
+        assert "1999-08-26" in json.dumps(state2["requests"][0]["messages"])
+    else:
+        assert info.attempt_outcome == "failed", output[-1:]
+        assert not cards
+        assert len(state["requests"]) <= 4

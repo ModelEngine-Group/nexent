@@ -186,7 +186,9 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             root.external_a2a_agents = [ExternalA2AAgentConfig(agent_id="remote-id", name="delegate",
                 url=url + "/remote", protocol_type=remote_protocol, timeout=0.3 if fault == "timeout" else 5)]
         manager = ThreadManager("collaboration-runtime", {
-            name: LanePolicy(name=name, max_workers=2 if name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
+            # Reserve service ownership for both monitoring and the shared Jiuwen loop.
+            name: LanePolicy(name=name, max_workers=2 if name == "background-service" or
+                             name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()
         info = AgentRunInfo(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,

@@ -9,6 +9,8 @@ implementations:
 acceptance_bindings:
   AC-01:
   - test_factory_service_protocol_loop
+  AC-02:
+  - test_terminal_clarification_runtime
 preparation:
   families: []
   anchors: false

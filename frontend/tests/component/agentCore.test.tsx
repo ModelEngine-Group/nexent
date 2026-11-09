@@ -1,5 +1,6 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { compatibleCorePatch } from "@/lib/agentCore";
 import { useAgentStore } from "@/stores/agentStore";
 import { updateAgentInfo } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
@@ -26,8 +27,9 @@ const agent: Agent = {
   external_sub_agent_id_list: [9],
 };
 
-describe("Core configuration", () => {
+describe("Deployment-only Core preserves ordinary Agent settings", () => {
   beforeEach(() => {
+    vi.mocked(updateAgentInfo).mockClear();
     vi.mocked(updateAgentInfo).mockResolvedValue({
       success: true,
       data: { agent_id: 42 },
@@ -37,68 +39,72 @@ describe("Core configuration", () => {
     useAgentStore.getState().initialize(agent);
   });
 
-  it("preserves all settings through Jiuwen saves and a return to smolagents", async () => {
-    useAgentStore.getState().updateAgentConfig({ agent_core: "jiuwen" });
+  it("drops a legacy saved Core and persists CM without touching resources", async () => {
+    const legacy = { ...agent, agent_core: "jiuwen" };
+    useAgentStore.getState().initialize(legacy);
+    expect(useAgentStore.getState().editedAgent).not.toHaveProperty(
+      "agent_core"
+    );
+    useAgentStore
+      .getState()
+      .updateAgentConfig({ enable_context_manager: false });
     expect(await useAgentStore.getState().waitForIdle()).toBe(true);
-    expect(updateAgentInfo).toHaveBeenCalledWith({
+    expect(updateAgentInfo).toHaveBeenCalledExactlyOnceWith({
       agent_id: 42,
-      agent_core: "jiuwen",
+      enable_context_manager: false,
     });
     expect(useAgentStore.getState().editedAgent).toMatchObject({
-      enable_context_manager: true,
+      enable_context_manager: false,
       provide_run_summary: true,
-      sub_agent_id_list: [8],
-      sub_agent_relations: [{ agent_id: 8, version_no: 1 }],
-      external_sub_agent_id_list: [9],
-    });
-    expect(useAgentStore.getState().editedAgent).toMatchObject({
       model: "model",
       description: "unchanged",
       tools: [],
       skills: [],
+      sub_agent_id_list: [8],
+      sub_agent_relations: [{ agent_id: 8, version_no: 1 }],
+      external_sub_agent_id_list: [9],
     });
+    expect(useAgentStore.getState().savedAgent).not.toHaveProperty(
+      "agent_core"
+    );
+  });
+
+  it("never mutates read-only CM or resource configuration", async () => {
+    useAgentStore.getState().initialize({ ...agent, permission: "READ_ONLY" });
     useAgentStore
       .getState()
-      .updateAgentConfig({ enable_context_manager: true });
+      .updateAgentConfig({ enable_context_manager: false });
     await useAgentStore.getState().waitForIdle();
     expect(useAgentStore.getState().editedAgent?.enable_context_manager).toBe(
       true
     );
-    useAgentStore.getState().updateAgentConfig({
-      agent_core: "smolagents",
-      enable_context_manager: true,
-    });
-    await useAgentStore.getState().waitForIdle();
-    expect(useAgentStore.getState().editedAgent).toMatchObject({
-      agent_core: "smolagents",
-      enable_context_manager: true,
-      sub_agent_id_list: [8],
-    });
-  });
-
-  it("defaults legacy records and never mutates readonly configuration", async () => {
-    useAgentStore.getState().initialize({ ...agent, permission: "READ_ONLY" });
-    useAgentStore.getState().updateAgentConfig({ agent_core: "jiuwen" });
-    await useAgentStore.getState().waitForIdle();
-    expect(useAgentStore.getState().editedAgent?.agent_core).toBe("smolagents");
     expect(updateAgentInfo).not.toHaveBeenCalled();
   });
 
-  it("rolls back a failed Core save and permits retry", async () => {
+  it("rolls back a failed CM save and permits retry", async () => {
     vi.mocked(updateAgentInfo).mockResolvedValueOnce({
       success: false,
       data: null,
       message: "rejected",
       error: undefined,
     });
-    useAgentStore.getState().updateAgentConfig({ agent_core: "jiuwen" });
+    useAgentStore
+      .getState()
+      .updateAgentConfig({ enable_context_manager: false });
     expect(await useAgentStore.getState().waitForIdle()).toBe(false);
-    expect(useAgentStore.getState().editedAgent?.agent_core).toBe("smolagents");
-    useAgentStore.getState().updateAgentConfig({ agent_core: "jiuwen" });
+    expect(useAgentStore.getState().editedAgent?.enable_context_manager).toBe(
+      true
+    );
+    useAgentStore
+      .getState()
+      .updateAgentConfig({ enable_context_manager: false });
     expect(await useAgentStore.getState().waitForIdle()).toBe(true);
+    expect(useAgentStore.getState().editedAgent?.enable_context_manager).toBe(
+      false
+    );
   });
 
-  it("retains enabled guardrail and all its rules without changing caller input", () => {
+  it("retains guardrail settings without rewriting the caller patch", async () => {
     const rules = [
       { name: "rule", pattern: "secret", severity: "block" as const },
     ];
@@ -118,14 +124,19 @@ describe("Core configuration", () => {
         },
       },
     };
-    const result = compatibleCorePatch({ agent_core: "jiuwen" }, patch);
-    expect(result.verification_config?.guardrail_config).toMatchObject({
-      enabled: true,
-      rules,
+    useAgentStore.getState().updateAgentConfig(patch);
+    expect(await useAgentStore.getState().waitForIdle()).toBe(true);
+    expect(updateAgentInfo).toHaveBeenCalledExactlyOnceWith({
+      agent_id: 42,
+      ...patch,
     });
     expect(patch.verification_config.guardrail_config.enabled).toBe(true);
-    expect(compatibleCorePatch(null, { description: "same" })).toEqual({
-      description: "same",
+    expect(
+      useAgentStore.getState().editedAgent?.verification_config
+        ?.guardrail_config
+    ).toMatchObject({
+      enabled: true,
+      rules,
     });
   });
 });

@@ -65,7 +65,11 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     const before = runCount;
     await page.goto(`${base}/zh/newchat?${conversation ? "thread_id=" + conversation : "agent_id=" + state.agent_id}`);
     await expect(page.getByRole("textbox").last()).toBeVisible();
-    if (count) await expect(roots()).toHaveCount(count);
+    if (count) {
+      await expect(roots()).toHaveCount(count);
+      for (const card of await roots().locator(".aui-reasoning-root").all())
+        await expect(card).not.toContainText(/"type"\s*:\s*"step_count"/);
+    }
     expect(runCount).toBe(before);
   };
   const openProcess = async (row: any) => {

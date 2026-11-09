@@ -1536,6 +1536,7 @@ const HomeContent: FC = () => {
                     mode={workbenchState.config.mode}
                     onExit={() => void changeCreationMode("generic_chat")}
                     disabled={isThreadRunning}
+                    draftAgentId={creationAgent?.agentId}
                     onSelect={(mode) => void changeCreationMode(mode)}
                   />
                 ),

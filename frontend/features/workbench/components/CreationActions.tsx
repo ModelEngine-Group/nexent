@@ -3,6 +3,8 @@
 import type { WorkbenchMode } from "../types";
 import { Lightbulb, Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export function CreationActions({
   canCreateAgent,
@@ -11,12 +13,14 @@ export function CreationActions({
   onSelect,
   mode,
   onExit,
+  draftAgentId,
 }: {
   canCreateAgent: boolean;
   canCreateSkill: boolean;
   disabled: boolean;
   mode?: WorkbenchMode;
   onExit?: () => void;
+  draftAgentId?: number;
   onSelect: (
     mode: Extract<WorkbenchMode, "agent_create" | "skill_create">
   ) => void;
@@ -57,6 +61,50 @@ export function CreationActions({
           {t("workbench.controls.skillCreate", "技能创建")}
         </button>
       )}
+      {canCreateAgent &&
+        mode === "agent_create" &&
+        Number.isInteger(draftAgentId) &&
+        Number(draftAgentId) > 0 && (
+          <AgentDraftEditAction
+            agentId={Number(draftAgentId)}
+            disabled={disabled}
+          />
+        )}
     </div>
+  );
+}
+
+function AgentDraftEditAction({
+  agentId,
+  disabled,
+}: {
+  agentId: number;
+  disabled: boolean;
+}) {
+  const { t, i18n } = useTranslation();
+  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
+    ? "en"
+    : "zh";
+  const label = t("workbench.creation.editDraft", "编辑当前草稿");
+  if (disabled)
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        data-testid="workbench-edit-agent-draft"
+      >
+        {label}
+      </Button>
+    );
+  return (
+    <Button variant="outline" size="sm" asChild>
+      <Link
+        data-testid="workbench-edit-agent-draft"
+        href={`/${locale}/agents/${agentId}`}
+      >
+        {label}
+      </Link>
+    </Button>
   );
 }

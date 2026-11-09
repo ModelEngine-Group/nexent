@@ -5,11 +5,12 @@
 import { useTranslation } from "react-i18next";
 import { Checkbox, Form, InputNumber, Switch, Row, Col } from "antd";
 
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
-import AgentCoreSelector from "./agent-core-selector";
+import ContextManagerSetting from "./context-manager-setting";
 import { AgentSettingHint } from "./agent-setting-hint";
 
 interface AgentRunPolicyProps {
@@ -21,7 +22,8 @@ function AgentProtocolRepairOption() {
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const isReadOnly = useAgentReadOnly();
-  const coreUnsupported = editedAgent.agent_core === "jiuwen";
+  const { agentCore } = useDeployment();
+  const coreUnsupported = agentCore === "jiuwen";
 
   return (
     <AgentSettingHint
@@ -48,12 +50,13 @@ export default function AgentRunPolicy({
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const isReadOnly = useAgentReadOnly();
-  const coreUnsupported = editedAgent.agent_core === "jiuwen";
+  const { agentCore } = useDeployment();
+  const coreUnsupported = agentCore === "jiuwen";
 
   if (highFidelity) {
     return (
       <div className="flex w-[296px] max-w-full flex-col gap-4 text-sm leading-[22px] tracking-[0px] text-[#191919] [&_.ant-checkbox-wrapper]:!m-0 [&_.ant-checkbox-wrapper]:!h-[22px] [&_.ant-checkbox-wrapper]:!text-sm [&_.ant-checkbox-wrapper]:!leading-[22px] [&_.ant-checkbox-wrapper]:!text-[#191919] [&_.ant-checkbox-label]:!pl-2 [&_.ant-checkbox-label]:!pr-0">
-        <AgentCoreSelector />
+        <ContextManagerSetting />
         <div className="flex flex-col gap-2">
           <label htmlFor="agent-max-step">
             {t("agentConfig.layout.maxRunSteps")}
@@ -121,7 +124,7 @@ export default function AgentRunPolicy({
 
   return (
     <div className="w-full">
-      <AgentCoreSelector />
+      <ContextManagerSetting />
       <Row gutter={[16, 0]}>
         {/* Max Steps */}
         <Col xs={24} sm={12}>

@@ -267,3 +267,30 @@ def test_history_returns_structured_response_without_replacing_readable_text(mon
         assert result['clarification_response']['source_message_id'] == 10
     else:
         assert 'clarification_response' not in result
+
+
+@pytest.mark.parametrize("content", ["native", "wrong_type", "wrong_schema", "missing_turn", "nested"])
+def test_saved_native_form_keeps_the_same_owned_atomic_response_contract(storage, content):
+    envelope = {"schema_version": 1, "runtime_mode": "native_agent", "type": "human_interaction",
+                "agent_core": "jiuwen", "turn_id": "turn", "sequence": 4, "content": json.dumps(FORM)}
+    if content == "wrong_type":
+        envelope["type"] = "tool_result"
+    elif content == "wrong_schema":
+        envelope["schema_version"] = 2
+    elif content == "missing_turn":
+        envelope.pop("turn_id")
+    elif content == "nested":
+        envelope["content"] = json.dumps(dict(envelope))
+    storage.execute(text("UPDATE nexent.conversation_message_unit_t SET unit_content=:form WHERE message_id=10"),
+                    {"form": json.dumps(envelope)})
+    storage.commit()
+    if content == "native":
+        message_id = save()
+        saved = json.loads(storage.execute(text("SELECT unit_content FROM nexent.conversation_message_unit_t WHERE message_id=:id"),
+                                           {"id": message_id}).scalar_one())
+        assert saved["source_message_id"] == 10 and saved["unit_index"] == 7
+        assert saved["answers"] == RESPONSE["answers"]
+    else:
+        with pytest.raises(AppException, match="Clarification"):
+            save()
+        assert storage.execute(text("SELECT count(*) FROM nexent.conversation_message_t")).scalar() == 1
