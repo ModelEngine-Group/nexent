@@ -60,4 +60,3 @@ def test_reasoning_stream_and_unchanged_definition(model_index):
             "completed_answers": len(finals), "definition_sha256_before": before,
             "definition_sha256_after": after, "observed_result": 323,
         })
-
