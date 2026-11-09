@@ -3,7 +3,6 @@
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
-    Boolean,
     Column,
     Index,
     Integer,
@@ -91,11 +90,6 @@ class ConversationMessage(TableBase):
     """
     __tablename__ = "conversation_message_t"
     __table_args__ = {"schema": SCHEMA}
-
-    question_bookmarked = Column(
-        Boolean, nullable=False, server_default=text("false"),
-        comment="Owner's question bookmark; independent of message content and conversation activity",
-    )
 
     message_id = Column(Integer, Sequence(
         "conversation_message_t_message_id_seq", schema=SCHEMA), primary_key=True, nullable=False)

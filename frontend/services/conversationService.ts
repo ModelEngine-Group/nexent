@@ -42,28 +42,6 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
-  async getQuestionBookmarks(id: number): Promise<number[]> {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.conversation.questionBookmarks(id),
-      { headers: getAuthHeaders() }
-    );
-    return (await response.json()).data.message_ids;
-  },
-  async setQuestionBookmark(
-    id: number,
-    messageId: number,
-    bookmarked: boolean
-  ): Promise<number[]> {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.conversation.questionBookmark(id, messageId),
-      {
-        method: "PUT",
-        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ bookmarked }),
-      }
-    );
-    return (await response.json()).data.message_ids;
-  },
   async getCreatorHistories(
     kind: ConversationTarget["type"],
     targetId: number,

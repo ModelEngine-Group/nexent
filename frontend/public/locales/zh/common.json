@@ -6762,9 +6762,5 @@
   "workbench.creationConfirmation.hint": "选择后提交，确认进入创建模式或继续当前对话。",
   "workbench.creationConfirmation.noPermission": "你没有进入该创建模式的权限。",
   "workbench.creationConfirmation.saveFailed": "保存确认失败，请重试。",
-  "workbench.creationConfirmation.originalRequest": "用户原始需求：",
-  "chat.questions.bookmark": "标记问题",
-  "chat.questions.bookmarkFailed": "问题标记未能读取或保存，请重试",
-  "chat.questions.bookmarkRetry": "重试",
-  "chat.questions.unbookmark": "取消标记"
+  "workbench.creationConfirmation.originalRequest": "用户原始需求："
 }

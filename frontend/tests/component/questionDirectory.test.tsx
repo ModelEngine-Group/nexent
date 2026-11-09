@@ -90,7 +90,7 @@ test("QuestionDirectoryRail previews question and reply on keyboard focus", asyn
   fireEvent.focus(
     screen.getByRole("button", { name: "chat.questions.jump:1" })
   );
-  const preview = await screen.findByRole("dialog");
+  const preview = await screen.findByRole("tooltip");
   expect(preview.textContent).toContain("question u1");
   expect(preview.textContent).toContain("question a1");
 });
@@ -128,7 +128,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       if (this === second) return rect(0, 15, 32, 15);
       if (this === third) return rect(0, 30, 32, 15);
       // A tall preview beside the ticks overlaps the diagonal hover corridor.
-      if (this.getAttribute("role") === "dialog") return rect(40, 0, 288, 300);
+      if (this.getAttribute("role") === "tooltip") return rect(40, 0, 288, 300);
       return rect(0, 0, 0, 0);
     });
   try {
@@ -137,7 +137,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientX: 31,
       clientY: 38,
     });
-    expect((await screen.findByRole("dialog")).textContent).toContain(
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
       "question u3"
     );
     fireEvent.pointerLeave(third, {
@@ -151,7 +151,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientY: 25,
     });
     await waitFor(() => {
-      const previews = screen.getAllByRole("dialog");
+      const previews = screen.getAllByRole("tooltip");
       expect(previews).toHaveLength(1);
       expect(previews[0].textContent).toContain("question u2");
       expect(previews[0].textContent).not.toContain("question u3");
@@ -161,7 +161,7 @@ test("QuestionDirectoryRail switches previews when moving from Q3 to adjacent Q2
       clientX: 0,
       clientY: 15,
     });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
   } finally {
     bounds.mockRestore();
   }
@@ -180,80 +180,6 @@ test("QuestionDirectoryRail has no expanded-directory entry or search popover", 
   expect(
     screen.queryByRole("textbox", { name: "chat.questions.search" })
   ).toBeNull();
-});
-
-test("bookmark action is interactive, preserves preview and requests explicit desired state", async () => {
-  const questions = collectQuestionDirectory([makeMessage("u1", "user")]);
-  const onBookmark = vi.fn();
-  const { rerender, container } = render(
-    <QuestionDirectoryRail
-      questions={questions}
-      onJump={vi.fn()}
-      onBookmark={onBookmark}
-      bookmarkedIds={new Set()}
-    />
-  );
-  const tick = screen.getByRole("button", { name: "chat.questions.jump:1" });
-  fireEvent.pointerMove(tick, { pointerType: "mouse" });
-  const card = await screen.findByRole("dialog");
-  fireEvent.pointerLeave(tick);
-  fireEvent.pointerEnter(card);
-  await new Promise((resolve) => setTimeout(resolve, 220));
-  expect(screen.getByRole("dialog")).toBeVisible();
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.bookmark" })
-  );
-  expect(onBookmark).toHaveBeenCalledWith("u1", true);
-  rerender(
-    <QuestionDirectoryRail
-      questions={questions}
-      onJump={vi.fn()}
-      onBookmark={onBookmark}
-      bookmarkedIds={new Set(["u1"])}
-    />
-  );
-  expect(
-    container.querySelector('[data-slot="question-rail-bookmark"]')
-  ).not.toBeNull();
-  const remove = screen.getByRole("button", {
-    name: "chat.questions.unbookmark",
-  });
-  expect(remove).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(remove);
-  expect(onBookmark).toHaveBeenLastCalledWith("u1", false);
-  fireEvent.keyDown(card, { key: "Escape" });
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-});
-
-test("unknown or pending bookmark state is disabled and read failures can retry", async () => {
-  const onBookmark = vi.fn();
-  const retry = vi.fn();
-  render(
-    <QuestionDirectoryRail
-      questions={collectQuestionDirectory([makeMessage("u1", "user")])}
-      onJump={vi.fn()}
-      onBookmark={onBookmark}
-      canBookmark={() => false}
-      bookmarkFailed
-      onBookmarkRetry={retry}
-    />
-  );
-  fireEvent.focus(
-    screen.getByRole("button", { name: "chat.questions.jump:1" })
-  );
-  const button = await screen.findByRole("button", {
-    name: "chat.questions.bookmark",
-  });
-  expect(button).toBeDisabled();
-  fireEvent.click(button);
-  expect(onBookmark).not.toHaveBeenCalled();
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "chat.questions.bookmarkFailed"
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "chat.questions.bookmarkRetry" })
-  );
-  expect(retry).toHaveBeenCalledOnce();
 });
 
 test("QuestionDirectoryRail keeps the active tick visible without scrolling chat", () => {

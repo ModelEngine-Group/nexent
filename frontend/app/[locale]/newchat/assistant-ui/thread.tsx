@@ -67,7 +67,6 @@ import {
 } from "../ui/artifacts-panel";
 import { ConversationArtifactsEntryProvider } from "../ui/conversation-artifacts-context";
 import { QuestionDirectoryRail } from "../ui/question-directory-rail";
-import { QuestionBookmarkRail } from "../ui/question-bookmark-rail";
 import { useAutoArtifactPreview } from "../components/use-auto-artifact-preview";
 import { ArtifactDocumentPanel } from "../components/artifact-document-panel";
 import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
@@ -986,10 +985,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           )}
 
         <ConversationArtifactsToolbarEntry />
-        <QuestionBookmarkRail
-          conversationId={conversationId}
-          isRunning={isRunning}
-          readOnly={readOnly || isShareMode}
+        <QuestionDirectoryRail
           questions={questionDirectory}
           onJump={handleJumpToQuestion}
           activeMessageId={activeQuestionId}

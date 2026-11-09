@@ -224,8 +224,7 @@ def message_db(monkeypatch):
             'CREATE TABLE nexent.conversation_message_t '
             '(message_id INTEGER PRIMARY KEY, conversation_id INTEGER, message_index INTEGER, '
             'message_role TEXT, message_source TEXT, message_content TEXT, minio_files TEXT, '
-            'opinion_flag TEXT, question_bookmarked BOOLEAN NOT NULL DEFAULT FALSE, '
-            'status TEXT, delete_flag TEXT, created_by TEXT, updated_by TEXT, '
+            'opinion_flag TEXT, status TEXT, delete_flag TEXT, created_by TEXT, updated_by TEXT, '
             'create_time DATETIME, update_time DATETIME)')
         connection.exec_driver_sql(
             'CREATE TABLE nexent.conversation_message_unit_t '
