@@ -64,8 +64,7 @@ export function AgentPublication({
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const shareUrl = buildAgentShareUrl(origin, locale, agentId);
   const northboundUrl = buildNorthboundRunUrl(
-    frontendConfig.data?.northboundBaseUrl,
-    origin
+    frontendConfig.data?.northboundBaseUrl
   );
   const publishedName = publishedAgents.data?.find(
     (agent) => agent.id === String(agentId)

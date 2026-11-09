@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -225,8 +227,8 @@ test("builds safe share and northbound API examples", () => {
     "https://api.example.com/root/nb/v1/chat/run"
   );
   assert.equal(
-    buildNorthboundRunUrl(undefined, "https://nexent.example/"),
-    "https://nexent.example/nb/v1/chat/run"
+    buildNorthboundRunUrl(),
+    "http://localhost:5013/api/nb/v1/chat/run"
   );
   assert.match(
     buildNorthboundCurl("demo-agent", "https://api.example.com/nb/v1/chat/run"),
@@ -241,6 +243,19 @@ test("builds safe share and northbound API examples", () => {
     buildNorthboundDocsUrl("en"),
     "https://modelengine-group.github.io/nexent/en/integration/integration-out/northbound-api.html"
   );
+});
+
+test("northbound examples preserve the public API prefix and normalize empty configuration", () => {
+  assert.equal(
+    buildNorthboundRunUrl(" https://api.example.com/api/// "),
+    "https://api.example.com/api/nb/v1/chat/run"
+  );
+  for (const value of [undefined, "", "   "]) {
+    assert.equal(
+      buildNorthboundRunUrl(value),
+      "http://localhost:5013/api/nb/v1/chat/run"
+    );
+  }
 });
 
 test("builds an editable default Agent version name from name and timestamp", () => {

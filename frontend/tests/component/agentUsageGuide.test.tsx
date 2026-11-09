@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -568,7 +570,7 @@ describe("Agent usage guide component coverage", () => {
     ).toBeInTheDocument();
   });
 
-  it("UT-FE-AGUG-019 uses the current site origin when config is absent", async () => {
+  it("UT-FE-AGUG-019 uses the northbound service default when config is absent", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <AgentUsageGuideModal
@@ -580,7 +582,7 @@ describe("Agent usage guide component coverage", () => {
     );
     await openTab(user, "agentUsageGuide.tabs.northbound");
     expect(
-      await screen.findByText(/http:\/\/localhost:\d+\/nb\/v1\/chat\/run/)
+      await screen.findByText(/http:\/\/localhost:5013\/api\/nb\/v1\/chat\/run/)
     ).toBeInTheDocument();
   });
 
