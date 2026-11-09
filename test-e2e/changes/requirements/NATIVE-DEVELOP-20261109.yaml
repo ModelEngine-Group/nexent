@@ -40,7 +40,8 @@
         "test/sdk/core/model_service/test_native_stream_compatibility.py",
         "test/sdk/core/model_service/test_native_service_observability.py",
         "test/backend/contracts/test_agent_runtime_config.py",
-        "test/backend/utils/test_final_answer_projection.py"
+        "test/backend/utils/test_final_answer_projection.py",
+        "test/backend/management/test_contracts_directory_architecture.py"
       ],
       "behaviors": [
         "Capability selection per actual parent/child model; model service profile-controlled generation; validated native generation completion and side-effect prevention."

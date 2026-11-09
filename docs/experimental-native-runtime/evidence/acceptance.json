@@ -183,9 +183,16 @@
         "tests": 2,
         "failures": 0,
         "skipped": 0
+      },
+      {
+        "file": "test/backend/management/test_contracts_directory_architecture.py",
+        "exit_code": 0,
+        "tests": 7,
+        "failures": 0,
+        "skipped": 0
       }
     ],
-    "total_tests": 1291,
+    "total_tests": 1298,
     "failures": 0,
     "skipped": 0
   },
@@ -197,7 +204,7 @@
   "formal": [
     {
       "case_id": "AGENT-NATIVE-D2-001",
-      "run_id": "20261109T111249656201Z-AGENT-NATIVE-D2-001",
+      "run_id": "20261109T113417066776Z-AGENT-NATIVE-D2-001",
       "status": "PASS",
       "test_summary": {
         "tests": 5,
@@ -233,7 +240,7 @@
     },
     {
       "case_id": "AGENT-NATIVE-D5-001",
-      "run_id": "20261109T111400507017Z-AGENT-NATIVE-D5-001",
+      "run_id": "20261109T113519378102Z-AGENT-NATIVE-D5-001",
       "status": "PASS",
       "test_summary": {
         "tests": 1,
@@ -250,5 +257,6 @@
     "tool_detail_screenshot": "interleaved-tools.png",
     "observations": "Public progress before direct directory call and Python execution; final observed 323. Reload/reopen retained text/tool order and one final answer.",
     "note": "No invented filename when the new workspace was empty."
-  }
+  },
+  "ci_correction": "Pure runtime parser moved to existing configuration helpers to satisfy constants architecture; six configuration and seven architecture tests pass. Rebuilt/deployed main, API and image checks repeated; unchanged SDK/frontend proofs retained."
 }

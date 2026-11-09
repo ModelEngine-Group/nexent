@@ -17,6 +17,14 @@ def parse_positive_int(raw_value: object, name: str, default: int) -> int:
     return parsed
 
 
+def parse_agent_runtime(raw_value: object) -> str:
+    """Validate the runtime switch while keeping environment declarations simple."""
+    value = "codeagent" if raw_value is None else raw_value
+    if value not in ("codeagent", "toolcalling"):
+        raise ValueError("NEXENT_AGENT_RUNTIME must be codeagent or toolcalling")
+    return value
+
+
 def parse_port(raw_value: object, name: str, default: int) -> int:
     """Parse a TCP port while keeping environment declarations assignment-only."""
     port = parse_positive_int(raw_value, name, default)

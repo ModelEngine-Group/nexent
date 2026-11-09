@@ -1,4 +1,61 @@
 {
+  "api-python": {
+    "scenario": "python",
+    "agent_id": 4,
+    "model_id": 1,
+    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "event_types": [
+      "execution_logs",
+      "final_answer",
+      "model_attempt_control",
+      "model_output",
+      "other",
+      "step_count",
+      "token_count",
+      "tool"
+    ],
+    "actual_python_observation": true,
+    "capability_fallback": false,
+    "expected_marker": "323"
+  },
+  "api-plain": {
+    "scenario": "plain",
+    "agent_id": 4,
+    "model_id": 1,
+    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "event_types": [
+      "final_answer",
+      "model_attempt_control",
+      "model_output",
+      "other",
+      "step_count",
+      "token_count"
+    ],
+    "actual_python_observation": false,
+    "capability_fallback": false,
+    "expected_marker": "NATIVE_RUNTIME_OK"
+  },
+  "api-fallback_plain": {
+    "scenario": "fallback_plain",
+    "agent_id": 4,
+    "model_id": 2,
+    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
+    "event_types": [
+      "agent_new_run",
+      "final_answer",
+      "model_attempt_control",
+      "model_output_deep_thinking",
+      "other",
+      "step_count",
+      "token_count"
+    ],
+    "actual_python_observation": false,
+    "capability_fallback": true,
+    "expected_marker": "NATIVE_RUNTIME_OK"
+  },
   "api-fallback_python": {
     "scenario": "fallback_python",
     "agent_id": 4,
@@ -21,65 +78,8 @@
     "capability_fallback": true,
     "expected_marker": "323"
   },
-  "api-plain": {
-    "scenario": "plain",
-    "agent_id": 4,
-    "model_id": 1,
-    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "event_types": [
-      "final_answer",
-      "model_attempt_control",
-      "model_output",
-      "other",
-      "step_count",
-      "token_count"
-    ],
-    "actual_python_observation": false,
-    "capability_fallback": false,
-    "expected_marker": "NATIVE_RUNTIME_OK"
-  },
-  "api-python": {
-    "scenario": "python",
-    "agent_id": 4,
-    "model_id": 1,
-    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "event_types": [
-      "execution_logs",
-      "final_answer",
-      "model_attempt_control",
-      "model_output",
-      "other",
-      "step_count",
-      "token_count",
-      "tool"
-    ],
-    "actual_python_observation": true,
-    "capability_fallback": false,
-    "expected_marker": "323"
-  },
   "api-unauthenticated": {
     "status_code": 500,
     "denied_before_stream": true
-  },
-  "api-fallback_plain": {
-    "scenario": "fallback_plain",
-    "agent_id": 4,
-    "model_id": 2,
-    "definition_sha256_before": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "definition_sha256_after": "c7d5aea5236c8f0679d56800dcc1cacc62487f4e20797114c68aea61bd65c332",
-    "event_types": [
-      "agent_new_run",
-      "final_answer",
-      "model_attempt_control",
-      "model_output_deep_thinking",
-      "other",
-      "step_count",
-      "token_count"
-    ],
-    "actual_python_observation": false,
-    "capability_fallback": true,
-    "expected_marker": "NATIVE_RUNTIME_OK"
   }
 }
