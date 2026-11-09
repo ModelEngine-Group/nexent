@@ -78,6 +78,7 @@ def test_ac003_adapter_preserves_wire_history_and_releases_permit(
     for _ in range(2):
         message = adapter.generate(history)
         assert message.content == "Answer"
+        assert adapter.last_finish_reason == "stop"
         assert message.token_usage.input_tokens == 4
     request = dispatch.call_args.kwargs
     assert request["messages"] == history

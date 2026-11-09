@@ -169,6 +169,10 @@ class NativeModel(Model):
         super().__init__()
         self.delegate = model
 
+    @property
+    def last_finish_reason(self):
+        return getattr(self.delegate, "last_finish_reason", None)
+
     def generate(self, messages, tools_to_call_from=None, **kwargs):
         model = self.delegate
         for attempt in range(1, model.retry_config.max_attempts + 1):
