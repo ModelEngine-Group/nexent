@@ -8,12 +8,29 @@ from contextlib import aclosing
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import EVENT_ID_PATTERN, AgentResume
-from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
 from nexent.core.concurrency import run_blocking
 
 _OBSERVER_LINE = b"event: agentos_observer"
 _PUBLIC_ERROR = b"data: " + json.dumps({"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE}).encode("utf-8")
+
+
+def active_run_error_response(language: str) -> StreamingResponse:
+    message = (
+        "当前会话已有智能体任务正在运行，请等待任务完成或先停止任务后再重试。"
+        if language == LANGUAGE["ZH"]
+        else "An agent run is already active for this conversation. Wait for it to finish or stop it before retrying."
+    )
+
+    async def events():
+        payload = json.dumps({"type": "error", "content": message}, ensure_ascii=False)
+        yield f"data: {payload}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "Connection": "keep-alive",
+        "X-Accel-Buffering": "no", "X-Stream-Status": "conflict",
+    })
 
 
 async def iter_sse_frames(response):
@@ -73,7 +90,8 @@ async def _present_observer(data, request, user_id):
 
 
 def present_public_resume(
-    response: StreamingResponse, request: AgentResume, user_id: str, *, on_terminal=None, created=False,
+    response: StreamingResponse, request: AgentResume, user_id: str, *,
+    on_terminal=None, created=False, include_journal_controls=True,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -91,12 +109,17 @@ def present_public_resume(
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
                 if kind != _OBSERVER_LINE:
-                    if (on_terminal is not None and kind == b"event: agentos_terminal"
-                            and cursor.startswith(f"id: {request.run_id}:".encode())):
-                        await on_terminal()
-                        if not error_presented and json.loads(data.removeprefix(b"data: ")).get("status") == "failed":
-                            yield _PUBLIC_ERROR + b"\n\n"
-                    yield frame + b"\n\n"
+                    if kind == b"event: agentos_terminal" and cursor.startswith(f"id: {request.run_id}:".encode()):
+                        if on_terminal is not None:
+                            await on_terminal()
+                            if not error_presented and json.loads(data.removeprefix(b"data: ")).get("status") == "failed":
+                                yield _PUBLIC_ERROR + b"\n\n"
+                        if not include_journal_controls:
+                            continue
+                    if not include_journal_controls and cursor == b"event: agentos_error":
+                        yield _PUBLIC_ERROR + b"\n\n"
+                    else:
+                        yield frame + b"\n\n"
                     continue
                 cursor_id = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
                 if (not cursor.startswith(b"id: ") or not re.fullmatch(EVENT_ID_PATTERN, cursor_id)
@@ -108,7 +131,10 @@ def present_public_resume(
                 except (TypeError, ValueError):
                     data, is_error = _PUBLIC_ERROR, True
                 error_presented |= is_error
-                yield cursor + b"\n" + data + b"\n\n"
+                yield (cursor + b"\n" if include_journal_controls else b"") + data + b"\n\n"
 
-    headers = {name: value for name, value in response.headers.items() if name != "content-length"}
+    excluded_headers = {"content-length"}
+    if not include_journal_controls:
+        excluded_headers.add("x-agentos-run-id")
+    headers = {name: value for name, value in response.headers.items() if name not in excluded_headers}
     return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)

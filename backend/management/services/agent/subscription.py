@@ -18,6 +18,7 @@ from typing import (
     Dict,
 )
 
+from management.services.agent.agentos_events import active_run_error_response
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
@@ -832,29 +833,7 @@ async def run_agent_stream(
             resolved_user_id,
             agent_request.conversation_id,
         )
-        active_message = (
-            "当前会话已有智能体任务正在运行，请等待任务完成或先停止任务后再重试。"
-            if language == LANGUAGE["ZH"]
-            else "An agent run is already active for this conversation. Wait for it to finish or stop it before retrying."
-        )
-
-        async def active_run_error_stream():
-            payload = json.dumps(
-                {"type": "error", "content": active_message},
-                ensure_ascii=False,
-            )
-            yield f"data: {payload}\n\n"
-
-        return StreamingResponse(
-            active_run_error_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "X-Stream-Status": "conflict",
-            },
-        )
+        return active_run_error_response(language)
 
     channel = None
     admission_scope = getattr(agent_request, "_run_admission_scope", None)

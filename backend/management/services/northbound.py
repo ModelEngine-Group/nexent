@@ -22,10 +22,8 @@ from contracts.tool import ToolParamsRequest
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.db.conversation.repository import get_conversation_list, get_conversation_messages
 from management.db.identity.token import get_latest_usage_metadata, log_token_usage
-from management.services.agent.service import (
-    get_agent_by_name_impl,
-)
-from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from management.services.agent.management import get_agent_by_name_impl
+from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop, forward_northbound_run
 from management.thread_management import config_thread_manager
 from infrastructure.redis.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
@@ -419,7 +417,6 @@ async def start_streaming_chat(
             query,
             metadata_key,
         )
-        await idempotency_start(composed_key)
         agent_request = AgentRequest(
             conversation_id=internal_conversation_id,
             agent_id=agent_id,
@@ -434,9 +431,18 @@ async def start_streaming_chat(
             enable_automation_tool=False,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
+        await idempotency_start(composed_key)
+    except LimitExceededError as exc:
+        raise LimitExceededError(str(exc))
+    except UnauthorizedError:
+        raise UnauthorizedError("Cannot authenticate.")
+    except (AppException, PermissionError):
+        raise
+    except Exception as exc:
+        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {exc}") from exc
 
-        # Persist before starting the stream. External callers may not reconnect,
-        # so the managed control-I/O task preserves synchronous commit semantics.
+    async def execute_legacy():
+        # The compatibility Runtime expects Management to have saved this user message.
         try:
             await config_thread_manager.run(
                 "control-io",
@@ -449,26 +455,13 @@ async def start_streaming_chat(
                 ctx.user_id,
                 ctx.tenant_id,
             )
-        except Exception as e:
-            raise Exception(f"Failed to persist user message: {str(e)}")
+        except Exception as exc:
+            raise Exception(f"Failed to persist user message: {exc}") from exc
 
-    except LimitExceededError as exc:
-        raise LimitExceededError(str(exc))
-    except UnauthorizedError as _:
-        raise UnauthorizedError("Cannot authenticate.")
-    except AppException:
-        raise
-    except PermissionError:
-        raise
-    except Exception as e:
-        raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
+        return await forward_agent_run(agent_request=agent_request, user_id=ctx.user_id, tenant_id=ctx.tenant_id)
 
     try:
-        response = await forward_agent_run(
-            agent_request=agent_request,
-            user_id=ctx.user_id,
-            tenant_id=ctx.tenant_id,
-        )
+        response = await forward_northbound_run(agent_request, ctx.user_id, ctx.tenant_id, fallback=execute_legacy)
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))

@@ -2,6 +2,7 @@
 """Tests for northbound-to-runtime HTTP forwarding."""
 
 import json
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -17,6 +18,13 @@ from management.services.agent import runtime_client as proxy
 @pytest.fixture(autouse=True)
 def agentos_key(monkeypatch):
     monkeypatch.setattr(environment, "JWT_SECRET", "local-agentos-proxy-test-secret-value")
+
+
+@pytest.fixture(autouse=True)
+def no_prepared_northbound_turn(monkeypatch):
+    from management.services.agent import prepared_turn
+
+    monkeypatch.setattr(prepared_turn, "find_pending_turn", AsyncMock(return_value=None))
 
 
 class TrackingStream(httpx.AsyncByteStream):

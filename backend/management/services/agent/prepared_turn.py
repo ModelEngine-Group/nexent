@@ -72,7 +72,13 @@ def _definitive_rejection(error):
     return False
 
 
-async def start_turn(payload, request, user_id, tenant_id, client):
+async def reject_unstaged_turn(payload, user_id, tenant_id):
+    scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
+    await _io("prepared-turn-reject-claim", set_conversation_admission, scope, payload.claimed_run_id, user_id, tenant_id,
+              conversation_id=None, journal_available=False)
+
+
+async def start_turn(payload, request, user_id, tenant_id, client, *, include_journal_controls=True):
     run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
     initial_title = None
@@ -115,8 +121,7 @@ async def start_turn(payload, request, user_id, tenant_id, client):
             "automation": automation,
         }, **creation)
     except Exception as exc:
-        await _io("prepared-turn-reject-claim", set_conversation_admission, scope, run_id, user_id, tenant_id,
-                  conversation_id=None, journal_available=False)
+        await reject_unstaged_turn(payload, user_id, tenant_id)
         if isinstance(exc, (AdmissionScopeError, ForbiddenError)):
             raise _not_owned() from exc
         if isinstance(exc, store.PreparedTurnConflict):
@@ -149,6 +154,7 @@ async def start_turn(payload, request, user_id, tenant_id, client):
         raise RuntimeServiceUnavailableError("Prepared conversation admission is no longer pending")
     return await _stream_turn(
         confirmed, client, metadata_version=snapshot.runtime_metadata_version, created=initial_title is not None,
+        include_journal_controls=include_journal_controls,
     )
 
 
@@ -163,7 +169,7 @@ async def _cancel_unbound_turn(client, turn):
     await _io("prepared-turn-unbound", store.close_turn, turn)
 
 
-async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, created=False):
+async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True):
     reference = turn.reference
     cursor = AgentResume(**reference.model_dump())
     upstream = await client.resume(cursor, turn.user_id, turn.tenant_id)
@@ -175,8 +181,12 @@ async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, cr
             logger.warning("Deferred terminal conversation projection run_id=%s error=%s",
                            reference.run_id, type(exc).__name__)
 
-    response = present_public_resume(upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created)
-    response.headers.update({"conversation_id": str(reference.conversation_id), "run_id": reference.run_id})
+    response = present_public_resume(
+        upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created, include_journal_controls=include_journal_controls,
+    )
+    response.headers["conversation_id"] = str(reference.conversation_id)
+    if include_journal_controls:
+        response.headers["run_id"] = reference.run_id
     if metadata_version is not None:
         response.headers["X-Runtime-Metadata-Version"] = str(metadata_version)
     if resumed and response.status_code == 200:

@@ -185,3 +185,61 @@ async def test_unexportable_first_turn_never_creates_a_conversation(flow, mocker
     assert await prepared_turn.start_turn(payload, request, *ACTOR, client) is None
     assert operations == [] and request.conversation_id is None
     client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["prepared", "unsupported", "ambiguous", "metadata", "active"])
+async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(mocker, outcome):
+    from management.services.agent import conversation_submission
+
+    fallback = AsyncMock(return_value=StreamingResponse(iter(())))
+    prepared = StreamingResponse(iter(()))
+    start = mocker.patch.object(prepared_turn, "start_turn", return_value=prepared)
+    if outcome == "unsupported":
+        start.return_value = None
+    if outcome == "ambiguous":
+        start.side_effect = RuntimeServiceUnavailableError("lost acknowledgement")
+    release = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=REFERENCE if outcome == "active" else None)
+
+    async def submit(payload, user, tenant, dispatch, *, include_claim_headers):
+        assert not include_claim_headers
+        assert payload.idempotency_key.startswith("prepared-")
+        return await dispatch(payload.model_copy(update={"claimed_run_id": REFERENCE.run_id}), user, tenant)
+
+    mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
+    metadata_request = outcome in {"metadata", "active"}
+    request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {} if metadata_request else None})
+
+    if outcome == "ambiguous":
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await runtime_client.forward_northbound_run(request, *ACTOR, fallback=fallback)
+    else:
+        response = await runtime_client.forward_northbound_run(request, *ACTOR, fallback=fallback)
+        if outcome == "active":
+            assert response.status_code == 200 and response.headers["X-Stream-Status"] == "conflict"
+            frames = [chunk async for chunk in response.body_iterator]
+            assert len(frames) == 1 and frames[0].startswith('data: {"type": "error"')
+        else:
+            assert response is (fallback.return_value if outcome in {"unsupported", "metadata"} else prepared)
+
+    assert start.await_count == (0 if metadata_request else 1)
+    assert release.await_count == (1 if outcome == "unsupported" else 0)
+    assert fallback.await_count == (1 if outcome in {"unsupported", "metadata"} else 0)
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
+    pending = SimpleNamespace(reference=REFERENCE, user_id=ACTOR[0], tenant_id=ACTOR[1])
+    find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=pending)
+    client = SimpleNamespace(
+        stop=AsyncMock(), stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+
+    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    find.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
+    client.stop.assert_not_awaited()
+    assert result["message"] == "successfully stopped agent run for user_id actor, run_id 42"

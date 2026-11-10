@@ -236,6 +236,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(turn_patches)
     with monkeypatch.context() as new_turn_patches:
         await _assert_public_prepared_turn_over_signed_http(new_turn_patches, new_conversation=True)
+    with monkeypatch.context() as northbound_patches:
+        await _assert_public_prepared_turn_over_signed_http(northbound_patches, northbound=True)
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -1833,7 +1835,7 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
 
 
-async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conversation=False):
+async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conversation=False, northbound=False):
     from contracts.constants.constants import DEFAULT_EN_TITLE
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
@@ -1869,9 +1871,12 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
         assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
         assert turn["query"] == "test"
-        assert turn["automation"] == {
-            "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
-        }
+        if northbound:
+            assert turn["automation"] is None
+        else:
+            assert turn["automation"] == {
+                "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
+            }
         calls.append("stage")
         return pending
 
@@ -1954,6 +1959,11 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
     with serve(runtime) as runtime_url:
         monkeypatch.setattr(runtime_client, "_agentos_client",
                             lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+        if northbound:
+            await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor)
+            assert calls == ["stage", "start", "confirm", "project", "close"]
+            return
+
         request = {"query": "test", "agent_id": 7}
         if not new_conversation:
             request["conversation_id"] = reference.conversation_id
@@ -1975,6 +1985,91 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
         assert retry.json()["conversation_id"] == reference.conversation_id
         assert denied.status_code == 404
     assert calls == ["stage", "start", "confirm", "project", "close"]
+
+
+async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor):
+    from unittest.mock import AsyncMock, Mock
+
+    from contracts.authentication import NorthboundContext
+    from management.api import northbound as northbound_api
+    from management.services import northbound as northbound_service
+    from management.services.agent import prepared_turn
+    from runtime.agentos import resume
+
+    async def authenticate(request):
+        return NorthboundContext(
+            "northbound-request", request.headers["authorization"],
+            request.headers.get("X-Test-Actor", actor.user_id), "", token_id=4,
+        )
+
+    def visible(conversation_id, user_id, tenant_id):
+        if (conversation_id, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id):
+            return {"conversation_id": conversation_id}
+        return None
+
+    management.include_router(northbound_api.router)
+    monkeypatch.setattr(northbound_api, "_get_northbound_context", authenticate)
+    monkeypatch.setattr(northbound_service, "get_agent_by_name_impl", lambda **_: {"agent_id": 7, "latest_version_no": 2})
+    monkeypatch.setattr(northbound_service, "create_new_conversation",
+                        Mock(return_value={"conversation_id": reference.conversation_id}))
+    monkeypatch.setattr(northbound_service, "get_conversation_service", visible)
+    monkeypatch.setattr(northbound_service, "get_conversation_history_internal",
+                        AsyncMock(return_value={"data": {"history": []}}))
+    monkeypatch.setattr(northbound_service, "check_and_consume_rate_limit", AsyncMock())
+    claim_external = AsyncMock()
+    monkeypatch.setattr(northbound_service, "idempotency_start", claim_external)
+    monkeypatch.setattr(northbound_service, "_release_idempotency_after_delay", AsyncMock())
+    legacy_write = Mock()
+    legacy_dispatch = AsyncMock()
+    log_usage = Mock()
+    monkeypatch.setattr(northbound_service, "save_conversation_user", legacy_write)
+    monkeypatch.setattr(northbound_service, "forward_agent_run", legacy_dispatch)
+    monkeypatch.setattr(northbound_service, "log_token_usage", log_usage)
+
+    stopped_id = "c" * 32
+    pending = SimpleNamespace(reference=reference.model_copy(update={"run_id": stopped_id}))
+    cancel = Mock(return_value={
+        "conversation_id": reference.conversation_id, "status": "stopped", "cancellation_requested": True,
+    })
+
+    body = {"query": "test", "agent_name": "test-agent"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management), base_url="http://management") as caller:
+        response = await caller.post("/nb/v1/chat/run", json=body,
+                                     headers={"Authorization": actor.tenant_id, "Idempotency-Key": "external-key"})
+        followup = {**body, "conversation_id": reference.conversation_id}
+        foreign_tenant = await caller.post("/nb/v1/chat/run", json=followup, headers={"Authorization": "foreign"})
+        foreign_user = await caller.post("/nb/v1/chat/run", json=followup,
+                                         headers={"Authorization": actor.tenant_id, "X-Test-Actor": "foreign"})
+        monkeypatch.setattr(prepared_turn.store, "pending_turn", lambda *scope: pending if scope == (
+            reference.conversation_id, actor.user_id, actor.tenant_id,
+        ) else None)
+        monkeypatch.setattr(resume, "read_execution", cancel)
+        monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
+        stop = await caller.get(f"/nb/v1/chat/stop/{reference.conversation_id}",
+                                headers={"Authorization": actor.tenant_id})
+    assert response.status_code == 200
+    assert foreign_tenant.status_code == foreign_user.status_code == 403
+    assert response.headers["X-Request-Id"] == "northbound-request"
+    assert response.headers["conversation_id"] == str(reference.conversation_id)
+    assert response.headers["X-Accel-Buffering"] == "no"
+    assert "X-AgentOS-Run-ID" not in response.headers and "run_id" not in response.headers
+    created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
+    assert response.text == (
+        f"data: {json.dumps(created)}\n\n"
+        'data: {"type":"final_answer","content":"answer"}\n\n'
+    )
+    claim_external.assert_awaited_once_with("external-key")
+    legacy_write.assert_not_called()
+    legacy_dispatch.assert_not_awaited()
+    assert stop.status_code == 200 and stop.json() == {
+        "message": f"successfully stopped agent run for user_id {actor.user_id}, run_id {reference.conversation_id}",
+        "data": reference.conversation_id, "requestId": "northbound-request",
+    }
+    cancel.assert_called_once_with(
+        stopped_id, actor.user_id, actor.tenant_id, reference.conversation_id, request_stop=True, prevent_start=True,
+    )
+    assert [call.kwargs["call_function_name"] for call in log_usage.call_args_list] == ["run_chat", "stop_chat_stream"]
+    assert all(call.kwargs["related_id"] == reference.conversation_id for call in log_usage.call_args_list)
 
 
 async def _assert_automation_proposal_callback(monkeypatch):

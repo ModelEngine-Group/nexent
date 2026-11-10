@@ -440,6 +440,7 @@ def test_run_chat_unauthorized():
     [
         (RuntimeServiceUnavailableError("unavailable"), 502),
         (RuntimeServiceTimeoutError("timed out"), 504),
+        (RuntimeUpstreamError(422, b'{"detail":"invalid"}', {"content-type": "application/json"}), 422),
     ],
 )
 def test_run_chat_maps_runtime_transport_errors(error, expected_status):
@@ -460,6 +461,8 @@ def test_run_chat_maps_runtime_transport_errors(error, expected_status):
         )
 
     assert response.status_code == expected_status
+    if isinstance(error, RuntimeUpstreamError):
+        assert response.json() == {"detail": "invalid"}
 
 
 # =============================================================================

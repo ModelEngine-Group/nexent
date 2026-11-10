@@ -78,6 +78,9 @@ case:
   - order: 17
     action: Submit a first public turn without a conversation ID and repeat it with the same submission key.
     expected: Management creates one conversation with the localized default title, announces its ID without consuming a Runtime cursor, and the retry returns the same conversation and run.
+  - order: 18
+    action: Submit an owned Northbound turn, reject another user and tenant, and stop a staged run through signed AgentOS.
+    expected: One turn stages and projects. Northbound preserves response headers and SSE data frames. Stop fences the exact staged run and keeps its public response.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -96,6 +99,7 @@ case:
   - One prepared public submission creates one Runtime execution and one assistant projection.
   - The SDK tool emits the original proposal event while only the signed owned turn may create it.
   - First-turn submission keeps one conversation, run, and original creation event.
+  - Northbound uses signed prepared admission and projection without a duplicate user write or exposing journal control frames.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -243,4 +247,9 @@ case:
     description: Management owns first-turn creation and preserves the public conversation ID and event without duplicate signed execution.
     steps: [17]
     expected_results: [17]
+    forbidden_side_effects: [1, 2]
+  - id: AC-26
+    description: Northbound preserves public frames and conversation ownership during signed prepared execution and run-scoped cancellation.
+    steps: [18]
+    expected_results: [18]
     forbidden_side_effects: [1, 2]

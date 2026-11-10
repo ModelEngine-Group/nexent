@@ -33,6 +33,8 @@ async def submit_conversation(
     user_id: str,
     tenant_id: str,
     dispatch: Callable[[CompatibilityConversationRun, str, str], Awaitable[Response]],
+    *,
+    include_claim_headers: bool = True,
 ) -> Response:
     request = AgentRequest.model_validate(payload.request)
     conversation_id = request.conversation_id
@@ -76,5 +78,6 @@ async def submit_conversation(
     # Compatibility Runtime binds the conversation and journal before writing headers.
     # A transport failure leaves the claim intact so retry cannot dispatch again.
     response = await dispatch(payload.model_copy(update={"claimed_run_id": claim.run_id}), user_id, tenant_id)
-    response.headers.update(headers)
+    if include_claim_headers:
+        response.headers.update(headers)
     return response
