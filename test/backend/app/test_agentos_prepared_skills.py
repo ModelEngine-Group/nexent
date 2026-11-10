@@ -306,6 +306,8 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
     assert not resource.skill_refs and "tenant-secret-value" not in resource.model_dump_json()
     actor = ServicePrincipal("user-a", "tenant-a")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    mounts = {53: {"value": "tenant-secret-value"}}
+    fetch = mocker.patch.object(prepared_skills, "fetch_workbench_skill_mounts", return_value=mounts)
     read = mocker.patch.object(prepared_skills, "read_workbench_skill_rows", return_value={53: catalog})
     workspace = str(tmp_path / "runs" / actor.user_id / reference.run_id)
     with pytest.raises(ValueError, match="Workbench root"):
@@ -330,7 +332,10 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
                     resource, actor, workspace, public_reference=reference, workbench_version=3,
                 )
             assert error.value.status_code == status
-        read.assert_called_once_with(reference, actor, 3, 7, 2, {53})
+        scope, principal = fetch.call_args.args
+        assert scope.model_dump() == {**reference.model_dump(), "agent_id": 7, "agent_version": 2, "workbench_version": 3}
+        assert principal == actor
+        read.assert_called_once_with(7, 2, actor, mounts, {53})
         ordinary.assert_not_called()
     finally:
         prepared_evaluation._remove_skill_files(workspace)

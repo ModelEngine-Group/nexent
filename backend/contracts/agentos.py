@@ -654,10 +654,33 @@ class NL2AgentToolCall(RunSpecModel):
     arguments: dict[str, JsonValue]
 
 
+class WorkbenchSkillLookup(AgentRunReference):
+    agent_id: PositiveInt
+    agent_version: Annotated[int, Field(ge=0)]
+    workbench_version: PositiveInt
+
+
+class WorkbenchSkillMount(RunSpecModel):
+    skill_id: PositiveInt
+    config_values: dict[str, JsonValue]
+
+
+class WorkbenchSkillMounts(RunSpecModel):
+    mounts: list[WorkbenchSkillMount] = Field(max_length=20)
+
+    @field_validator("mounts")
+    @classmethod
+    def unique_skill_ids(cls, mounts):
+        if len({mount.skill_id for mount in mounts}) != len(mounts):
+            raise ValueError("Duplicate Workbench Skill mounts")
+        return mounts
+
+
 class ManagementOperation(str, Enum):
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
+    WORKBENCH_SKILL_MOUNTS = NAMESPACE + "v1/agent/workbench-skill-mounts"
 
 
 MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in ManagementOperation)

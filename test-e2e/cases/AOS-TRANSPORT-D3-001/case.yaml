@@ -124,7 +124,7 @@ case:
     action: Start a Memory-enabled automation run, lose its admission acknowledgement, and recover after the task Agent changes.
     expected: Management projects the original signed run under the persisted Agent and prompt message without another dispatch.
   - order: 33
-    action: Run a signed Workbench snapshot with an authorized root Skill and a conversation override.
+    action: Run a signed Workbench snapshot whose authorized root Skill overrides are obtained through the signed Management callback.
     expected: Runtime rebuilds the root SDK Skill tools and refuses a modified bundle or revoked binding.
   - order: 34
     action: Run a signed Workbench snapshot whose mounted Skill contributes Local, MCP, and LangChain tools.
@@ -402,7 +402,7 @@ case:
     expected_results: [33]
     forbidden_side_effects: [1, 2]
   - id: AC-42
-    description: A prepared Workbench run binds its root Skill to the owned conversation revision and rechecks the Skill bundle.
+    description: A prepared Workbench run obtains root Skill mounts from the signed Management operation and rechecks the Skill bundle.
     steps: [33]
     expected_results: [34]
     forbidden_side_effects: [1, 2]

@@ -9,11 +9,12 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from contracts.agentos import EvaluationSkillTool, FileToolDescription
+from contracts.agentos import EvaluationSkillTool, FileToolDescription, WorkbenchSkillLookup
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
 from nexent.core.agents.agent_model import ToolConfig
+from runtime.agentos.prepared_workbench import fetch_workbench_skill_mounts
 
 _stage_lock = Lock()
 _stage_directory: TemporaryDirectory | None = None
@@ -59,9 +60,11 @@ def materialize_skill_tools(
     tenant = actor.tenant_id
     if workbench_refs:
         try:
-            rows = read_workbench_skill_rows(
-                public_reference, actor, workbench_version, resource.agent_id, resource.version_no, ids,
-            )
+            mounts = fetch_workbench_skill_mounts(WorkbenchSkillLookup(
+                **public_reference.model_dump(), agent_id=resource.agent_id, agent_version=resource.version_no,
+                workbench_version=workbench_version,
+            ), actor)
+            rows = read_workbench_skill_rows(resource.agent_id, resource.version_no, actor, mounts, ids)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
     else:

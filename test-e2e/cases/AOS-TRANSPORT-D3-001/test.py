@@ -2068,12 +2068,13 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
-    from contracts.agentos import EvaluationSkillTool
+    from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
     from infrastructure import langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.mcp_execution import build_mcp_tool
     from infrastructure.skill_execution import capture_skill_files
+    from management.api.agent import workbench_callback
     from management.services.agent.preparation import evaluation_snapshot
     from management.services.agent.workbench import ResolvedSkillMount
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
@@ -2117,7 +2118,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     for name in ("read_bound_local_tools", "read_bound_mcp_tools", "read_bound_langchain_tools"):
         monkeypatch.setattr(evaluation_snapshot, name, lambda *_: [])
     monkeypatch.setattr(prepared_mcp, "read_mcp_execution_servers", lambda tenant: servers)
-    access = {"visible": True, "change_tool": False}
+    access = {"visible": True, "change_tool": False, "closed": False}
 
     def read_tools(agent_id, version, tenant, skills):
         assert (agent_id, version, tenant) == (7, 3, actor.tenant_id)
@@ -2168,9 +2169,17 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     assert "from langchain_core" not in payload.model_dump_json()
     scoped_reads = []
 
-    def read(ref, principal, version, agent_id, agent_version, ids):
-        assert (ref, principal, version, agent_id, agent_version, ids) == (reference, actor, 4, 7, 3, {45})
-        scoped_reads.append(version)
+    lookup = WorkbenchSkillLookup(**reference.model_dump(), agent_id=7, agent_version=3, workbench_version=4)
+    mounts = WorkbenchSkillMounts(mounts=[{"skill_id": 45, "config_values": effective}])
+
+    def read_scope(request, user_id, tenant_id):
+        if (request, user_id, tenant_id) != (lookup, actor.user_id, actor.tenant_id) or access["closed"]:
+            return None
+        scoped_reads.append(request.workbench_version)
+        return mounts
+
+    def read(agent_id, agent_version, principal, overrides, ids):
+        assert (agent_id, agent_version, principal, overrides, ids) == (7, 3, actor, {45: effective}, {45})
         return {45: {"skill_id": 45, "name": "mounted", "description": "Example", "config": effective,
                      "tool_ids": tool_ids}} if access["visible"] else {}
 
@@ -2200,7 +2209,28 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(prepared_run.create_prepared_run_router())
-    with serve(runtime) as runtime_url:
+    async def blocking(_name, function, *args, lane=None, owner=None):
+        return function(*args)
+
+    monkeypatch.setattr(workbench_callback, "run_blocking", blocking)
+    monkeypatch.setattr(workbench_callback, "read_workbench_skill_mounts", read_scope)
+    management = FastAPI(root_path="/api")
+    management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    management.include_router(workbench_callback.router)
+    with serve(runtime) as runtime_url, serve(management) as management_url:
+        monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", management_url)
+        operation = ManagementOperation.WORKBENCH_SKILL_MOUNTS
+        body = lookup.model_dump_json().encode()
+        url = management_url + "/api" + operation.value
+        async with httpx.AsyncClient(trust_env=False) as http:
+            assert (await http.post(url, content=body)).status_code == 401
+            foreign = sign_call(operation, body, ServicePrincipal(actor.user_id, "other-tenant"))
+            assert (await http.post(url, content=body, headers={"Authorization": f"Bearer {foreign}"})).status_code == 404
+            signature = sign_call(operation, body, actor)
+            assert (await http.post(url, content=body + b" ", headers={"Authorization": f"Bearer {signature}"})).status_code == 401
+            approved = await http.post(url, content=body, headers={"Authorization": f"Bearer {signature}"})
+            assert approved.status_code == 200 and approved.headers["cache-control"] == "no-store"
+            assert approved.json() == mounts.model_dump()
         client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         assert await client.start_prepared_run(payload, actor.user_id, actor.tenant_id) == reference
         access["change_tool"] = True
@@ -2216,7 +2246,11 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
         with pytest.raises(RuntimeUpstreamError) as denied:
             await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
         assert denied.value.status_code == 404
-    assert scoped_reads == [4, 4, 4, 4]
+        access["closed"] = True
+        with pytest.raises(RuntimeUpstreamError) as closed:
+            await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
+        assert closed.value.status_code == 404
+    assert scoped_reads == [4, 4, 4, 4, 4]
 
 
 async def _assert_public_prepared_turn_over_signed_http(

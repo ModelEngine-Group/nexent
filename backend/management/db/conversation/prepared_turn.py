@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
 
-from contracts.agentos import AgentRunReference
+from contracts.agent import WorkbenchSessionConfig
+from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
@@ -93,6 +94,42 @@ def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> Prepared
         row = session.scalar(_pending(admission.conversation_id == conversation_id,
                                       admission.created_by == user_id, admission.tenant_id == tenant_id).limit(1))
         return _view(row) if row is not None else None
+
+
+def read_workbench_skill_mounts(
+    lookup: WorkbenchSkillLookup, user_id: str, tenant_id: str,
+) -> WorkbenchSkillMounts | None:
+    """Read only the overrides owned by a staged or confirmed Workbench turn."""
+    admission, conversation = ConversationRunAdmission, ConversationRecord
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return None
+        row = session.execute(select(
+            admission.status, admission.prepared_user_turn, conversation.workbench_config,
+            conversation.workbench_config_version,
+        ).join(conversation, conversation.conversation_id == admission.conversation_id).where(
+            admission.run_id == lookup.run_id, admission.conversation_id == lookup.conversation_id,
+            admission.created_by == user_id, admission.tenant_id == tenant_id,
+            admission.delete_flag == "N", admission.prepared_message_index.is_not(None),
+            conversation.created_by == user_id, conversation.delete_flag == "N",
+        )).one_or_none()
+        if row is None:
+            return None
+        state = row.prepared_user_turn or {}
+        if state.get("workbench_skill_root") != {"agent_id": lookup.agent_id, "version_no": lookup.agent_version}:
+            return None
+        config = None
+        if row.status == "admitted" and row.workbench_config_version == lookup.workbench_version:
+            config = row.workbench_config
+        elif row.status == "dispatching":
+            staged = state.get("workbench_update") or {}
+            expected = lookup.workbench_version if state.get("new_conversation") else staged.get("expected_version")
+            if staged.get("version") == lookup.workbench_version and row.workbench_config_version == expected:
+                config = staged.get("config")
+        if config is None:
+            return None
+        mounts = WorkbenchSessionConfig.model_validate(config).skill_mounts
+        return WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in mounts])
 
 
 def _require_metadata_version(conversation: ConversationRecord, expected: int) -> None:

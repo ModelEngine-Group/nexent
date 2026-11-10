@@ -1,17 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Read Skill settings owned by an admitted Workbench run."""
+"""Read tenant Skill and tool catalog records for verified Workbench mounts."""
 
 from contextlib import nullcontext
 
 from sqlalchemy import select
 
-from contracts.agent import WorkbenchSessionConfig
-from contracts.agentos import AgentRunReference
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.account_access import get_user_role_by_tenant, query_group_ids_by_user_in_tenant
-from infrastructure.rdb.agent_admission import ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
-from infrastructure.rdb.conversation_record import ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance
 from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance, SkillToolRelation
@@ -19,44 +15,13 @@ from infrastructure.skill_execution import merge_skill_tool_parameters
 from infrastructure.workbench_skill_execution import can_view_skill, resolve_skill_config
 
 
-def _run_config(session, reference, actor, version, agent_id, agent_version):
-    admission, conversation = ConversationRunAdmission, ConversationRecord
-    row = session.execute(select(
-        admission.status, admission.prepared_user_turn, conversation.workbench_config,
-        conversation.workbench_config_version,
-    ).join(conversation, conversation.conversation_id == admission.conversation_id).where(
-        admission.run_id == reference.run_id, admission.conversation_id == reference.conversation_id,
-        admission.created_by == actor.user_id, admission.tenant_id == actor.tenant_id,
-        admission.delete_flag == "N", admission.prepared_message_index.is_not(None),
-        conversation.created_by == actor.user_id, conversation.delete_flag == "N",
-    )).one_or_none()
-    if row is None:
-        return None
-    state = row.prepared_user_turn or {}
-    if state.get("workbench_skill_root") != {"agent_id": agent_id, "version_no": agent_version}:
-        return None
-    if row.status == "admitted" and row.workbench_config_version == version:
-        return row.workbench_config
-    if row.status == "dispatching":
-        staged = state.get("workbench_update") or {}
-        current = version if state.get("new_conversation") else staged.get("expected_version")
-        if staged.get("version") == version and row.workbench_config_version == current:
-            return staged.get("config")
-    return None
-
-
 def read_workbench_skill_rows(
-    reference: AgentRunReference, actor: ServicePrincipal, version: int, agent_id: int, agent_version: int,
-    ids: set[int],
+    agent_id: int, agent_version: int, actor: ServicePrincipal, mounts: dict[int, dict], ids: set[int],
 ) -> dict[int, dict]:
     """Recompute the root Skill configuration for the exact signed Workbench revision."""
     with get_db_session() as session:
         if not tenant_membership_matches(session, actor.user_id, actor.tenant_id):
             return {}
-        config = _run_config(session, reference, actor, version, agent_id, agent_version)
-        if config is None:
-            return {}
-        mounts = {mount.skill_id: mount.config_values for mount in WorkbenchSessionConfig.model_validate(config).skill_mounts}
         published = {}
         for skill_id, values in session.execute(select(SkillInstance.skill_id, SkillInstance.config_values).where(
             SkillInstance.agent_id == agent_id, SkillInstance.version_no == agent_version,
