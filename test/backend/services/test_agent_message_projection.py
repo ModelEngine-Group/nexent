@@ -7,7 +7,7 @@ from management.services.agent.stream import AssistantMessageProjection, finaliz
 
 
 def test_projection_retains_legacy_indices_and_only_committed_model_fragments():
-    projection = AssistantMessageProjection(message_id=12, next_unit_index=7)
+    projection = AssistantMessageProjection(persist_units=True, next_unit_index=7)
 
     def project(kind, content="", **fields):
         chunk, _ = projection.project(json.dumps({"type": kind, "content": content, **fields}))
@@ -36,7 +36,7 @@ def test_projection_retains_legacy_indices_and_only_committed_model_fragments():
 
 
 def test_unpersisted_stream_does_not_add_indices_or_buffer_units():
-    projection = AssistantMessageProjection(message_id=None)
+    projection = AssistantMessageProjection(persist_units=False)
     chunk = '{"type":"final_answer","content":"answer"}'
     assert projection.project(chunk)[0] == chunk
     assert not projection.units

@@ -234,8 +234,8 @@ class AssistantMessageProjection:
         "final_answer", "model_output_code", "model_output_thinking", "model_output_deep_thinking",
     }
 
-    def __init__(self, message_id: int | None, next_unit_index: int = 0):
-        self.message_id = message_id
+    def __init__(self, *, persist_units: bool, next_unit_index: int = 0):
+        self.persist_units = persist_units
         self.next_unit_index = next_unit_index
         self.current_unit: dict[str, Any] | None = None
         self.units: list[dict[str, Any]] = []
@@ -260,7 +260,7 @@ class AssistantMessageProjection:
 
             mergeable = kind in self._MERGEABLE_TYPES
             continuation = is_stream_unit_continuation(self.current_unit, mergeable, kind, data)
-            if self.message_id is not None and kind:
+            if self.persist_units and kind:
                 if continuation:
                     data["unit_index"] = self.current_unit["unit_index"]
                 elif kind != "search_content_placeholder":
@@ -275,7 +275,7 @@ class AssistantMessageProjection:
             attempt = data.get("attempt_id")
             if data.get("phase") == "rollback" and isinstance(attempt, str):
                 rollback_model_attempt_units(self.units, attempt)
-        elif self.message_id is not None and kind and kind not in {"skill_artifact", "file_artifact"}:
+        elif self.persist_units and kind and kind not in {"skill_artifact", "file_artifact"}:
             if continuation:
                 self.current_unit["_content_fragments"].append(content)
             else:

@@ -1425,10 +1425,11 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
 
 async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from contracts.agent import AgentRequest
+    from contracts.conversation import MessageSource
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
-    from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
+    from management.services.agent import prepared_projection
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from nexent.core.agents.agent_model import AgentConfig
     from runtime.agentos import prepared_evaluation, prepared_run, resume
@@ -1439,6 +1440,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     admissions = []
     calls = []
     finished = threading.Event()
+    persisted = []
 
     def owns(conversation_id, *, user_id, tenant_id):
         return (conversation_id, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id)
@@ -1578,17 +1580,22 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             f"id: {reference.run_id}:3\nevent: agentos_terminal\n"
             'data: {"status": "completed"}\n\n'
         )
-        # Exercise the same Management projection used by the public legacy path
-        # against retained Runtime observer data with the original event sequence.
-        full = await agentos.resume(AgentResume(**reference.model_dump()), actor.user_id, actor.tenant_id)
-        frames = b"".join([chunk async for chunk in full.body_iterator]).decode().split("\n\n")
-        projection = AssistantMessageProjection(message_id=77)
-        for frame in frames:
-            lines = frame.splitlines()
-            if lines[1:2] == ["event: agentos_observer"]:
-                projection.project(lines[2].removeprefix("data: "))
-        finalize_buffered_unit_fragments(projection.units)
-        assert [(unit["unit_index"], unit["unit_content"]) for unit in projection.units] == [
+        def persist(**fields):
+            persisted.append(fields)
+            return 77
+
+        monkeypatch.setattr(prepared_projection, "run_blocking", control_io)
+        monkeypatch.setattr(prepared_projection, "persist_prepared_assistant_projection", persist)
+        projection = await prepared_projection.resume_assistant_projection(
+            agentos.resume, reference, actor.user_id, actor.tenant_id,
+            message_index=1, message_source=MessageSource.AUTOMATION,
+        )
+        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 2)
+        assert len(persisted) == 1
+        batch = persisted[0]
+        assert (batch["projection_run_id"], batch["conversation_id"]) == (reference.run_id, 42)
+        assert batch["message_content"] == "answer"
+        assert [(unit["unit_index"], unit["unit_content"]) for unit in batch["message_units"]] == [
             (0, "step"), (1, "answer"),
         ]
 

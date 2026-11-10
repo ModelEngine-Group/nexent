@@ -11,6 +11,17 @@ from management.services.agent.stream import (
 from nexent.core.concurrency import ManagedTaskSpec
 
 
+def canonicalize_assistant_units(units):
+    """Finalize the canonical answer and shared persistence representation."""
+    remove_answer_only_steps(units)
+    total_bytes = _finalize_buffered_unit_fragments(units)
+    answer = next(
+        (unit["content"] for unit in reversed(units) if unit["type"] == "final_answer" and not unit.get("invocation_id")),
+        "",
+    )
+    return answer, total_bytes
+
+
 async def finalize_assistant_projection(
     *,
     thread_manager,
@@ -35,16 +46,7 @@ async def finalize_assistant_projection(
     persistence_failed = False
     if message_id is not None:
         try:
-            remove_answer_only_steps(buffered_units)
-            persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
-            final_answer_content = next(
-                (
-                    unit["content"]
-                    for unit in reversed(buffered_units)
-                    if unit["type"] == "final_answer" and not unit.get("invocation_id")
-                ),
-                "",
-            )
+            final_answer_content, persistence_bytes = canonicalize_assistant_units(buffered_units)
             logger.info(
                 "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                 conversation_id,

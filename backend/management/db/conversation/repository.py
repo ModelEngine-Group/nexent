@@ -428,6 +428,59 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+def _lock_projection_conversation(session, conversation_id: int, user_id: str) -> None:
+    conversation = session.scalar(
+        select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ).with_for_update()
+    )
+    if conversation is None:
+        raise ValueError("Conversation does not exist or is not accessible")
+
+
+def persist_prepared_assistant_projection(
+    *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
+    user_id: str, tenant_id: str, **batch,
+) -> int:
+    """Create or replay a remote projection in the same transaction as its receipt."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    if not isinstance(projection_run_id, str) or not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+        raise ValueError("Invalid assistant projection run ID")
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
+        receipt = ConversationProjectionReceipt
+        existing = session.execute(
+            select(receipt.message_id, receipt.created_by, receipt.tenant_id, ConversationMessage.conversation_id,
+                   ConversationMessage.message_index, ConversationMessage.message_source)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .where(receipt.run_id == projection_run_id, receipt.delete_flag == "N")
+        ).first()
+        source = MessageSource(message_source).value
+        if existing is not None:
+            if (existing.created_by, existing.tenant_id, existing.conversation_id) != (user_id, tenant_id, conversation_id):
+                raise ValueError("Conversation does not exist or is not accessible")
+            if (existing.message_index, existing.message_source) != (message_index, source):
+                raise ValueError("Assistant projection conflicts with the original message index or source")
+            message_id = existing.message_id
+        else:
+            message_id = session.scalar(insert(ConversationMessage).values(
+                conversation_id=conversation_id, message_index=message_index, message_role="assistant",
+                message_source=source, message_content="", status="streaming",
+                created_by=user_id, updated_by=user_id, delete_flag="N",
+            ).returning(ConversationMessage.message_id))
+        persist_assistant_run_batch(
+            message_id, conversation_id, user_id=user_id, tenant_id=tenant_id,
+            projection_run_id=projection_run_id, db_session=session, **batch,
+        )
+        return message_id
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,
@@ -441,6 +494,7 @@ def persist_assistant_run_batch(
     user_id: str,
     tenant_id: str,
     projection_run_id: str | None = None,
+    *, db_session=None,
 ) -> Dict[int, int]:
     """Persist one completed assistant stream in a single transaction.
 
@@ -479,20 +533,12 @@ def persist_assistant_run_batch(
             "automation_proposals": automation_proposals,
         })
 
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         if projection_run_id is not None and not tenant_membership_matches(session, user_id, tenant_id):
             raise ValueError("Conversation does not exist or is not accessible")
         # Match deletion's conversation-before-message lock order and reject
         # finalization if deletion committed while this locking read waited.
-        conversation = session.scalar(
-            select(ConversationRecord.conversation_id).where(
-                ConversationRecord.conversation_id == conversation_id,
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            ).with_for_update()
-        )
-        if conversation is None:
-            raise ValueError("Conversation does not exist or is not accessible")
+        _lock_projection_conversation(session, conversation_id, user_id)
 
         parent = session.execute(
             select(ConversationMessage)

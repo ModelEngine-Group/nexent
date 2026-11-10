@@ -360,7 +360,9 @@ async def _stream_agent_chunks(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )
 
-    projection = AssistantMessageProjection(streaming_message_id, resume_from_unit_index)
+    projection = AssistantMessageProjection(
+        persist_units=streaming_message_id is not None, next_unit_index=resume_from_unit_index,
+    )
     # Set when the agent run loop finishes successfully.
     stream_completed_normally: bool = False
 
