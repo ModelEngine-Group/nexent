@@ -2,7 +2,9 @@
 """Export authorized AgentOS snapshots from the Management compiler."""
 
 import json
+from dataclasses import asdict
 from functools import cache
+from typing import TYPE_CHECKING
 
 from pydantic_core import PydanticSerializationError
 
@@ -18,7 +20,7 @@ from contracts.errors.exceptions import ForbiddenError, RuntimeMetadataVersionCo
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
-from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
+from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision
 from infrastructure.agent_tool_config import (
     AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, build_automation_proposal_tool,
     build_parallel_executor_tool_config, build_plan_tool_configs,
@@ -43,6 +45,9 @@ from management.services.agent.preparation.local_tool import export_local_tool
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
 from nexent.core.concurrency import run_blocking
 from nexent.multi_modal.utils import parse_s3_url
+
+if TYPE_CHECKING:
+    from management.services.agent.workbench import PreparedWorkbench
 
 
 def _export_attachments(files):
@@ -113,7 +118,7 @@ async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
     before_message_index: int | None = None, new_conversation: bool = False,
-    allow_metadata_update: bool = False,
+    allow_metadata_update: bool = False, workbench: "PreparedWorkbench | None" = None,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -131,10 +136,11 @@ async def prepare_conversation_snapshot(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if any((
-        request.agent_id is None, request.is_debug, request.entrypoint,
-        request.generation_config, request.metadata is not None and (not allow_metadata_update or new_conversation),
+        workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
+        request.is_debug, request.generation_config,
+        request.metadata is not None and (not allow_metadata_update or new_conversation),
         request.clarification_response is not None, request.knowledge_scope is not None,
-        conversation.get("workbench_config") is not None, conversation.get("knowledge_scope") is not None,
+        conversation.get("knowledge_scope") is not None,
     )):
         return None
     if await run_blocking(
@@ -142,6 +148,21 @@ async def prepare_conversation_snapshot(
     ):
         return None
 
+    compile_options = {}
+    if workbench is not None:
+        root = workbench.plan.root.identity
+        config = workbench.config
+        request = request.model_copy(update={
+            "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
+            "model_id": config.model_id or request.model_id,
+            "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
+        })
+        compile_options = {
+            "runtime_sub_agent_mounts": [asdict(child) for child in workbench.plan.child_mounts],
+            "runtime_skill_snapshot": [],
+            "runtime_generation_config": config.generation_config.model_dump(mode="json"),
+            "prepared_workbench": workbench,
+        }
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
     historical_context = None
@@ -165,6 +186,7 @@ async def prepare_conversation_snapshot(
     scope = PreparedConversationScope(
         **reference.model_dump(),
         historical_context=historical_context,
+        workbench_config_version=workbench.version if workbench is not None else None,
         runtime_metadata=metadata,
         runtime_metadata_version=metadata_version,
     )
@@ -177,7 +199,7 @@ async def prepare_conversation_snapshot(
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
         conversation_id=reference.conversation_id, context_policy=request.context_policy,
         enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
-        prepared_conversation=scope,
+        prepared_conversation=scope, **compile_options,
     )
 
 
@@ -384,13 +406,18 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
     )
 
 
-def _export_model(alias, models, tenant_id, resource, agent_model_overrides):
-    candidates = get_model_records({"display_name": alias, "model_type": "llm"}, tenant_id)
-    effective = [model for model in models if model.cite_name == alias]
+def _export_model(alias, models, tenant_id, resource, agent_model_overrides, *, root_generation=None, source_alias=None):
+    record_alias = source_alias if root_generation is not None else alias
+    candidates = get_model_records({"display_name": record_alias, "model_type": "llm"}, tenant_id)
+    effective = [model for model in models if model.cite_name == record_alias]
     if len(candidates) != 1 or len(effective) != 1:
         raise ValueError("Evaluation requires an unambiguous model binding")
     record = candidates[0]
     selected = effective[0]
+    if root_generation is not None:
+        overlaid = [model for model in models if model.cite_name == alias]
+        if overlaid != [overlay_root_model(selected, root_generation.model_dump(), alias)]:
+            raise ValueError("Unsupported Workbench root model overlay")
     base = create_model_config_from_record(record)
     changes = {
         name: getattr(selected, name) for name in RunModelOverrides.model_fields
@@ -410,12 +437,14 @@ def _export_model(alias, models, tenant_id, resource, agent_model_overrides):
     return RunModelBinding(
         model_id=model_id, alias=alias, revision=model_record_revision(record),
         overrides=RunModelOverrides(**changes) if changes else None, provider_body_revision=body_revision,
+        root_generation=root_generation,
     )
 
 
 def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
+    root_generation=None, source_model_alias=None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -426,7 +455,11 @@ def export_snapshot(
             allow_public_tools=prepared_conversation is not None,
         )
         bindings = [
-            _export_model(alias, models, tenant_id, resource, agent_model_overrides) for alias in aliases
+            _export_model(
+                alias, models, tenant_id, resource, agent_model_overrides,
+                root_generation=root_generation if alias == agent.model_name else None, source_alias=source_model_alias,
+            )
+            for alias in aliases
         ]
         identity = resolve_tool_user_context(agent, user_id, tenant_id) if user_id is not None else None
         tool_caller = ToolCallerContext(**{

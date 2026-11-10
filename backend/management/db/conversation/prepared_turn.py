@@ -1,19 +1,21 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-owned public conversation admission and projection markers."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
 
 from contracts.agentos import AgentRunReference
-from contracts.errors.exceptions import RuntimeMetadataVersionConflict
+from contracts.errors.exceptions import RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.repository import (
-    _enforce_conversation_turn_limit, _lock_conversation_limit_scope, create_conversation, create_conversation_message,
+    _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
+    create_conversation, create_conversation_message,
 )
 
 
@@ -95,11 +97,19 @@ def _require_metadata_version(conversation: ConversationRecord, expected: int) -
         raise RuntimeMetadataVersionConflict(current)
 
 
+def _require_workbench_version(conversation: ConversationRecord, expected: int, config: dict) -> None:
+    current = conversation.workbench_config_version or 0
+    if current != expected:
+        raise WorkbenchConfigVersionConflict(current, deepcopy(conversation.workbench_config))
+    _assert_workbench_topology(conversation, config)
+
+
 def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
     *, initial_title: str | None = None,
 ) -> PreparedTurn:
     admission = ConversationRunAdmission
+    workbench = user_turn.get("workbench_update")
     with get_db_session() as session:
         if initial_title is None:
             if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
@@ -114,6 +124,8 @@ def stage_turn(
                 raise PreparedTurnConflict
             if (metadata_update := user_turn.get("metadata_update")) is not None:
                 _require_metadata_version(conversation, metadata_update["expected_version"])
+            if workbench is not None:
+                _require_workbench_version(conversation, workbench["expected_version"], workbench["config"])
         elif not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
         row = session.scalar(select(admission).where(
@@ -128,6 +140,7 @@ def stage_turn(
                 raise PreparedTurnConflict
             create_conversation(
                 initial_title, user_id, agent_id=user_turn["agent_id"], chat_mode=user_turn["chat_mode"],
+                workbench_config=workbench["config"] if workbench is not None else None,
                 reserved_conversation_id=reference.conversation_id, db_session=session,
             )
         row.status = "dispatching"
@@ -166,6 +179,17 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             if _next_index(session, conversation_id) != row.prepared_message_index - 1:
                 raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
+            workbench = user_turn.get("workbench_update")
+            if workbench is not None:
+                config = workbench["config"]
+                expected = workbench["version"] if user_turn["new_conversation"] else workbench["expected_version"]
+                _require_workbench_version(conversation, expected, config)
+                if config != conversation.workbench_config:
+                    conversation.workbench_config = config
+                    conversation.workbench_config_version = workbench["version"]
+                    conversation.knowledge_scope = config.get("knowledge_scope")
+                    conversation.updated_by = turn.user_id
+                    conversation.update_time = func.now()
             if (metadata_update := user_turn.get("metadata_update")) is not None:
                 expected = metadata_update["expected_version"]
                 _require_metadata_version(conversation, expected)
@@ -182,7 +206,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 "role": "assistant", "content": "",
             }, turn.user_id, status="streaming", streaming_owner="management", db_session=session)
             conversation.chat_mode = user_turn["chat_mode"]
-            conversation.agent_id = user_turn["agent_id"]
+            if workbench is None:
+                conversation.agent_id = user_turn["agent_id"]
             row.prepared_user_turn = None
             if row.prepared_automation_context is not None:
                 row.prepared_automation_context = {

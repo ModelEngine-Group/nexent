@@ -91,7 +91,7 @@ async def _present_observer(data, request, user_id):
 
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
-    on_terminal=None, created=False, include_journal_controls=True,
+    on_terminal=None, created=False, include_journal_controls=True, opening_event=None,
 ) -> StreamingResponse:
     if response.status_code != 200:
         return response
@@ -99,6 +99,7 @@ def present_public_resume(
     async def events():
         error_presented = False
         announce_creation = created
+        announce_opening = opening_event is not None
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
                 if announce_creation:
@@ -106,6 +107,9 @@ def present_public_resume(
                     payload = {"type": "conversation_created", "content": {"conversation_id": request.conversation_id}}
                     yield b"data: " + json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n\n"
                     announce_creation = False
+                if announce_opening:
+                    yield b"data: " + json.dumps(opening_event, ensure_ascii=False, separators=(",", ":")).encode() + b"\n\n"
+                    announce_opening = False
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
                 if kind != _OBSERVER_LINE:

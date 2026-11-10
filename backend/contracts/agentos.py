@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, field_validator, model_serializer
 
+from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
@@ -186,12 +187,14 @@ class RunModelBinding(RunSpecModel):
     revision: str = Field(min_length=1)
     overrides: RunModelOverrides | None = None
     provider_body_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    root_generation: WorkbenchGenerationConfig | None = None
 
     @model_serializer(mode="wrap")
-    def serialize_optional_body_revision(self, handler):
+    def serialize_optional_model_fields(self, handler):
         data = handler(self)
-        if data.get("provider_body_revision") is None:
-            data.pop("provider_body_revision", None)
+        for name in ("provider_body_revision", "root_generation"):
+            if data.get(name) is None:
+                data.pop(name, None)
         return data
 
 
@@ -448,6 +451,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 
 class PreparedConversationScope(AgentRunReference):
+    workbench_config_version: PositiveInt | None = None
     historical_context: PreparedConversationHistory | None = None
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
     runtime_metadata_version: int | None = Field(default=None, ge=0)
@@ -456,6 +460,13 @@ class PreparedConversationScope(AgentRunReference):
     @classmethod
     def validate_metadata(cls, value):
         return validate_runtime_metadata(value)
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_workbench_version(self, handler):
+        data = handler(self)
+        if data.get("workbench_config_version") is None:
+            data.pop("workbench_config_version", None)
+        return data
 
 
 class PreparedAgentRun(AgentRunSpec, PreparedConversationScope):

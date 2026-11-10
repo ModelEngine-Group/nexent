@@ -77,7 +77,9 @@ async def test_log_failure_releases_admission(payload, runtime):
 
 
 @pytest.mark.asyncio
-async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch, payload, runtime):
+@pytest.mark.parametrize("workbench_version", [None, 4])
+async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch, payload, runtime, workbench_version):
+    payload = payload.model_copy(update={"workbench_config_version": workbench_version})
     async def runner(info, **_kwargs):
         assert info is runtime.info
         yield '{"type":"thought","content":"step"}'
@@ -97,6 +99,7 @@ async def test_run_journals_events_and_finishes_under_exact_identity(monkeypatch
     identity = runtime.begin.call_args.args[0]
     runtime.mark.assert_called_once_with(identity, {
         "agent_id": 7, "agent_version_no": 3, "model_id": 11, "model_revision": "revision-1",
+        **({"workbench_config_version": workbench_version} if workbench_version is not None else {}),
     })
     runtime.finish.assert_called_once_with(identity, "completed")
     runtime.release.assert_called_once_with(runtime.info, 42, "actor", "completed")

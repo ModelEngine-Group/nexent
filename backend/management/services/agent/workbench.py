@@ -15,7 +15,8 @@ from nexent.core.agents.agent_model import AgentConfig
 
 from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.agent import WorkbenchSessionConfig
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -87,6 +88,14 @@ class ResolvedAgentPlan:
     root_skills: Tuple[ResolvedSkillMount, ...]
     child_mounts: Tuple[RuntimeAgentIdentity, ...] = ()
     knowledge_tree: Tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedWorkbench:
+    config: WorkbenchSessionConfig
+    plan: ResolvedAgentPlan
+    previous_version: int
+    version: int
 
 
 @dataclass(frozen=True)
@@ -570,6 +579,35 @@ def assert_workbench_version(
             current_version,
             deepcopy(conversation.get("workbench_config")),
         )
+
+
+def prepare_portable_workbench(
+    request: AgentRequest, conversation: Mapping[str, Any] | None, user_id: str, tenant_id: str,
+) -> PreparedWorkbench | None:
+    from management.services.model.run_controls import validate_agent_model_selection
+
+    if not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+    validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
+    stored = conversation.get("workbench_config") if conversation is not None else None
+    previous_version = 0
+    if conversation is not None:
+        assert_workbench_version(conversation, request.expected_workbench_config_version)
+        previous_version = int(conversation.get("workbench_config_version") or 0)
+    requested = request.workbench
+    if requested is None and stored is not None:
+        requested = WorkbenchSessionConfig.model_validate(stored)
+    if requested is None:
+        raise ValidationError("Workbench configuration is required")
+    if (request.metadata is not None or request.knowledge_scope is not None
+            or requested.knowledge_scope is not None or requested.skill_mounts):
+        return None
+
+    canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
+    if plan.root_skills:
+        return None
+    version = previous_version + int(canonical.model_dump(mode="json") != stored)
+    return PreparedWorkbench(canonical, plan, previous_version, version)
 
 
 def runtime_skill_snapshot(tree: ResolvedAgentPlan | ResolvedAgentTree) -> list[Dict[str, Any]]:

@@ -1,18 +1,37 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Immutable model descriptors and capacity suggestion contracts."""
+"""Model descriptors, generation settings and capacity suggestion contracts."""
 
 import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from enum import Enum
 
 
 ProfileKey = tuple[str, str]
 CapabilityProfileLike = Any
+
+
+class WorkbenchGenerationConfig(BaseModel):
+    """Provider-neutral generation settings persisted with the conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deep_thinking: bool = False
+    thinking_effort: Literal[
+        "auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"
+    ] = "low"
+    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+    temperature: Optional[float] = Field(
+        default=None, ge=0, le=2, strict=True, allow_inf_nan=False
+    )
+    top_p: Optional[float] = Field(
+        default=None, ge=0, le=1, strict=True, allow_inf_nan=False
+    )
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
 
 
 class CapacitySuggestionMatchKind(str, Enum):

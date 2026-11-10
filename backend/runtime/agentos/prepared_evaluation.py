@@ -5,8 +5,8 @@ import asyncio
 import logging
 import shutil
 from contextlib import ExitStack
-from hmac import compare_digest
 from functools import partial
+from hmac import compare_digest
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -20,12 +20,15 @@ from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
+from contracts.errors.exceptions import RunModelControlsError
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_attachments import validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
-from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
+from infrastructure.agent_model_overrides import (
+    get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
+)
 from infrastructure.agent_tool_config import (
     PLAN_TOOL_NAMES, build_parallel_executor_tool_config, build_plan_tool_configs,
 )
@@ -158,6 +161,7 @@ def _materialize_external_agents(resource, actor):
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
+    root_only_alias=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -167,6 +171,8 @@ def _materialize_agent(
     if root_alias is not None and resource.model_alias not in (None, root_alias):
         raise ValueError("Evaluation root model binding mismatch")
     alias = resource.model_alias or root_alias
+    if root_alias is None and root_only_alias is not None and alias == root_only_alias:
+        raise ValueError("Workbench root model cannot be used by a child Agent")
     if alias not in model_aliases:
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
@@ -221,6 +227,7 @@ def _materialize_agent(
             _materialize_agent(
                 child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
                 language=language, sandbox_enabled=sandbox_enabled, publish_skill_artifacts=publish_skill_artifacts,
+                root_only_alias=root_only_alias,
             )
             for child in resource.subagents
         ],
@@ -247,7 +254,13 @@ def _materialize_model(binding, actor, resource):
         if patch is None or not compare_digest(provider_body_revision(scope, body), binding.provider_body_revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_MODEL_BODY_REVISION_MISMATCH"})
         updates["extra_body"] = body
-    return model.model_copy(update={"cite_name": binding.alias, **updates})
+    model = model.model_copy(update={"cite_name": binding.alias, **updates})
+    if binding.root_generation is not None:
+        try:
+            return overlay_root_model(model, binding.root_generation.model_dump(), binding.alias)
+        except RunModelControlsError as exc:
+            raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
+    return model
 
 
 def _remove_skill_files(workspace_path: str | None) -> None:
@@ -290,6 +303,13 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
     )):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
+    workbench_version = payload.workbench_config_version if isinstance(payload, PreparedAgentRun) else None
+    root_generation = payload.models.llm.root_generation
+    if (root_generation is not None) != (workbench_version is not None) or any(
+        binding.root_generation is not None for binding in payload.models.additional_llms
+    ):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
+
     historical_context = (
         _restore_conversation_history(payload.historical_context, actor) if isinstance(payload, PreparedAgentRun) else None
     )
@@ -311,6 +331,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, PreparedAgentRun),
+                root_only_alias=payload.models.llm.alias if root_generation is not None else None,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,

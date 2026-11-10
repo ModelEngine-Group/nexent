@@ -17,12 +17,12 @@ from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
     AppException, ForbiddenError, RunModelControlsError, RuntimeMetadataVersionConflict,
-    RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError,
+    RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError,
 )
 from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
 from management.db.conversation import prepared_turn as store
-from management.db.conversation.repository import get_prepared_projection_receipt
+from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
 from management.services.agent.agentos_events import present_public_resume
 from management.services.agent.context import strip_current_time_prefix
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
@@ -41,7 +41,8 @@ async def _io(name, fn, *args, **kwargs):
 
 def is_prepared_candidate(payload, request):
     return bool(
-        not payload.resume and not request.is_debug and request.agent_id and not request.entrypoint
+        not payload.resume and not request.is_debug
+        and (request.entrypoint == "workbench" or (request.agent_id and not request.entrypoint))
         and (request.conversation_id is None or request.conversation_id > 0)
     )
 
@@ -64,6 +65,26 @@ def active_turn_conflict():
 
 def _metadata_conflict(error):
     return AppException(ErrorCode.CHAT_METADATA_VERSION_CONFLICT, details={"current_version": error.current_version})
+
+
+def _workbench_conflict(error: WorkbenchConfigVersionConflict) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": error.current_version,
+    })
+
+
+async def _prepare_workbench(request, conversation_id, user_id, tenant_id):
+    from management.services.agent.workbench import prepare_portable_workbench
+
+    conversation = None
+    if conversation_id is not None:
+        conversation = await _io("prepared-workbench-owner", get_conversation, conversation_id,
+                                 user_id=user_id, tenant_id=tenant_id)
+        if conversation is None:
+            raise _not_owned()
+        if not isinstance(conversation.get("workbench_config"), dict):
+            raise HTTPException(status_code=403, detail="Conversation belongs to a different chat entrypoint")
+    return await _io("prepared-workbench-plan", prepare_portable_workbench, request, conversation, user_id, tenant_id)
 
 
 def _definitive_rejection(error):
@@ -92,6 +113,11 @@ async def start_turn(
     initial_title = None
     try:
         conversation_id = request.conversation_id
+        workbench = None
+        if request.entrypoint == "workbench":
+            workbench = await _prepare_workbench(request, conversation_id, user_id, tenant_id)
+            if workbench is None:
+                return None
         if conversation_id is None:
             conversation_id = await _io("prepared-turn-sequence", store.allocate_conversation_id)
             request = request.model_copy(update={"conversation_id": conversation_id})
@@ -104,6 +130,8 @@ async def start_turn(
             options = {"before_message_index": boundary}
         if allow_metadata_update:
             options["allow_metadata_update"] = True
+        if workbench is not None:
+            options["workbench"] = workbench
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
             request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
@@ -120,16 +148,22 @@ async def start_turn(
             automation = {
                 "agent_id": snapshot.resource.agent_id,
                 "agent_version_no": snapshot.resource.version_no,
-                "model_id": request.model_id,
+                "model_id": (workbench.config.model_id if workbench is not None else None) or request.model_id,
                 "tool_params": request.tool_params.model_dump(mode="json") if request.tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
         user_turn = {
             "query": strip_current_time_prefix(request.query), "minio_files": request.minio_files,
-            "chat_mode": "planning" if request.enable_plan else "execution", "agent_id": request.agent_id,
+            "chat_mode": "planning" if request.enable_plan else "execution",
+            "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if workbench is not None:
+            user_turn["workbench_update"] = {
+                "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,
+                "version": workbench.version,
+            }
         if allow_metadata_update and request.metadata is not None:
             user_turn["metadata_update"] = {
                 "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
@@ -144,6 +178,10 @@ async def start_turn(
             raise active_turn_conflict() from exc
         if isinstance(exc, RuntimeMetadataVersionConflict):
             raise _metadata_conflict(exc) from exc
+        if isinstance(exc, WorkbenchConfigVersionConflict):
+            raise _workbench_conflict(exc) from exc
+        if isinstance(exc, WorkbenchError):
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if isinstance(exc, RunModelControlsError):
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
             raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
@@ -163,18 +201,23 @@ async def start_turn(
         raise RuntimeServiceUnavailableError("AgentOS returned a different conversation run")
     try:
         confirmed = await _io("prepared-turn-confirm", store.confirm_turn, turn)
-    except (AdmissionScopeError, store.PreparedTurnConflict, RuntimeMetadataVersionConflict) as exc:
+    except (AdmissionScopeError, store.PreparedTurnConflict, RuntimeMetadataVersionConflict,
+            WorkbenchConfigVersionConflict, WorkbenchError) as exc:
         await _cancel_unbound_turn(client, turn)
         if isinstance(exc, AdmissionScopeError):
             raise _not_owned() from exc
         if isinstance(exc, RuntimeMetadataVersionConflict):
             raise _metadata_conflict(exc) from exc
+        if isinstance(exc, WorkbenchConfigVersionConflict):
+            raise _workbench_conflict(exc) from exc
+        if isinstance(exc, WorkbenchError):
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         raise active_turn_conflict() from exc
     if confirmed is None:
         raise RuntimeServiceUnavailableError("Prepared conversation admission is no longer pending")
     return await _stream_turn(
         confirmed, client, metadata_version=snapshot.runtime_metadata_version, created=initial_title is not None,
-        include_journal_controls=include_journal_controls,
+        include_journal_controls=include_journal_controls, workbench=workbench,
     )
 
 
@@ -189,7 +232,9 @@ async def _cancel_unbound_turn(client, turn):
     await _io("prepared-turn-unbound", store.close_turn, turn)
 
 
-async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True):
+async def _stream_turn(
+    turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True, workbench=None,
+):
     reference = turn.reference
     cursor = AgentResume(**reference.model_dump())
     upstream = await client.resume(cursor, turn.user_id, turn.tenant_id)
@@ -201,9 +246,20 @@ async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, cr
             logger.warning("Deferred terminal conversation projection run_id=%s error=%s",
                            reference.run_id, type(exc).__name__)
 
+    opening_event = None
+    if workbench is not None:
+        opening_event = {"type": "workbench_config_resolved", "content": {
+            "config_version": workbench.version,
+            "schema_version": workbench.config.schema_version,
+            "mode": workbench.config.mode,
+            "agent_mounts": [mount.model_dump(mode="json") for mount in workbench.config.agent_mounts],
+        }}
     response = present_public_resume(
-        upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created, include_journal_controls=include_journal_controls,
+        upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created,
+        include_journal_controls=include_journal_controls, opening_event=opening_event,
     )
+    if workbench is not None:
+        response.headers["X-Workbench-Config-Version"] = str(workbench.version)
     response.headers["conversation_id"] = str(reference.conversation_id)
     if include_journal_controls:
         response.headers["run_id"] = reference.run_id
@@ -283,7 +339,7 @@ async def reconcile_turn(turn, client):
         except AdmissionScopeError:
             await _io("prepared-turn-outside-scope", store.close_turn, turn, failure_status="failed")
             return
-        except (store.PreparedTurnConflict, RuntimeMetadataVersionConflict):
+        except (store.PreparedTurnConflict, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError):
             await _cancel_unbound_turn(client, turn)
             return
         if turn is None:

@@ -292,3 +292,57 @@ async def test_recovery_discards_run_stopped_before_runtime_admission(flow):
     await prepared_turn.reconcile_turn(staged, client)
     assert operations == ["close"]
     client.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_workbench_stale_configuration_rejects_before_runtime(mocker):
+    from fastapi import HTTPException
+
+    from contracts.agent import WorkbenchSessionConfig
+
+    config = WorkbenchSessionConfig(mode="generic_chat")
+    request = AgentRequest(
+        query="question", entrypoint="workbench", conversation_id=REFERENCE.conversation_id,
+        workbench=config, expected_workbench_config_version=1,
+    )
+    mocker.patch.object(prepared_turn, "get_conversation", return_value={
+        "workbench_config": config.model_dump(mode="json"), "workbench_config_version": 2,
+    })
+
+    async def inline(_name, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    mocker.patch.object(prepared_turn, "_io", side_effect=inline)
+    reject = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+    client = SimpleNamespace(start_prepared_run=AsyncMock())
+    with pytest.raises(HTTPException) as error:
+        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+
+    assert error.value.status_code == 409
+    assert error.value.detail == {"code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": 2}
+    reject.assert_awaited_once_with(PAYLOAD, *ACTOR)
+    client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_workbench_uses_unchanged_compatibility_request(mocker):
+    from management.services.agent import conversation_submission
+
+    payload = CompatibilityConversationRun(request={
+        "query": "question", "entrypoint": "workbench", "workbench": {"mode": "generic_chat"},
+    })
+    response = StreamingResponse(iter(()))
+    client = SimpleNamespace(run_conversation=AsyncMock(return_value=response))
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(prepared_turn, "start_turn", return_value=None)
+    reject = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+
+    async def submit(claimed, owner, tenant, dispatch, *, include_claim_headers):
+        assert not include_claim_headers
+        assert claimed.idempotency_key.startswith("prepared-")
+        return await dispatch(claimed.model_copy(update={"claimed_run_id": REFERENCE.run_id}), owner, tenant)
+
+    mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
+    assert await runtime_client.forward_conversation_run(payload, *ACTOR) is response
+    assert reject.await_args.args[0].claimed_run_id == REFERENCE.run_id
+    client.run_conversation.assert_awaited_once_with(payload, *ACTOR)

@@ -84,6 +84,9 @@ case:
   - order: 19
     action: Submit explicit runtime metadata to Northbound on an owned conversation through signed AgentOS.
     expected: Runtime receives the replacement and next version. Management stages that version and preserves it in the public response.
+  - order: 20
+    action: Submit an owned Workbench turn with a resolved Workbench configuration and stream signed AgentOS output.
+    expected: The typed Workbench version and root generation reach Runtime and Management presents the public configuration event and version header.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -104,6 +107,7 @@ case:
   - First-turn submission keeps one conversation, run, and original creation event.
   - Northbound uses signed prepared admission and projection without a duplicate user write or exposing journal control frames.
   - Northbound passes explicit metadata only as a signed prepared snapshot and retains the response version header.
+  - A prepared Workbench turn preserves its resolved configuration event, version and single projection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -261,4 +265,9 @@ case:
     description: Northbound preserves explicit metadata and the version across signed prepared admission without legacy execution.
     steps: [19]
     expected_results: [19]
+    forbidden_side_effects: [1, 2]
+  - id: AC-28
+    description: Signed prepared Workbench execution preserves the resolved configuration, root generation binding and public event.
+    steps: [20]
+    expected_results: [20]
     forbidden_side_effects: [1, 2]

@@ -242,6 +242,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(
             metadata_patches, northbound=True, metadata={"project": "replacement"},
         )
+    with monkeypatch.context() as workbench_patches:
+        await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True)
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -1840,8 +1842,9 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 
 async def _assert_public_prepared_turn_over_signed_http(
-    monkeypatch, *, new_conversation=False, northbound=False, metadata=None,
+    monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
 ):
+    from contracts.agent import WorkbenchSessionConfig
     from contracts.constants.constants import DEFAULT_EN_TITLE
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
@@ -1852,13 +1855,18 @@ async def _assert_public_prepared_turn_over_signed_http(
     boundary = 0 if new_conversation else 4
     actor = ServicePrincipal("public-user", "public-tenant")
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
+    config = WorkbenchSessionConfig(mode="generic_chat", generation_config={"temperature": 0.4})
+    llm = {"model_id": 11, "alias": "demo", "revision": "revision"}
+    if use_workbench:
+        llm["root_generation"] = config.generation_config.model_dump(mode="json")
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
         **({"runtime_metadata": metadata, "runtime_metadata_version": 6} if metadata is not None else {}),
+        **({"workbench_config_version": 4} if use_workbench else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
                      "prompt_templates": {"system_prompt": "Answer"},
                      "tools": [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]},
-        "models": {"llm": {"model_id": 11, "alias": "demo", "revision": "revision"}},
+        "models": {"llm": llm},
     })
     state = {"status": "pending"}
     calls = []
@@ -1878,6 +1886,10 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
         assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
         assert turn["query"] == "test"
+        if use_workbench:
+            assert turn["workbench_update"] == {
+                "config": config.model_dump(mode="json"), "expected_version": 3, "version": 4,
+            }
         if northbound:
             assert turn["automation"] is None
             if metadata is not None:
@@ -1935,6 +1947,16 @@ async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(conversation_submission, "conversation_belongs_to", owned)
     monkeypatch.setattr(prepared_turn, "run_blocking", inline)
+    if use_workbench:
+        from management.services.agent import workbench
+
+        monkeypatch.setattr(prepared_turn, "get_conversation", lambda *_args, **_kwargs: {
+            "workbench_config": WorkbenchSessionConfig(mode="generic_chat").model_dump(mode="json"),
+            "workbench_config_version": 3,
+        })
+        monkeypatch.setattr(workbench, "resolve_workbench_config",
+                            lambda requested, **_kwargs: (requested, SimpleNamespace(root_skills=())))
+
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
@@ -1942,6 +1964,8 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata
         assert kwargs.get("allow_metadata_update", False) == (metadata is not None)
+        if use_workbench:
+            assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
         return snapshot
 
     monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", compile_snapshot)
@@ -1976,6 +2000,11 @@ async def _assert_public_prepared_turn_over_signed_http(
             return
 
         request = {"query": "test", "agent_id": 7}
+        if use_workbench:
+            request = {
+                "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
+                "expected_workbench_config_version": 3,
+            }
         if not new_conversation:
             request["conversation_id"] = reference.conversation_id
         headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1", "Cookie": "NEXT_LOCALE=en"}
@@ -1990,6 +2019,12 @@ async def _assert_public_prepared_turn_over_signed_http(
         if new_conversation:
             created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
             prefix = f"data: {json.dumps(created, separators=(',', ':'))}\n\n" + prefix
+        if use_workbench:
+            event = {"type": "workbench_config_resolved", "content": {
+                "config_version": 4, "schema_version": 3, "mode": "generic_chat", "agent_mounts": [],
+            }}
+            prefix = f"data: {json.dumps(event, separators=(',', ':'))}\n\n" + prefix
+            assert first.headers["X-Workbench-Config-Version"] == "4"
         assert first.text.startswith(prefix)
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id

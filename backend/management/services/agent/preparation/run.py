@@ -4,7 +4,7 @@
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from contracts.agentos import PreparedConversationScope
 from contracts.constants.environment import (
@@ -41,6 +41,10 @@ from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
 from management.services.model.run_budget import _OPERATOR_OVERRIDE_FIELDS
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+
+if TYPE_CHECKING:
+    from management.services.agent.workbench import PreparedWorkbench
+
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -89,7 +93,7 @@ def apply_root_generation_overlay(
     model_list: List[ModelConfig],
     agent_config: AgentConfig,
     generation_config: Optional[Dict[str, Any]],
-) -> None:
+) -> str | None:
     """Add a root-only model alias without changing child Agent aliases."""
     if not generation_config:
         return
@@ -105,7 +109,8 @@ def apply_root_generation_overlay(
         )
         model_list.append(root_model)
         agent_config.model_name = root_model.cite_name
-        return
+        return model_config.cite_name
+    return None
 
 
 async def create_agent_run_info(
@@ -136,6 +141,7 @@ async def create_agent_run_info(
     export_evaluation: bool = False,
     resource_versions: dict | None = None,
     prepared_conversation: PreparedConversationScope | None = None,
+    prepared_workbench: "PreparedWorkbench | None" = None,
 ):
     export_resources = export_evaluation or prepared_conversation is not None
     if override_model_id is not None:
@@ -324,7 +330,7 @@ async def create_agent_run_info(
     # Request-scoped Workbench settings apply only to the root model. Static
     # children retain the model aliases from their published versions.
     # Static children keep their published aliases and never inherit this overlay.
-    apply_root_generation_overlay(
+    source_model_alias = apply_root_generation_overlay(
         model_list,
         agent_config,
         runtime_generation_config,
@@ -353,10 +359,22 @@ async def create_agent_run_info(
     if export_resources:
         from management.services.agent.preparation.evaluation_snapshot import export_snapshot
 
+        export_options = {}
+        if prepared_workbench is not None:
+            from management.services.agent.workbench import compile_runtime_mount_plan
+
+            if source_model_alias is None:
+                return None
+            agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
+            export_options = {
+                "root_generation": prepared_workbench.config.generation_config,
+                "source_model_alias": source_model_alias,
+            }
         return export_snapshot(
             agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
             agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
+            **export_options,
         )
 
     if resource_versions is not None:

@@ -58,6 +58,7 @@ async def forward_conversation_run(
     request = AgentRequest.model_validate(payload.request)
     conversation_id = request.conversation_id
     northbound = northbound_fallback is not None
+    temporary_workbench_claim = request.entrypoint == "workbench" and payload.idempotency_key is None
     candidate = prepared_turn.is_prepared_candidate(payload, request)
 
     async def dispatch(claimed, owner, tenant):
@@ -68,8 +69,9 @@ async def forward_conversation_run(
             )
             if response is not None:
                 return response
-            if northbound:
+            if northbound or temporary_workbench_claim:
                 await prepared_turn.reject_unstaged_turn(claimed, owner, tenant)
+                claimed = payload
         if conversation_id and conversation_id > 0 and not request.is_debug:
             pending = await prepared_turn.find_pending_turn(conversation_id, owner, tenant)
             if pending is not None:
@@ -82,7 +84,8 @@ async def forward_conversation_run(
 
     if candidate or payload.idempotency_key is not None:
         return await submit_conversation(
-            prepared_turn.with_submission_key(payload), user_id, tenant_id, dispatch, include_claim_headers=not northbound,
+            prepared_turn.with_submission_key(payload), user_id, tenant_id, dispatch,
+            include_claim_headers=not (northbound or temporary_workbench_claim),
         )
     return await dispatch(payload, user_id, tenant_id)
 
