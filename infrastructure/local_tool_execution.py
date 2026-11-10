@@ -5,6 +5,7 @@ import hmac
 import json
 
 from contracts.constants import environment
+from infrastructure.shared_aidp_tool import shared_aidp_parameters
 from nexent.core.agents.agent_model import ToolConfig
 
 LOCAL_SDK_TOOL_CLASSES = {
@@ -14,6 +15,7 @@ LOCAL_SDK_TOOL_CLASSES = {
     "haotian_search": "HaotianSearchTool",
     "idata_search": "IdataSearchTool",
     "ind_aidp_search": "IndependentAidpSearchTool",
+    "aidp_search": "AidpSearchTool",
     "deepseek_search": "DeepSeekSearchTool",
     "exa_search": "ExaSearchTool",
     "linkup_search": "LinkupSearchTool",
@@ -40,6 +42,8 @@ def build_local_tool(row: dict, language: str, description_zh: str | None, input
         params.pop("localization", None)
         params.pop("max_content_chars", None)
         params["language"] = language
+    elif name == "aidp_search":
+        params = shared_aidp_parameters(params)
     return ToolConfig(
         name=name, class_name=row["class_name"], source="local", description=row["description"],
         description_zh=description_zh, inputs=inputs, output_type=row["output_type"], usage=row["usage"], params=params,

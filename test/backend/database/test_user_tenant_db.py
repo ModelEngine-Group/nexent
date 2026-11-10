@@ -72,7 +72,7 @@ install_serialization_stub(sys.modules["infrastructure.rdb.client"])
 db_models_mock = MagicMock()
 db_models_mock.UserTenant = MagicMock()
 sys.modules['management.db.models'] = db_models_mock
-sys.modules['management.db.models'] = db_models_mock
+sys.modules['infrastructure.rdb.account_record'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()

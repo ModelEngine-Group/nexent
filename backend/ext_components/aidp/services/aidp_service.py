@@ -17,10 +17,7 @@ from nexent.utils.http_client_manager import http_client_manager
 from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from management.db.agent.repository import query_knowledge_binding_agents
 from infrastructure.rdb.client import get_db_session
-from management.db.conversation.repository import remove_conversation_knowledge_bindings
-from management.db.tool.repository import remove_tool_knowledge_references
 
 
 logger = logging.getLogger("aidp_service")
@@ -1281,6 +1278,24 @@ def update_aidp_kb_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP API response: {str(e)}",
         )
+
+
+def query_knowledge_binding_agents(*args, **kwargs):
+    from management.db.agent.repository import query_knowledge_binding_agents as operation
+
+    return operation(*args, **kwargs)
+
+
+def remove_conversation_knowledge_bindings(*args, **kwargs):
+    from management.db.conversation.repository import remove_conversation_knowledge_bindings as operation
+
+    return operation(*args, **kwargs)
+
+
+def remove_tool_knowledge_references(*args, **kwargs):
+    from management.db.tool.repository import remove_tool_knowledge_references as operation
+
+    return operation(*args, **kwargs)
 
 
 def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:

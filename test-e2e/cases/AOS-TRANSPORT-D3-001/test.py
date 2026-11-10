@@ -192,12 +192,126 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path)
     with monkeypatch.context() as tool_patches:
         await _assert_stored_local_tool_over_signed_http(tool_patches, tmp_path)
+    with monkeypatch.context() as aidp_patches:
+        await _assert_shared_aidp_over_signed_http(aidp_patches, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
     with monkeypatch.context() as lifecycle_patches:
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
+
+
+async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
+    from fastapi import Request
+
+    from ext_components.aidp.database import aidp_permission_db
+    from ext_components.aidp.services import aidp_service
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.local_tool_execution import build_local_tool
+    from infrastructure.rdb import account_access
+    from management.services.agent.preparation import evaluation_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import prepared_evaluation, prepared_local_tool
+    from runtime.executions import LocalExecutionRegistry
+
+    provider = FastAPI()
+    searches = []
+    catalog_calls = []
+    groups = [17]
+    acl = [
+        {"kb_id": "group-kb", "kds_name": "Allowed", "tenant_id": "tenant-a",
+         "owner_user_id": "owner", "group_ids": [17], "ingroup_permission": "READ_ONLY"},
+        {"kb_id": "private-kb", "kds_name": "Private", "tenant_id": "tenant-a",
+         "owner_user_id": "owner", "group_ids": [17], "ingroup_permission": "PRIVATE"},
+    ]
+
+    @provider.post("/KnowledgeBase/Tenants/shared-provider/KnowledgeBases/0/Count")
+    async def count(request: Request):
+        catalog_calls.append(request.headers.get("authorization"))
+        return {"count": 2}
+
+    @provider.get("/KnowledgeBase/Tenants/shared-provider/KnowledgeBases")
+    async def catalog():
+        return {"value": [{"kds_id": "group-kb"}, {"kds_id": "private-kb"}]}
+
+    @provider.post("/KnowledgeBase/Tenants/shared-provider/Retrieval/FusionSearch")
+    async def retrieve(request: Request):
+        payload = await request.json()
+        searches.append((request.headers.get("authorization"), payload["kds_list"]))
+        return {"result": []}
+
+    observed_whitelists = []
+
+    async def run(info, thread_manager):
+        configured, = info.agent_config.tools
+        expected = ["group-kb"] if groups else []
+        assert configured.metadata["allowed_kds_set"] == expected
+        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), configured)
+        result = await asyncio.to_thread(tool.forward, "fixture query", ["Private", "Allowed"])
+        assert "Private" in result
+        observed_whitelists.append(expected)
+        yield json.dumps({"type": "thought", "content": "scope checked"})
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_evaluation_router())
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "shared-aidp-runs"))
+    monkeypatch.setattr(prepared_evaluation, "agent_run_manager", LocalExecutionRegistry())
+    monkeypatch.setattr(prepared_evaluation, "agent_run", run)
+    monkeypatch.setattr(account_access, "get_user_role_by_tenant",
+                        lambda user, tenant: "DEV" if (user, tenant) == ("user-a", "tenant-a") else "")
+    monkeypatch.setattr(account_access, "query_group_ids_by_user_in_tenant",
+                        lambda user, tenant: groups if (user, tenant) == ("user-a", "tenant-a") else [])
+    monkeypatch.setattr(aidp_permission_db, "list_all_permissions_by_tenant",
+                        lambda tenant_id: acl if tenant_id == "tenant-a" else [])
+    model = {
+        "model_id": 49, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
+        "model_name": "fixture-model", "model_repo": None, "display_name": "eval_llm",
+        "api_key": "runtime-llm", "base_url": "https://fixture.invalid/v1", "update_time": "revision-1",
+    }
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda _model, _tenant: model)
+    monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [model])
+    row = {
+        "tool_id": 10, "tool_instance_id": 21, "name": "aidp_search", "class_name": "AidpSearchTool",
+        "source": "local", "description": "Shared AIDP", "inputs": None, "usage": None, "output_type": "string",
+        "instance_params": {}, "params": [{"name": "kds_list", "default": '["group-kb","private-kb"]'}],
+    }
+    for module in (evaluation_snapshot, prepared_local_tool):
+        monkeypatch.setattr(module, "read_bound_local_tools", lambda *_: [row])
+
+    with serve(provider) as provider_url, serve(runtime) as runtime_url:
+        agent = AgentConfig(
+            agent_id=9, version_no=4, name="eval", description="Shared AIDP scope",
+            prompt_templates={"system_prompt": "Evaluate the search"}, model_name="eval_llm",
+            tools=[build_local_tool(row, "en", None, None)],
+        )
+        prepared = evaluation_snapshot.export_snapshot(
+            agent, [create_model_config_from_record(model)], "question", None,
+            tenant_id="tenant-a", conversation_id=-61, language="en",
+        )
+        assert isinstance(prepared, PreparedEvaluationRun)
+        for secret in (provider_url, "synthetic-shared-aidp-key", "shared-provider", "private-kb", "group-kb"):
+            assert secret not in prepared.model_dump_json()
+        assert catalog_calls == []
+
+        monkeypatch.setattr(environment, "AIDP_SERVER_URL", provider_url)
+        monkeypatch.setattr(environment, "AIDP_API_KEY", "synthetic-shared-aidp-key")
+        monkeypatch.setattr(environment, "AIDP_TENANT_ID", "shared-provider")
+        monkeypatch.setattr(aidp_service, "AIDP_TENANT_ID", "shared-provider")
+        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        result = await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert result.events == [
+            {"type": "thought", "content": "scope checked"}, {"type": "final_answer", "content": "done"},
+        ]
+        groups.clear()
+        assert (await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")).answer == "done"
+
+    assert observed_whitelists == [["group-kb"], []]
+    assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
+    assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])]
 
 
 async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):

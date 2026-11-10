@@ -20,6 +20,7 @@ from contracts.tool import ToolParamsRequest
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
 from infrastructure.object_storage.client import minio_client
+from infrastructure.shared_aidp_tool import restrict_aidp_access, shared_aidp_parameters
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
@@ -420,20 +421,11 @@ async def create_tool_config_list(
             param_dict.pop("max_content_chars", None)
             # Run language is authoritative over persisted or request-level tool parameters.
             param_dict["language"] = language
-        if tool.get("class_name") == "AidpSearchTool":
-            # Credentials are backend-owned since the v7.1 permission
-            # redesign; populate them from the central constants (the
-            # database row may carry a stale value).
-            param_dict.pop("server_url", None)
-            param_dict.pop("api_key", None)
-            param_dict.pop("tenant_id", None)
-            param_dict.update(
-                {
-                    "server_url": AIDP_SERVER_URL,
-                    "api_key": AIDP_API_KEY,
-                    "tenant_id": AIDP_TENANT_ID,
-                }
-            )
+        is_shared_aidp = tool.get("class_name") == "AidpSearchTool"
+        if is_shared_aidp:
+            param_dict = shared_aidp_parameters(param_dict)
+            if not portable_evaluation:
+                param_dict.update(server_url=AIDP_SERVER_URL, api_key=AIDP_API_KEY, tenant_id=AIDP_TENANT_ID)
 
         if tool.get("class_name") == "IndependentAidpSearchTool":
             if not param_dict.get("server_url") or not param_dict.get("api_key"):
@@ -441,19 +433,14 @@ async def create_tool_config_list(
                     "Independent AIDP search requires server_url and api_key in its tool configuration."
                 )
 
-        # Inject the runtime whitelist for AidpSearchTool. ``param_dict``
-        # already contains the resolved per-run range (inherit/override/
-        # disabled). Intersect it with the current remote catalog and local
-        # permissions, but never intersect it with the agent defaults again.
-        _allowed_kds_set: set[str] = set()
-        _kds_name_to_id_map: dict[str, str] = {}
-        if tool.get("class_name") == "AidpSearchTool":
+        aidp_snapshot = None
+        if is_shared_aidp and not portable_evaluation:
             try:
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
 
-                snapshot = await run_blocking(
+                aidp_snapshot = await run_blocking(
                     "resolve-runtime-aidp-access",
                     resolve_current_aidp_access,
                     server_url=AIDP_SERVER_URL,
@@ -464,39 +451,11 @@ async def create_tool_config_list(
                     lane="control-io",
                     owner="agents.create_agent_info",
                 )
-                _allowed_kds_set = set(snapshot.accessible_id_set)
-                _kds_name_to_id_map = {
-                    **snapshot.name_to_id,
-                    **snapshot.tenant_name_to_id,
-                }
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "AIDP access snapshot lookup failed: %s",
                     exc,
                 )
-
-            configured_kds = param_dict.get("kds_list") or []
-            if isinstance(configured_kds, str):
-                try:
-                    configured_kds = json.loads(configured_kds)
-                except json.JSONDecodeError:
-                    configured_kds = []
-            if not isinstance(configured_kds, list):
-                configured_kds = []
-            configured_kds = [str(kds_id) for kds_id in configured_kds]
-            configured_kds_set = set(configured_kds)
-            # The execution whitelist is the effective tool range, not every
-            # KDS the user could access. This prevents model-supplied arguments
-            # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds_set)
-            # Keep the full per-run scope in params so the SDK can distinguish
-            # configured-but-denied knowledge bases from unavailable ones.
-            param_dict["kds_list"] = configured_kds
-            _kds_name_to_id_map = {
-                name: kds_id
-                for name, kds_id in _kds_name_to_id_map.items()
-                if kds_id in configured_kds_set
-            }
 
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
@@ -510,32 +469,11 @@ async def create_tool_config_list(
             usage=tool.get("usage"),
         )
 
-        if tool.get("class_name") == "AidpSearchTool":
-            # Carry over the runtime whitelist; merge into any existing
-            # metadata so langchain_tool references that may already be
-            # attached are preserved. ``tool_config.metadata`` defaults to
-            # None on ToolConfig, so guard the spread accordingly.
-            existing = (
-                tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
-            )
-            tool_config.metadata = {
-                **existing,
-                "allowed_kds_set": sorted(_allowed_kds_set),
-                "kds_name_to_id_map": _kds_name_to_id_map,
-            }
-            tool_class_name = tool.get("class_name")
-            for langchain_tool in langchain_tools:
-                if langchain_tool.name == tool_class_name:
-                    existing2 = (
-                        tool_config.metadata
-                        if isinstance(tool_config.metadata, dict)
-                        else {}
-                    )
-                    tool_config.metadata = {
-                        **existing2,
-                        "langchain_tool": langchain_tool,
-                    }
-                    break
+        if is_shared_aidp and not portable_evaluation:
+            tool_config.metadata = restrict_aidp_access(param_dict["kds_list"], aidp_snapshot)
+            langchain_tool = next((item for item in langchain_tools if item.name == tool_config.class_name), None)
+            if langchain_tool is not None:
+                tool_config.metadata["langchain_tool"] = langchain_tool
 
         if tool.get("class_name") == "IndependentAidpSearchTool" and not portable_evaluation:
             existing = (

@@ -21,6 +21,7 @@ from infrastructure.rdb.account_record import (
     TenantGroupUser as TenantGroupUser,
     UserAccount as UserAccount,
     UserTenant as UserTenant,
+    TenantGroupInfo as TenantGroupInfo,
 )
 
 
@@ -79,21 +80,6 @@ class TenantInvitationRecord(TableBase):
     invitation_id = Column(Integer, nullable=False,
                            doc="Invitation ID, foreign key")
     user_id = Column(String(100), nullable=False, doc="User ID")
-
-
-class TenantGroupInfo(TableBase):
-    """
-    Tenant group information table
-    """
-    __tablename__ = "tenant_group_info_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    group_id = Column(Integer, Sequence("tenant_group_info_t_group_id_seq", schema=SCHEMA),
-                      primary_key=True, nullable=False, doc="Group ID, primary key")
-    tenant_id = Column(String(100), nullable=False,
-                       doc="Tenant ID, foreign key")
-    group_name = Column(String(100), nullable=False, doc="Group name")
-    group_description = Column(String(500), doc="Group description")
 
 
 class RolePermission(SimpleTableBase):

@@ -1,11 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Rebuild signed SDK tool instances without accepting connection parameters."""
 
+import logging
 from hmac import compare_digest
 
 from fastapi import HTTPException
 
 from contracts.agentos import AgentResource, SkillDerivedLocalToolBinding, StoredLocalToolBinding
+from contracts.constants import environment
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
@@ -13,8 +15,27 @@ from infrastructure.local_tool_execution import (
     LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
+from infrastructure.shared_aidp_tool import restrict_aidp_access
 from nexent.core.agents.agent_model import ToolConfig
 from runtime.agentos.prepared_knowledge import _reranker
+
+
+logger = logging.getLogger(__name__)
+
+
+def _aidp_access_metadata(tool: ToolConfig, actor: ServicePrincipal) -> dict:
+    from ext_components.aidp.services.aidp_access_service import resolve_current_aidp_access
+
+    params = tool.params
+    try:
+        snapshot = resolve_current_aidp_access(
+            server_url=params["server_url"], api_key=params["api_key"], user_id=actor.user_id,
+            tenant_id=actor.tenant_id, aidp_tenant_id=params["tenant_id"],
+        )
+    except Exception as exc:
+        logger.warning("AIDP access snapshot lookup failed (%s)", type(exc).__name__)
+        snapshot = None
+    return restrict_aidp_access(params["kds_list"], snapshot)
 
 
 def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, language: str) -> dict[str, ToolConfig]:
@@ -69,5 +90,10 @@ def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, la
                 agent_id=resource.agent_id, version_no=resource.version_no, tenant_id=actor.tenant_id,
                 tool_id=row["tool_id"], aidp_tenant_id=tool.params.get("tenant_id") or "aidp",
             )}
+        elif name == "aidp_search":
+            tool.params.update(
+                server_url=environment.AIDP_SERVER_URL, api_key=environment.AIDP_API_KEY, tenant_id=environment.AIDP_TENANT_ID,
+            )
+            tool.metadata = _aidp_access_metadata(tool, actor)
         tools[name] = tool
     return tools
