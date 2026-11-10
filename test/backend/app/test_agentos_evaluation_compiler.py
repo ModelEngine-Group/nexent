@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
-from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
+from contracts.agentos import CompatibilityConversationRun, AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
 from contracts.model import WorkbenchGenerationConfig
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
@@ -27,14 +27,15 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
     (kind, persisted_body)
     for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
                  "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope",
-                 "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a")
+                 "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
     for persisted_body in (False, True)
 ] + [("a2a_default_model", False)])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     legacy_default = kind == "a2a_default_model"
     if legacy_default:
         kind = "a2a"
-    planning = kind == "planning"
+    debug_planning = kind == "debug_planning"
+    planning = kind == "planning" or debug_planning
     new = kind in {"new", "workbench_first_metadata"}
     use_workbench = kind.startswith("workbench")
     workbench_metadata = use_workbench and "metadata" in kind
@@ -84,7 +85,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     user, tenant = "user-a", "tenant-a"
-    if kind not in {"evaluation", "a2a"}:
+    if kind not in {"evaluation", "a2a", "debug_planning"}:
         mocker.patch.object(run, "query_current_version_no", return_value=2)
         read_conversation = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
             "runtime_metadata": {"project": "test"},
@@ -213,6 +214,23 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert info.runtime_metadata_version == (4 if metadata is None else 5)
             read_history.assert_called_once_with(42, 23, user, tenant)
             assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+    elif debug_planning:
+        from management.services.agent import authorization
+
+        authorize = mocker.patch.object(authorization, "authorize_debug_version", return_value={})
+        mocker.patch("management.services.model.run_controls.preflight_turn_controls")
+        request = AgentRequest(agent_id=7, is_debug=True, enable_plan=True, query="hello")
+        response = await runtime_client.forward_conversation_run(
+            CompatibilityConversationRun(request=request.model_dump()), user, tenant,
+        )
+        client.run_conversation.assert_not_awaited()
+        prepared, sent_user, sent_tenant = client.run_ephemeral.await_args.args
+        assert response is client.run_ephemeral.return_value
+        assert (sent_user, sent_tenant) == (user, tenant)
+        authorize.assert_called_once_with(7, 0, user, tenant)
+        payload = PreparedEphemeralRun.model_validate_json(prepared.model_dump_json())
+        info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
+        assert payload.debug is True and info.conversation_id is None and "conversation_id" not in payload.model_dump()
     elif kind == "a2a":
         lookup = mocker.patch(
             "management.db.agent.repository.search_agent_info_by_agent_id",
@@ -247,8 +265,12 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     assert prepared.resource.subagents[0].version_no == 5
     assert info.agent_config.enable_planning is planning
     if planning:
-        get_redis.assert_called_once_with()
-        assert info.redis_client is redis
+        if debug_planning:
+            get_redis.assert_not_called()
+            assert info.redis_client is None
+        else:
+            get_redis.assert_called_once_with()
+            assert info.redis_client is redis
         bindings = [tool for tool in prepared.resource.tools if tool.tool_id in ("create_plan", "update_plan_step")]
         assert [tool.tool_id for tool in bindings] == ["create_plan", "update_plan_step"]
         assert all(tool.version == "1" and not tool.parameters and tool.credential_ref is None for tool in bindings)
@@ -265,7 +287,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 extra["enable_thinking"] = False
             assert info.model_config_list[0].extra_body == extra
         else:
-            lookup_override.assert_called_once_with(7, 2, "tenant-a")
+            lookup_override.assert_called_once_with(7, 0 if debug_planning else 2, "tenant-a")
             assert info.model_config_list[0].extra_body == {"provider_option": "fixture-private-option"}
     else:
         lookup_override.assert_not_called()

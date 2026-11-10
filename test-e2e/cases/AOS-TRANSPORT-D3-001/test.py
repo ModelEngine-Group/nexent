@@ -2702,6 +2702,8 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     from management.services.agent import agentos_events, runtime_client
     from management.services.agent.preparation import evaluation_snapshot
     from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.plan_repo import PlanRepo
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
     from runtime.agentos import debug as debug_lifecycle, ephemeral
@@ -2711,6 +2713,16 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
 
     actor = ServicePrincipal("ephemeral-user", "ephemeral-tenant")
     run_id = "d" * 32
+    model = {
+        "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
+        "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "revision",
+    }
+    redis = Mock(side_effect=AssertionError("Debug planning accessed shared Redis"))
+    monkeypatch.setattr(prepared_evaluation, "get_redis_client", redis)
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_: model)
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "debug-plans"))
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     template = PreparedEphemeralRun.model_validate({
         "run_id": run_id, "mode": "nexent", "input": {"query": "finish"}, "runtime_metadata": {"ticket": "42"},
         "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}},
@@ -2764,11 +2776,15 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         assert principal == actor and materializer is ephemeral.prepare_run_snapshot
         assert payload.runtime_metadata == {"ticket": "42"} and "conversation_id" not in payload.model_dump()
         calls.append(payload.input.query)
-        workspace = tmp_path / "ephemeral" / f"{run_id}-{payload.input.query}"
+        info = materializer(payload, principal) if payload.debug else None
+        workspace = info.workspace_path if info is not None else tmp_path / "ephemeral" / f"{run_id}-{payload.input.query}"
         stage = skill_stage_path(str(workspace), create=True)
         stage.mkdir(parents=True, exist_ok=True)
         (stage / "SKILL.md").write_text("test", encoding="utf-8")
         stages.append(stage)
+        if info is not None:
+            assert info.conversation_id is None and info.redis_client is None and info.agent_config.enable_planning
+            return info
         return SimpleNamespace(
             query=payload.input.query, workspace_path=str(workspace), workspace_run_id=run_id, conversation_id=None,
             runtime_metadata=payload.runtime_metadata, observer=Observer(), stop_event=Event(), cancellation_scope=None,
@@ -2793,6 +2809,34 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         context = get_agent_monitoring_context()
         assert (context.user_id, context.tenant_id, context.agent_id) == (actor.user_id, actor.tenant_id, 7)
         assert context.conversation_id is None
+        if getattr(getattr(info, "agent_config", None), "enable_planning", False):
+            create, update = [NexentAgent.create_local_tool(
+                SimpleNamespace(observer=info.observer), tool,
+            ) for tool in info.agent_config.tools]
+            class PlanState:
+                current_plan = None
+
+                def created(self, value):
+                    self.current_plan = value
+
+                def updated(self, value, _step_id, _status):
+                    self.current_plan = value
+
+            plan = PlanState()
+            repo = PlanRepo(redis_client=info.redis_client)
+            for tool in (create, update):
+                tool.observer = info.observer
+                tool.plan_repo = repo
+                tool._get_conversation_id = lambda: 0
+                tool._get_user_id = lambda: info.user_id
+            create._on_plan_created = plan.created
+            update._on_step_updated = plan.updated
+            created = create.forward("Debug plan", [{"id": str(i), "title": str(i)} for i in range(3)])
+            assert update.forward("0", "completed")["status"] == "completed"
+            assert repo.load(0, info.user_id)["plan_id"] == created["plan_id"]
+            if info.stop_event.wait(5):
+                worker_stopped.set()
+            return
         info.observer.queue.put(json.dumps({"type": "final_answer", "content": "answer"}))
         if info.query == "wait":
             if info.stop_event.wait(5):
@@ -2833,8 +2877,13 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
 
     async def compile_debug(request, user_id, tenant_id, *, language, timezone):
         assert (user_id, tenant_id, language) == (actor.user_id, actor.tenant_id, "en")
-        assert request.is_debug and request.version_no is None and request.query == "wait"
-        resource = template.resource.model_copy(update={"version_no": 0})
+        assert request.is_debug and request.version_no is None and request.query == "wait" and request.enable_plan
+        from contracts.agentos import ToolBinding
+
+        resource = template.resource.model_copy(update={
+            "version_no": 0,
+            "tools": [ToolBinding(tool_id=name, version="1") for name in ("create_plan", "update_plan_step")],
+        })
         return template.model_copy(update={
             "debug": True, "resource": resource, "input": template.input.model_copy(update={"query": request.query}),
         })
@@ -2898,12 +2947,21 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             with serve(management) as public_url:
                 async with httpx.AsyncClient(base_url=public_url, trust_env=False, timeout=4) as browser:
                     async with browser.stream("POST", "/agent/run", headers=headers, json={
-                        "query": "wait", "agent_id": 7, "is_debug": True,
+                        "query": "wait", "agent_id": 7, "is_debug": True, "enable_plan": True,
                     }) as debug:
                         assert debug.status_code == 200 and debug.headers["run_id"] == f"debug-{run_id}"
                         assert "conversation_id" not in debug.headers
                         lines = debug.aiter_lines()
-                        assert json.loads((await anext(lines))[6:]) == frames[0]
+                        debug_events = []
+                        async for line in lines:
+                            if line.startswith("data: "):
+                                debug_events.append(json.loads(line[6:]))
+                                if len(debug_events) == 2:
+                                    break
+                        assert [event["type"] for event in debug_events] == ["plan", "plan_step_update"]
+                        created = json.loads(debug_events[0]["content"])
+                        updated = json.loads(debug_events[1]["content"])
+                        assert created["title"] == "Debug plan" and updated["status"] == "completed"
                         stop_url = f"/agent/stop/{debug.headers['run_id']}"
                         foreign = await browser.get(stop_url, headers={"Authorization": "foreign"})
                         assert foreign.json()["already_stopped"] is True and not cancel_signals
@@ -2914,6 +2972,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             assert worker_stopped.is_set() and len(executions) == 3 and all(item.future.done() for item in executions)
             assert not debug_states and not stages[-1].exists()
             assert released.call_count == 3 and reserve.call_count == 4
+            redis.assert_not_called()
     finally:
         await manager.shutdown(timeout=2)
 

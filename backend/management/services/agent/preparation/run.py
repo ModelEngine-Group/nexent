@@ -139,6 +139,7 @@ async def create_agent_run_info(
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     export_evaluation: bool = False,
+    export_debug_planning: bool = False,
     resource_versions: dict | None = None,
     prepared_conversation: PreparedConversationScope | None = None,
     prepared_workbench: "PreparedWorkbench | None" = None,
@@ -369,6 +370,8 @@ async def create_agent_run_info(
         export_options = {}
         if turn_generation is not None:
             export_options.update(turn_generation=turn_generation, source_model_alias=source_model_alias)
+        if export_debug_planning:
+            export_options["allow_debug_planning"] = True
         if prepared_workbench is not None:
             from management.services.agent.workbench import compile_runtime_mount_plan
 

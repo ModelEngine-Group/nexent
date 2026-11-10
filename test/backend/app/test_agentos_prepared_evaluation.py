@@ -538,11 +538,11 @@ async def test_management_prepares_evaluation_with_nonlocal_deployment_setting(m
     assert compiler.call_args.kwargs["export_evaluation"] is True
 
 
-@pytest.mark.parametrize("scope", ["evaluation", "child", "missing", "duplicate", "parameters", "credential"])
+@pytest.mark.parametrize("scope", ["evaluation", "a2a", "child", "debug_child", "missing", "duplicate", "parameters", "credential"])
 def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, scope):
     from fastapi import HTTPException
 
-    from contracts.agentos import PreparedAgentRun
+    from contracts.agentos import PreparedAgentRun, PreparedEphemeralRun
     from runtime.agentos import prepared_evaluation
 
     payload = evaluation_payload()
@@ -550,7 +550,7 @@ def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, s
     update = {"tool_id": "update_plan_step", "version": "1"}
     tools = [create, update]
     resource = payload["resource"]
-    if scope == "child":
+    if scope in {"child", "debug_child"}:
         resource["subagents"] = [{**resource, "agent_id": 8, "model_alias": "evaluation_llm", "tools": tools}]
     else:
         resource["tools"] = tools
@@ -564,6 +564,11 @@ def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, s
         create["credential_ref"] = "unexpected"
     if scope == "evaluation":
         prepared = PreparedEvaluationRun.model_validate(payload)
+    elif scope in {"a2a", "debug_child"}:
+        payload.pop("conversation_id")
+        prepared = PreparedEphemeralRun.model_validate({
+            **payload, "run_id": "a" * 32, "debug": True if scope == "debug_child" else None,
+        })
     else:
         prepared = PreparedAgentRun.model_validate({**payload, "conversation_id": 42, "run_id": "a" * 32})
     read = mocker.patch.object(prepared_evaluation, "get_model_by_model_id")

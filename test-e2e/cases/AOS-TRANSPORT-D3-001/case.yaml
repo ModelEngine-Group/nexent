@@ -138,6 +138,9 @@ case:
   - order: 37
     action: Fetch a mounted independent AIDP image after its signed Workbench run, then try a foreign user, tenant or revoked mount.
     expected: Only the authorized image reaches its provider and the image response is not cached.
+  - order: 38
+    action: Start a public planning debug run through the signed ephemeral Runtime endpoint and stop it using the debug run ID.
+    expected: The two planning events preserve their order, the worker is released, and no conversation or shared plan key is written.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -177,6 +180,7 @@ case:
   - Management retains Skill SSE and history. Signed Runtime runs the selected model, reports one safe failure, and stops on disconnect.
   - NL2Agent uses signed bidirectional transport for execution and tools. Closing the stream revokes draft access.
   - Workbench image retrieval is bound to the admitted conversation and current mounted tool and does not transport credentials in the signed URL.
+  - The request-owned debug plan stays local and retains the original plan and plan step events.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -429,4 +433,9 @@ case:
     description: An independent AIDP tool mounted by a Workbench Skill returns a scoped proxy image after the signed run.
     steps: [37]
     expected_results: [38]
+    forbidden_side_effects: [1, 2]
+  - id: AC-47
+    description: A signed debug run executes its built-in planning tools locally and forwards the planning SSE events.
+    steps: [38]
+    expected_results: [39]
     forbidden_side_effects: [1, 2]

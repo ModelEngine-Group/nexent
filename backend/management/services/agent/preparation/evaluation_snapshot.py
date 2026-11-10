@@ -173,7 +173,7 @@ async def prepare_debug_snapshot(
         "snapshot-debug-authorization", authorize_debug_version, request.agent_id, version, user_id, tenant_id,
         lane="control-io", owner="management",
     )
-    if any((request.conversation_id is not None, request.enable_plan, request.workbench, request.knowledge_scope)):
+    if any((request.conversation_id is not None, request.workbench, request.knowledge_scope)):
         return None
     if request.metadata is not None:
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": version}), tenant_id)
@@ -187,7 +187,8 @@ async def prepare_debug_snapshot(
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=version, override_model_id=request.model_id, tool_params=request.tool_params,
         requested_output_tokens=request.requested_output_tokens, context_policy=request.context_policy,
-        enable_automation_tool=False, export_evaluation=True, turn_generation=_turn_model_generation(request),
+        enable_automation_tool=False, enable_planning=bool(request.enable_plan), export_evaluation=True,
+        export_debug_planning=bool(request.enable_plan), turn_generation=_turn_model_generation(request),
     )
     if snapshot is None:
         return None
@@ -511,14 +512,15 @@ def _export_memory_search(agent, allow_memory):
 
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
-    workbench_skills=(),
+    allow_debug_planning=False, workbench_skills=(),
 ):
     if agent.sandbox_policy is not None:
         raise ValueError("Unsupported prepared resource")
     memory_search = _export_memory_search(agent, allow_memory)
     plan_tools = [tool for tool in agent.tools if tool.name in PLAN_TOOL_NAMES]
     if plan_tools or agent.enable_planning:
-        if not (allow_public_tools and agent.enable_planning and len(plan_tools) == len(PLAN_TOOL_NAMES)):
+        if not ((allow_public_tools or allow_debug_planning) and agent.enable_planning
+                and len(plan_tools) == len(PLAN_TOOL_NAMES)):
             raise ValueError("Unsupported prepared planning scope")
         expected = {tool.name: tool.class_name for tool in build_plan_tool_configs()}
         if set(expected) != {tool.name for tool in plan_tools} or any(
@@ -705,6 +707,7 @@ def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
+    allow_debug_planning=False,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -714,6 +717,7 @@ def export_snapshot(
             agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {},
             allow_public_tools=prepared_conversation is not None,
             allow_memory=prepared_conversation is not None,
+            allow_debug_planning=allow_debug_planning,
             workbench_skills=workbench_skills,
         )
         bindings = [

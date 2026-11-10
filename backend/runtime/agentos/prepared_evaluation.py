@@ -166,7 +166,7 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
-    workbench_version=None,
+    workbench_version=None, allow_debug_planning=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -183,7 +183,7 @@ def _materialize_agent(
     used_aliases.add(alias)
     plan_bindings = [binding for binding in resource.tools if binding.tool_id in PLAN_TOOL_NAMES]
     if plan_bindings and (
-        public_reference is None or len(plan_bindings) != len(PLAN_TOOL_NAMES)
+        (public_reference is None and not allow_debug_planning) or len(plan_bindings) != len(PLAN_TOOL_NAMES)
         or {binding.tool_id for binding in plan_bindings} != PLAN_TOOL_NAMES
         or any(binding.version != "1" or binding.parameters or binding.credential_ref is not None
                for binding in plan_bindings)
@@ -343,9 +343,8 @@ def prepare_run_snapshot(
     native_knowledge = isinstance(payload, PreparedAgentRun) and payload.native_knowledge is True
     root_generation = payload.models.llm.root_generation
     turn_generation = payload.models.llm.turn_generation
-    native_run = isinstance(payload, PreparedAgentRun) or (
-        isinstance(payload, PreparedEphemeralRun) and payload.debug is True
-    )
+    debug = isinstance(payload, PreparedEphemeralRun) and payload.debug is True
+    native_run = isinstance(payload, PreparedAgentRun) or debug
     if (
         (root_generation is not None) != (workbench_version is not None)
         or (native_knowledge and workbench_version is not None)
@@ -382,7 +381,7 @@ def prepare_run_snapshot(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,
                 memory_conversation_id=payload.conversation_id if isinstance(payload, PreparedAgentRun) else None,
-                workbench_version=workbench_version,
+                workbench_version=workbench_version, allow_debug_planning=debug,
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")
@@ -417,7 +416,7 @@ def prepare_run_snapshot(
             conversation_id=None if isinstance(payload, PreparedEphemeralRun) else payload.conversation_id,
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
-            redis_client=get_redis_client() if agent_config.enable_planning else None,
+            redis_client=get_redis_client() if agent_config.enable_planning and not debug else None,
         )
         if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
             info.runtime_metadata = payload.runtime_metadata
