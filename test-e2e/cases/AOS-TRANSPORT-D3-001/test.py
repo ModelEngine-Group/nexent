@@ -202,7 +202,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     from management.services.agent.preparation import evaluation_snapshot
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from runtime.agentos import prepared_evaluation
+    from infrastructure.mcp_execution import build_mcp_tool
+    from runtime.agentos import prepared_evaluation, prepared_mcp
     from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
@@ -241,6 +242,24 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
 
     monkeypatch.setattr(prepared_evaluation, "read_external_agent_bindings", read_external)
 
+    mcp_tool = {
+        "tool_instance_id": 27, "name": "catalog_lookup", "class_name": "catalog_lookup",
+        "origin_name": "catalog_lookup", "description": "Catalog", "inputs": None, "output_type": "object",
+        "usage": "catalog", "params": [{"name": "scope", "default": "private-tool-default"}], "instance_params": {},
+    }
+    mcp_server = {
+        "mcp_id": 32, "mcp_name": "catalog", "mcp_server": "https://mcp.example/private",
+        "authorization_token": "runtime-mcp-token", "custom_headers": None, "enabled": True,
+    }
+
+    def read_mcp_tools(agent_id, version_no, tenant_id, names):
+        assert (agent_id, version_no, names) == (7, 2, ["catalog_lookup"])
+        return [mcp_tool] if tenant_id == "tenant-a" else []
+
+    for module in (evaluation_snapshot, prepared_mcp):
+        monkeypatch.setattr(module, "read_bound_mcp_tools", read_mcp_tools)
+        monkeypatch.setattr(module, "read_mcp_execution_servers", lambda tenant_id: [mcp_server])
+
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.model_config_list[0].api_key == "only-in-runtime"
@@ -253,6 +272,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         peer, = child.external_a2a_agents
         assert peer.url == "https://external.example/private"
         assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
+        assert info.agent_config.tools[1].params == {"scope": "private-tool-default"}
+        host, = info.mcp_host
+        assert host["headers"] == {"Authorization": "runtime-mcp-token"}
+        assert host["allowed_tools"] == {"catalog_lookup": "catalog_lookup"}
+        assert info.user_context["user_id"] == "user-a"
         access = info.agent_config.tools[0].metadata["validate_url_access"]
         access(["s3://bucket/attachments/user-a/allowed.txt"])
         with pytest.raises(PermissionError):
@@ -281,7 +305,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        )],
+        ), build_mcp_tool(mcp_tool)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -293,6 +317,9 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     assert "only-in-runtime" not in prepared.model_dump_json()
     assert external_row["agent_url"] not in prepared.model_dump_json()
     assert "local-peer-token" not in prepared.model_dump_json()
+    assert "runtime-mcp-token" not in prepared.model_dump_json()
+    assert "private-tool-default" not in prepared.model_dump_json()
+    assert mcp_server["mcp_server"] not in prepared.model_dump_json()
 
     async def prepare(payload, user_id, tenant_id):
         assert (payload, user_id, tenant_id) == (case, "user-a", "tenant-a")
@@ -311,6 +338,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         with pytest.raises(RuntimeUpstreamError) as refused:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
         assert refused.value.status_code == 404
+        mcp_server["authorization_token"] = "rotated-mcp-token"
+        with pytest.raises(RuntimeUpstreamError) as changed_mcp:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_mcp.value.status_code == 409
+        assert "AGENTOS_MCP_REVISION_MISMATCH" in changed_mcp.value.content.decode()
+        mcp_server["authorization_token"] = "runtime-mcp-token"
         external_row["security_credentials"] = {"auth": "rotated-token"}
         with pytest.raises(RuntimeUpstreamError) as changed:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -324,7 +357,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
             assert response.status_code == 401
 
     assert lookups == [(11, "tenant-a")]
-    assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-b", [19]), (8, "tenant-a", [19])]
+    assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-a", [19])]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None
 

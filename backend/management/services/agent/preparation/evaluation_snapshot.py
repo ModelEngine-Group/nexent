@@ -2,18 +2,21 @@
 """Export authorized evaluation resources from the existing compiler."""
 
 from datetime import datetime
+from functools import cache
 
 from pydantic_core import PydanticSerializationError
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, ExternalA2AExecutionBinding,
-    FileToolDescription,
+    FileToolDescription, MCPExecutionBinding, ToolCallerContext,
     ModelBindings, PreparedEvaluationRun, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
 )
 from contracts.constants.environment import NEXENT_SANDBOX_DEFAULT_LEVEL
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.mcp_execution import build_mcp_tool, mcp_execution_revision, select_mcp_server
+from infrastructure.rdb.mcp_execution_records import read_bound_mcp_tools, read_mcp_execution_servers
 from infrastructure.rdb.model_records import get_model_records
 
 
@@ -49,7 +52,27 @@ def _file_tool_binding(tool):
     return ToolBinding(tool_id=builtin.value, version="1", parameters=description.model_dump(mode="json"))
 
 
-def _export_resource(agent, aliases, tenant_id):
+def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_servers):
+    matching = [row for row in candidates if row["name"] == tool.name]
+    if len(matching) != 1 or build_mcp_tool(matching[0]) != tool:
+        raise ValueError("MCP tool differs from its explicit binding")
+    row = matching[0]
+    server_id, host = select_mcp_server(servers, tool.usage, tenant_id)
+    origin_name = row["origin_name"] or tool.class_name
+    target = (server_id, origin_name)
+    if tool_servers.setdefault(tool.class_name, target) != target:
+        raise ValueError("Ambiguous MCP callable")
+    revision = mcp_execution_revision(
+        tenant_id, agent.agent_id, agent.version_no, row["tool_instance_id"], tool,
+        origin_name, server_id, host,
+    )
+    reference = MCPExecutionBinding(
+        instance_id=row["tool_instance_id"], tool_name=tool.name, server_id=server_id, revision=revision,
+    )
+    return ToolBinding(tool_id="mcp", version="1", parameters=reference.model_dump(mode="json"))
+
+
+def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
     if any((
         agent.pre_run_tool_events,
         agent.sandbox_policy is not None, agent.enable_planning,
@@ -57,8 +80,14 @@ def _export_resource(agent, aliases, tenant_id):
         raise ValueError("Unsupported evaluation resource")
 
     tools = []
+    mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]
+    candidates = read_bound_mcp_tools(agent.agent_id, agent.version_no, tenant_id, mcp_names) if mcp_names else []
+    mcp_servers = read_servers(tenant_id) if mcp_names else []
     for tool in agent.tools:
-        binding = _file_tool_binding(tool)
+        binding = (
+            _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
+            if tool.source == "mcp" else _file_tool_binding(tool)
+        )
         if binding is None:
             raise ValueError("Unsupported evaluation tool")
         tools.append(binding)
@@ -79,7 +108,7 @@ def _export_resource(agent, aliases, tenant_id):
         max_steps=agent.max_steps, tools=tools, model_alias=agent.model_name,
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
         evaluation_options=EvaluationAgentOptions(**profile),
-        subagents=[_export_resource(child, aliases, tenant_id) for child in agent.worker_agents],
+        subagents=[_export_resource(child, aliases, tenant_id, read_servers, tool_servers) for child in agent.worker_agents],
         external_a2a=[
             ExternalA2AExecutionBinding(
                 agent_id=int(external.agent_id), invocation_name=external.invocation_name,
@@ -114,17 +143,23 @@ def _export_model(alias, models, tenant_id):
     )
 
 
-def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language):
+def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None):
+    from management.services.agent.tool_identity import resolve_tool_user_context
+
     try:
         aliases = {}
-        resource = _export_resource(agent, aliases, tenant_id)
+        resource = _export_resource(agent, aliases, tenant_id, cache(read_mcp_execution_servers), {})
         bindings = [_export_model(alias, models, tenant_id) for alias in aliases]
+        identity = resolve_tool_user_context(agent, user_id, tenant_id) if user_id is not None else None
+        tool_caller = ToolCallerContext(**{
+            key: identity[key] for key in ToolCallerContext.model_fields if key in identity
+        }) if identity is not None else None
         return PreparedEvaluationRun(
-            mode="nexent", language=language, conversation_id=conversation_id, resource=resource,
+            mode="nexent", language=language, conversation_id=conversation_id, resource=resource, tool_caller=tool_caller,
             models=ModelBindings(llm=bindings[0], additional_llms=bindings[1:]),
             input=RunInput(
                 query=query, history=[RunHistoryMessage(role=item.role, content=item.content) for item in (history or [])],
             ),
         )
-    except (ValueError, PydanticSerializationError):
+    except (LookupError, TypeError, ValueError, PydanticSerializationError):
         return None

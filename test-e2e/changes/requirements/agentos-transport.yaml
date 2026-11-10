@@ -39,6 +39,7 @@ change:
     - Public and automation cancellation use only their captured run identity and keep user and tenant authorization.
     - Prepared evaluation preserves a static child callable and typed generation overrides, and rejects transport credential overrides.
     - Prepared evaluation rechecks external A2A relations and configuration revisions and keeps endpoint credentials out of the signed request.
+    - Prepared MCP evaluation pins enabled versioned tools and tenant connections without serializing transport or tool credentials.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -49,6 +50,7 @@ change:
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
     - test/backend/app/test_agentos_prepared_evaluation.py
+    - test/sdk/core/agents/test_managed_mcp.py
     - test/backend/agents/test_create_agent_info.py
     - test/backend/database/test_a2a_agent_db.py
     - test/backend/app/test_agentos_resume.py

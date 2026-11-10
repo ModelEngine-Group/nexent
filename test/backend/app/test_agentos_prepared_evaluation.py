@@ -348,3 +348,81 @@ def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, 
         reader.assert_not_called()
     else:
         reader.assert_called_once_with(7, tenant, [19])
+
+
+@pytest.mark.parametrize(("change", "status"), [
+    ("remote", None), ("local", None), ("revoked", 404), ("disabled", 404), ("rotated", 409), ("params", 409),
+])
+def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, change, status):
+    from fastapi import HTTPException
+
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.mcp_execution import build_mcp_tool
+    from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+
+    mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-agentos-mcp-key")
+    mocker.patch("contracts.constants.environment.LOCAL_MCP_SERVER", "http://local-mcp.example")
+    mocker.patch("contracts.constants.environment.TOKEN", "runtime-internal-token")
+    tool_row = {
+        "tool_instance_id": 17, "name": "lookup", "class_name": "lookup", "origin_name": "lookup",
+        "description": "Lookup", "inputs": None, "output_type": "object",
+        "usage": "outer-apis" if change == "local" else "remote",
+        "params": [{"name": "private_param", "default": "default-tool-param"}],
+        "instance_params": {"private_param": "stored-tool-param"},
+    }
+    server = {
+        "mcp_id": 29, "mcp_name": "remote", "mcp_server": "https://remote.example/private",
+        "authorization_token": "remote-token", "custom_headers": {"X-Key": "remote-key"}, "enabled": True,
+    }
+    model_row = model_record(model_id=11)
+    model = create_model_config_from_record(model_row)
+    config = AgentConfig(
+        agent_id=7, version_no=2, name="agent", description="", model_name=model.cite_name,
+        tools=[build_mcp_tool(tool_row)],
+    )
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[model_row])
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.read_bound_mcp_tools", return_value=[tool_row])
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.read_mcp_execution_servers", return_value=[server])
+    mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value={
+        "tenant_name": "Tenant A", "user_groups": ["Support"], "tenant_id": "ignored", "user_id": "ignored",
+    })
+    snapshot = export_snapshot(config, [model], "hello", None, tenant_id="tenant-a",
+                               user_id="user-a", conversation_id=-42, language="en")
+    assert snapshot is not None
+    encoded = snapshot.model_dump_json()
+    for value in (server["mcp_server"], "remote-token", "remote-key", "stored-tool-param", "runtime-internal-token"):
+        assert value not in encoded
+    payload = PreparedEvaluationRun.model_validate_json(encoded)
+
+    if change == "rotated":
+        server["authorization_token"] = "new-token"
+    elif change == "disabled":
+        server["enabled"] = False
+    elif change == "params":
+        tool_row["instance_params"] = {"private_param": "changed"}
+    reader = mocker.patch("runtime.agentos.prepared_mcp.read_bound_mcp_tools",
+                          return_value=[] if change == "revoked" else [tool_row])
+    mocker.patch("runtime.agentos.prepared_mcp.read_mcp_execution_servers", return_value=[server])
+    model_reader = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=model_row)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    if status:
+        with pytest.raises(HTTPException) as error:
+            prepare_evaluation_run(payload, actor)
+        assert error.value.status_code == status
+        model_reader.assert_not_called()
+    else:
+        info = prepare_evaluation_run(payload, actor)
+        assert info.agent_config.tools[0].params == {"private_param": "stored-tool-param"}
+        host, = info.mcp_host
+        assert host["allowed_tools"] == {"lookup": "lookup"}
+        if change == "local":
+            assert host["url"] == "http://local-mcp.example/mcp/tenant-a/sse"
+            assert host["headers"] == {"X-Tenant-ID": "tenant-a", "X-Nexent-Internal-Token": "runtime-internal-token"}
+            assert callable(host["httpx_client_factory"])
+        else:
+            assert host["headers"] == {"Authorization": "remote-token", "X-Key": "remote-key"}
+        assert info.user_context["user_id"] == "user-a"
+        assert info.user_context["tenant_id"] == "tenant-a"
+        assert info.user_context["user_groups"] == ["Support"]
+    reader.assert_called_once_with(7, 2, "tenant-a", ["lookup"])

@@ -15,6 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 
+from infrastructure.rdb.mcp_execution_records import McpRecord as McpRecord
 from management.db.base import (
     SCHEMA,
     TableBase,
@@ -23,57 +24,6 @@ from management.db.base import (
     _PUBLISHER_USER_ID_DOC,
     _TENANT_ID_DOC,
 )
-
-
-class McpRecord(TableBase):
-    """
-    MCP (Model Context Protocol) records table
-    """
-    __tablename__ = "mcp_record_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    mcp_id = Column(Integer, Sequence("mcp_record_t_mcp_id_seq", schema=SCHEMA),
-                    primary_key=True, nullable=False, doc="MCP record ID, unique primary key")
-    tenant_id = Column(String(100), doc="Tenant ID")
-    user_id = Column(String(100), doc="User ID")
-    mcp_name = Column(String(100), doc=_MCP_NAME_DOC)
-    mcp_server = Column(String(500), doc="MCP server address")
-    status = Column(
-        Boolean,
-        default=None,
-        doc="MCP server connection status, True=connected, False=disconnected, None=unknown",
-    )
-    container_id = Column(
-        String(200),
-        doc="Docker container ID for MCP service, None for non-containerized MCP",
-    )
-    container_port = Column(
-        Integer,
-        doc="Host port bound for containerized MCP service",
-    )
-    authorization_token = Column(
-        String(500),
-        doc="Authorization token for MCP server authentication (e.g., Bearer token)",
-        default=None,
-    )
-    custom_headers = Column(
-        JSON,
-        doc="Custom HTTP headers as JSON object for MCP server requests",
-        default=None,
-    )
-    source = Column(
-        String(30), doc="Source type: local/mcp_registry/community")
-    market_id = Column(Integer, doc="Published market record ID (FK to mcp_market_record_t)")
-    registry_json = Column(JSONB, doc="Full MCP registry server.json snapshot")
-    config_json = Column(JSON, doc="MCP config data")
-    enabled = Column(Boolean, default=True, doc="Enabled")
-    tags = Column(ARRAY(Text), doc="Tags")
-    description = Column(Text, doc="Description")
-    group_ids = Column(String, doc="Comma-separated group IDs that can access this MCP")
-    ingroup_permission = Column(String(30), default="READ_ONLY",
-                                 doc="In-group permission: EDIT, READ_ONLY, PRIVATE")
-    shared_fields = Column(JSON, default=None,
-                           doc="JSON object of field-level sharing flags (e.g. {\"serverUrl\": true, \"authorizationToken\": false})")
 
 
 class McpCommunityRecord(TableBase):

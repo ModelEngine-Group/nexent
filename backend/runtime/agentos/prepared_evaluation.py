@@ -12,7 +12,8 @@ from pydantic import ValidationError
 
 from contracts.agentos import EvaluationAgentResult, EvaluationFileTool, FileToolDescription, PreparedEvaluationRun
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
+    NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
@@ -30,6 +31,7 @@ from nexent.core.concurrency import run_blocking
 from runtime.adapters.nexent.factory import build_run_info
 from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.evaluation import collect_observer_output
+from runtime.agentos.prepared_mcp import PreparedMCP
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
@@ -105,7 +107,7 @@ def _materialize_external_agents(resource, actor):
     return agents
 
 
-def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, *, root_alias=None):
+def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp, *, root_alias=None):
     if any((
         resource.skill_refs, resource.mcp_server_refs, resource.knowledge_base_refs,
         resource.memory_ref is not None, resource.sandbox_policy is not None,
@@ -118,7 +120,11 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
 
-    tools = _materialize_file_tools(resource.tools, actor, workspace_path, workspace_run_id)
+    files = iter(_materialize_file_tools(
+        [binding for binding in resource.tools if binding.tool_id != "mcp"], actor, workspace_path, workspace_run_id,
+    ))
+    mcp_tools = iter(mcp.materialize(resource))
+    tools = [next(mcp_tools if binding.tool_id == "mcp" else files) for binding in resource.tools]
     options = _agent_options(resource)
     legacy_root = root_alias is not None and resource.model_alias is None
     return AgentConfig(
@@ -129,7 +135,7 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
         external_a2a_agents=_materialize_external_agents(resource, actor),
         worker_agents=[
-            _materialize_agent(child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases)
+            _materialize_agent(child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp)
             for child in resource.subagents
         ],
         **options,
@@ -159,6 +165,7 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
     )):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
+    mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
     workspace_run_id = uuid4().hex
@@ -168,7 +175,7 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
             raise ValueError("Duplicate evaluation model binding")
         used_aliases = set()
         agent_config = _materialize_agent(
-            payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases,
+            payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
             root_alias=payload.models.llm.alias,
         )
         if used_aliases != aliases:
@@ -177,7 +184,16 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
     models = [_materialize_model(binding, actor) for binding in bindings]
+    user_context = None
+    if mcp.hosts or payload.tool_caller is not None:
+        user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
+        user_context.update(user_id=actor.user_id, tenant_id=actor.tenant_id)
     info = build_run_info(
+        mcp_host=list(mcp.hosts.values()) or None,
+        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+        user_context=user_context,
         query=payload.input.query,
         history=[AgentHistory(**message.model_dump()) for message in payload.input.history],
         agent_config=agent_config,

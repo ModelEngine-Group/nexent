@@ -356,7 +356,7 @@ async def create_agent_run_info(
 
         return export_snapshot(
             agent_config, model_list, final_query, _convert_history_with_minio_files(history, language=language),
-            tenant_id=tenant_id, conversation_id=conversation_id, language=language,
+            tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
         )
 
     if resource_versions is not None:

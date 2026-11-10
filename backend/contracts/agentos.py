@@ -227,6 +227,20 @@ class EvaluationAgentOptions(RunSpecModel):
     verification_config: dict[str, JsonValue] | None = None
 
 
+class MCPExecutionBinding(RunSpecModel):
+    instance_id: PositiveInt
+    tool_name: str = Field(min_length=1)
+    server_id: PositiveInt | None = None
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ToolCallerContext(RunSpecModel):
+    tenant_name: str = ""
+    user_name: str = ""
+    user_account: str = ""
+    user_groups: list[str] = Field(default_factory=list)
+
+
 class ExternalA2AExecutionBinding(RunSpecModel):
     agent_id: PositiveInt
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -267,6 +281,7 @@ class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
     conversation_id: Annotated[int, Field(le=0)] = 0
+    tool_caller: ToolCallerContext | None = None
 
 
 class EvaluationAgentResult(BaseModel):
