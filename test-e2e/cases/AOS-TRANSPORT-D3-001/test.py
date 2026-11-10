@@ -191,6 +191,7 @@ async def test_signed_agentos_transport(monkeypatch):
     ]
     await _assert_prepared_evaluation_over_signed_http(monkeypatch)
     await _assert_resume_over_signed_http(monkeypatch)
+    await _assert_public_conversation_over_signed_http(monkeypatch)
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
@@ -347,3 +348,47 @@ async def _assert_resume_over_signed_http(monkeypatch):
         assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([chunk async for chunk in denied.body_iterator])
 
     assert reads == ["1-0", "2-0"]
+
+
+
+async def _assert_public_conversation_over_signed_http(monkeypatch):
+    from management.api.agent import conversation_run
+    from management.services.agent import runtime_client
+
+    received = []
+    run_id = "a" * 32
+
+    async def run_conversation(payload, actor):
+        received.append((payload, actor))
+
+        async def body():
+            yield _EVENTS
+
+        return StreamingResponse(
+            body(), media_type="text/event-stream", headers={"X-AgentOS-Run-ID": run_id},
+        )
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_compatibility_router(None, None, conversation_run=run_conversation))
+
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
+    management = FastAPI(root_path="/api")
+    management.include_router(conversation_run.router)
+    with serve(runtime) as runtime_url, serve(management) as management_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            response = await client.post(
+                f"{management_url}/api/agent/run?resume=true",
+                json={"query": "question", "conversation_id": 42, "model_id": None},
+                headers={"Cookie": "NEXT_LOCALE=en", "X-User-Timezone": "Asia/Shanghai"},
+            )
+            assert response.status_code == 200
+            assert response.content == _EVENTS and response.headers["X-AgentOS-Run-ID"] == run_id
+            payload, actor = received[0]
+            assert actor == ServicePrincipal("user-a", "tenant-a")
+            assert payload.request == {"query": "question", "conversation_id": 42, "model_id": None}
+            assert (payload.resume, payload.language, payload.timezone) == (True, "en", "Asia/Shanghai")
+    assert len(received) == 1

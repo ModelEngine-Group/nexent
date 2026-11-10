@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
+from management.api.agent.conversation_run import router as conversation_run_router
 from management.api.automation.agent_automation import (
     conversation_automation_router,
     router as agent_automation_router,
@@ -166,6 +167,7 @@ async def thread_capacity():
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
+app.include_router(conversation_run_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)

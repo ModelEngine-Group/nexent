@@ -5,7 +5,9 @@ from fastapi.responses import StreamingResponse
 
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
-from contracts.agentos import BackgroundAgentResult, EvaluationAgentResult, EvaluationAgentRun
+from contracts.agentos import (
+    AgentResume, BackgroundAgentResult, CompatibilityConversationRun, EvaluationAgentResult, EvaluationAgentRun,
+)
 from contracts.constants.environment import RUNTIME_SERVICE_URL
 from management.clients.agentos import AgentOSClient
 
@@ -21,6 +23,14 @@ async def forward_agent_run(
 ) -> StreamingResponse:
     """Start an AgentOS compatibility run and relay its SSE response."""
     return await _agentos_client().run(agent_request.model_dump(mode="json"), user_id, tenant_id)
+
+
+async def forward_conversation_run(payload: CompatibilityConversationRun, user_id: str, tenant_id: str):
+    return await _agentos_client().run_conversation(payload, user_id, tenant_id)
+
+
+async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
+    return await _agentos_client().resume(payload, user_id, tenant_id)
 
 
 async def forward_agent_background(agent_request: AgentRequest, user_id: str, tenant_id: str) -> BackgroundAgentResult:

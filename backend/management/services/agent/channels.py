@@ -11,7 +11,6 @@ import asyncio
 from collections import deque
 import logging
 from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
-from uuid import uuid4
 
 from redis.exceptions import RedisError
 
@@ -59,8 +58,8 @@ class StreamingChannel:
         self._journal_fragment = ""
         self._journal_gap = False
 
-    async def start_journal(self, tenant_id: str) -> str | None:
-        journal = RunJournal(tenant_id, self.user_id, self.conversation_id, uuid4().hex)
+    async def start_journal(self, tenant_id: str, run_id: str) -> str | None:
+        journal = RunJournal(tenant_id, self.user_id, self.conversation_id, run_id)
         async with self._lock:
             if self._journal is not None:
                 return self._journal.run_id

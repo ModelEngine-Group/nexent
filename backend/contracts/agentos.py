@@ -14,6 +14,7 @@ BODY_KEY = "nexent.agentos.body"
 
 class CompatibilityOperation(str, Enum):
     RUN = NAMESPACE + "v1/compat/agent/run"
+    CONVERSATION_RUN = NAMESPACE + "v1/compat/agent/conversation-run"
     STOP = NAMESPACE + "v1/compat/agent/stop"
     BACKGROUND = NAMESPACE + "v1/compat/agent/background"
     INSPECT = NAMESPACE + "v1/compat/agent/inspect"
@@ -25,6 +26,12 @@ class CompatibilityRun(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     request: dict[str, JsonValue]
+
+
+class CompatibilityConversationRun(CompatibilityRun):
+    resume: bool = False
+    language: Literal["zh", "en"] = "zh"
+    timezone: str | None = Field(default=None, max_length=128)
 
 
 class CompatibilityStop(BaseModel):

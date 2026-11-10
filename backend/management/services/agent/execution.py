@@ -3,6 +3,7 @@
 """Agent execution, message persistence and process-local task ownership."""
 
 import asyncio
+from functools import partial
 from management.services.agent.persistence import finalize_assistant_projection
 import json
 import logging
@@ -817,6 +818,12 @@ async def _stream_agent_chunks(
                 _transform_skill_files_to_standard_format(uploaded_files)
             )
 
+        projection_run_id = getattr(agent_request, "_projection_run_id", None)
+        mark_failed = update_message_status
+        if projection_run_id is not None:
+            from management.db.conversation.repository import fail_unfinished_assistant_projection
+
+            mark_failed = partial(fail_unfinished_assistant_projection, tenant_id=tenant_id)
         terminal_status, persistence_failed, final_answer_content = await finalize_assistant_projection(
             thread_manager=runtime_thread_manager,
             message_id=streaming_message_id,
@@ -832,8 +839,9 @@ async def _stream_agent_chunks(
             final_answer_content=final_answer_content,
             run_outcome=agent_run_info,
             persist_batch=persist_assistant_run_batch,
-            mark_failed=update_message_status,
+            mark_failed=mark_failed,
             logger=logger,
+            projection_run_id=projection_run_id,
         )
         if persistence_failed and channel is not None:
             persistence_error_chunk = _safe_agent_stream_error_chunk()

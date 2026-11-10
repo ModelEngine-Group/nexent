@@ -21,7 +21,7 @@ from management.services.conversation.creation_history import prepare_creation_h
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
-from contracts.agentos import AgentRunningState, BackgroundAgentResult
+from contracts.agentos import AgentRunningState, BackgroundAgentResult, CompatibilityConversationRun
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -59,8 +59,28 @@ async def agent_run_api(
     Agent execution API endpoint.
     If resume=true, attempts to continue streaming from where it left off after a tab switch.
     """
+    return await _run_public_conversation(
+        agent_request, http_request, lambda: get_current_user_id(authorization), resume,
+    )
+
+
+async def run_agentos_conversation(payload: CompatibilityConversationRun, principal: ServicePrincipal):
     try:
-        user_id, tenant_id = get_current_user_id(authorization)
+        request = AgentRequest.model_validate(payload.request)
+        headers = [(b"cookie", f"NEXT_LOCALE={payload.language}".encode("ascii"))]
+        if payload.timezone:
+            headers.append((b"x-user-timezone", payload.timezone.encode("latin-1")))
+    except (PayloadValidationError, UnicodeEncodeError) as exc:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
+    context = Request({"type": "http", "headers": headers})
+    return await _run_public_conversation(
+        request, context, lambda: (principal.user_id, principal.tenant_id), payload.resume,
+    )
+
+
+async def _run_public_conversation(agent_request, http_request, resolve_actor, resume):
+    try:
+        user_id, tenant_id = resolve_actor()
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,

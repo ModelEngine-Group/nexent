@@ -4,6 +4,7 @@ from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT
 from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
+import re
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
@@ -15,6 +16,7 @@ from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSA
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.agentos import RUN_ID_PATTERN
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
@@ -434,6 +436,7 @@ def persist_assistant_run_batch(
     automation_proposals: List[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    projection_run_id: str | None = None,
 ) -> Dict[int, int]:
     """Persist one completed assistant stream in a single transaction.
 
@@ -451,7 +454,30 @@ def persist_assistant_run_batch(
     message_id = int(message_id)
     conversation_id = int(conversation_id)
 
+    payload_digest = None
+    if projection_run_id is not None:
+        if not re.fullmatch(RUN_ID_PATTERN, projection_run_id):
+            raise ValueError("Invalid assistant projection run ID")
+        from management.db.conversation.projection_receipt import (
+            ConversationProjectionReceipt,
+            find_projection_receipts,
+            projection_payload_digest,
+        )
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+        payload_digest = projection_payload_digest({
+            "message_content": message_content or "",
+            "terminal_status": terminal_status,
+            "message_units": message_units,
+            "search_records": search_records,
+            "image_urls": image_urls,
+            "skill_files": skill_files,
+            "automation_proposals": automation_proposals,
+        })
+
     with get_db_session() as session:
+        if projection_run_id is not None and not tenant_membership_matches(session, user_id, tenant_id):
+            raise ValueError("Conversation does not exist or is not accessible")
         # Match deletion's conversation-before-message lock order and reject
         # finalization if deletion committed while this locking read waited.
         conversation = session.scalar(
@@ -477,6 +503,21 @@ def persist_assistant_run_batch(
         ).scalar_one_or_none()
         if parent is None:
             raise ValueError("Assistant streaming message does not exist or is not accessible")
+        if projection_run_id is not None:
+            receipts = find_projection_receipts(session, projection_run_id, message_id)
+            if receipts:
+                existing = receipts[0]
+                if (
+                    len(receipts) == 1
+                    and existing.run_id == projection_run_id
+                    and existing.message_id == message_id
+                    and existing.tenant_id == tenant_id
+                    and existing.created_by == user_id
+                    and existing.payload_sha256 == payload_digest
+                    and parent.status == terminal_status
+                ):
+                    return {int(index): unit_id for index, unit_id in existing.unit_ids.items()}
+                raise ValueError("Assistant projection conflicts with a committed run")
         if parent.status != "streaming":
             raise ValueError(f"Assistant message is already finalized with status {parent.status}")
 
@@ -613,7 +654,39 @@ def persist_assistant_run_batch(
         ):
             _touch_conversation_activity(session, conversation_id, user_id)
 
+        if projection_run_id is not None:
+            session.add(ConversationProjectionReceipt(
+                run_id=projection_run_id,
+                message_id=message_id,
+                tenant_id=tenant_id,
+                payload_sha256=payload_digest,
+                unit_ids={str(index): unit_id for index, unit_id in unit_id_by_index.items()},
+                created_by=user_id,
+                updated_by=user_id,
+            ))
+
         return unit_id_by_index
+
+
+
+def fail_unfinished_assistant_projection(message_id: int, status: str, user_id: str, *, tenant_id: str) -> None:
+    """Preserve a committed projection if the sender lost the commit response."""
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return
+        session.execute(
+            update(ConversationMessage)
+            .where(
+                ConversationMessage.message_id == message_id,
+                ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .values(status=status, updated_by=user_id, update_time=func.current_timestamp())
+        )
 
 
 def create_message_unit(

@@ -11,6 +11,7 @@ from contracts.agentos import (
     AgentResume,
     AgentRunningState,
     BackgroundAgentResult,
+    CompatibilityConversationRun,
     CompatibilityOperation,
     CompatibilityRun,
     CompatibilityStop,
@@ -64,6 +65,9 @@ class AgentOSClient:
         return await self._open_stream(
             CompatibilityOperation.RUN, CompatibilityRun(request=request), user_id, tenant_id,
         )
+
+    async def run_conversation(self, request: CompatibilityConversationRun, user_id: str, tenant_id: str):
+        return await self._open_stream(CompatibilityOperation.CONVERSATION_RUN, request, user_id, tenant_id)
 
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)

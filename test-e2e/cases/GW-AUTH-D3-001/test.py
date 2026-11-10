@@ -127,6 +127,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     management.add_middleware(ObserveContext)
     runtime.add_middleware(ObserveContext)
 
+    @management.post("/agent/run")
     @runtime.post("/agent/run")
     async def execute():
         identity = identity_context.get()

@@ -143,8 +143,10 @@ def persist_assistant_run_batch(
     automation_proposals: List[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    projection_run_id: str | None = None,
 ) -> Dict[int, int]:
     """Persist one assistant run and its related records atomically."""
+    projection_options = {"projection_run_id": projection_run_id} if projection_run_id is not None else {}
     return persist_assistant_run_batch_db(
         message_id=message_id,
         conversation_id=conversation_id,
@@ -157,6 +159,7 @@ def persist_assistant_run_batch(
         automation_proposals=automation_proposals,
         user_id=user_id,
         tenant_id=tenant_id,
+        **projection_options,
     )
 
 

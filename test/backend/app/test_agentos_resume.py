@@ -87,7 +87,7 @@ async def test_legacy_channel_records_complete_sse_frames(mocker):
     journal.run_id = RUN_ID
     channel = channels.StreamingChannel(42, "actor")
 
-    assert await channel.start_journal("tenant") == RUN_ID
+    assert await channel.start_journal("tenant", RUN_ID) == RUN_ID
     await channel.publish("event: stream_status\n")
     journal.append.assert_not_called()
     await channel.publish("data: payload\n\n")
@@ -114,7 +114,7 @@ async def test_legacy_channel_marks_gap_and_keeps_serving_when_journal_fails(moc
     journal.append.side_effect = ConnectionError("event store disconnected")
     channel = channels.StreamingChannel(42, "actor")
 
-    await channel.start_journal("tenant")
+    await channel.start_journal("tenant", RUN_ID)
     await channel.publish("data: first\n\n")
     await channel.publish("data: second\n\n")
     await channel.finish_journal("completed")

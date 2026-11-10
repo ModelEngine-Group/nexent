@@ -7,10 +7,12 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, CompatibilityOperation, CompatibilityRun, CompatibilityStop
+from contracts.agentos import (
+    BODY_KEY, PRINCIPAL_KEY, CompatibilityConversationRun, CompatibilityOperation, CompatibilityRun, CompatibilityStop,
+)
 
 
-def create_compatibility_router(run, stop) -> APIRouter:
+def create_compatibility_router(run, stop, *, conversation_run=None) -> APIRouter:
     router = APIRouter()
 
     @router.post(CompatibilityOperation.RUN.value, include_in_schema=False)
@@ -23,6 +25,18 @@ def create_compatibility_router(run, stop) -> APIRouter:
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         return await run(payload.request, principal)
+
+    if conversation_run is not None:
+        @router.post(CompatibilityOperation.CONVERSATION_RUN.value, include_in_schema=False)
+        async def run_conversation(request: Request):
+            principal = request.scope.get(PRINCIPAL_KEY)
+            if principal is None:
+                return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+            try:
+                payload = CompatibilityConversationRun.model_validate_json(request.scope[BODY_KEY])
+            except ValidationError:
+                return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+            return await conversation_run(payload, principal)
 
     @router.post(CompatibilityOperation.STOP.value, include_in_schema=False)
     async def stop_agent(request: Request):

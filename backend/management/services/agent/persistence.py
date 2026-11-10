@@ -29,6 +29,7 @@ async def finalize_assistant_projection(
     persist_batch,
     mark_failed,
     logger,
+    projection_run_id: str | None = None,
 ):
     """Apply the established batch transaction and failure fallback through injected I/O."""
     persistence_failed = False
@@ -50,6 +51,7 @@ async def finalize_assistant_projection(
                 len(buffered_units),
                 persistence_bytes,
             )
+            projection_options = {"projection_run_id": projection_run_id} if projection_run_id is not None else {}
             await thread_manager.run(
                 "control-io",
                 ManagedTaskSpec(
@@ -68,6 +70,7 @@ async def finalize_assistant_projection(
                 automation_proposals=buffered_automation_proposals,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                **projection_options,
             )
         except Exception:
             persistence_failed = True

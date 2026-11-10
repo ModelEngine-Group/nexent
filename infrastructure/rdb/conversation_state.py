@@ -8,23 +8,28 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 
 
+def tenant_membership_matches(session, user_id: str, tenant_id: str) -> bool:
+    """Verify the active tenant scope, including legacy empty-tenant accounts."""
+    membership = session.execute(
+        select(UserTenant.tenant_id, UserTenant.user_role)
+        .where(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
+        .limit(1)
+    ).first()
+    if membership is None:
+        return False
+    effective_tenant = membership.tenant_id
+    if not effective_tenant:
+        effective_tenant = (
+            ASSET_OWNER_TENANT_ID if (membership.user_role or "").upper() == ASSET_OWNER_ROLE
+            else DEFAULT_TENANT_ID
+        )
+    return effective_tenant == tenant_id
+
+
 def conversation_belongs_to(conversation_id: int, *, user_id: str, tenant_id: str) -> bool:
     """Check the signed actor's active tenant membership and live conversation ownership."""
     with get_db_session() as session:
-        membership = session.execute(
-            select(UserTenant.tenant_id, UserTenant.user_role)
-            .where(UserTenant.user_id == user_id, UserTenant.delete_flag == "N")
-            .limit(1)
-        ).first()
-        if membership is None:
-            return False
-        effective_tenant = membership.tenant_id
-        if not effective_tenant:
-            effective_tenant = (
-                ASSET_OWNER_TENANT_ID if (membership.user_role or "").upper() == ASSET_OWNER_ROLE
-                else DEFAULT_TENANT_ID
-            )
-        if effective_tenant != tenant_id:
+        if not tenant_membership_matches(session, user_id, tenant_id):
             return False
         return session.scalar(
             select(ConversationRecord.conversation_id)

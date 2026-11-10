@@ -275,7 +275,11 @@ async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecyc
     env = lifecycle
     run_id = "a" * 32
     monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
-    monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value=run_id), raising=False)
+    async def start_journal(_tenant, selected_run_id):
+        return selected_run_id
+
+    monkeypatch.setattr(env.service.uuid, "uuid4", lambda: SimpleNamespace(hex=run_id))
+    monkeypatch.setattr(env.channel, "start_journal", AsyncMock(side_effect=start_journal), raising=False)
 
     async def source(_request, **_kwargs):
         await env.channel.publish("data: answer\n\n")
@@ -286,7 +290,8 @@ async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecyc
     response = await env.start(source)
 
     assert response.headers["X-AgentOS-Run-ID"] == run_id
-    env.channel.start_journal.assert_awaited_once_with("t")
+    env.channel.start_journal.assert_awaited_once_with("t", run_id)
+    assert env.request._projection_run_id == run_id
     chunks = [chunk async for chunk in response.body_iterator]
     assert "conversation_created" in chunks[0]
     assert chunks[1:] == ["data: answer\n\n"]

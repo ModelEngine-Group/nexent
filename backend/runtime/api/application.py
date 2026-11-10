@@ -17,6 +17,7 @@ from runtime.api.agent.execution import (
     inspect_agentos_conversation,
     run_agentos_background,
     run_agentos_compatibility,
+    run_agentos_conversation,
     stop_agentos_compatibility,
 )
 from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
@@ -106,7 +107,9 @@ async def thread_capacity():
 
 app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
-app.include_router(create_compatibility_router(run_agentos_compatibility, stop_agentos_compatibility))
+app.include_router(create_compatibility_router(
+    run_agentos_compatibility, stop_agentos_compatibility, conversation_run=run_agentos_conversation,
+))
 app.include_router(create_background_router(run_agentos_background, inspect_agentos_conversation))
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))

@@ -890,8 +890,9 @@ async def run_agent_stream(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
             )
+            agent_request._projection_run_id = uuid.uuid4().hex
             if runtime_state_service.enabled is True:
-                journal_run_id = await channel.start_journal(resolved_tenant_id)
+                journal_run_id = await channel.start_journal(resolved_tenant_id, agent_request._projection_run_id)
     except Exception:
         deferred_run.cancel()
         runtime_thread_manager.cancel(

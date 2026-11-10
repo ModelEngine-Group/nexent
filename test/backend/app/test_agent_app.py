@@ -559,6 +559,30 @@ def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
 
 
 @pytest.mark.asyncio
+async def test_agentos_conversation_uses_signed_actor_and_preserves_request_context(mocker):
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    auth = mocker.patch.object(execution, "get_current_user_id")
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock(return_value=object()))
+    actor = ServicePrincipal("actor", "tenant")
+    payload = CompatibilityConversationRun(
+        request={"query": "question", "conversation_id": 42},
+        language="en", timezone="Asia/Shanghai", resume=True,
+    )
+    result = await execution.run_agentos_conversation(payload, actor)
+    assert result is runner.return_value
+    args = runner.await_args.kwargs
+    assert (args["user_id"], args["tenant_id"], args["resume"]) == ("actor", "tenant", True)
+    assert args["agent_request"].conversation_id == 42
+    assert args["http_request"].cookies["NEXT_LOCALE"] == "en"
+    assert args["http_request"].headers["x-user-timezone"] == "Asia/Shanghai"
+    assert "skip_user_save" not in args
+    auth.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("owned", [True, False])
 async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, owned):
     from infrastructure.agentos_identity import ServicePrincipal
