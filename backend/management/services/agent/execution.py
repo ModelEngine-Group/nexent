@@ -10,7 +10,6 @@ import logging
 import os
 from typing import (
     Any,
-    Dict,
     Optional,
 )
 
@@ -39,25 +38,8 @@ from management.services.agent.artifacts import (
 from management.services.agent.artifacts import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
-from management.services.agent.stream import (
-    finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments,
-)
-from management.services.agent.stream import (
-    is_stream_unit_continuation as _is_continuation,
-)
-from management.services.agent.stream import (
-    remove_answer_only_steps,
-    resolve_answer_completion,
-)
-from management.services.agent.stream import (
-    rollback_model_attempt_units as _rollback_model_attempt_units,
-)
-from management.services.agent.stream import (
-    safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
-)
-from management.services.agent.stream import (
-    serialize_stream_unit_content as _serialize_stream_unit_content,
-)
+from management.services.agent.stream import AssistantMessageProjection
+from management.services.agent.stream import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
 from management.services.model.names import (
     get_model_name_from_config,
 )
@@ -342,25 +324,10 @@ async def _stream_agent_chunks(
         channel: Optional StreamingChannel for multi-subscriber support.
     """
 
-    # Types whose chunks should be merged into the previous unit boundary,
-    # matching the legacy batch merge logic.
-    _MERGEABLE_TYPES = {
-        ProcessType.FINAL_ANSWER.value,
-        ProcessType.MODEL_OUTPUT_CODE.value,
-        ProcessType.MODEL_OUTPUT_THINKING.value,
-        ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
-    }
-
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
     workspace_file_uploads: dict[str, dict] = {}
     frontend_skill_files: list[dict] = []
-    buffered_units: list[dict[str, Any]] = []
-    buffered_search_records: list[dict[str, Any]] = []
-    buffered_image_urls: list[str] = []
-    buffered_image_url_set: set[str] = set()
-    buffered_automation_proposals: list[dict[str, Any]] = []
-    final_answer_content = ""
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -399,13 +366,7 @@ async def _stream_agent_chunks(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )
 
-    # Tracks the unit currently being accumulated in memory. Assistant output
-    # is written to PostgreSQL only once, after the stream reaches a terminal
-    # state. Redis/channel publication remains per chunk.
-    current_unit: Optional[Dict[str, Any]] = None
-    # The next unit_index to assign to a brand-new (non-merge) unit.
-    # In resume mode, start from the position after the last persisted unit.
-    next_unit_index: int = resume_from_unit_index
+    projection = AssistantMessageProjection(streaming_message_id, resume_from_unit_index)
     # Set when the agent run loop finishes successfully.
     stream_completed_normally: bool = False
 
@@ -464,53 +425,8 @@ async def _stream_agent_chunks(
 
     try:
         async for chunk in _iter_run_chunks():
-            chunk_type: Optional[str] = None
-            chunk_content: Any = ""
-            try:
-                data = json.loads(chunk)
-                chunk_type = data.get("type")
-                chunk_content = data.get("content", "") or ""
-                if chunk_type == "final_answer":
-                    has_body = resolve_answer_completion(buffered_units, data)
-                    if data.get("answer_phase") == "complete":
-                        current_unit = None
-                    if not has_body:
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                # Use the current unit index for continuations and the next index
-                # for new units so the frontend can skip persisted resume chunks.
-                if streaming_message_id is not None and chunk_type:
-                    mergeable = chunk_type in _MERGEABLE_TYPES
-                    if _is_continuation(current_unit, mergeable, chunk_type, data):
-                        # Continuing chunk - use current unit's index
-                        data["unit_index"] = current_unit["unit_index"]
-                    elif chunk_type not in ("search_content_placeholder",):
-                        # New unit - this will be the next index after assignment
-                        data["unit_index"] = next_unit_index
-                    # Tool events and side-channel output carry the same ID
-                    # from the observer's actual invocation context.
-                    # Re-serialize the chunk with unit_index for accurate frontend skip
-                    chunk = json.dumps(data)
-                    logger.debug(
-                        f"[resume-debug] Added unit_index to chunk: type={chunk_type}, unit_index={data.get('unit_index')}"
-                    )
-            except Exception:
-                # Malformed chunk: emit as-is and skip persistence bookkeeping.
-                await channel.publish(f"data: {chunk}\n\n")
-                yield f"data: {chunk}\n\n"
-                continue
-
-            if chunk_type == "model_attempt_control":
-                phase = data.get("phase")
-                attempt_id = data.get("attempt_id")
-                current_unit = None
-                if phase == "rollback" and isinstance(attempt_id, str):
-                    _rollback_model_attempt_units(buffered_units, attempt_id)
-                await channel.publish(f"data: {chunk}\n\n")
-                yield f"data: {chunk}\n\n"
-                continue
+            chunk, data = projection.project(chunk)
+            chunk_type = data.get("type")
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
                 artifact_content = data.get("content")
@@ -599,180 +515,6 @@ async def _stream_agent_chunks(
                         extracted_payload_count,
                         len(captured_skill_files),
                     )
-
-            # Buffer assistant persistence in memory. Redis/channel publication
-            # below remains per chunk; PostgreSQL is touched only once after the
-            # stream reaches a terminal state.
-            if streaming_message_id is not None and chunk_type:
-                mergeable = chunk_type in _MERGEABLE_TYPES
-                is_continuation = _is_continuation(
-                    current_unit, mergeable, chunk_type, data
-                )
-
-                if is_continuation:
-                    current_unit["_content_fragments"].append(chunk_content)
-                else:
-                    if chunk_type == "final_answer":
-                        final_answer_content = chunk_content
-
-                    if chunk_type == "picture_web":
-                        try:
-                            content_json = json.loads(chunk_content)
-                            if (
-                                isinstance(content_json, dict)
-                                and "images_url" in content_json
-                            ):
-                                for image_url in content_json["images_url"]:
-                                    if (
-                                        image_url
-                                        and image_url not in buffered_image_url_set
-                                    ):
-                                        buffered_image_url_set.add(image_url)
-                                        buffered_image_urls.append(image_url)
-                        except Exception as img_exc:
-                            logger.error(
-                                "Failed to buffer picture_web sources: %r",
-                                img_exc,
-                                exc_info=True,
-                            )
-
-                    if chunk_type == "search_content":
-                        placeholder_index = next_unit_index
-                        buffered_units.append(
-                            {
-                                "type": "search_content_placeholder",
-                                "content": '{"placeholder": true}',
-                                "unit_index": placeholder_index,
-                                "unit_type": "search_content_placeholder",
-                                "unit_content": '{"placeholder": true}',
-                                "tool_call_id": data.get("tool_call_id"),
-                                "invocation_id": data.get("invocation_id"),
-                                "mergeable": False,
-                            }
-                        )
-                        try:
-                            search_results = json.loads(chunk_content)
-                            if not isinstance(search_results, list):
-                                search_results = [search_results]
-                            for result in search_results:
-                                buffered_search_records.append(
-                                    {
-                                        "unit_index": placeholder_index,
-                                        "source_type": result.get("source_type", ""),
-                                        "source_title": result.get("title", ""),
-                                        "source_location": result.get("url", ""),
-                                        "source_content": result.get("text", ""),
-                                        "aidp_metadata": result.get(
-                                            "score_details", {}
-                                        ).get("metadata"),
-                                        "aidp_source_reference": {
-                                            key: value
-                                            for key, value in result.get(
-                                                "score_details", {}
-                                            ).items()
-                                            if key != "metadata"
-                                        },
-                                        "score_overall": float(result.get("score"))
-                                        if result.get("score") not in (None, "")
-                                        else None,
-                                        "score_accuracy": float(
-                                            result.get("score_details", {}).get(
-                                                "accuracy"
-                                            )
-                                        )
-                                        if result.get("score_details", {}).get(
-                                            "accuracy"
-                                        )
-                                        not in (None, "")
-                                        else None,
-                                        "score_semantic": float(
-                                            result.get("score_details", {}).get(
-                                                "semantic"
-                                            )
-                                        )
-                                        if result.get("score_details", {}).get(
-                                            "semantic"
-                                        )
-                                        not in (None, "")
-                                        else None,
-                                        "retrieval_highlight_terms": result.get(
-                                            "score_details", {}
-                                        ).get("retrieval_highlight_terms", []),
-                                        "published_date": result.get("published_date")
-                                        if result.get("published_date")
-                                        not in (None, "")
-                                        else None,
-                                        "cite_index": result.get("cite_index")
-                                        if result.get("cite_index") != ""
-                                        else None,
-                                        "search_type": result.get("search_type")
-                                        if result.get("search_type")
-                                        else None,
-                                        "tool_sign": result.get("tool_sign", ""),
-                                    }
-                                )
-                        except Exception as src_exc:
-                            logger.error(
-                                "Failed to buffer search_content sources: %r",
-                                src_exc,
-                                exc_info=True,
-                            )
-                        current_unit = None
-                        next_unit_index += 1
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
-                        continue
-
-                    # history_summary is already persisted once by the canonical
-                    # checkpoint sink on its covered assistant message. The stream
-                    # event is display-only and must not create a duplicate unit on
-                    # the currently-running assistant message.
-                    if chunk_type == "history_summary":
-                        current_unit = None
-                    elif streaming_message_id is not None and chunk_type not in (
-                        "search_content_placeholder",
-                    ):
-                        persisted_content = _serialize_stream_unit_content(
-                            data, chunk_content
-                        )
-                        current_unit = {
-                            "type": chunk_type,
-                            "content": persisted_content,
-                            "unit_index": next_unit_index,
-                            "unit_type": chunk_type,
-                            "unit_content": persisted_content,
-                            "tool_call_id": data.get("tool_call_id"),
-                            "invocation_id": data.get("invocation_id"),
-                            "_attempt_id": data.get("attempt_id"),
-                            "_step_id": data.get("step_id"),
-                            "mergeable": mergeable,
-                        }
-                        if mergeable:
-                            current_unit["_content_fragments"] = [persisted_content]
-                            current_unit["content"] = ""
-                            current_unit["unit_content"] = ""
-                        buffered_units.append(current_unit)
-                        if chunk_type == "automation_proposal":
-                            try:
-                                proposal_payload = json.loads(persisted_content)
-                                buffered_automation_proposals.append(
-                                    {
-                                        "unit_index": next_unit_index,
-                                        "proposal_id": int(
-                                            proposal_payload["proposal_id"]
-                                        ),
-                                    }
-                                )
-                            except (
-                                KeyError,
-                                TypeError,
-                                ValueError,
-                                json.JSONDecodeError,
-                            ):
-                                logger.warning(
-                                    "Invalid persisted automation proposal event payload"
-                                )
-                        next_unit_index += 1
 
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
@@ -893,14 +635,14 @@ async def _stream_agent_chunks(
             message_id=streaming_message_id,
             conversation_id=agent_request.conversation_id,
             terminal_status=terminal_status,
-            buffered_units=buffered_units,
-            buffered_search_records=buffered_search_records,
-            buffered_image_urls=buffered_image_urls,
+            buffered_units=projection.units,
+            buffered_search_records=projection.search_records,
+            buffered_image_urls=projection.image_urls,
             frontend_skill_files=frontend_skill_files,
-            buffered_automation_proposals=buffered_automation_proposals,
+            buffered_automation_proposals=projection.automation_proposals,
             user_id=user_id,
             tenant_id=tenant_id,
-            final_answer_content=final_answer_content,
+            final_answer_content=projection.final_answer_content,
             run_outcome=agent_run_info,
             persist_batch=persist_assistant_run_batch,
             mark_failed=mark_failed,

@@ -34,6 +34,7 @@ change:
     - Evaluations require a prepared snapshot. The signed legacy evaluation route rejects execution with HTTP 410.
     - Signed resume authorizes the conversation and replays a strict run-scoped cursor.
     - Ordinary conversation admission uses the signed AgentOS compatibility transport and preserves request and SSE context.
+    - Management projects serialized observer events independently of the Runtime worker.
     - Ordinary assistant projections replay by run ID and payload digest after committing their receipt in the same transaction.
     - Signed ordinary submissions bind a stable run ID to the actor, key and normalized request before execution.
     - Signed inspect and stop enforce actor ownership and scope cancellation to the exact run journal.
@@ -66,6 +67,8 @@ change:
     - test/backend/services/test_evaluation_dispatch.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
+    - test/backend/services/test_agent_message_projection.py
+    - test/backend/services/test_agent_run_final_answers.py
     - test/backend/app/test_agentos_prepared_run.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_evaluation_compiler.py

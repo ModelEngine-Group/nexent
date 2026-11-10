@@ -225,3 +225,193 @@ def remove_answer_only_steps(units: list[dict[str, Any]]) -> None:
     ]
     for unit in units:
         unit.pop("_step_id", None)
+
+
+class AssistantMessageProjection:
+    """Project observer JSON into public event indices and durable assistant units."""
+
+    _MERGEABLE_TYPES = {
+        "final_answer", "model_output_code", "model_output_thinking", "model_output_deep_thinking",
+    }
+
+    def __init__(self, message_id: int | None, next_unit_index: int = 0):
+        self.message_id = message_id
+        self.next_unit_index = next_unit_index
+        self.current_unit: dict[str, Any] | None = None
+        self.units: list[dict[str, Any]] = []
+        self.search_records: list[dict[str, Any]] = []
+        self.image_urls: list[str] = []
+        self._seen_images: set[str] = set()
+        self.automation_proposals: list[dict[str, int]] = []
+        self.final_answer_content = ""
+
+    def project(self, chunk: str) -> tuple[str, dict[str, Any]]:
+        """Return the forwarded JSON and parsed fields for transport-side handling."""
+        try:
+            data = json.loads(chunk)
+            kind = data.get("type")
+            content = data.get("content", "") or ""
+            if kind == "final_answer":
+                has_body = resolve_answer_completion(self.units, data)
+                if data.get("answer_phase") == "complete":
+                    self.current_unit = None
+                if not has_body:
+                    return chunk, data
+
+            mergeable = kind in self._MERGEABLE_TYPES
+            continuation = is_stream_unit_continuation(self.current_unit, mergeable, kind, data)
+            if self.message_id is not None and kind:
+                if continuation:
+                    data["unit_index"] = self.current_unit["unit_index"]
+                elif kind != "search_content_placeholder":
+                    data["unit_index"] = self.next_unit_index
+                chunk = json.dumps(data)
+        except Exception:
+            # Preserve malformed observer output without adding persistence metadata.
+            return chunk, {}
+
+        if kind == "model_attempt_control":
+            self.current_unit = None
+            attempt = data.get("attempt_id")
+            if data.get("phase") == "rollback" and isinstance(attempt, str):
+                rollback_model_attempt_units(self.units, attempt)
+        elif self.message_id is not None and kind and kind not in {"skill_artifact", "file_artifact"}:
+            if continuation:
+                self.current_unit["_content_fragments"].append(content)
+            else:
+                self._buffer_unit(kind, content, data, mergeable)
+
+        return chunk, data
+
+    def _buffer_unit(self, kind, content, data, mergeable):
+        if kind == "final_answer":
+            self.final_answer_content = content
+        if kind == "picture_web":
+            self._buffer_images(content)
+        if kind == "search_content":
+            self._buffer_search_sources(content, data)
+            self.current_unit = None
+            self.next_unit_index += 1
+            return
+        if kind == "history_summary":
+            # A checkpoint sink persists this event separately.
+            self.current_unit = None
+            return
+        if kind == "search_content_placeholder":
+            return
+
+        persisted_content = serialize_stream_unit_content(data, content)
+        unit = {
+            "type": kind,
+            "content": persisted_content,
+            "unit_index": self.next_unit_index,
+            "unit_type": kind,
+            "unit_content": persisted_content,
+            "tool_call_id": data.get("tool_call_id"),
+            "invocation_id": data.get("invocation_id"),
+            "_attempt_id": data.get("attempt_id"),
+            "_step_id": data.get("step_id"),
+            "mergeable": mergeable,
+        }
+        if mergeable:
+            unit.update(_content_fragments=[persisted_content], content="", unit_content="")
+        self.units.append(unit)
+        self.current_unit = unit
+        if kind == "automation_proposal":
+            try:
+                proposal_id = int(json.loads(persisted_content)["proposal_id"])
+                self.automation_proposals.append({"unit_index": self.next_unit_index, "proposal_id": proposal_id})
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Invalid persisted automation proposal event payload")
+        self.next_unit_index += 1
+
+    def _buffer_images(self, content):
+        try:
+            picture = json.loads(content)
+            if isinstance(picture, dict):
+                for url in picture.get("images_url", []):
+                    if url and url not in self._seen_images:
+                        self._seen_images.add(url)
+                        self.image_urls.append(url)
+        except Exception:
+            logger.exception("Failed to buffer picture_web sources")
+
+    def _buffer_search_sources(self, chunk_content, data):
+        placeholder_index = self.next_unit_index
+        self.units.append({
+            "type": "search_content_placeholder",
+            "content": '{"placeholder": true}',
+            "unit_index": placeholder_index,
+            "unit_type": "search_content_placeholder",
+            "unit_content": '{"placeholder": true}',
+            "tool_call_id": data.get("tool_call_id"),
+            "invocation_id": data.get("invocation_id"),
+            "mergeable": False,
+        })
+        try:
+            search_results = json.loads(chunk_content)
+            if not isinstance(search_results, list):
+                search_results = [search_results]
+            for result in search_results:
+                self.search_records.append(
+                    {
+                        "unit_index": placeholder_index,
+                        "source_type": result.get("source_type", ""),
+                        "source_title": result.get("title", ""),
+                        "source_location": result.get("url", ""),
+                        "source_content": result.get("text", ""),
+                        "aidp_metadata": result.get(
+                            "score_details", {}
+                        ).get("metadata"),
+                        "aidp_source_reference": {
+                            key: value
+                            for key, value in result.get(
+                                "score_details", {}
+                            ).items()
+                            if key != "metadata"
+                        },
+                        "score_overall": float(result.get("score"))
+                        if result.get("score") not in (None, "")
+                        else None,
+                        "score_accuracy": float(
+                            result.get("score_details", {}).get(
+                                "accuracy"
+                            )
+                        )
+                        if result.get("score_details", {}).get(
+                            "accuracy"
+                        )
+                        not in (None, "")
+                        else None,
+                        "score_semantic": float(
+                            result.get("score_details", {}).get(
+                                "semantic"
+                            )
+                        )
+                        if result.get("score_details", {}).get(
+                            "semantic"
+                        )
+                        not in (None, "")
+                        else None,
+                        "retrieval_highlight_terms": result.get(
+                            "score_details", {}
+                        ).get("retrieval_highlight_terms", []),
+                        "published_date": result.get("published_date")
+                        if result.get("published_date")
+                        not in (None, "")
+                        else None,
+                        "cite_index": result.get("cite_index")
+                        if result.get("cite_index") != ""
+                        else None,
+                        "search_type": result.get("search_type")
+                        if result.get("search_type")
+                        else None,
+                        "tool_sign": result.get("tool_sign", ""),
+                    }
+                )
+        except Exception as src_exc:
+            logger.error(
+                "Failed to buffer search_content sources: %r",
+                src_exc,
+                exc_info=True,
+            )

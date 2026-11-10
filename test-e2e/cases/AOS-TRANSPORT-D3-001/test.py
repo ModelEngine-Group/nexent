@@ -1413,6 +1413,7 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
 async def _assert_prepared_run_over_signed_http(monkeypatch):
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
+    from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
     from runtime.agentos import prepared_run, resume
 
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
@@ -1517,6 +1518,20 @@ async def _assert_prepared_run_over_signed_http(monkeypatch):
             f"id: {reference.run_id}:3\nevent: agentos_terminal\n"
             'data: {"status": "completed"}\n\n'
         )
+        # Exercise the same Management projection used by the public legacy path
+        # against retained Runtime observer data with the original event sequence.
+        full = await agentos.resume(AgentResume(**reference.model_dump()), actor.user_id, actor.tenant_id)
+        frames = b"".join([chunk async for chunk in full.body_iterator]).decode().split("\n\n")
+        projection = AssistantMessageProjection(message_id=77)
+        for frame in frames:
+            lines = frame.splitlines()
+            if lines[1:2] == ["event: agentos_observer"]:
+                projection.project(lines[2].removeprefix("data: "))
+        finalize_buffered_unit_fragments(projection.units)
+        assert [(unit["unit_index"], unit["unit_content"]) for unit in projection.units] == [
+            (0, "step"), (1, "answer"),
+        ]
+
         denied = await agentos.resume(cursor, "user-b", actor.tenant_id)
         assert denied.status_code == 404
         assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([chunk async for chunk in denied.body_iterator])
