@@ -104,6 +104,23 @@ def test_source_scan_ignores_dependencies_but_detects_owned_legacy_imports(tmp_p
     assert _legacy_agent_imports(tmp_path) == [("backend/owned.py", 2, "agents")]
 
 
+def test_management_compiler_and_legacy_streams_do_not_import_runtime_factory_or_sdk_alias():
+    for name in ("preparation/run.py", "execution.py", "run.py", "subscription.py"):
+        path = ROOT / "backend" / "management" / "services" / "agent" / name
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        forbidden = "runtime" if name.startswith("preparation/") else "runtime.adapters"
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            assert all(
+                name != forbidden and not name.startswith(f"{forbidden}.")
+                for name in (module.removeprefix("backend.") for module in modules)
+            ), (path, node.lineno)
+
+
 def test_ut_be_arb_002_factory_preserves_prepared_values(monkeypatch):
     factory = load_file("backend/runtime/adapters/nexent/factory.py", "arb_factory")
     constructor = Mock(side_effect=lambda **values: SimpleNamespace(**values))

@@ -40,7 +40,7 @@ from management.services.agent.artifacts import (
 )
 from management.services.agent.stream import AssistantMessageProjection
 from management.services.agent.stream import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
-from runtime.adapters.nexent.runner import (
+from nexent.core.agents.run_agent import (
     DeferredAgentRun,
     agent_run,
 )

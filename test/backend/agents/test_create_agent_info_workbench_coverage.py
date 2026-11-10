@@ -114,6 +114,7 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
         runtime_skill_snapshot=[{"name": "demo", "files": []}],
         runtime_knowledge_tools=[{"name": "search"}],
         runtime_sub_agent_mounts=[{"agent_id": 8, "version_no": 2}],
+        legacy_materializer=runtime_factory.materialize_legacy_run,
     )
 
     materialize.assert_called_once()

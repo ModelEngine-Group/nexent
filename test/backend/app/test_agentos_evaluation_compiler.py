@@ -2,6 +2,7 @@
 """Exercise the production evaluation compiler through its AgentOS boundary."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -20,6 +21,54 @@ from nexent.core.concurrency import LanePolicy, ThreadManager
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
+
+
+@pytest.mark.asyncio
+async def test_legacy_compile_requires_runtime_materializer_before_resource_reads(mocker):
+    load_agent = mocker.patch.object(run, "search_agent_info_by_agent_id")
+    allocate_workspace = mocker.patch.object(run, "_build_run_workspace")
+
+    with pytest.raises(ValueError, match="requires a Runtime materializer"):
+        await run.create_agent_run_info(7, [], "hello", [], "tenant", "actor")
+
+    load_agent.assert_not_called()
+    allocate_workspace.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tmp_path):
+    from nexent.core.agents.agent_model import AgentConfig
+    from runtime.adapters.nexent import factory
+
+    workspace = tmp_path / "run"
+    model = create_model_config_from_record(model_record(model_id=11, connect_status="available"))
+    agent = AgentConfig(name="test", description="test", tools=[], model_name=model.cite_name, sandbox_policy={"level": "local"})
+    mocker.patch.object(run, "_build_run_workspace", return_value=str(workspace))
+    mocker.patch.object(run, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    mocker.patch.object(run, "_validate_run_minio_files")
+    mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
+    mocker.patch.object(run, "create_agent_config", return_value=agent)
+    mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
+    mocker.patch.object(run, "create_model_config_list", return_value=[model])
+    mocker.patch.object(run, "get_remote_mcp_server_list", return_value=[])
+    mocker.patch.object(run, "get_tenant_local_mcp_server", return_value="http://mcp/mcp")
+    mocker.patch.object(run, "resolve_tool_user_context", return_value={"tenant_id": "tenant"})
+    mocker.patch.object(run, "get_redis_client", return_value=None)
+    storage = object()
+    storage_client = mocker.patch.object(factory, "get_sandbox_minio_client", return_value=storage)
+
+    prepared = await run.create_agent_run_info(
+        7, [], "hello", [], "tenant", "actor", is_debug=True, legacy_materializer=factory.materialize_legacy_run,
+    )
+
+    assert prepared.query == "hello" and prepared.agent_config is agent
+    assert prepared.model_config_list == [model]
+    assert prepared.user_context == {"tenant_id": "tenant"}
+    assert not prepared.stop_event.is_set()
+    assert prepared.minio_client is storage
+    storage_client.assert_called_once_with()
+    assert prepared.sandbox_config.output_dir == str(workspace / "outputs")
+    assert prepared.sandbox_config.extra_kwargs["workspace_root"] == str(tmp_path.resolve())
 
 
 @pytest.mark.asyncio
@@ -82,7 +131,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     lookup_override = mocker.patch.object(prepared_evaluation, "read_agent_model_overrides", return_value=agent_model_overrides)
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-compiler-signing-key")
-    client = mocker.AsyncMock()
+    client = AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     user, tenant = "user-a", "tenant-a"
@@ -141,7 +190,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 request.generation_config = WorkbenchGenerationConfig(temperature=1.7, top_p=0.8)
                 mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
                 mocker.patch.object(run, "get_model_by_model_id", return_value=record)
-                preflight_overlay = mocker.spy(run_controls, "overlay_root_model")
+                preflight_overlay = mocker.patch.object(run_controls, "overlay_root_model", wraps=run_controls.overlay_root_model)
             if knowledge_scope is not None:
                 knowledge = ResolvedKnowledgeScope(
                     desired_scope=config.knowledge_scope.model_dump(mode="json"), tool_params=ToolParamsRequest(),

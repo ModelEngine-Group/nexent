@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
+from unittest.mock import call
 
 import pytest
 from starlette.responses import StreamingResponse
@@ -8,6 +9,23 @@ from starlette.responses import StreamingResponse
 from contracts.agentos import BackgroundRun
 from infrastructure.agentos_identity import ServicePrincipal
 from runtime.api.agent import execution
+
+
+@pytest.mark.asyncio
+async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(mocker):
+    from runtime.adapters.nexent.factory import materialize_legacy_run
+
+    actor = ServicePrincipal("actor", "tenant")
+    legacy_stream = mocker.patch.object(execution, "run_legacy_agent_stream", return_value=StreamingResponse(iter(())))
+
+    response = await execution.run_agentos_compatibility({"query": "run", "conversation_id": 42}, actor)
+
+    assert response is legacy_stream.return_value
+    options = legacy_stream.await_args.kwargs
+    assert options["legacy_materializer"] is materialize_legacy_run
+    assert options["agent_request"]._track_execution
+    assert options["skip_user_save"]
+    assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
 
 
 @pytest.mark.asyncio
@@ -48,8 +66,8 @@ async def test_background_disconnect_requests_stop_for_the_dispatched_run(mocker
 
     owned.assert_called_once_with(42, actor)
     assert state.call_args_list == [
-        mocker.call(run_id, "actor", "tenant", 42),
-        mocker.call(run_id, "actor", "tenant", 42, request_stop=True, prevent_start=True),
+        call(run_id, "actor", "tenant", 42),
+        call(run_id, "actor", "tenant", 42, request_stop=True, prevent_start=True),
     ]
 
 

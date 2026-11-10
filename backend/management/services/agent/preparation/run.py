@@ -1,9 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Prepare an in-process run and delegate local object construction to Runtime."""
+"""Compile Agent resources for AgentOS and the temporary in-process fallback."""
 
 import logging
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from contracts.agentos import PreparedConversationScope, TurnModelGeneration
@@ -44,10 +45,13 @@ from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 if TYPE_CHECKING:
     from management.services.agent.workbench import PreparedWorkbench
+    from nexent.core.agents.agent_model import AgentRunInfo
 
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
+LegacyRunMaterializer = Callable[..., "AgentRunInfo"]
 
 
 def _ensure_agent_reasoning_snapshot(
@@ -145,8 +149,12 @@ async def create_agent_run_info(
     prepared_workbench: "PreparedWorkbench | None" = None,
     turn_generation: TurnModelGeneration | None = None,
     authorized_knowledge_tools: dict | None = None,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
 ):
     export_resources = export_evaluation or prepared_conversation is not None
+    if not export_resources and legacy_materializer is None:
+        raise ValueError("Legacy run preparation requires a Runtime materializer")
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
 
@@ -455,10 +463,7 @@ async def create_agent_run_info(
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)
 
-    # The compatibility path still invokes the materializer in-process.
-    from runtime.adapters.nexent.factory import materialize_legacy_run
-
-    return materialize_legacy_run(
+    return legacy_materializer(
         workspace_root=AGENT_WORKSPACE_ROOT,
         query=final_query,
         model_config_list=model_list,

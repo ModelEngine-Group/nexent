@@ -14,7 +14,7 @@ from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from management.services.agent.preparation.run import create_agent_run_info
+from management.services.agent.preparation.run import LegacyRunMaterializer, create_agent_run_info
 from management.services.agent.preprocessing import (
     preprocess_manager,
 )
@@ -38,9 +38,7 @@ from management.services.agent.execution import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from runtime.adapters.nexent.runner import (
-    DeferredAgentRun,
-)
+from nexent.core.agents.run_agent import DeferredAgentRun
 from infrastructure.rdb.agent_execution import RunIdentity, mark_running
 from nexent.core.concurrency import (
     ManagedExecution,
@@ -123,6 +121,8 @@ async def prepare_agent_run(
     allow_memory_search: bool = True,
     reservation_token: Optional[str] = None,
     resource_versions: dict | None = None,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -191,6 +191,8 @@ async def prepare_agent_run(
         create_run_kwargs["enable_automation_tool"] = False
     if resource_versions is not None:
         create_run_kwargs["resource_versions"] = resource_versions
+    if legacy_materializer is not None:
+        create_run_kwargs["legacy_materializer"] = legacy_materializer
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
@@ -292,6 +294,8 @@ async def generate_stream(
     reservation_token: Optional[str] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
 ):
     """Unified streaming entry point.
 
@@ -356,6 +360,8 @@ async def generate_stream(
                 prepare_kwargs["resource_versions"] = resource_versions
             if reservation_token is not None:
                 prepare_kwargs["reservation_token"] = reservation_token
+            if legacy_materializer is not None:
+                prepare_kwargs["legacy_materializer"] = legacy_materializer
             agent_run_info, memory_context = await prepare_agent_run(
                 agent_request=agent_request,
                 user_id=user_id,
@@ -440,6 +446,7 @@ async def generate_stream(
                 reservation_token=reservation_token,
                 execution=execution,
                 deferred_run=deferred_run,
+                legacy_materializer=legacy_materializer,
             ):
                 yield data_chunk
         except Exception as run_exc:

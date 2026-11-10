@@ -50,6 +50,7 @@ from management.services.agent.execution import (
     _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
+from management.services.agent.preparation.run import LegacyRunMaterializer
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -58,9 +59,7 @@ from management.services.agent.run import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from runtime.adapters.nexent.runner import (
-    DeferredAgentRun,
-)
+from nexent.core.agents.run_agent import DeferredAgentRun
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ThreadCapacityExceeded,
@@ -194,6 +193,8 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
 ):
     """
     Start an agent run and stream responses.
@@ -924,6 +925,8 @@ async def run_agent_stream(
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
+    if legacy_materializer is not None:
+        stream_kwargs["legacy_materializer"] = legacy_materializer
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():

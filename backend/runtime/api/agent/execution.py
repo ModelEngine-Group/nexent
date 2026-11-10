@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
-from management.services.agent.subscription import run_agent_stream
+from management.services.agent.subscription import run_agent_stream as run_legacy_agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
@@ -20,6 +20,7 @@ from contracts.agentos import (
     BackgroundRun, CompatibilityConversationRun, TrackedBackgroundResult,
 )
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
+from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
 from runtime.executions import stop_registered_run
 
@@ -29,6 +30,10 @@ agent_runtime_router = APIRouter(prefix="/agent")
 
 
 logger = logging.getLogger("agent_app")
+
+
+async def run_agent_stream(**options):
+    return await run_legacy_agent_stream(**options, legacy_materializer=materialize_legacy_run)
 
 
 def _execution_conflict_response() -> JSONResponse:

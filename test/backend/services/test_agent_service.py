@@ -6478,6 +6478,7 @@ async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monke
 @pytest.mark.asyncio
 async def test_generate_stream_fallback_on_failure(monkeypatch):
     """Fallback output does not claim a pre-loop memory search occurred."""
+    materializer = MagicMock()
     agent_request = AgentRequest(
         agent_id=8,
         conversation_id=888,
@@ -6496,7 +6497,8 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
     )
 
     # Force prepare_agent_run to raise, which will be normalized
-    async def raise_prepare(*_, **__):
+    async def raise_prepare(*_, **kwargs):
+        assert kwargs["legacy_materializer"] is materializer
         raise Exception("prep failed")
 
     monkeypatch.setattr(
@@ -6506,7 +6508,8 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
     )
 
     # Fallback generator
-    async def fallback_gen(*_, **__):
+    async def fallback_gen(*_, **kwargs):
+        assert kwargs["legacy_materializer"] is materializer
         yield "data: fb1\n\n"
 
     monkeypatch.setattr(
@@ -6517,7 +6520,7 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
     out = []
     async for d in agent_run_service.generate_stream(
-        agent_request, user_id="u", tenant_id="t", enable_memory=True
+        agent_request, user_id="u", tenant_id="t", enable_memory=True, legacy_materializer=materializer,
     ):
         out.append(d)
 

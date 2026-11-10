@@ -8,6 +8,7 @@ import types
 import importlib.util
 from pathlib import Path
 from contextlib import ExitStack
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace stubs.
 
@@ -592,7 +593,6 @@ from management.services.agent.preparation.tools import create_tool_config_list
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.model.run_bindings import create_model_config_list
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
-from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preparation.inputs import join_minio_file_description_to_query
 from management.services.agent.preparation.inputs import prepare_prompt_templates
 from management.services.agent.resource_resolver import _get_skills_for_template
@@ -605,6 +605,7 @@ from management.services.agent.preparation.resources import _build_auth_header_f
 from management.services.agent.preparation.resources import _get_external_a2a_agents
 from management.services.agent.preparation.inputs import _build_internal_s3_url
 from management.services.agent.preparation.inputs import _format_minio_files_for_content
+
 from management.services.agent.preparation.inputs import _convert_history_with_minio_files
 from management.services.agent.preparation.tools import _normalize_tool_params_request
 from management.services.agent.preparation.tools import _get_agent_tool_overrides
@@ -613,6 +614,10 @@ from management.services.agent.resource_resolver import _resolve_runtime_tool_re
 from management.services.model.run_budget import _resolve_input_budget
 from management.services.model.run_budget import _resolve_context_budget
 from management.services.agent.preparation.compiler import _get_external_provider_service_for_search
+from runtime.adapters.nexent.factory import materialize_legacy_run
+
+
+create_agent_run_info = partial(run_preparation.create_agent_run_info, legacy_materializer=materialize_legacy_run)
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
