@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: CONTEXT-MAINTENANCE-20261110
+  change_type: requirement
+  requirement_id: CONTEXT-MAINTENANCE-20261110
+  title: Share non-blocking context maintenance and provider usage observations
+  description: Keep context estimates advisory, preserve history when maintenance
+    fails, and retain bounded provider overflow recovery for both agent runtimes.
+  affected_features:
+    existing:
+    - SDK-MODEL-TRANSPORT
+    added: []
+    modified:
+    - F-171
+    retired: []
+  affected_cases:
+    existing:
+    - AGENT-HISTORY-D3-001
+    added: []
+    modified:
+    - MODEL-SERVICE-TRANSPORT-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Pair actual provider input usage with the completed request; reject stale or
+      non-provider observations.
+    - Account for changed messages/tools without treating estimates as admission limits.
+    - Preserve original history when maintenance fails; bound each request independently
+      and retain cancellation.
+    - Keep output length separate from explicit input overflow; preserve retry and
+      saved output-cap contracts.
+    reason: Existing history and recovery assertions are reused; focused observation,
+      fail-open, and repeated-maintenance regressions are missing.
+    test_selectors:
+    - test/sdk/core/agents/test_context_usage_observation.py
+    - test/sdk/core/agents/test_context_maintenance_failures.py
+    - test/sdk/core/agents/test_context_helper_contracts.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_context_manager_assembly.py
+    - test/sdk/core/model_service/test_legacy_response_observation.py
+    - test/sdk/core/model_service/test_context_recovery.py
+    - test/sdk/core/model_service/test_legacy_context_recovery.py
+    - test/sdk/core/model_service/test_legacy_context_budget.py
+    - test/sdk/core/models/test_openai_llm.py
+    - test/sdk/monitor/test_monitoring.py
+  notes: Existing runtime/model ownership mappings apply. Transport preparation is
+    self-contained with owned loopback server/client cleanup; real Agent acceptance
+    retains separate Phoenix evidence. No new D1 duplicates UT.

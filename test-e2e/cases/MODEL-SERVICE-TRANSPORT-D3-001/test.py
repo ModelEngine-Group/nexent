@@ -57,6 +57,8 @@ from .custom_control_cases import test_custom_provider_shutdown_configuration_re
 
 from .catalog_control_cases import test_all_selected_custom_model_controls_reach_real_peer, test_all_selected_hosted_model_controls_reach_real_peer  # noqa: F401
 
+from .context_maintenance_cases import test_shared_context_maintenance_uses_completed_provider_usage  # noqa: F401
+
 pytestmark = [pytest.mark.case_id("MODEL-SERVICE-TRANSPORT-D3-001"), pytest.mark.stage("D3")]
 
 
