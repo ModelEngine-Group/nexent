@@ -182,7 +182,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
 
     config = request.workbench
-    if config is None or config.mode in {"skill_create", "agent_create"}:
+    if config is None:
         return None
 
     await run_blocking(

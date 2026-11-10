@@ -161,6 +161,25 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["skill_create", "agent_create"])
+async def test_workbench_debug_rejects_creation_modes_without_dispatch(mocker, mode):
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    payload = CompatibilityConversationRun(request={
+        "query": "hello", "is_debug": True, "entrypoint": "workbench", "workbench": {"mode": mode},
+    })
+
+    with pytest.raises(HTTPException) as rejected:
+        await runtime_client.forward_conversation_run(payload, "actor", "tenant-a")
+
+    assert (rejected.value.status_code, rejected.value.detail) == (
+        422, {"code": "WORKBENCH_MODE_RESOURCE_CONFLICT"},
+    )
+    client.run_ephemeral.assert_not_called()
+    client.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_workbench_debug_denies_mount_without_dispatch(mocker):
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
     mocker.patch.object(workbench, "resolve_workbench_config", side_effect=WorkbenchError("AGENT_NOT_RUNNABLE", 403))
