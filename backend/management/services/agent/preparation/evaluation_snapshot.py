@@ -95,8 +95,26 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
     )
 
 
-async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: str) -> PreparedEphemeralRun | None:
+async def _authorize_prepared_metadata(request: AgentRequest, tenant_id: str) -> None:
     from management.db.agent.repository import search_agent_info_by_agent_id
+
+    try:
+        validate_runtime_metadata(request.metadata)
+    except RuntimeMetadataValidationError as exc:
+        code = (
+            ErrorCode.CHAT_METADATA_TOO_LARGE
+            if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE else ErrorCode.CHAT_METADATA_INVALID
+        )
+        raise AppException(code, details={"reason": exc.code.value}) from exc
+    agent = await run_blocking(
+        "prepared-metadata-policy", search_agent_info_by_agent_id,
+        request.agent_id, tenant_id, request.version_no, lane="control-io", owner="management",
+    )
+    if not agent.get("allow_chat_metadata", False):
+        raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+
+
+async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: str) -> PreparedEphemeralRun | None:
     from management.services.agent.preparation.run import create_agent_run_info
 
     if not request.is_debug or request.conversation_id is not None or not request.version_no or request.version_no < 1:
@@ -104,20 +122,7 @@ async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: s
 
     metadata = request.metadata
     if metadata is not None:
-        try:
-            validate_runtime_metadata(metadata)
-        except RuntimeMetadataValidationError as exc:
-            code = (
-                ErrorCode.CHAT_METADATA_TOO_LARGE
-                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE else ErrorCode.CHAT_METADATA_INVALID
-            )
-            raise AppException(code, details={"reason": exc.code.value}) from exc
-        published = await run_blocking(
-            "a2a-metadata-policy", search_agent_info_by_agent_id,
-            request.agent_id, tenant_id, request.version_no, lane="control-io", owner="management",
-        )
-        if not published.get("allow_chat_metadata", False):
-            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+        await _authorize_prepared_metadata(request, tenant_id)
 
     snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
@@ -180,7 +185,7 @@ async def prepare_conversation_snapshot(
     if any((
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug, request.generation_config,
-        request.metadata is not None and (not allow_metadata_update or new_conversation),
+        workbench is None and request.metadata is not None and (not allow_metadata_update or new_conversation),
         request.clarification_response is not None,
         workbench is None and (request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None),
     )):
@@ -230,8 +235,10 @@ async def prepare_conversation_snapshot(
     metadata = conversation.get("runtime_metadata") or {}
     metadata_version = conversation.get("runtime_metadata_version") or 0
     if request.metadata is not None:
-        if request.expected_metadata_version is not None and request.expected_metadata_version != metadata_version:
+        if not new_conversation and request.expected_metadata_version not in (None, metadata_version):
             raise RuntimeMetadataVersionConflict(metadata_version)
+        if workbench is not None:
+            await _authorize_prepared_metadata(request, tenant_id)
         metadata = request.metadata
         metadata_version += 1
     scope = PreparedConversationScope(

@@ -66,6 +66,7 @@ change:
     - Prepared Workbench turns preserve optimistic configuration versions, mounted Agent identities, and root-only model controls.
     - Workbench scopes local knowledge at the root, retains document filters, and presents authorization warnings before journal events.
     - A2A ephemeral execution preserves observer frames, signed versions, and file scope, and releases resources on disconnect.
+    - Workbench updates authorized runtime metadata with configuration in one confirmation and keeps both versions.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

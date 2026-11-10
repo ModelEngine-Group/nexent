@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
 
-from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.errors.exceptions import RuntimeMetadataVersionConflict, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, ENABLE_AIDP_KNOWLEDGE
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -596,12 +596,15 @@ def prepare_portable_workbench(
     if conversation is not None:
         assert_workbench_version(conversation, request.expected_workbench_config_version)
         previous_version = int(conversation.get("workbench_config_version") or 0)
+        metadata_version = int(conversation.get("runtime_metadata_version") or 0)
+        if request.metadata is not None and request.expected_metadata_version not in (None, metadata_version):
+            raise RuntimeMetadataVersionConflict(metadata_version)
     requested = request.workbench
     if requested is None and stored is not None:
         requested = WorkbenchSessionConfig.model_validate(stored)
     if requested is None:
         raise ValidationError("Workbench configuration is required")
-    if request.metadata is not None or requested.skill_mounts:
+    if requested.skill_mounts:
         return None
     scope = requested.knowledge_scope
     if ENABLE_AIDP_KNOWLEDGE and scope is not None and scope.aidp.mode != "disabled":

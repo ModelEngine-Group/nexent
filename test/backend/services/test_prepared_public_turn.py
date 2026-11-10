@@ -295,7 +295,8 @@ async def test_recovery_discards_run_stopped_before_runtime_admission(flow):
 
 
 @pytest.mark.asyncio
-async def test_workbench_stale_configuration_rejects_before_runtime(mocker):
+@pytest.mark.parametrize("stale", ["configuration", "metadata"])
+async def test_workbench_stale_revision_rejects_before_runtime(mocker, stale):
     from fastapi import HTTPException
 
     from contracts.agent import WorkbenchSessionConfig
@@ -303,10 +304,12 @@ async def test_workbench_stale_configuration_rejects_before_runtime(mocker):
     config = WorkbenchSessionConfig(mode="generic_chat")
     request = AgentRequest(
         query="question", entrypoint="workbench", conversation_id=REFERENCE.conversation_id,
-        workbench=config, expected_workbench_config_version=1,
+        workbench=config, expected_workbench_config_version=1 if stale == "configuration" else 2,
+        metadata={}, expected_metadata_version=3,
     )
     mocker.patch.object(prepared_turn, "get_conversation", return_value={
         "workbench_config": config.model_dump(mode="json"), "workbench_config_version": 2,
+        "runtime_metadata_version": 4,
     })
 
     async def inline(_name, fn, *args, **kwargs):
@@ -315,11 +318,16 @@ async def test_workbench_stale_configuration_rejects_before_runtime(mocker):
     mocker.patch.object(prepared_turn, "_io", side_effect=inline)
     reject = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
     client = SimpleNamespace(start_prepared_run=AsyncMock())
-    with pytest.raises(HTTPException) as error:
-        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
-
-    assert error.value.status_code == 409
-    assert error.value.detail == {"code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": 2}
+    if stale == "configuration":
+        with pytest.raises(HTTPException) as error:
+            await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+        assert error.value.status_code == 409
+        assert error.value.detail == {"code": "WORKBENCH_CONFIG_VERSION_CONFLICT", "current_version": 2}
+    else:
+        with pytest.raises(AppException) as error:
+            await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+        assert error.value.error_code == ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+        assert error.value.details == {"current_version": 4}
     reject.assert_awaited_once_with(PAYLOAD, *ACTOR)
     client.start_prepared_run.assert_not_awaited()
 

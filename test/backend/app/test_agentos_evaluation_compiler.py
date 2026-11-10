@@ -22,12 +22,13 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "a2a"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
-    new = kind == "new"
-    use_workbench = kind in {"workbench", "workbench_scope"}
+    new = kind in {"new", "workbench_first_metadata"}
+    use_workbench = kind.startswith("workbench")
+    workbench_metadata = use_workbench and "metadata" in kind
     redis = object()
     get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
@@ -84,13 +85,19 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                                     "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
         })
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
-        metadata = {"project": "replacement"} if kind == "metadata" else {} if kind == "clear_metadata" else None
+        metadata = None
+        if kind == "metadata" or workbench_metadata:
+            metadata = {"project": "replacement"}
+        elif kind == "clear_metadata":
+            metadata = {}
         request = AgentRequest(
             query="hello", agent_id=7, conversation_id=42,
             enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
         )
         if metadata is not None:
-            assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant) is None
+            assert await evaluation_snapshot.prepare_conversation_snapshot(
+                request, reference, user, tenant, new_conversation=new,
+            ) is None
         options = {}
         if use_workbench:
             knowledge = None
@@ -114,11 +121,27 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             )
             request.entrypoint = "workbench"
             options["workbench"] = workbench.PreparedWorkbench(
-                config, plan, 3, 4, knowledge=knowledge, knowledge_tools=[] if knowledge is not None else None,
+                config, plan, 0 if new else 3, 1 if new else 4,
+                knowledge=knowledge, knowledge_tools=[] if knowledge is not None else None,
             )
+        if workbench_metadata:
+            permission = mocker.patch(
+                "management.db.agent.repository.search_agent_info_by_agent_id",
+                return_value={"allow_chat_metadata": kind != "workbench_metadata_denied"},
+            )
+        if kind == "workbench_metadata_denied":
+            from contracts.errors.codes import ErrorCode
+            from contracts.errors.exceptions import AppException
+
+            with pytest.raises(AppException) as error:
+                await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant, **options)
+            assert error.value.error_code == ErrorCode.CHAT_METADATA_NOT_ALLOWED
+            permission.assert_called_once_with(7, tenant, 2)
+            compile_tools.assert_not_awaited()
+            return
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             request, reference, user, tenant, language="en", timezone="Asia/Shanghai", **options,
-            allow_metadata_update=metadata is not None,
+            allow_metadata_update=metadata is not None and not use_workbench,
             **({"new_conversation": True} if new else {"current_user_message_id": 23}),
         )
         assert isinstance(prepared, PreparedAgentRun)
@@ -134,7 +157,9 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 assert next(call for call in compile_tools.await_args_list if call.args[0] == 8).kwargs[
                     "runtime_knowledge_tools"
                 ] is None
-            assert payload.workbench_config_version == 4
+            assert payload.workbench_config_version == (1 if new else 4)
+            if workbench_metadata:
+                permission.assert_called_once_with(7, tenant, 2)
             assert payload.models.llm.root_generation.temperature == 0.4
             assert info.agent_config.invocation_name == "workbench_main"
             assert info.agent_config.worker_agents[0].invocation_name == "agent_8_v5"
@@ -145,7 +170,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         if new:
             read_conversation.assert_not_called()
             read_history.assert_not_called()
-            assert info.runtime_metadata == {} and info.runtime_metadata_version == 0
+            assert info.runtime_metadata == (metadata or {})
+            assert info.runtime_metadata_version == (1 if workbench_metadata else 0)
             assert prepared.historical_context is None
         else:
             assert info.runtime_metadata == ({"project": "test"} if metadata is None else metadata)

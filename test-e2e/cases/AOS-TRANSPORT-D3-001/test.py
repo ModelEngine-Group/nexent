@@ -244,6 +244,10 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         )
     with monkeypatch.context() as workbench_patches:
         await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True)
+    with monkeypatch.context() as joint_metadata_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            joint_metadata_patches, use_workbench=True, metadata={"project": "replacement"},
+        )
     with monkeypatch.context() as knowledge_patches:
         await _assert_public_prepared_turn_over_signed_http(
             knowledge_patches, use_workbench=True, use_knowledge_scope=True,
@@ -1913,10 +1917,10 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert turn["workbench_update"] == {
                 "config": config.model_dump(mode="json"), "expected_version": 3, "version": 4,
             }
+        if metadata is not None:
+            assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
         if northbound:
             assert turn["automation"] is None
-            if metadata is not None:
-                assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
         else:
             automation_params = None
             if use_knowledge_scope:
@@ -1983,6 +1987,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         monkeypatch.setattr(prepared_turn, "get_conversation", lambda *_args, **_kwargs: {
             "workbench_config": WorkbenchSessionConfig(mode="generic_chat").model_dump(mode="json"),
             "workbench_config_version": 3,
+            "runtime_metadata_version": 5,
         })
         identity = SimpleNamespace(agent_id=7, version_no=2)
         monkeypatch.setattr(workbench, "resolve_workbench_config", lambda requested, **_kwargs: (
@@ -2008,7 +2013,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata
-        assert kwargs.get("allow_metadata_update", False) == (metadata is not None)
+        assert kwargs.get("allow_metadata_update", False) == (metadata is not None and northbound)
         if use_workbench:
             assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
         if use_knowledge_scope:
@@ -2052,6 +2057,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
                 "expected_workbench_config_version": 3,
             }
+        if use_workbench and metadata is not None:
+            request.update(metadata=metadata, expected_metadata_version=5)
         if use_knowledge_scope:
             request.update(knowledge_scope=knowledge_scope, tool_params={
                 "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
@@ -2085,6 +2092,8 @@ async def _assert_public_prepared_turn_over_signed_http(
             }}
             prefix = f"data: {json.dumps(event, separators=(',', ':'))}\n\n" + prefix
             assert first.headers["X-Workbench-Config-Version"] == "4"
+            if metadata is not None:
+                assert first.headers["X-Runtime-Metadata-Version"] == "6"
         assert first.text.startswith(prefix)
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id

@@ -167,7 +167,7 @@ async def start_turn(
                 "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,
                 "version": workbench.version,
             }
-        if allow_metadata_update and request.metadata is not None:
+        if request.metadata is not None and (allow_metadata_update or workbench is not None):
             user_turn["metadata_update"] = {
                 "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
             }

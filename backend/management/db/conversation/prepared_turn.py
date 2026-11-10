@@ -122,10 +122,10 @@ def stage_turn(
             if (session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None
                     or _next_index(session, reference.conversation_id) != message_index):
                 raise PreparedTurnConflict
-            if (metadata_update := user_turn.get("metadata_update")) is not None:
-                _require_metadata_version(conversation, metadata_update["expected_version"])
             if workbench is not None:
                 _require_workbench_version(conversation, workbench["expected_version"], workbench["config"])
+            if (metadata_update := user_turn.get("metadata_update")) is not None:
+                _require_metadata_version(conversation, metadata_update["expected_version"])
         elif not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
         row = session.scalar(select(admission).where(
@@ -181,21 +181,24 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
             workbench = user_turn.get("workbench_update")
+            metadata_update = user_turn.get("metadata_update")
             if workbench is not None:
                 config = workbench["config"]
-                expected = workbench["version"] if user_turn["new_conversation"] else workbench["expected_version"]
-                _require_workbench_version(conversation, expected, config)
-                if config != conversation.workbench_config:
-                    conversation.workbench_config = config
-                    conversation.workbench_config_version = workbench["version"]
-                    conversation.knowledge_scope = config.get("knowledge_scope")
-                    conversation.updated_by = turn.user_id
-                    conversation.update_time = func.now()
-            if (metadata_update := user_turn.get("metadata_update")) is not None:
-                expected = metadata_update["expected_version"]
-                _require_metadata_version(conversation, expected)
+                config_version = workbench["version"] if user_turn["new_conversation"] else workbench["expected_version"]
+                _require_workbench_version(conversation, config_version, config)
+            if metadata_update is not None:
+                metadata_version = metadata_update["expected_version"]
+                _require_metadata_version(conversation, metadata_version)
+
+            if workbench is not None and (config != conversation.workbench_config or metadata_update is not None):
+                conversation.workbench_config = config
+                conversation.workbench_config_version = workbench["version"]
+                conversation.knowledge_scope = config.get("knowledge_scope")
+                conversation.updated_by = turn.user_id
+                conversation.update_time = func.now()
+            if metadata_update is not None:
                 conversation.runtime_metadata = metadata_update["value"]
-                conversation.runtime_metadata_version = expected + 1
+                conversation.runtime_metadata_version = metadata_version + 1
                 conversation.updated_by = turn.user_id
                 conversation.update_time = func.now()
             source_message_id = create_conversation_message({
