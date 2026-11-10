@@ -154,7 +154,7 @@ async def create_agent_run_info(
         )
     workspace_run_id = uuid.uuid4().hex
     workspace_path = _build_run_workspace(user_id, workspace_run_id)
-    if runtime_skill_snapshot is not None:
+    if runtime_skill_snapshot is not None and not export_resources:
         runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
             runtime_skill_snapshot,
             workspace_path,
@@ -378,6 +378,7 @@ async def create_agent_run_info(
             export_options = {
                 "root_generation": prepared_workbench.config.generation_config,
                 "source_model_alias": source_model_alias,
+                "workbench_skills": prepared_workbench.plan.root_skills,
             }
         return export_snapshot(
             agent_config, model_list, final_query, None, run_input=run_input,

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from contracts.agentos import PreparedEvaluationRun
+from contracts.agentos import AgentRunReference, PreparedEvaluationRun
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.preparation import evaluation_snapshot
@@ -263,7 +263,7 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
 
     calls = []
 
-    def materialize_skills(resource, actor, path, *, publish_artifacts):
+    def materialize_skills(resource, actor, path, *, publish_artifacts, public_reference, workbench_version):
         calls.append(publish_artifacts)
         return {}
 
@@ -279,3 +279,57 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
             language="en", sandbox_enabled=False, root_alias="llm", publish_skill_artifacts=publish,
         )
     assert calls == [False, True]
+
+
+@pytest.mark.parametrize(("change", "status"), [
+    ("none", None), ("revoked", 404), ("config", 409), ("file", 409),
+])
+def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status):
+    from infrastructure.skill_execution import capture_skill_files
+    from management.services.agent.workbench import ResolvedSkillMount
+    from runtime.agentos import prepared_skills
+
+    agent, _, directory, row, ordinary = skill_snapshot
+    agent.origin = "SYSTEM"
+    for tool in agent.tools:
+        tool.params["authorized_skill_names"] = ["summarize"]
+    catalog = {"skill_id": 53, "name": row["name"], "description": row["description"],
+               "config": row["config"], "tool_ids": []}
+    skill = ResolvedSkillMount(
+        53, row["name"], row["description"], (), row["config"],
+        files=tuple(capture_skill_files("tenant-a", row["name"]).items()),
+    )
+    resource = evaluation_snapshot._export_resource(
+        agent, {}, "tenant-a", "en", None, {}, workbench_skills=(skill,),
+    )
+    assert resource.workbench_skill_refs[0].skill_id == 53
+    assert not resource.skill_refs and "tenant-secret-value" not in resource.model_dump_json()
+    actor = ServicePrincipal("user-a", "tenant-a")
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    read = mocker.patch.object(prepared_skills, "read_workbench_skill_rows", return_value={53: catalog})
+    workspace = str(tmp_path / "runs" / actor.user_id / reference.run_id)
+    with pytest.raises(ValueError, match="Workbench root"):
+        prepared_skills.materialize_skill_tools(resource, actor, workspace)
+    if change == "revoked":
+        read.return_value = {}
+    if change == "config":
+        catalog["config"] = {"value": "changed"}
+    if change == "file":
+        (directory / "SKILL.md").write_text("tampered", encoding="utf-8")
+    try:
+        if status is None:
+            tools = prepared_skills.materialize_skill_tools(
+                resource, actor, workspace, public_reference=reference, workbench_version=3,
+            )
+            assert tools["read_skill_config"].params["config_overrides"] == {"summarize": row["config"]}
+            assert tools["read_skill_md"].params["authorized_skill_names"] == ["summarize"]
+        else:
+            with pytest.raises(HTTPException) as error:
+                prepared_skills.materialize_skill_tools(
+                    resource, actor, workspace, public_reference=reference, workbench_version=3,
+                )
+            assert error.value.status_code == status
+        read.assert_called_once_with(reference, actor, 3, 7, 2, {53})
+        ordinary.assert_not_called()
+    finally:
+        prepared_evaluation._remove_skill_files(workspace)

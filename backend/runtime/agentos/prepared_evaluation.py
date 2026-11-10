@@ -163,6 +163,7 @@ def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
     root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
+    workbench_version=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -188,6 +189,7 @@ def _materialize_agent(
 
     local_tools = materialize_skill_tools(
         resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
+        public_reference=public_reference, workbench_version=workbench_version,
     )
     local_tools.update(materialize_automation_tool(resource, actor, public_reference))
     memory_tools, pre_run_tool_events = materialize_memory(resource, actor, memory_conversation_id)
@@ -358,6 +360,7 @@ def prepare_run_snapshot(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,
                 memory_conversation_id=payload.conversation_id if isinstance(payload, PreparedAgentRun) else None,
+                workbench_version=workbench_version,
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")

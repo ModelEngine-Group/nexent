@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from contracts.agentos import EvaluationSkillTool, FileToolDescription
 from infrastructure.rdb.skill_execution_records import read_bound_skills
+from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
 from nexent.core.agents.agent_model import ToolConfig
 
@@ -35,24 +36,39 @@ def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | Non
         return stage_directory / run_path.name
 
 
-def materialize_skill_tools(resource, actor, workspace_path: str, *, publish_artifacts: bool = False) -> dict[str, ToolConfig]:
+def materialize_skill_tools(
+    resource, actor, workspace_path: str, *, publish_artifacts: bool = False,
+    public_reference=None, workbench_version: int | None = None,
+) -> dict[str, ToolConfig]:
     bindings = [binding for binding in resource.tools if binding.tool_id in set(EvaluationSkillTool)]
     context_items = resource.evaluation_options.context_items if resource.evaluation_options is not None else None
-    refs = resource.skill_refs
+    workbench_refs = resource.workbench_skill_refs
+    if workbench_refs and (resource.skill_refs or public_reference is None or workbench_version is None
+                           or resource.origin != "SYSTEM"):
+        raise ValueError("Workbench Skills require the admitted Workbench root")
+    refs = workbench_refs or resource.skill_refs
     if not refs and not bindings:
         validate_skill_context(context_items, [])
         return {}
-    ids = {ref.instance_id for ref in refs}
+    ids = {ref.skill_id for ref in workbench_refs} if workbench_refs else {ref.instance_id for ref in refs}
     if not refs or len(ids) != len(refs) or {binding.tool_id for binding in bindings} != set(EvaluationSkillTool):
         raise ValueError("Inconsistent evaluation skill bindings")
     if len(bindings) != len(EvaluationSkillTool):
         raise ValueError("Duplicate evaluation skill tool")
 
     tenant = actor.tenant_id
-    rows = {
-        row["instance_id"]: row for row in read_bound_skills(resource.agent_id, resource.version_no, tenant)
-        if row["instance_id"] in ids
-    }
+    if workbench_refs:
+        try:
+            rows = read_workbench_skill_rows(
+                public_reference, actor, workbench_version, resource.agent_id, resource.version_no, ids,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
+    else:
+        rows = {
+            row["instance_id"]: row for row in read_bound_skills(resource.agent_id, resource.version_no, tenant)
+            if row["instance_id"] in ids
+        }
     if rows.keys() != ids:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_SKILL_NOT_FOUND"})
 
@@ -62,7 +78,7 @@ def materialize_skill_tools(resource, actor, workspace_path: str, *, publish_art
     configs = {}
     stage.mkdir(parents=True, mode=0o700)
     for ref in refs:
-        row = rows[ref.instance_id]
+        row = rows[ref.skill_id if workbench_refs else ref.instance_id]
         name = row["name"]
         if name in configs:
             raise ValueError("Duplicate evaluation skill name")

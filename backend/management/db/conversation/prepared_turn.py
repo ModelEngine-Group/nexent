@@ -251,8 +251,9 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             conversation.chat_mode = user_turn["chat_mode"]
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]
-            memory_agent_id = user_turn.get("memory_agent_id")
-            row.prepared_user_turn = {"memory_agent_id": memory_agent_id} if memory_agent_id is not None else None
+            row.prepared_user_turn = {
+                key: user_turn[key] for key in ("memory_agent_id", "workbench_skill_root") if key in user_turn
+            } or None
             if row.prepared_automation_context is not None:
                 row.prepared_automation_context = {
                     **row.prepared_automation_context, "source_message_id": source_message_id,

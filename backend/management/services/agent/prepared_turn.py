@@ -193,6 +193,10 @@ async def start_turn(
                 "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,
                 "version": workbench.version,
             }
+            if snapshot.resource.workbench_skill_refs:
+                user_turn["workbench_skill_root"] = {
+                    "agent_id": snapshot.resource.agent_id, "version_no": snapshot.resource.version_no,
+                }
         else:
             desired_scope = (
                 knowledge.desired_scope if request.knowledge_scope is not None and knowledge is not None else previous_scope

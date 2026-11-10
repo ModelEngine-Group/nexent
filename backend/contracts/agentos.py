@@ -273,6 +273,11 @@ class SkillExecutionBinding(RunSpecModel):
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class WorkbenchSkillBinding(RunSpecModel):
+    skill_id: PositiveInt
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class FileToolDescription(RunSpecModel):
     description: str | None = None
     description_zh: str | None = None
@@ -454,6 +459,7 @@ class AgentResource(RunSpecModel):
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
     tools: list[ToolBinding] = Field(default_factory=list)
     skill_refs: list[SkillExecutionBinding] = Field(default_factory=list)
+    workbench_skill_refs: list[WorkbenchSkillBinding] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)
     knowledge_base_refs: list[str] = Field(default_factory=list)
     memory_ref: str | None = None

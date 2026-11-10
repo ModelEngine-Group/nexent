@@ -8,7 +8,6 @@ import shutil
 import tempfile
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
@@ -17,8 +16,9 @@ from contracts.errors.exceptions import RuntimeMetadataVersionConflict, Validati
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
+from infrastructure.workbench_skill_execution import resolve_skill_config
 from management.db.skill import repository as skill_db
-from management.db.tool.repository import query_tools_by_ids
+from management.db.tool.repository import query_tools_by_ids, search_tools_for_sub_agent
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
@@ -258,43 +258,6 @@ def build_workbench_main_profile(tenant_id: str) -> Dict[str, Any]:
             for skill in skills
         ],
     }
-
-
-def resolve_skill_config(schemas, defaults, published, runtime):
-    """Validate declared configuration after applying the three precedence layers."""
-    fields = {item["name"]: item for item in schemas if isinstance(item, dict) and item.get("name")}
-    values = deepcopy(defaults)
-    values.update(deepcopy(published))
-    values.update(deepcopy(runtime))
-    if any(name not in fields for name in runtime):
-        raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    types = {
-        "string": str, "boolean": bool, "integer": int,
-        "number": (int, float), "object": dict, "array": list,
-    }
-    for name, schema in fields.items():
-        value = values.get(name)
-        if value is None and "default" in schema:
-            value = values[name] = deepcopy(schema["default"])
-        if value is None or value == "":
-            if schema.get("required"):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            continue
-        expected = types.get(schema.get("type"))
-        if expected and (not isinstance(value, expected) or (
-            schema.get("type") in {"integer", "number"} and isinstance(value, bool)
-        )):
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if isinstance(schema.get("enum"), list) and value not in schema["enum"]:
-            raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-        if schema.get("type") in {"integer", "number"}:
-            if not isfinite(value):
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("minimum") is not None and value < schema["minimum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-            if schema.get("maximum") is not None and value > schema["maximum"]:
-                raise WorkbenchError("RUNTIME_SKILL_CONFIG_INVALID")
-    return values
 
 
 class RuntimeMountService:
@@ -604,11 +567,13 @@ def prepare_portable_workbench(
         requested = WorkbenchSessionConfig.model_validate(stored)
     if requested is None:
         raise ValidationError("Workbench configuration is required")
-    if requested.skill_mounts:
-        return None
     canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
-    if plan.root_skills:
-        return None
+    required = {tool_id for skill in plan.root_skills for tool_id in skill.tool_ids}
+    if required:
+        root = plan.root.identity
+        bound = search_tools_for_sub_agent(root.agent_id, tenant_id, version_no=root.version_no)
+        if not required <= {tool.get("tool_id") for tool in bound}:
+            return None
     version = previous_version + int(canonical.model_dump(mode="json") != stored)
     if canonical.knowledge_scope is None:
         return PreparedWorkbench(canonical, plan, previous_version, version)

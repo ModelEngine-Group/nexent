@@ -15,6 +15,7 @@ from contracts.agentos import (
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
+    WorkbenchSkillBinding,
 )
 from contracts.constants import environment
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
@@ -290,6 +291,8 @@ async def prepare_conversation_snapshot(
     )
     compile_options = {}
     if workbench is not None:
+        from management.services.agent.workbench import runtime_skill_snapshot
+
         root = workbench.plan.root.identity
         config = workbench.config
         request = request.model_copy(update={
@@ -300,7 +303,7 @@ async def prepare_conversation_snapshot(
         })
         compile_options = {
             "runtime_sub_agent_mounts": [asdict(child) for child in workbench.plan.child_mounts],
-            "runtime_skill_snapshot": [],
+            "runtime_skill_snapshot": runtime_skill_snapshot(workbench.plan),
             "runtime_generation_config": config.generation_config.model_dump(mode="json"),
             "prepared_workbench": workbench,
         }
@@ -425,15 +428,22 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
     return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json"))
 
 
-def _export_skill_bindings(agent, tenant_id, context_items):
+def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=()):
     tools = [tool for tool in agent.tools if tool.name in set(EvaluationSkillTool)]
-    if not tools:
+    if not tools and not workbench_skills:
         validate_skill_context(context_items, [])
         return []
     if {tool.name for tool in tools} != set(EvaluationSkillTool) or len(tools) != len(EvaluationSkillTool):
         raise ValueError("Incomplete evaluation skill tools")
 
-    rows = read_bound_skills(agent.agent_id, agent.version_no, tenant_id)
+    if workbench_skills:
+        rows = [
+            {"skill_id": skill.skill_id, "name": skill.name, "description": skill.description,
+             "config": dict(skill.config_values), "tool_ids": sorted(skill.tool_ids)}
+            for skill in workbench_skills
+        ]
+    else:
+        rows = read_bound_skills(agent.agent_id, agent.version_no, tenant_id)
     configs = {row["name"]: row["config"] for row in rows}
     if not rows or len(configs) != len(rows):
         raise ValueError("Ambiguous evaluation skill bindings")
@@ -451,10 +461,21 @@ def _export_skill_bindings(agent, tenant_id, context_items):
             expected["isolated_skills_root"] = False
         else:
             expected["config_overrides"] = configs
+        if workbench_skills:
+            expected["authorized_skill_names"] = sorted(configs)
         if (tool.class_name != builtin.class_name or tool.source != "builtin" or tool.usage != "builtin"
                 or tool.metadata != metadata or actual != expected):
             raise ValueError("Unsupported evaluation skill tool configuration")
 
+    if workbench_skills:
+        return [
+            WorkbenchSkillBinding(
+                skill_id=row["skill_id"], revision=skill_execution_revision(
+                    tenant_id, agent.agent_id, agent.version_no, row, dict(skill.files),
+                ),
+            )
+            for row, skill in zip(rows, workbench_skills)
+        ]
     return [
         SkillExecutionBinding(
             instance_id=row["instance_id"],
@@ -484,6 +505,7 @@ def _export_memory_search(agent, allow_memory):
 
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
+    workbench_skills=(),
 ):
     if agent.sandbox_policy is not None:
         raise ValueError("Unsupported prepared resource")
@@ -509,7 +531,8 @@ def _export_resource(
         portable_items = [item for item in context_items if item["id"] not in EXECUTOR_CONTEXT_IDS]
         if len(portable_items) != len(context_items):
             profile.update(context_items=portable_items, render_executor_context=True)
-    skill_refs = _export_skill_bindings(agent, tenant_id, profile.get("context_items"))
+    refs = _export_skill_bindings(agent, tenant_id, profile.get("context_items"), workbench_skills)
+    skill_refs = [] if workbench_skills else refs
     tools = []
     mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]
     candidates = read_bound_mcp_tools(agent.agent_id, agent.version_no, tenant_id, mcp_names) if mcp_names else []
@@ -586,6 +609,7 @@ def _export_resource(
         agent_id=agent.agent_id, version_no=agent.version_no, name=agent.name,
         description=agent.description, prompt_templates=agent.prompt_templates or {},
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,
+        workbench_skill_refs=refs if workbench_skills else [],
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
         memory_search=memory_search,
         evaluation_options=EvaluationAgentOptions(**profile),
@@ -647,7 +671,7 @@ def _export_model(
 def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
-    root_generation=None, turn_generation=None, source_model_alias=None,
+    root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -657,6 +681,7 @@ def export_snapshot(
             agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {},
             allow_public_tools=prepared_conversation is not None,
             allow_memory=prepared_conversation is not None,
+            workbench_skills=workbench_skills,
         )
         bindings = [
             _export_model(

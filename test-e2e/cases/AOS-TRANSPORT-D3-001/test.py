@@ -232,6 +232,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_prepared_run_over_signed_http(run_patches, tmp_path)
     with monkeypatch.context() as planning_patches:
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
+    with monkeypatch.context() as root_skill_patches:
+        await _assert_workbench_root_skills_over_signed_http(root_skill_patches, tmp_path)
     with monkeypatch.context() as turn_patches:
         await _assert_public_prepared_turn_over_signed_http(turn_patches, use_memory=True)
     with monkeypatch.context() as clarification_patches:
@@ -245,7 +247,7 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
             metadata_patches, northbound=True, metadata={"project": "replacement"},
         )
     with monkeypatch.context() as workbench_patches:
-        await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True)
+        await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True, use_root_skill=True)
     with monkeypatch.context() as joint_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
             joint_metadata_patches, use_workbench=True, metadata={"project": "replacement"},
@@ -2065,9 +2067,102 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
 
 
+async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
+    from contracts.agentos import EvaluationSkillTool
+    from infrastructure.agent_model_config import model_record_revision
+    from infrastructure.skill_execution import capture_skill_files
+    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.agent.workbench import ResolvedSkillMount
+    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import prepared_run, prepared_skills
+
+    actor = ServicePrincipal("workbench-user", "workbench-tenant")
+    reference = AgentRunReference(conversation_id=88, run_id="a" * 32)
+    root = tmp_path / "mounted-skills"
+    skill_dir = root / actor.tenant_id / "mounted"
+    skill_dir.mkdir(parents=True)
+    guide = skill_dir / "SKILL.md"
+    guide.write_text("---\nname: mounted\ndescription: Example\n---\nMounted skill guide", encoding="utf-8")
+    (skill_dir / "config").mkdir()
+    (skill_dir / "config" / "config.yaml").write_text("value: default", encoding="utf-8")
+    monkeypatch.setattr(environment, "CONTAINER_SKILLS_PATH", str(root))
+    effective = {"value": "synthetic-private-setting"}
+    skill = ResolvedSkillMount(
+        45, "mounted", "Example", (), effective,
+        files=tuple(capture_skill_files(actor.tenant_id, "mounted").items()),
+    )
+    common = {"local_skills_dir": str(root), "authorized_skill_names": ["mounted"]}
+    agent = AgentConfig(
+        agent_id=7, version_no=3, name="workbench_main", description="", model_name="demo", origin="SYSTEM",
+        context_items=[{"id": "skill:mounted", "type": "skill", "content": {"name": "mounted", "description": "Example"}}],
+        tools=[ToolConfig(
+            class_name=tool.class_name, name=tool.value, source="builtin", usage="builtin",
+            metadata={"agent_id": 7, "version_no": 3, "tenant_id": actor.tenant_id},
+            params={**common, **({"config_overrides": {"mounted": effective}} if tool == EvaluationSkillTool.CONFIG
+                                else {"isolated_skills_root": False})},
+        ) for tool in EvaluationSkillTool],
+    )
+    resource = evaluation_snapshot._export_resource(agent, {}, actor.tenant_id, "en", None, {}, workbench_skills=(skill,))
+    model = {
+        "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
+        "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "2026-11-10T00:00:00",
+    }
+    payload = PreparedAgentRun.model_validate({
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "use skill"}, "language": "en",
+        "workbench_config_version": 4, "resource": resource,
+        "models": {"llm": {"model_id": 11, "alias": "demo", "revision": model_record_revision(model),
+                           "root_generation": {}}},
+    })
+    assert effective["value"] not in payload.model_dump_json()
+    assert "Mounted skill guide" not in payload.model_dump_json()
+    access = {"visible": True}
+    scoped_reads = []
+
+    def read(ref, principal, version, agent_id, agent_version, ids):
+        assert (ref, principal, version, agent_id, agent_version, ids) == (reference, actor, 4, 7, 3, {45})
+        scoped_reads.append(version)
+        return {45: {"skill_id": 45, "name": "mounted", "description": "Example", "config": effective,
+                     "tool_ids": []}} if access["visible"] else {}
+
+    async def execute(signed, principal):
+        info = prepared_evaluation.prepare_run_snapshot(signed, principal)
+        try:
+            tools = {tool.name: tool for tool in info.agent_config.tools}
+            assert "Mounted skill guide" in NexentAgent.create_builtin_tool(None, tools["read_skill_md"]).forward("mounted")
+            config = NexentAgent.create_builtin_tool(None, tools["read_skill_config"])
+            assert json.loads(config.forward("mounted")) == effective
+            assert tools["run_skill_script"].params["publish_file_artifacts"]
+        finally:
+            prepared_evaluation._remove_skill_files(info.workspace_path)
+        return reference
+
+    monkeypatch.setattr(prepared_skills, "read_workbench_skill_rows", read)
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_: model)
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "workbench-runs"))
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr(prepared_run, "start_prepared_run", execute)
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(prepared_run.create_prepared_run_router())
+    with serve(runtime) as runtime_url:
+        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        assert await client.start_prepared_run(payload, actor.user_id, actor.tenant_id) == reference
+        guide.write_text("modified", encoding="utf-8")
+        with pytest.raises(RuntimeUpstreamError) as stale:
+            await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
+        assert stale.value.status_code == 409
+        access["visible"] = False
+        with pytest.raises(RuntimeUpstreamError) as denied:
+            await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
+        assert denied.value.status_code == 404
+    assert scoped_reads == [4, 4, 4]
+
+
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
-    use_knowledge_scope=False, clarification=False, use_memory=False,
+    use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
 ):
     from contracts.agent import WorkbenchSessionConfig
     from contracts.clarification import ClarificationResponse
@@ -2087,6 +2182,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     } if use_knowledge_scope else None
     config = WorkbenchSessionConfig(
         mode="generic_chat", generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
+        skill_mounts=[{"skill_id": 45}] if use_root_skill else [],
     )
     native_scope = use_knowledge_scope and not use_workbench
     bindings = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
@@ -2110,7 +2206,8 @@ async def _assert_public_prepared_turn_over_signed_http(
         **({"native_knowledge": True} if native_scope else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
                      "prompt_templates": {"system_prompt": "Answer"},
-                     "tools": bindings},
+                     "tools": bindings,
+                     "workbench_skill_refs": [{"skill_id": 45, "revision": "a" * 64}] if use_root_skill else []},
         "models": {"llm": llm},
     })
     response = ClarificationResponse.model_validate({
@@ -2142,6 +2239,7 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert turn["workbench_update"] == {
                 "config": config.model_dump(mode="json"), "expected_version": 3, "version": 4,
             }
+        assert turn.get("workbench_skill_root") == ({"agent_id": 7, "version_no": 2} if use_root_skill else None)
         if native_scope:
             stored = config.knowledge_scope.model_dump(mode="json")
             assert turn["knowledge_update"] == {"expected": stored, "value": stored}
@@ -2224,7 +2322,9 @@ async def _assert_public_prepared_turn_over_signed_http(
         })
         identity = SimpleNamespace(agent_id=7, version_no=2)
         monkeypatch.setattr(workbench, "resolve_workbench_config", lambda requested, **_kwargs: (
-            requested, SimpleNamespace(root_skills=(), root=SimpleNamespace(identity=identity)),
+            requested, SimpleNamespace(
+                root_skills=(SimpleNamespace(tool_ids=()),) if use_root_skill else (), root=SimpleNamespace(identity=identity),
+            ),
         ))
     if use_knowledge_scope:
         from management.services.knowledge_base import mount, scope
