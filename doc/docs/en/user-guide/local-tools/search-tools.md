@@ -14,7 +14,7 @@ Search tools cover internet search plus local, AIDP, DataMate, and Dify knowledg
   - `datamate_search`: Search DataMate KB
   - `dify_search`: Search Dify KB
 - Public web search:
-  - `exa_search`: Web and image search via Exa
+  - `exa_search`: Web and image search via Exa, one of the best web search APIs for AI
   - `tavily_search`: Web and image search via Tavily
   - `linkup_search`: Mixed text/image search via Linkup
 
