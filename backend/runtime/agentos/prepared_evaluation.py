@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from contracts.agentos import (
     AgentRunReference, EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
-    ParallelExecutorBinding, PreparedAgentRun, PreparedEvaluationRun,
+    ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun,
 )
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
@@ -297,7 +297,9 @@ def _restore_conversation_history(history, actor):
     }
 
 
-def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, actor: ServicePrincipal) -> AgentRunInfo:
+def prepare_run_snapshot(
+    payload: PreparedEvaluationRun | PreparedAgentRun | PreparedEphemeralRun, actor: ServicePrincipal,
+) -> AgentRunInfo:
     if any((
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
     )):
@@ -317,7 +319,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
-    workspace_run_id = payload.run_id if isinstance(payload, PreparedAgentRun) else uuid4().hex
+    workspace_run_id = payload.run_id if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)) else uuid4().hex
     workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
     with ExitStack() as cleanup:
         cleanup.callback(_remove_skill_files, workspace_path)
@@ -330,7 +332,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
             agent_config = _materialize_agent(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
-                publish_skill_artifacts=isinstance(payload, PreparedAgentRun),
+                publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None else None,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
@@ -366,13 +368,14 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
             tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
             model_config_list=models,
             language=payload.language,
-            conversation_id=payload.conversation_id,
+            conversation_id=None if isinstance(payload, PreparedEphemeralRun) else payload.conversation_id,
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
             redis_client=get_redis_client() if agent_config.enable_planning else None,
         )
-        if isinstance(payload, PreparedAgentRun):
+        if isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)):
             info.runtime_metadata = payload.runtime_metadata
+        if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata_version = payload.runtime_metadata_version
         info.context_input = build_authorized_context_input(info, historical_context)
         cleanup.pop_all()

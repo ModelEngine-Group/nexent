@@ -65,9 +65,11 @@ change:
     - Northbound replaces or clears metadata with an owned prepared run, preserves its version, and rejects stale or unadmitted updates.
     - Prepared Workbench turns preserve optimistic configuration versions, mounted Agent identities, and root-only model controls.
     - Workbench scopes local knowledge at the root, retains document filters, and presents authorization warnings before journal events.
+    - A2A ephemeral execution preserves observer frames, signed versions, and file scope, and releases resources on disconnect.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
+    - test/backend/services/test_a2a_server_service_message.py
     - test/backend/app/test_northbound_app.py
     - test/backend/services/test_northbound_service.py
     - test/backend/services/test_prepared_public_turn.py

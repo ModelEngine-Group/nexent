@@ -90,6 +90,9 @@ case:
   - order: 21
     action: Submit a Workbench turn with a local knowledge scope and consume the signed prepared journal.
     expected: Runtime receives the scoped knowledge binding. The response emits the resolved configuration and authorized scope before journal events.
+  - order: 22
+    action: Send a prepared ephemeral run through signed AgentOS and close a live response.
+    expected: Runtime receives the exact authorized snapshot without a conversation. Observer events reach Management and closing the caller releases the worker and workspace.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -112,6 +115,7 @@ case:
   - Northbound passes explicit metadata only as a signed prepared snapshot and retains the response version header.
   - A prepared Workbench turn preserves its resolved configuration event, version and single projection.
   - Workbench preserves the authorized local knowledge scope event and dispatches its scoped search binding once.
+  - The signed ephemeral stream retains observer events and releases request-owned execution on disconnect.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -279,4 +283,9 @@ case:
     description: Signed Workbench execution carries the authorized local search binding and preserves the public knowledge scope event.
     steps: [21]
     expected_results: [21]
+    forbidden_side_effects: [1, 2]
+  - id: AC-30
+    description: A2A's prepared ephemeral operation preserves the signed snapshot and releases Runtime resources on disconnect.
+    steps: [22]
+    expected_results: [22]
     forbidden_side_effects: [1, 2]

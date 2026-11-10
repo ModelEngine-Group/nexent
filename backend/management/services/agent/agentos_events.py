@@ -108,6 +108,41 @@ def knowledge_scope_event_content(resolved) -> dict:
     }
 
 
+def present_ephemeral_stream(response: StreamingResponse, user_id: str, run_id: str) -> StreamingResponse:
+    """Preserve complete observer frames and publish only run-owned file references."""
+    if response.status_code != 200:
+        return response
+
+    async def events():
+        outputs = {}
+        async with aclosing(iter_sse_frames(response)) as frames:
+            async for frame in frames:
+                if not frame.startswith(b"data: "):
+                    continue
+                try:
+                    event = json.loads(frame[6:])
+                    if not isinstance(event, dict) or event.get("type") == "skill_artifact":
+                        continue
+                    if event.get("type") == "file_artifact":
+                        for output in _output_artifacts(event.get("content"), user_id, run_id):
+                            outputs[output["object_name"]] = output
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                yield frame + b"\n\n"
+
+        if outputs:
+            files = await run_blocking(
+                "agentos-ephemeral-sign-outputs", enrich_file_uploads_with_presigned_urls, list(outputs.values()),
+                lane="control-io", owner="management",
+            )
+            event = {"type": "files", "content": json.dumps({"file_uploads": files}, ensure_ascii=False)}
+            yield b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
+
+    headers = {name: value for name, value in response.headers.items() if name != "content-length"}
+    return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)
+
+
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
     on_terminal=None, created=False, include_journal_controls=True, opening_events=(),

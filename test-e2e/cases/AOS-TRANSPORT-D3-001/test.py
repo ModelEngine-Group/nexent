@@ -248,6 +248,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(
             knowledge_patches, use_workbench=True, use_knowledge_scope=True,
         )
+    with monkeypatch.context() as ephemeral_patches:
+        await _assert_signed_ephemeral_stream(ephemeral_patches, tmp_path)
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -2176,6 +2178,154 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
     )
     assert [call.kwargs["call_function_name"] for call in log_usage.call_args_list] == ["run_chat", "stop_chat_stream"]
     assert all(call.kwargs["related_id"] == reference.conversation_id for call in log_usage.call_args_list)
+
+
+async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
+    from queue import Empty, SimpleQueue
+    from threading import Event
+    from unittest.mock import AsyncMock, Mock
+
+    from contracts.agent import AgentRequest
+    from contracts.agentos import PreparedEphemeralRun
+    from management.services.agent import agentos_events, runtime_client
+    from management.services.agent.preparation import evaluation_snapshot
+    from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+    from nexent.monitor import get_agent_monitoring_context
+    from runtime.agentos import ephemeral
+    from runtime.agentos.prepared_skills import skill_stage_path
+
+    actor = ServicePrincipal("ephemeral-user", "ephemeral-tenant")
+    run_id = "d" * 32
+    template = PreparedEphemeralRun.model_validate({
+        "run_id": run_id, "mode": "nexent", "input": {"query": "finish"}, "runtime_metadata": {"ticket": "42"},
+        "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}},
+        "models": {"llm": {"model_id": 11, "alias": "demo", "revision": "revision"}},
+    })
+    object_name = f"workspace/{actor.user_id}/{run_id}/outputs/report.txt"
+    calls = []
+    executions = []
+    released = Mock()
+    stages = []
+    worker_stopped = Event()
+
+    class Observer:
+        def __init__(self):
+            self.queue = SimpleQueue()
+
+        def get_cached_message(self):
+            events = []
+            while True:
+                try:
+                    events.append(self.queue.get_nowait())
+                except Empty:
+                    return events
+
+    async def compile_snapshot(request, user_id, tenant_id):
+        assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        assert request.conversation_id is None and request.version_no == 3 and request.is_debug
+        return template.model_copy(update={"input": template.input.model_copy(update={"query": request.query})})
+
+    async def load(payload, principal, materializer):
+        assert principal == actor and materializer is ephemeral.prepare_run_snapshot
+        assert payload.runtime_metadata == {"ticket": "42"} and "conversation_id" not in payload.model_dump()
+        calls.append(payload.input.query)
+        workspace = tmp_path / "ephemeral" / f"{run_id}-{payload.input.query}"
+        stage = skill_stage_path(str(workspace), create=True)
+        stage.mkdir(parents=True, exist_ok=True)
+        (stage / "SKILL.md").write_text("test", encoding="utf-8")
+        stages.append(stage)
+        return SimpleNamespace(
+            query=payload.input.query, workspace_path=str(workspace), workspace_run_id=run_id, conversation_id=None,
+            runtime_metadata=payload.runtime_metadata, observer=Observer(), stop_event=Event(), cancellation_scope=None,
+        )
+
+    manager = ThreadManager(
+        service_name="ephemeral-test",
+        lane_policies={"agent-run": LanePolicy(
+            name="agent-run", max_workers=1, max_queue_size=0, queue_timeout_seconds=2,
+        )},
+    )
+    original_submit = manager.submit
+
+    def submit(lane, spec, function):
+        assert lane == "agent-run" and spec.run_id == run_id
+        execution = original_submit(lane, spec, function)
+        executions.append(execution)
+        return execution
+
+    def worker(info):
+        context = get_agent_monitoring_context()
+        assert (context.user_id, context.tenant_id, context.agent_id) == (actor.user_id, actor.tenant_id, 7)
+        assert context.conversation_id is None
+        info.observer.queue.put(json.dumps({"type": "final_answer", "content": "answer"}))
+        if info.query == "wait":
+            if info.stop_event.wait(5):
+                worker_stopped.set()
+            return
+        info.observer.queue.put(json.dumps({"type": "file_artifact", "content": {"artifacts": [
+            {"object_name": object_name, "name": "report.txt"},
+            {"object_name": f"workspace/other/{run_id}/outputs/private.txt"},
+        ]}}))
+
+    reserve = Mock(return_value="capacity")
+    monkeypatch.setattr(ephemeral, "agent_run_manager", SimpleNamespace(
+        reserve_agent_capacity=reserve, release_agent_capacity=released,
+    ))
+    monkeypatch.setattr(manager, "submit", submit)
+    monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
+    monkeypatch.setattr(ephemeral, "load_prepared_run", load)
+    monkeypatch.setattr(sdk_runner, "agent_run_thread", worker)
+    monkeypatch.setattr(evaluation_snapshot, "prepare_a2a_snapshot", compile_snapshot)
+    monkeypatch.setattr(runtime_client, "forward_agent_run", AsyncMock(side_effect=AssertionError("legacy dispatch")))
+    signer = AsyncMock(return_value=[{"object_name": object_name, "presigned_url": "https://signed.invalid/report"}])
+    monkeypatch.setattr(agentos_events, "run_blocking", signer)
+
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(ephemeral.create_ephemeral_run_router())
+    manager.start()
+    try:
+        with serve(app) as base:
+            client = AgentOSClient(base, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+            async with httpx.AsyncClient(trust_env=False) as unauthenticated:
+                rejected = await unauthenticated.post(
+                    f"{base}/api{AgentOperation.RUN_EPHEMERAL.value}", json=template.model_dump(mode="json"),
+                )
+            assert rejected.status_code == 401 and not executions
+
+            request = AgentRequest(query="finish", agent_id=7, version_no=3, is_debug=True)
+            success = await runtime_client.forward_a2a_run(request, actor.user_id, actor.tenant_id)
+            frames = [json.loads(frame[6:]) async for frame in success.body_iterator]
+            assert frames[0] == {"type": "final_answer", "content": "answer"}
+            assert frames[1]["type"] == "files" and len(frames) == 2
+            assert json.loads(frames[1]["content"])["file_uploads"][0]["object_name"] == object_name
+            assert signer.await_args.args[2] == [{"object_name": object_name, "file_name": "report.txt", "status": "success"}]
+
+            live = await runtime_client.forward_a2a_run(
+                request.model_copy(update={"query": "wait"}), actor.user_id, actor.tenant_id,
+            )
+            assert live.status_code == 200
+            assert json.loads((await anext(live.body_iterator))[6:]) == frames[0]
+            await live.body_iterator.aclose()
+            deadline = asyncio.get_running_loop().time() + 3
+            while any(stage.exists() for stage in stages) or released.call_count != 2:
+                if asyncio.get_running_loop().time() >= deadline:
+                    break
+                await asyncio.sleep(0.02)
+            assert calls == ["finish", "wait"] and len(stages) == 2 and not any(stage.exists() for stage in stages)
+            assert worker_stopped.is_set()
+            assert all(item.future.done() for item in executions)
+            assert released.call_count == reserve.call_count == 2
+
+            reserve.side_effect = ephemeral.AgentRunConcurrencyExceededError
+            overloaded = await runtime_client.forward_a2a_run(request, actor.user_id, actor.tenant_id)
+            assert overloaded.status_code == 429 and overloaded.headers["Retry-After"] == "1"
+            assert "RUNTIME_CAPACITY_FULL" in b"".join([chunk async for chunk in overloaded.body_iterator]).decode()
+            assert len(executions) == 2 and released.call_count == 2
+    finally:
+        await manager.shutdown(timeout=2)
 
 
 async def _assert_automation_proposal_callback(monkeypatch):

@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
-from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun
+from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
 from infrastructure.agent_model_config import create_model_config_from_record
@@ -22,7 +22,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "a2a"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
@@ -71,7 +71,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     user, tenant = "user-a", "tenant-a"
-    if kind != "evaluation":
+    if kind not in {"evaluation", "a2a"}:
         mocker.patch.object(run, "query_current_version_no", return_value=2)
         read_conversation = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
             "runtime_metadata": {"project": "test"},
@@ -152,6 +152,23 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert info.runtime_metadata_version == (4 if metadata is None else 5)
             read_history.assert_called_once_with(42, 23, user, tenant)
             assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+    elif kind == "a2a":
+        lookup = mocker.patch(
+            "management.db.agent.repository.search_agent_info_by_agent_id",
+            return_value={"allow_chat_metadata": True},
+        )
+        request = AgentRequest(
+            agent_id=7, version_no=2, query="hello", is_debug=True, metadata={"ticket": "42"},
+            history=[{"role": "user", "content": "earlier"}],
+        )
+        prepared = await evaluation_snapshot.prepare_a2a_snapshot(request, user, tenant)
+        lookup.assert_called_once_with(7, tenant, 2)
+        payload = PreparedEphemeralRun.model_validate_json(prepared.model_dump_json())
+        info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
+        assert "conversation_id" not in payload.model_dump()
+        assert info.conversation_id is None and info.workspace_run_id == payload.run_id
+        assert info.runtime_metadata == {"ticket": "42"}
+        assert payload.input.history[0].content == "earlier"
     else:
         case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
         assert await runtime_client.forward_evaluation_case(case, user, tenant) is client.run_prepared_evaluation.return_value
@@ -301,3 +318,23 @@ def test_prepared_conversation_rejects_foreign_history_attachment():
     with pytest.raises(HTTPException) as error:
         prepared_evaluation._restore_conversation_history(context, ServicePrincipal("actor", "tenant"))
     assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a2a_metadata_requires_permission_on_published_version(mocker):
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
+
+    lookup = mocker.patch(
+        "management.db.agent.repository.search_agent_info_by_agent_id",
+        return_value={"allow_chat_metadata": False},
+    )
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    with pytest.raises(AppException) as error:
+        await evaluation_snapshot.prepare_a2a_snapshot(
+            AgentRequest(agent_id=7, version_no=2, query="hello", is_debug=True, metadata={"ticket": "42"}),
+            "user-a", "tenant-a",
+        )
+    assert error.value.error_code == ErrorCode.CHAT_METADATA_NOT_ALLOWED
+    lookup.assert_called_once_with(7, "tenant-a", 2)
+    compile_run.assert_not_called()

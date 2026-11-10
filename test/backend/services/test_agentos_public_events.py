@@ -112,3 +112,50 @@ async def test_failed_prepared_turn_presents_an_error_before_the_terminal_frame(
     assert json.loads(frames[0].removeprefix(b"data: "))["type"] == "error"
     assert frames[1:] == [terminal]
     on_terminal.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_frames_preserve_observers_and_only_sign_run_owned_files(mocker):
+    scoped = f"workspace/actor/{CURSOR.run_id}/outputs/result.txt"
+    frame = lambda event: ("data: " + json.dumps(event) + "\n\n").encode()
+    observer_frame = frame({"type": "final_answer", "content": "answer"})
+    artifact = frame({"type": "file_artifact", "content": {"artifacts": [
+        {"object_name": scoped, "name": "result.txt", "absolute_path": "/runtime/path"},
+        {"object_name": f"workspace/other/{CURSOR.run_id}/outputs/foreign.txt"},
+    ]}})
+    raw_path = frame({"type": "skill_artifact", "content": {"absolute_path": "/runtime/private"}})
+    source = response(observer_frame[:7], observer_frame[7:] + artifact + raw_path)
+    signer = mocker.patch.object(public_events, "run_blocking", return_value=[{"object_name": scoped, "presigned_url": "url"}])
+
+    output = public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id)
+    chunks = [chunk async for chunk in output.body_iterator]
+    assert chunks[0] == observer_frame and len(chunks) == 2
+    assert json.loads(json.loads(chunks[1][6:])["content"]) == {
+        "file_uploads": [{"object_name": scoped, "presigned_url": "url"}],
+    }
+    assert signer.await_args.args[2] == [{"object_name": scoped, "file_name": "result.txt", "status": "success"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["unsupported", "unavailable"])
+async def test_a2a_falls_back_only_before_prepared_dispatch(mocker, mode):
+    from types import SimpleNamespace
+
+    from contracts.agent import AgentRequest
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+    from management.services.agent.preparation import evaluation_snapshot
+
+    request = AgentRequest(query="query", agent_id=7, version_no=2, is_debug=True)
+    snapshot = SimpleNamespace(run_id=CURSOR.run_id) if mode == "unavailable" else None
+    mocker.patch.object(evaluation_snapshot, "prepare_a2a_snapshot", return_value=snapshot)
+    fallback = mocker.patch.object(runtime_client, "forward_agent_run", return_value=response())
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    client.run_ephemeral = AsyncMock(side_effect=RuntimeServiceUnavailableError("lost response"))
+    if mode == "unsupported":
+        assert await runtime_client.forward_a2a_run(request, "actor", "tenant") is fallback.return_value
+        client.run_ephemeral.assert_not_awaited()
+    else:
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await runtime_client.forward_a2a_run(request, "actor", "tenant")
+        client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
+        fallback.assert_not_awaited()

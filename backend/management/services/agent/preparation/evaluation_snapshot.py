@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict
 from functools import cache
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from pydantic_core import PydanticSerializationError
 
@@ -12,11 +13,15 @@ from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
-    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
+    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
-from contracts.errors.exceptions import ForbiddenError, RuntimeMetadataVersionConflict
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.errors.exceptions import (
+    AppException, ForbiddenError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, ValidationError,
+)
+from contracts.runtime_metadata import validate_runtime_metadata
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
@@ -87,6 +92,43 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
         tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
         override_version_no=request.version_no, conversation_id=request.conversation_id,
         enable_automation_tool=False, export_evaluation=True,
+    )
+
+
+async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: str) -> PreparedEphemeralRun | None:
+    from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.services.agent.preparation.run import create_agent_run_info
+
+    if not request.is_debug or request.conversation_id is not None or not request.version_no or request.version_no < 1:
+        raise ValidationError("A2A execution requires an ephemeral request and a published Agent version")
+
+    metadata = request.metadata
+    if metadata is not None:
+        try:
+            validate_runtime_metadata(metadata)
+        except RuntimeMetadataValidationError as exc:
+            code = (
+                ErrorCode.CHAT_METADATA_TOO_LARGE
+                if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE else ErrorCode.CHAT_METADATA_INVALID
+            )
+            raise AppException(code, details={"reason": exc.code.value}) from exc
+        published = await run_blocking(
+            "a2a-metadata-policy", search_agent_info_by_agent_id,
+            request.agent_id, tenant_id, request.version_no, lane="control-io", owner="management",
+        )
+        if not published.get("allow_chat_metadata", False):
+            raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
+
+    snapshot = await create_agent_run_info(
+        agent_id=request.agent_id, minio_files=request.minio_files,
+        query=prepend_current_time(request.query, None, language="zh"), history=request.history,
+        tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
+        override_version_no=request.version_no, enable_automation_tool=False, export_evaluation=True,
+    )
+    if snapshot is None:
+        return None
+    return PreparedEphemeralRun(
+        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex, runtime_metadata=metadata or {},
     )
 
 
@@ -483,6 +525,6 @@ def export_snapshot(
         )
         if prepared_conversation is not None:
             return PreparedAgentRun(**fields, **prepared_conversation.model_dump())
-        return PreparedEvaluationRun(**fields, conversation_id=conversation_id)
+        return PreparedEvaluationRun(**fields, conversation_id=conversation_id if conversation_id is not None else 0)
     except (LookupError, OSError, TypeError, ValueError, PydanticSerializationError):
         return None

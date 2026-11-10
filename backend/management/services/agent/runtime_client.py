@@ -15,7 +15,7 @@ from contracts.agentos import (
 from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RuntimeUpstreamError, ValidationError
 from management.clients.agentos import AgentOSClient
-from management.services.agent.agentos_events import active_run_error_response, present_public_resume
+from management.services.agent.agentos_events import active_run_error_response, present_ephemeral_stream, present_public_resume
 
 
 def _agentos_client() -> AgentOSClient:
@@ -29,6 +29,16 @@ async def forward_agent_run(
 ) -> StreamingResponse:
     """Start an AgentOS compatibility run and relay its SSE response."""
     return await _agentos_client().run(agent_request.model_dump(mode="json"), user_id, tenant_id)
+
+
+async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: str) -> StreamingResponse:
+    from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
+
+    snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
+    if snapshot is None:
+        return await forward_agent_run(agent_request, user_id, tenant_id)
+    response = await _agentos_client().run_ephemeral(snapshot, user_id, tenant_id)
+    return present_ephemeral_stream(response, user_id, snapshot.run_id)
 
 
 async def forward_northbound_run(

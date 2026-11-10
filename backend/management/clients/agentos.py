@@ -29,6 +29,7 @@ from contracts.agentos import (
     ModelReference,
     ModelResult,
     PreparedAgentRun,
+    PreparedEphemeralRun,
     PreparedEvaluationRun,
     TrackedBackgroundResult,
 )
@@ -80,6 +81,9 @@ class AgentOSClient:
     async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
         result = await self._post_json(AgentOperation.RUN, payload, user_id, tenant_id)
         return self._validate_result(AgentRunReference, result)
+
+    async def run_ephemeral(self, payload: PreparedEphemeralRun, user_id: str, tenant_id: str) -> StreamingResponse:
+        return await self._open_stream(AgentOperation.RUN_EPHEMERAL, payload, user_id, tenant_id)
 
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)

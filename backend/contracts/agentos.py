@@ -81,6 +81,7 @@ class EvaluationAgentRun(BaseModel):
 
 class AgentOperation(str, Enum):
     RUN = NAMESPACE + "v1/agent/run"
+    RUN_EPHEMERAL = NAMESPACE + "v1/agent/run-ephemeral"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
     INSPECT = NAMESPACE + "v1/agent/inspect"
@@ -471,6 +472,18 @@ class PreparedConversationScope(AgentRunReference):
 
 class PreparedAgentRun(AgentRunSpec, PreparedConversationScope):
     """Execute an authorized snapshot for an existing conversation."""
+
+
+class PreparedEphemeralRun(AgentRunSpec):
+    """Execute a request-owned snapshot without creating a conversation."""
+
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("runtime_metadata")
+    @classmethod
+    def validate_metadata(cls, value):
+        return validate_runtime_metadata(value)
 
 
 class PreparedEvaluationRun(AgentRunSpec):
