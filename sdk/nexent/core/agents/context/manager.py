@@ -17,7 +17,7 @@ from smolagents.memory import ActionStep, AgentMemory, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
-from ...models.context_usage import InputUsageObservation, context_model_key, request_characters
+from ...models.context_usage import InputUsageObservation, context_model_key, normalized_chars_per_token, request_characters
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
@@ -216,9 +216,14 @@ class ContextManager:
                 # If it is within the useful history target, fixed request
                 # content is the remaining excess and cannot be reclaimed by
                 # repeatedly summarizing the same checkpoint.
-                should_compress_history = original_history_tokens > history_target
+                should_compress_history = bool(
+                    force_compaction or (turns and original_history_tokens > history_target)
+               )
                 if not should_compress_history:
-                    compaction_stop_reason = "history_target_reached"
+                    compaction_stop_reason = (
+                        "no_new_history" if not turns and original_history_tokens > history_target
+                        else "history_target_reached"
+                    )
                 else:
                     history_triggered = True
                     self._emit_history_summary_status("compacting")
@@ -714,8 +719,7 @@ class ContextManager:
         return self._message_tokens(messages) + self._tools_tokens(tools)
 
     def _chars_per_token(self):
-        value = self.config.chars_per_token
-        return value if isinstance(value, (int, float)) and math.isfinite(value) and value > 0 else 1.5
+        return normalized_chars_per_token(self.config.chars_per_token)
 
     def _message_tokens(self, messages):
         return max(

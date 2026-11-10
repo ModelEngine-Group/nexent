@@ -22,8 +22,9 @@ def format_summary_output(raw_output: str) -> str | None:
 
 
 def _is_context_length_error(error: Exception) -> bool:
-    if getattr(error, "error_code", None) == ModelErrorCode.CONTEXT_OVERFLOW:
-        return True
+    error_code = getattr(error, "error_code", None)
+    if error_code is not None:
+        return error_code == ModelErrorCode.CONTEXT_OVERFLOW
     if is_provider_context_overflow(error):
         return True
     # Legacy providers may omit a machine-readable code. Require explicit

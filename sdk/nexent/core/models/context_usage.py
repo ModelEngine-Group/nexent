@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def normalized_chars_per_token(value: Any) -> float:
+    """Keep an unavailable local estimation ratio from blocking inference."""
+    return value if type(value) in (int, float) and math.isfinite(value) and value > 0 else 1.5
+
+
 def _json_value(value: Any) -> Any:
     if hasattr(value, 'model_dump'):
         return value.model_dump(mode='json')
@@ -74,5 +79,5 @@ class InputUsageObservation:
 
     def estimate(self, *, input_characters: int, chars_per_token: float) -> int:
         """Account for the whole changed payload without calling it measured usage."""
-        delta = (input_characters - self.input_characters) / chars_per_token
+        delta = (input_characters - self.input_characters) / normalized_chars_per_token(chars_per_token)
         return max(0, math.ceil(self.input_tokens + delta))

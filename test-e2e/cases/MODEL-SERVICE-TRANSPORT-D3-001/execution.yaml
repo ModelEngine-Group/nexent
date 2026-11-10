@@ -34,8 +34,10 @@ acceptance_bindings:
   - test_legacy_empty_policy
   - test_legacy_context_recovery_shares_real_http_budget
   - test_auxiliary_prompt_uses_saved_outlet_http_without_outer_retry
+  - test_explicit_overflow_rebuilds_shared_history_even_when_estimate_fits
   AC-04:
   - test_shared_context_maintenance_uses_completed_provider_usage
+  - test_shared_context_unknown_usage_does_not_block_request
 preparation:
   families: []
   anchors: false

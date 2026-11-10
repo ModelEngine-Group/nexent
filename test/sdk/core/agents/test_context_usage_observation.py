@@ -70,6 +70,10 @@ def test_switching_model_discards_previous_usage_anchor():
 def test_invalid_estimation_ratio_remains_advisory(ratio):
     manager = ContextManager(ContextManagerConfig(chars_per_token=ratio))
     assert manager._estimate_request([{'role': 'user', 'content': 'hello'}], []) >= 0
+    from nexent.core.agents.context.runtime import ManagedContextRuntime
+    assert ManagedContextRuntime(manager).chars_per_token > 0
+    observation = InputUsageObservation(100, 50, 'model', 'request', 1)
+    assert observation.estimate(input_characters=100, chars_per_token=ratio) > 100
 
 
 def test_zero_provider_input_is_known_and_cached_tokens_are_not_added():

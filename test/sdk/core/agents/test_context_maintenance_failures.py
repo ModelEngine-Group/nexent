@@ -2,7 +2,11 @@
 """Main inference survives auxiliary maintenance failures and exhausted estimates."""
 
 import pytest
-from nexent.core.agents.context import ContextManager, ContextManagerConfig
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextManager,
+    ContextManagerConfig,
+)
 from nexent.core.concurrency.cancellation import RunTerminated
 from smolagents.memory import TaskStep
 from test_history_context_runtime import (
@@ -101,3 +105,40 @@ def test_step_metrics_compare_the_same_context_estimate_basis(monkeypatch):
     agent._collect_step_metrics(step)
     assert agent.step_metrics[0]['memory_state']['estimated_input_tokens'] == 400
     assert agent.step_metrics[0]['compression_ratio'] == 0.0
+
+
+def test_explicit_overflow_can_compact_history_below_the_estimated_threshold(monkeypatch):
+    monkeypatch.setattr('smolagents.memory.SystemPromptStep', _SystemPrompt)
+    saved = []
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=1_000_000, history_summary_sink=saved.append,
+        policy_layers={'request': {'processing_mode': 'adaptive_compact'}},
+    ))
+    memory = _Memory([TaskStep(task='protected current task')])
+    run = manager.prepare_run_context(memory, '', _summary_and_turns())
+    model = _SummaryModel()
+    result = manager.assemble_final_context(
+        model=model, memory=memory, current_run_start_idx=0, run_context=run, force_compaction=True,
+    )
+    assert len(model.calls) == 1 and len(saved) == 1
+    assert result.evidence.history_compression_triggered
+    assert 'protected current task' in _rendered_text(result.messages)
+    assert result.evidence.new_summary_coverage == 22
+
+
+def test_accepted_checkpoint_is_not_repeatedly_summarized_without_new_turns(monkeypatch):
+    monkeypatch.setattr('smolagents.memory.SystemPromptStep', _SystemPrompt)
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=1000,
+        policy_layers={'request': {'processing_mode': 'adaptive_compact'}},
+    ))
+    memory = _Memory([TaskStep(task='current')])
+    summary = ContextItemInput(id='summary:10', type='history_summary', content={
+        'unit_id': 10, 'summary': 'accepted checkpoint ' * 1000, 'covered_through_message_id': 20,
+    })
+    run = manager.prepare_run_context(memory, '', [summary])
+    model = _SummaryModel()
+    result = manager.assemble_final_context(model=model, memory=memory, current_run_start_idx=0, run_context=run)
+    assert model.calls == []
+    assert result.evidence.history_compression_triggered is False
+    assert 'accepted checkpoint ' * 1000 in _rendered_text(result.messages)
