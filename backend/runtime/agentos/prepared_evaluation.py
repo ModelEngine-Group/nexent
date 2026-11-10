@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import (
-    EvaluationAgentResult, EvaluationFileTool, FileToolDescription, ParallelExecutorBinding, PreparedEvaluationRun,
+    EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription, ParallelExecutorBinding, PreparedEvaluationRun,
 )
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
@@ -41,6 +41,7 @@ from runtime.adapters.nexent.factory import materialize_run
 from runtime.adapters.nexent.runner import agent_run
 from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
 from runtime.agentos.evaluation import collect_observer_output
+from runtime.agentos.prepared_analysis import materialize_analysis_tools
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_mcp import PreparedMCP
@@ -166,6 +167,9 @@ def _materialize_agent(
     ))
     local_tools.update(materialize_knowledge_search(
         [binding for binding in resource.tools if binding.tool_id == "knowledge_base_search"], actor,
+    ))
+    local_tools.update(materialize_analysis_tools(
+        [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)], actor,
     ))
     files = iter(_materialize_file_tools(
         [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id != "mcp"],

@@ -205,13 +205,16 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_parallel_executor_tool_config
     from management.services.agent import runtime_client
-    from management.services.agent.preparation import evaluation_snapshot, knowledge_search
+    from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search
+    from management.services.model import adapter as management_model_adapter
     from management.services.knowledge_base import permission as knowledge_permission
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from infrastructure.mcp_execution import build_mcp_tool
     from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_knowledge, prepared_mcp, prepared_skills
+    from runtime.agentos import (
+        prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge, prepared_mcp, prepared_skills,
+    )
     from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
@@ -362,6 +365,25 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     )
     assert knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
 
+    media_model = dict(record, model_id=93, model_type="vlm", api_key="private-image-model-key")
+    media_adapter = object()
+    media_assemblies = []
+
+    def read_media_model(model_id, tenant_id):
+        return media_model if (model_id, tenant_id) == (93, "tenant-a") else None
+
+    def create_media_adapter(record, modality, slot, tenant_id):
+        media_assemblies.append((record["model_id"], modality, slot, tenant_id))
+        return media_adapter
+
+    monkeypatch.setattr(management_model_adapter, "get_model_by_model_id", read_media_model)
+    monkeypatch.setattr(prepared_analysis, "get_model_by_model_id", read_media_model)
+    monkeypatch.setattr(prepared_analysis, "get_adapter_from_config", create_media_adapter)
+    image_tool = ToolConfig(
+        class_name="AnalyzeImageTool", name="analyze_image", source="local", params={"selected_model_id": "93"},
+    )
+    assert analysis.prepare_analysis_tool(image_tool, "tenant-a")
+
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.sandbox_config.level.value == "docker"
@@ -385,6 +407,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
             "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", "knowledge_base_search",
+            "analyze_image",
         ]
         parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
@@ -396,6 +419,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert "authorized-document" in result and "secret-document" not in result
         assert "no read permission" in result
         assert knowledge_queries == [{"index_names": ["kb-open"], "query_text": "facts", "top_k": 4}]
+        image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["analyze_image"])
+        assert image.selected_model_id == 93 and image.vlm_model is media_adapter
+        with pytest.raises(PermissionError):
+            image.forward(["s3:/bucket/attachments/user-b/denied.png"], "Inspect the image")
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
         config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
         stage = prepared_skills.skill_stage_path(info.workspace_path)
@@ -445,7 +472,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools, build_mcp_tool(derived_tool), kb_tool],
+        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools,
+               build_mcp_tool(derived_tool), kb_tool, image_tool],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -471,6 +499,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "private-skill-tool-value" not in prepared.model_dump_json()
     assert next(tool for tool in prepared.resource.tools if tool.tool_id == "mcp" and tool.version == "2")
     assert "private-knowledge-embedding" not in prepared.model_dump_json()
+    assert "private-image-model-key" not in prepared.model_dump_json()
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
     assert "local-secret" not in prepared.model_dump_json()
     assert "Runtime skill guide" not in prepared.model_dump_json()
@@ -533,6 +562,14 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert changed_skill.value.status_code == 409
         assert "AGENTOS_SKILL_REVISION_MISMATCH" in changed_skill.value.content.decode()
         guide.write_bytes(original_guide)
+        media_model["update_time"] = "revision-2"
+        assemblies_before_rejection = list(media_assemblies)
+        with pytest.raises(RuntimeUpstreamError) as changed_media:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_media.value.status_code == 409
+        assert "AGENTOS_ANALYSIS_MODEL_REVISION_MISMATCH" in changed_media.value.content.decode()
+        assert media_assemblies == assemblies_before_rejection
+        media_model["update_time"] = "revision-1"
         external_row["security_credentials"] = {"auth": "rotated-token"}
         with pytest.raises(RuntimeUpstreamError) as changed:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -546,6 +583,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             assert response.status_code == 401
 
     assert lookups == [(11, "tenant-a")]
+    assert media_assemblies and set(media_assemblies) == {(93, "vlm", "vlm", "tenant-a")}
     assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-a", [19])]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None

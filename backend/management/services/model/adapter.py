@@ -44,9 +44,8 @@ def _fetch_slot_config(tenant_id, model_id, expected_type, slot_key):
         if not cfg:
             raise ValueError(f"Model not found: {model_id}")
         if cfg.get("model_type") != expected_type:
-            raise ValueError(
-                f"Selected model {model_id} is not a {expected_type} model"
-            )
+            type_label = "an LLM" if expected_type == "llm" else f"a {expected_type}"
+            raise ValueError(f"Selected model {model_id} is not {type_label} model")
         return cfg
     return tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING.get(slot_key, slot_key), tenant_id=tenant_id
@@ -73,16 +72,7 @@ def get_llm_adapter(
     Replaces ``file_management_service.get_llm_model``. ``modality`` = ``"llm"``
     (standard) or ``"llm_long_context"`` (AnalyzeTextFile long-context).
     """
-    if model_id:
-        cfg = get_model_by_model_id(int(model_id), tenant_id)
-        if not cfg:
-            raise ValueError(f"Model not found: {model_id}")
-        if cfg.get("model_type") != "llm":
-            raise ValueError(f"Selected model {model_id} is not an LLM model")
-    else:
-        cfg = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
-        )
+    cfg = _fetch_slot_config(tenant_id, model_id, expected_type="llm", slot_key="llm")
     if not cfg:
         return None
     return get_gateway().get_adapter(

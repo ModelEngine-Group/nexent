@@ -7,7 +7,7 @@ from pydantic_core import PydanticSerializationError
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
+    AgentResource, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
@@ -85,6 +85,14 @@ def _builtin_binding(tool):
         inputs=tool.inputs, output_type=tool.output_type,
     )
     return ToolBinding(tool_id=tool.name, version="1", parameters=description.model_dump(mode="json"))
+
+
+def _export_analysis_binding(tool):
+    builtin = EvaluationAnalysisTool(tool.name)
+    if tool.class_name != builtin.class_name or tool.source != "local":
+        raise ValueError("Unsupported analysis tool configuration")
+    descriptor = AnalysisToolBinding.model_validate((tool.metadata or {}).get("prepared_analysis"))
+    return ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
 
 
 def _export_parallel_executor_binding(tool):
@@ -190,6 +198,8 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
         elif tool.name == "knowledge_base_search" and tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
             descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
             binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
+        elif tool.name in set(EvaluationAnalysisTool):
+            binding = _export_analysis_binding(tool)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in set(EvaluationSkillTool):

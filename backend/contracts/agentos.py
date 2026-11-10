@@ -241,15 +241,47 @@ class FileToolDescription(RunSpecModel):
     output_type: str | None = None
 
 
+class EvaluationAnalysisTool(str, Enum):
+    TEXT = "analyze_text_file"
+    IMAGE = "analyze_image"
+    AUDIO = "analyze_audio"
+    VIDEO = "analyze_video"
+
+    @property
+    def class_name(self) -> str:
+        return {
+            EvaluationAnalysisTool.TEXT: "AnalyzeTextFileTool",
+            EvaluationAnalysisTool.IMAGE: "AnalyzeImageTool",
+            EvaluationAnalysisTool.AUDIO: "AnalyzeAudioTool",
+            EvaluationAnalysisTool.VIDEO: "AnalyzeVideoTool",
+        }[self]
+
+    @property
+    def slot(self) -> str:
+        return {
+            EvaluationAnalysisTool.TEXT: "llm",
+            EvaluationAnalysisTool.IMAGE: "vlm",
+            EvaluationAnalysisTool.AUDIO: "vlm4",
+            EvaluationAnalysisTool.VIDEO: "vlm3",
+        }[self]
+
+
 class KnowledgeSearchIndexBinding(RunSpecModel):
     knowledge_id: PositiveInt
     index_name: str = Field(min_length=1)
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class KnowledgeSearchModelBinding(RunSpecModel):
+class RevisionedModelBinding(RunSpecModel):
     model_id: PositiveInt
     revision: str = Field(min_length=1)
+
+
+class AnalysisToolBinding(RunSpecModel):
+    description: FileToolDescription
+    selected_model_id: int | None = None
+    model: RevisionedModelBinding | None = None
+    usage: str | None = None
 
 
 class KnowledgeSearchBinding(RunSpecModel):
@@ -262,9 +294,9 @@ class KnowledgeSearchBinding(RunSpecModel):
     search_mode: Literal["accurate", "hybrid", "semantic"] = "hybrid"
     rerank: bool = False
     rerank_model_name: str = ""
-    embedding: KnowledgeSearchModelBinding | None = None
-    reranker: KnowledgeSearchModelBinding | None = None
-    default_reranker: KnowledgeSearchModelBinding | None = None
+    embedding: RevisionedModelBinding | None = None
+    reranker: RevisionedModelBinding | None = None
+    default_reranker: RevisionedModelBinding | None = None
     usage: str | None = None
 
 

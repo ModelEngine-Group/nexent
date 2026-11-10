@@ -13,6 +13,7 @@ from contracts.constants.environment import (
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
 )
+from contracts.agentos import EvaluationAnalysisTool
 from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
@@ -571,6 +572,13 @@ async def create_tool_config_list(
             kb_overrides = agent_tool_overrides.get("knowledge_base_search")
             if kb_overrides and "document_paths" in kb_overrides:
                 document_paths = kb_overrides.get("document_paths")
+
+        if portable_evaluation and tool_config.name in set(EvaluationAnalysisTool):
+            from management.services.agent.preparation.analysis import prepare_analysis_tool
+
+            if prepare_analysis_tool(tool_config, tenant_id):
+                tool_config_list.append(tool_config)
+                continue
 
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":

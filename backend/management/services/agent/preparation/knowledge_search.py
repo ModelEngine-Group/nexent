@@ -5,7 +5,7 @@ import logging
 
 from pydantic import ValidationError as SchemaValidationError
 
-from contracts.agentos import FileToolDescription, KnowledgeSearchBinding, KnowledgeSearchIndexBinding, KnowledgeSearchModelBinding
+from contracts.agentos import FileToolDescription, KnowledgeSearchBinding, KnowledgeSearchIndexBinding, RevisionedModelBinding
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agent_model_config import model_record_revision
 from infrastructure.knowledge_search import knowledge_search_revision
@@ -22,7 +22,7 @@ _SEARCH_PARAMS = {"index_names", "top_k", "search_mode", "rerank", "rerank_model
 def _model_binding(record):
     if not record:
         return None
-    return KnowledgeSearchModelBinding(model_id=record["model_id"], revision=model_record_revision(record))
+    return RevisionedModelBinding(model_id=record["model_id"], revision=model_record_revision(record))
 
 
 def _rerank_bindings(tenant_id, model_name):
