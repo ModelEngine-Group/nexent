@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
-from contracts.model_names import add_repo_to_name
+from contracts.model_names import add_repo_to_name, get_model_name_from_config
 from nexent.core.agents.agent_model import ModelConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 
@@ -14,6 +14,23 @@ from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 COMMON_REASONING_LEVELS = ("low", "medium", "high")
 
 COMMON_REASONING_DEFAULT = "auto"
+
+
+def create_tenant_default_model_config(record: dict, alias: str, *, include_logprobs: bool) -> ModelConfig:
+    """Build the SDK profile used by legacy main_model and sub_model aliases."""
+    provider = record.get("model_factory")
+    return ModelConfig(
+        cite_name=alias,
+        api_key=record.get("api_key", ""),
+        model_name=get_model_name_from_config(record) if record.get("model_name") else "",
+        url=record.get("base_url", ""),
+        ssl_verify=record.get("ssl_verify", True),
+        model_factory=provider,
+        timeout_seconds=record.get("timeout_seconds"),
+        concurrency_limit=record.get("concurrency_limit"),
+        prompt_cache=resolve_prompt_cache_profile(provider),
+        extra_body={"logprobs": True} if include_logprobs else None,
+    )
 
 
 def normalize_model_revision(value: datetime | str | None) -> str:

@@ -203,13 +203,14 @@ class RunModelBinding(RunSpecModel):
     revision: str = Field(min_length=1)
     overrides: RunModelOverrides | None = None
     provider_body_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    tenant_default_profile: Literal["standard", "logprobs"] | None = None
     root_generation: WorkbenchGenerationConfig | None = None
     turn_generation: TurnModelGeneration | None = None
 
     @model_serializer(mode="wrap")
     def serialize_optional_model_fields(self, handler):
         data = handler(self)
-        for name in ("provider_body_revision", "root_generation", "turn_generation"):
+        for name in ("provider_body_revision", "tenant_default_profile", "root_generation", "turn_generation"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data

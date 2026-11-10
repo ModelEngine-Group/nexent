@@ -4096,7 +4096,7 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name, \
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name, \
                 patch('infrastructure.agent_model_config.add_repo_to_name') as mock_add_repo:
 
             # Mock database records
@@ -4177,7 +4177,7 @@ class TestCreateModelConfigList:
         capability = {"status": "supported", "levels": ["low", "high"], "default": "high"}
         with patch('management.services.model.run_bindings.get_model_records') as records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config', return_value="default"), \
+                patch('infrastructure.agent_model_config.get_model_name_from_config', return_value="default"), \
                 patch('infrastructure.agent_model_config.add_repo_to_name', return_value="openai/o3"), \
                 patch('infrastructure.agent_model_config._resolve_reasoning_capability', return_value=capability):
             records.return_value = [{
@@ -4210,7 +4210,7 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []
@@ -4245,7 +4245,7 @@ class TestCreateModelConfigList:
 
         with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
                 patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
-                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
+                patch('infrastructure.agent_model_config.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []

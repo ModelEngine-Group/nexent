@@ -18,6 +18,7 @@ from contracts.agentos import (
     WorkbenchSkillBinding,
 )
 from contracts.constants import environment
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import (
     AppException, ForbiddenError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, ValidationError,
@@ -26,7 +27,9 @@ from contracts.knowledge import ConversationKnowledgeScopeRequest, ResolvedKnowl
 from contracts.runtime_metadata import validate_runtime_metadata
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
-from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
+from infrastructure.agent_model_config import (
+    create_model_config_from_record, create_tenant_default_model_config, model_record_revision,
+)
 from infrastructure.agent_model_overrides import (
     apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
 )
@@ -50,6 +53,7 @@ from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
 from management.db.conversation.repository import get_conversation, get_historical_context
 from management.services.agent.context import prepend_current_time
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.configuration.user.memory import get_memory_switch
 from management.services.agent.preparation.langchain_tool import export_langchain_tool
 from management.services.agent.preparation.local_tool import export_local_tool, export_scoped_shared_aidp
@@ -650,10 +654,24 @@ def _export_model(
     record_alias = source_alias if root_generation is not None or turn_generation is not None else alias
     candidates = get_model_records({"display_name": record_alias, "model_type": "llm"}, tenant_id)
     effective = [model for model in models if model.cite_name == record_alias]
-    if len(candidates) != 1 or len(effective) != 1:
+    reserved = record_alias in {"main_model", "sub_model"}
+    profile = None
+    if len(candidates) == 1 and (len(effective) == 1 or (reserved and len(effective) == 2)):
+        # The SDK uses the first match, with catalog models preceding synthetic aliases.
+        record = candidates[0]
+        selected = effective[0]
+        base = create_model_config_from_record(record)
+    elif reserved and not candidates and len(effective) == 1:
+        record = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+        if (not record or record.get("tenant_id") != tenant_id or record.get("model_type") != "llm"
+                or record.get("delete_flag") != "N"):
+            raise ValueError("Tenant default LLM is unavailable")
+        selected = effective[0]
+        include_logprobs = selected.extra_body == {"logprobs": True}
+        base = create_tenant_default_model_config(record, record_alias, include_logprobs=include_logprobs)
+        profile = "logprobs" if include_logprobs else "standard"
+    else:
         raise ValueError("Evaluation requires an unambiguous model binding")
-    record = candidates[0]
-    selected = effective[0]
     if root_generation is not None or turn_generation is not None:
         overlay = (
             apply_turn_model_generation(selected, turn_generation, alias) if turn_generation is not None
@@ -661,7 +679,6 @@ def _export_model(
         )
         if [model for model in models if model.cite_name == alias] != [overlay]:
             raise ValueError("Unsupported root model overlay")
-    base = create_model_config_from_record(record)
     changes = {
         name: getattr(selected, name) for name in RunModelOverrides.model_fields
         if getattr(selected, name) != getattr(base, name)
@@ -670,7 +687,7 @@ def _export_model(
     body_revision = None
     if base.extra_body != selected.extra_body:
         patch = get_provider_body_patch(agent_model_overrides, model_id)
-        if patch is None or merge_provider_body(base.extra_body, patch) != selected.extra_body:
+        if profile is not None or patch is None or merge_provider_body(base.extra_body, patch) != selected.extra_body:
             raise ValueError("Unsupported evaluation provider body")
         body_revision = provider_body_revision(
             (tenant_id, resource.agent_id, resource.version_no, model_id), selected.extra_body,
@@ -680,7 +697,7 @@ def _export_model(
     return RunModelBinding(
         model_id=model_id, alias=alias, revision=model_record_revision(record),
         overrides=RunModelOverrides(**changes) if changes else None, provider_body_revision=body_revision,
-        root_generation=root_generation, turn_generation=turn_generation,
+        tenant_default_profile=profile, root_generation=root_generation, turn_generation=turn_generation,
     )
 
 

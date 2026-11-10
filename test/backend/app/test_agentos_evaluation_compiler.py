@@ -11,7 +11,7 @@ from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAge
 from contracts.model import WorkbenchGenerationConfig
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agent_model_config import create_model_config_from_record, create_tenant_default_model_config
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import runtime_client, workbench
 from management.services.agent.preparation import compiler, evaluation_snapshot, run
@@ -23,9 +23,17 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
-@pytest.mark.parametrize("persisted_body", [False, True])
+@pytest.mark.parametrize(("kind", "persisted_body"), [
+    (kind, persisted_body)
+    for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
+                 "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope",
+                 "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a")
+    for persisted_body in (False, True)
+] + [("a2a_default_model", False)])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
+    legacy_default = kind == "a2a_default_model"
+    if legacy_default:
+        kind = "a2a"
     planning = kind == "planning"
     new = kind in {"new", "workbench_first_metadata"}
     use_workbench = kind.startswith("workbench")
@@ -34,11 +42,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
     model = create_model_config_from_record(record)
+    if legacy_default:
+        model = create_tenant_default_model_config(record, "main_model", include_logprobs=True)
+        mocker.patch.object(evaluation_snapshot.tenant_config_manager, "get_model_config", return_value=record)
 
     agent_model_overrides = {"11": {"extra_params": {"__custom__": {"provider_option": "fixture-private-option"}}}}
 
     def read_agent(agent_id, **kwargs):
-        agent = {"name": f"agent_{agent_id}", "description": "Test agent", "model_ids": [11]}
+        agent = {"name": f"agent_{agent_id}", "description": "Test agent", "model_ids": [] if legacy_default else [11]}
         if persisted_body and agent_id == 7:
             agent["model_params_override"] = agent_model_overrides
         return agent
@@ -63,7 +74,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(run, "create_model_config_list", return_value=[model])
     if persisted_body:
         mocker.patch.object(run, "get_model_by_model_id", return_value=record)
-    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[] if legacy_default else [record])
     mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value=None)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
     lookup_override = mocker.patch.object(prepared_evaluation, "read_agent_model_overrides", return_value=agent_model_overrides)
@@ -219,6 +230,10 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         assert info.conversation_id is None and info.workspace_run_id == payload.run_id
         assert info.runtime_metadata == {"ticket": "42"}
         assert payload.input.history[0].content == "earlier"
+        if legacy_default:
+            assert payload.models.llm.model_id == 11
+            assert payload.models.llm.tenant_default_profile == "logprobs"
+            assert info.model_config_list[0] == model
     else:
         case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
         assert await runtime_client.forward_evaluation_case(case, user, tenant) is client.run_prepared_evaluation.return_value

@@ -25,7 +25,9 @@ from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_attachments import validate_attachment_references
-from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
+from infrastructure.agent_model_config import (
+    create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
+)
 from infrastructure.agent_model_overrides import (
     apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
 )
@@ -262,7 +264,13 @@ def _materialize_model(binding, actor, resource):
     if model_record_revision(record) != normalize_model_revision(binding.revision):
         raise HTTPException(status_code=409, detail={"code": "MODEL_REVISION_MISMATCH"})
 
-    model = create_model_config_from_record(record)
+    profile = binding.tenant_default_profile
+    if profile is not None:
+        if binding.provider_body_revision is not None:
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
+        model = create_tenant_default_model_config(record, binding.alias, include_logprobs=profile == "logprobs")
+    else:
+        model = create_model_config_from_record(record)
     updates = binding.overrides.model_dump(exclude_unset=True) if binding.overrides is not None else {}
     if binding.provider_body_revision is not None:
         scope = (actor.tenant_id, resource.agent_id, resource.version_no, binding.model_id)
