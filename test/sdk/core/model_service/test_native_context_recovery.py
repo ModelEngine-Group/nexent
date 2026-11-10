@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from nexent.core.agents.native_model_service import NativeServiceModel
 from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
 from nexent.core.model_service.contracts import AssistantMessage, ModelEvent, TokenUsage
-from nexent.core.models.context_usage import request_characters
+from nexent.core.context_runtime.usage import request_characters
 from test_native_service_model import native_profile as native_profile  # noqa: PLC0414
 
 

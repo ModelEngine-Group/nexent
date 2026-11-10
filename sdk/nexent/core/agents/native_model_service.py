@@ -15,7 +15,7 @@ from ..model_service.compatibility.legacy_chat_model import _legacy_tool_call
 from ..model_service.contracts import ModelMessage, ToolDefinition
 from ..model_service.resource_conversion import ResourceConverterRegistry
 from ..model_service.service import ModelServiceError
-from ..models.context_usage import InputUsageObservation, context_model_key
+from ..context_runtime.usage import InputUsageObservation, context_model_key
 
 
 class NativeServiceModel(Model):
