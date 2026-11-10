@@ -22,6 +22,7 @@ from contracts.errors.exceptions import RuntimeUpstreamError
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
+from management.services.memory.extraction import AgentOSMemoryExtractionModel
 from nexent.core.concurrency import shutdown_fallback_thread_manager
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.middleware import AgentOSMiddleware
@@ -198,6 +199,14 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
             )
             assert output == "verified answer"
 
+            extraction = AgentOSMemoryExtractionModel(model_id=11, user_id="worker-a", tenant_id="tenant-a")
+            messages = [{"role": "user", "content": "extract memory"}]
+            assert await extraction.chat(messages) == "verified answer"
+            denied_extraction = AgentOSMemoryExtractionModel(model_id=11, user_id="worker-a", tenant_id="tenant-b")
+            with pytest.raises(RuntimeUpstreamError) as failure:
+                await denied_extraction.chat(messages)
+            assert failure.value.status_code == 404
+
             assert await asyncio.to_thread(
                 embed_query_in_worker, model_id=17, query="search", user_id="worker-a", tenant_id="tenant-a",
             ) == [0.1, 0.2]
@@ -243,7 +252,9 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert set(records) == {("tenant-a", "new-model"), ("tenant-b", "other-model")}
     assert retired == {("tenant-a", "new-model")}
     assert checked_keys == ["test-registration-key"]
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert calls[2][1]["messages"][-1]["content"] == "extract memory"
+    assert (calls[2][1]["temperature"], calls[2][1]["top_p"]) == (0.1, 0.9)
     assert calls[1][1]["messages"][-1]["content"] == "worker model request"
     authorization, provider_input = calls[0]
     assert authorization == "Bearer provider-secret"

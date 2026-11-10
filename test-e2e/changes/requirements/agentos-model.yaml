@@ -24,7 +24,7 @@ change:
     - Runtime owns model writes and probes under the signed tenant; Management retains role bindings.
     - Tenant deletion stops before cascading if Runtime model cleanup fails.
     - Management worker inference forwards its job identity and preserves model output and failure handling.
-    - Evaluation vectorization and automation intent dispatch by model ID and trusted actor.
+    - Evaluation vectorization, automation intent and final-answer memory extraction use model IDs and the trusted actor.
     reason: Existing adapter and legacy model management tests do not exercise the new AgentOS model contract.
     test_selectors:
     - test/backend/services/test_agentos_model.py
@@ -45,4 +45,5 @@ change:
     - test/backend/adapters/test_jiuwen_sdk_adapter.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/services/test_agent_automation_intent_analyzer.py
+    - test/backend/services/test_fa_memory_extractor.py
   requirement_id: AOS-REQ-008

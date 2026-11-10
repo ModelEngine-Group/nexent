@@ -40,9 +40,6 @@ from management.services.agent.artifacts import (
 )
 from management.services.agent.stream import AssistantMessageProjection
 from management.services.agent.stream import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
-from management.services.model.names import (
-    get_model_name_from_config,
-)
 from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
     agent_run,
@@ -52,9 +49,6 @@ from nexent.core.concurrency import (
     ManagedTaskSpec,
     RunCancellationScope,
     run_blocking,
-)
-from nexent.core.models import (
-    OpenAIModel,
 )
 from nexent.core.utils.observer import (
     ProcessType,
@@ -737,43 +731,16 @@ async def _stream_agent_chunks(
 
             async def _run_fa_extraction() -> None:
                 try:
-                    config = tenant_config_manager.get_model_config(
-                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+                    model_id = tenant_config_manager.get_app_config(
+                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id,
                     )
-                    if not config:
+                    if not model_id:
                         logger.warning(
                             "fa_memory_extraction: no tenant LLM configured, skipping"
                         )
                         return
 
-                    model = OpenAIModel(
-                        model_id=get_model_name_from_config(config),
-                        api_base=config.get("base_url", ""),
-                        api_key=config.get("api_key", ""),
-                        temperature=0.1,
-                        top_p=0.9,
-                        model_factory=config.get("model_factory"),
-                        ssl_verify=config.get("ssl_verify", True),
-                        display_name=config.get("display_name") or None,
-                        timeout_seconds=config.get("timeout_seconds"),
-                    )
-
-                    class _ModelAdapter:
-                        def __init__(self, sync_model):
-                            self._model = sync_model
-
-                        async def chat(self, messages):
-                            result = await runtime_thread_manager.run(
-                                "model-tool-io",
-                                ManagedTaskSpec(
-                                    task_name="memory-extractor-model-generate",
-                                    owner="management.services.agent.run",
-                                ),
-                                self._model.generate,
-                                messages,
-                            )
-                            content = getattr(result, "content", result)
-                            return content if isinstance(content, str) else str(content)
+                    from management.services.memory.extraction import AgentOSMemoryExtractionModel
 
                     extractor = FaMemoryExtractor(
                         tenant_id=tenant_id,
@@ -783,7 +750,9 @@ async def _stream_agent_chunks(
                             getattr(agent_request, "conversation_id", "")
                         ),
                         memory_service=build_memory_service_for_fa_extraction(),
-                        model_client=_ModelAdapter(model),
+                        model_client=AgentOSMemoryExtractionModel(
+                            model_id=int(model_id), user_id=user_id, tenant_id=tenant_id,
+                        ),
                     )
                     result = await extractor.extract_and_store(
                         final_answer_content,

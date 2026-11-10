@@ -7,10 +7,28 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from contracts.agentos import ChatMessage, ChatOptions
+from management.clients.model import invoke_chat_messages
 from nexent.core.agents.prompt.memory import compose_memory_prompt, load_memory_template
 from nexent.memory.models import MemoryLayer, MemoryType
 
 logger = logging.getLogger("fa_memory_extractor")
+
+@dataclass(frozen=True)
+class AgentOSMemoryExtractionModel:
+    model_id: int
+    user_id: str
+    tenant_id: str
+
+    async def chat(self, messages: list[dict]) -> str:
+        return await invoke_chat_messages(
+            model_id=self.model_id,
+            user_id=self.user_id,
+            tenant_id=self.tenant_id,
+            messages=[ChatMessage.model_validate(message) for message in messages],
+            options=ChatOptions(temperature=0.1, top_p=0.9),
+        )
+
 
 @dataclass
 class ExtractionResult:

@@ -31,8 +31,8 @@ case:
     action: Retire the tenant models and repeat the operation.
     expected: Only the signed tenant models are retired, and retry returns zero.
   - order: 5
-    action: Invoke a chat model through the Management worker adapter.
-    expected: The worker submits the same signed Model.invoke operation and receives the model text.
+    action: Invoke chat through the Management worker and the final-answer memory extraction adapter.
+    expected: Both adapters use signed Model.invoke and receive text. Memory extraction preserves sampling parameters and a foreign tenant cannot reach the provider.
   - order: 6
     action: Embed an evaluation search query with its registered model ID.
     expected: The signed model request returns a vector from the controlled embedding provider.
