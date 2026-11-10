@@ -50,7 +50,8 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
   let resumed = false,
     historyVerified = false,
     cleanupResult: any,
-    submittedAction: any;
+    submittedAction: any,
+    clarification: any;
   let selectedCore: "jiuwen" | "smolagents";
   page.on("request", (request) => {
     if (request.method() === "POST" && request.url().includes("/nl2agent/run"))
@@ -196,6 +197,8 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       Number(response.headers()["conversation_id"]);
     const stream = await events(response);
     expect(stream.filter((e: any) => e.type === "nl2a")).toHaveLength(1);
+    const rawCard = stream.find((e: any) => e.type === "nl2a").content;
+    clarification = typeof rawCard === "string" ? JSON.parse(rawCard) : rawCard;
     if (selectedCore === "jiuwen")
       expect(
         stream.some(
@@ -298,7 +301,7 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       else await page.reload();
       await expect(card()).toBeVisible();
       await expect(
-        card().getByRole("button", { name: "提交", exact: true }),
+        card().getByRole("button", { name: "已提交", exact: true }),
       ).toBeDisabled();
       await expect(card().locator("fieldset").first()).toHaveAttribute(
         "disabled",
@@ -306,6 +309,37 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       );
       for (const input of await card().locator("textarea,input").all())
         await expect(input).toBeDisabled();
+      for (const [index, question] of clarification.questions.entries()) {
+        const answer = submittedAction.result.answers.find(
+          (entry: any) => entry.question_id === question.question_id,
+        );
+        expect(answer).toBeDefined();
+        const field = card().locator("fieldset").nth(index);
+        if (question.question_type === "text") {
+          await expect(
+            field.getByRole("textbox", { name: question.title, exact: true }),
+          ).toHaveValue(answer.value);
+        } else {
+          const selected = Array.isArray(answer.value)
+            ? answer.value
+            : [answer.value];
+          const role =
+            question.question_type === "single_choice" ? "radio" : "checkbox";
+          for (const option of question.options) {
+            const input = field.getByRole(role, {
+              name: option.label,
+              exact: true,
+            });
+            if (selected.includes(option.option_id))
+              await expect(input).toBeChecked();
+            else await expect(input).not.toBeChecked();
+          }
+          if (answer.other_text)
+            await expect(field.getByRole("textbox").first()).toHaveValue(
+              answer.other_text,
+            );
+        }
+      }
       await noErrors();
       await publicHistory();
       await expect(
