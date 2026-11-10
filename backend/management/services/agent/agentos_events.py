@@ -3,6 +3,7 @@
 
 import json
 import re
+from collections.abc import Sequence
 from contextlib import aclosing
 
 from starlette.responses import StreamingResponse
@@ -109,7 +110,7 @@ def knowledge_scope_event_content(resolved) -> dict:
 
 
 def present_ephemeral_stream(
-    response: StreamingResponse, user_id: str, run_id: str, *, opening_event: dict | None = None,
+    response: StreamingResponse, user_id: str, run_id: str, *, opening_events: Sequence[dict] = (),
 ) -> StreamingResponse:
     """Preserve complete observer frames and publish only run-owned file references."""
     if response.status_code != 200:
@@ -117,13 +118,12 @@ def present_ephemeral_stream(
 
     async def events():
         outputs = {}
-        prefix = _public_sse(opening_event) if opening_event is not None else None
+        prefix = iter(opening_events)
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
-                if prefix is not None:
-                    # Enter the Runtime iterator before emitting so a disconnect also closes upstream.
-                    yield prefix
-                    prefix = None
+                # Enter the Runtime iterator before emitting so a disconnect also closes upstream.
+                for event in prefix:
+                    yield _public_sse(event)
                 if not frame.startswith(b"data: "):
                     continue
                 try:
@@ -138,8 +138,8 @@ def present_ephemeral_stream(
                     continue
                 yield frame + b"\n\n"
 
-        if prefix is not None:
-            yield prefix
+        for event in prefix:
+            yield _public_sse(event)
         if outputs:
             files = await run_blocking(
                 "agentos-ephemeral-sign-outputs", enrich_file_uploads_with_presigned_urls, list(outputs.values()),

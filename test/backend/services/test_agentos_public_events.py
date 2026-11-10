@@ -219,7 +219,7 @@ async def test_debug_scope_precedes_observers_and_disconnect_closes_runtime():
 
     source = StreamingResponse(body())
     event = {"type": "knowledge_scope_resolved", "content": {"warnings": []}}
-    output = public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_event=event)
+    output = public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_events=[event])
     async with aclosing(output.body_iterator) as events:
         assert json.loads((await anext(events))[6:]) == event
     assert closed
@@ -229,7 +229,7 @@ async def test_debug_scope_precedes_observers_and_disconnect_closes_runtime():
 async def test_debug_scope_does_not_mask_runtime_rejection():
     source = response(b'{"code":"AGENTOS_RESOURCE_UNSUPPORTED"}', status_code=422)
     event = {"type": "knowledge_scope_resolved", "content": {"warnings": []}}
-    assert public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_event=event) is source
+    assert public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_events=[event]) is source
 
 
 @pytest.mark.asyncio

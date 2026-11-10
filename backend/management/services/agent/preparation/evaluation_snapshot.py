@@ -176,12 +176,11 @@ class PreparedDebug:
 async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, language, timezone):
     from management.db.agent.repository import search_agent_info_by_agent_id
     from management.services.agent.preparation.run import create_agent_run_info
-    from management.services.agent.workbench import PreparedWorkbench, resolve_workbench_config
+    from management.services.agent.workbench import PreparedWorkbench, resolve_workbench_config, resolve_workbench_knowledge
     from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
 
     config = request.workbench
     if (config is None or config.mode in {"skill_create", "agent_create"} or config.skill_mounts
-            or config.knowledge_scope is not None or request.knowledge_scope is not None
             or request.metadata is not None or request.reasoning_effort is not None
             or request.reasoning_budget_tokens is not None):
         return None
@@ -208,24 +207,39 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         "snapshot-debug-model-controls", preflight_agent_turn_controls, request, tenant_id,
         search_agent_info_by_agent_id, lane="control-io", owner="management",
     )
+    knowledge = None
+    compile_options = {}
+    if config.knowledge_scope is not None:
+        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+
+        knowledge, tools = await run_blocking(
+            "snapshot-debug-workbench-knowledge", resolve_workbench_knowledge, config, plan, request, user_id, tenant_id,
+            lane="control-io", owner="management",
+        )
+        compile_options = {
+            "runtime_knowledge_tools": tools,
+            "runtime_knowledge_context": {"scope": build_runtime_knowledge_resources(knowledge)},
+        }
     snapshot = await create_agent_run_info(
         agent_id=root.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(request.query, timezone, language=language), history=request.history,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
         override_version_no=root.version_no, override_model_id=request.model_id,
-        tool_params=request.tool_params, requested_output_tokens=request.requested_output_tokens,
+        tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
+        requested_output_tokens=request.requested_output_tokens,
         context_policy=request.context_policy, enable_automation_tool=False,
         enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
         export_evaluation=True, runtime_skill_snapshot=[],
         runtime_generation_config=generation,
         runtime_sub_agent_mounts=[asdict(child) for child in plan.child_mounts],
         prepared_workbench=PreparedWorkbench(config, plan, 0, 0),
+        **compile_options,
     )
     if snapshot is None:
         return None
     return PreparedDebug(PreparedEphemeralRun(
         **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex, debug=True,
-    ), workbench=config)
+    ), knowledge=knowledge, workbench=config)
 
 
 async def prepare_debug_snapshot(

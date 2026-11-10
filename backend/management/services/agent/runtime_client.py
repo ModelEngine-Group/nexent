@@ -96,16 +96,16 @@ async def forward_conversation_run(
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if prepared is not None:
             response = await client.run_ephemeral(prepared.payload, user_id, tenant_id)
-            opening = None
-            if prepared.knowledge is not None:
-                opening = {"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)}
+            opening = []
             if prepared.workbench is not None:
-                opening = {"type": "workbench_config_resolved", "content": {
+                opening.append({"type": "workbench_config_resolved", "content": {
                     "config_version": 0, "schema_version": prepared.workbench.schema_version,
                     "mode": prepared.workbench.mode,
                     "agent_mounts": [mount.model_dump(mode="json") for mount in prepared.workbench.agent_mounts],
-                }}
-            public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
+                }})
+            if prepared.knowledge is not None:
+                opening.append({"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)})
+            public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_events=opening)
             if public.status_code == 200 and request.conversation_id is not None:
                 public.headers["conversation_id"] = str(request.conversation_id)
             return public

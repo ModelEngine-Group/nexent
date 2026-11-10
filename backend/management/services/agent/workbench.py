@@ -572,6 +572,13 @@ def prepare_portable_workbench(
     if canonical.knowledge_scope is None:
         return PreparedWorkbench(canonical, plan, previous_version, version)
 
+    knowledge, tools = resolve_workbench_knowledge(canonical, plan, request, user_id, tenant_id)
+    return PreparedWorkbench(canonical, plan, previous_version, version, knowledge, tools)
+
+
+def resolve_workbench_knowledge(
+    canonical: WorkbenchSessionConfig, plan: ResolvedAgentPlan, request: AgentRequest, user_id: str, tenant_id: str,
+) -> tuple[ResolvedKnowledgeScope, list[dict[str, Any]]]:
     from management.services.knowledge_base.mount import mount_knowledge_records
     from management.services.knowledge_base.scope import resolve_knowledge_scope, snapshot_runtime_knowledge_tree
 
@@ -582,9 +589,10 @@ def prepare_portable_workbench(
     tree[0]["tools"] = tools
     knowledge = resolve_knowledge_scope(
         scope=canonical.knowledge_scope, agent_id=int(root.agent_id), tenant_id=tenant_id, user_id=user_id,
-        version_no=root.version_no, is_debug=False, request_tool_params=request.tool_params, runtime_agent_tree=tree,
+        version_no=root.version_no, is_debug=bool(request.is_debug),
+        request_tool_params=request.tool_params, runtime_agent_tree=tree,
     )
-    return PreparedWorkbench(canonical, plan, previous_version, version, knowledge, tools)
+    return knowledge, tools
 
 
 def runtime_skill_snapshot(tree: ResolvedAgentPlan | ResolvedAgentTree) -> list[Dict[str, Any]]:

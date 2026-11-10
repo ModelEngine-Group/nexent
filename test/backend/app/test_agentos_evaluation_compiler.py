@@ -31,11 +31,15 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 @pytest.mark.parametrize("mode,child_ids", [
     ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),
 ])
-async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids):
+@pytest.mark.parametrize("scoped", [False, True])
+async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, scoped):
     mounts = [{"agent_id": child_id, "version_no": 5} for child_id in child_ids]
     request = AgentRequest(
         query="hello", is_debug=True, entrypoint="workbench",
-        workbench={"mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4}},
+        workbench={
+            "mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4},
+            "knowledge_scope": {"local": {"mode": "disabled"}} if scoped else None,
+        },
     )
     config = request.workbench
     root = workbench.RuntimeAgentIdentity("agent:7:v2", 7, 2, "workbench_main", "Workbench", "SYSTEM")
@@ -48,6 +52,19 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids):
         child_mounts=children,
     )
     resolve = mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
+    if scoped:
+        from management.services.knowledge_base import mount, scope
+
+        mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
+            {"agent_id": 7, "tools": []}, {"agent_id": 8, "tools": []},
+        ])
+        mounted_tools = [{"name": "knowledge_base_search"}]
+        mocker.patch.object(mount, "mount_knowledge_records", return_value=mounted_tools)
+        knowledge = ResolvedKnowledgeScope(
+            desired_scope=config.knowledge_scope.model_dump(mode="json"), tool_params=ToolParamsRequest(),
+            local_disabled=True,
+        )
+        authorize_scope = mocker.patch.object(scope, "resolve_knowledge_scope", return_value=knowledge)
     raw = evaluation_payload()
     raw["resource"]["origin"] = "SYSTEM"
     raw["models"]["llm"]["root_generation"] = {"temperature": 0.4}
@@ -81,6 +98,13 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids):
     assert options["prepared_workbench"].plan == plan
     assert options["override_version_no"] == 2
     assert options["runtime_sub_agent_mounts"] == [asdict(child) for child in children]
+    if scoped:
+        authorize_scope.assert_called_once_with(
+            scope=config.knowledge_scope, agent_id=7, tenant_id="tenant-a", user_id="actor", version_no=2,
+            is_debug=True, request_tool_params=None, runtime_agent_tree=[{"agent_id": 7, "tools": mounted_tools}],
+        )
+        assert options["runtime_knowledge_tools"] == mounted_tools
+        assert options["tool_params"] is knowledge.tool_params
     snapshot = client.run_ephemeral.await_args.args[0]
     info = prepared_evaluation.prepare_run_snapshot(snapshot, ServicePrincipal("actor", "tenant-a"))
     assert info.conversation_id is None
@@ -93,6 +117,10 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids):
         "config_version": 0, "schema_version": 3, "mode": mode,
         "agent_mounts": [mount.model_dump(mode="json") for mount in config.agent_mounts],
     }}
+    assert [frame["type"] for frame in frames] == (
+        ["workbench_config_resolved", "knowledge_scope_resolved", "final_answer"] if scoped
+        else ["workbench_config_resolved", "final_answer"]
+    )
 
 
 @pytest.mark.asyncio

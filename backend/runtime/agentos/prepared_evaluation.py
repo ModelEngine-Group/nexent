@@ -377,7 +377,7 @@ def prepare_run_snapshot(
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
-                allow_scoped_aidp=workbench_version is not None, native_knowledge=native_knowledge,
+                allow_scoped_aidp=workbench_version is not None or workbench_debug, native_knowledge=native_knowledge,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,
