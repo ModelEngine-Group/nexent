@@ -39,7 +39,7 @@ def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | Non
 def materialize_skill_tools(
     resource, actor, workspace_path: str, *, publish_artifacts: bool = False,
     public_reference=None, workbench_version: int | None = None,
-) -> dict[str, ToolConfig]:
+) -> tuple[dict[str, ToolConfig], list[dict]]:
     bindings = [binding for binding in resource.tools if binding.tool_id in set(EvaluationSkillTool)]
     context_items = resource.evaluation_options.context_items if resource.evaluation_options is not None else None
     workbench_refs = resource.workbench_skill_refs
@@ -49,7 +49,7 @@ def materialize_skill_tools(
     refs = workbench_refs or resource.skill_refs
     if not refs and not bindings:
         validate_skill_context(context_items, [])
-        return {}
+        return {}, []
     ids = {ref.skill_id for ref in workbench_refs} if workbench_refs else {ref.instance_id for ref in refs}
     if not refs or len(ids) != len(refs) or {binding.tool_id for binding in bindings} != set(EvaluationSkillTool):
         raise ValueError("Inconsistent evaluation skill bindings")
@@ -114,4 +114,4 @@ def materialize_skill_tools(
             class_name=builtin.class_name, name=builtin.value, source="builtin", usage="builtin",
             params=builtin_params, metadata=metadata, **FileToolDescription.model_validate(binding.parameters).model_dump(),
         )
-    return tools
+    return tools, list(rows.values()) if workbench_refs else []

@@ -30,6 +30,7 @@ change:
     - Memory completion jobs commit with the projection and keep selection and writes safe across lease recovery.
     - Automated Memory runs retain the prepared Agent and owned prompt through an uncertain admission and subsequent recovery.
     - Workbench root Skills use the exact authorized conversation revision and reject expired permissions or changed bundles.
+    - Workbench mounted Skills pin contributed Local, MCP, and LangChain tools and reject conflicting or unauthorized catalog configuration.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
@@ -114,6 +115,7 @@ change:
     - test/backend/app/test_agentos_prepared_attachments.py
     - test/backend/app/test_agentos_prepared_skills.py
     - test/backend/services/test_workbench_service_coverage.py
+    - test/backend/app/test_agentos_workbench_tools.py
     - test/sdk/core/tools/test_read_skill_config_tool.py
     - test/sdk/core/agents/test_managed_mcp.py
     - test/backend/agents/test_create_agent_info.py

@@ -63,25 +63,26 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
 
 def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
-    require_scoped_aidp_instance: bool = False,
+    require_scoped_aidp_instance: bool = False, workbench_tools=(),
 ) -> dict[str, ToolConfig]:
     references = {}
-    schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding}
+    schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding, "4": SkillDerivedLocalToolBinding}
     for binding in resource.tools:
         if binding.tool_id not in LOCAL_SDK_TOOL_CLASSES:
             continue
         schema = schemas.get(binding.version)
         if binding.tool_id == "aidp_search" and binding.version == "3" and allow_scoped_aidp:
             schema = ScopedSharedAidpBinding
-        if schema is None or binding.credential_ref is not None or binding.tool_id in references:
+        if (schema is None or binding.credential_ref is not None or binding.tool_id in references
+                or (binding.version == "4" and binding.tool_id == "ind_aidp_search")):
             raise ValueError("Unsupported local SDK tool binding")
-        references[binding.tool_id] = schema.model_validate(binding.parameters)
+        references[binding.tool_id] = binding.version, schema.model_validate(binding.parameters)
     if not references:
         return {}
 
     scope = (resource.agent_id, resource.version_no, actor.tenant_id)
-    direct_names = [name for name, ref in references.items() if isinstance(ref, StoredLocalToolBinding)]
-    derived_names = [name for name, ref in references.items() if isinstance(ref, SkillDerivedLocalToolBinding)]
+    direct_names = [name for name, (version, _) in references.items() if version == "1"]
+    derived_names = [name for name, (version, _) in references.items() if version == "2"]
     direct = read_bound_local_tools(*scope, direct_names) if direct_names else []
     try:
         derived = read_skill_derived_local_tools(*scope, derived_names) if derived_names else []
@@ -89,9 +90,11 @@ def materialize_local_tools(
         raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
     by_instance = {(row["tool_instance_id"], row["name"]): row for row in direct}
     by_tool = {(row["tool_id"], row["name"]): row for row in derived}
+    mounted = {(row["tool_id"], row["name"]): row for row in workbench_tools if row["source"] == "local"}
     skill_ids = {ref.instance_id for ref in resource.skill_refs} if derived_names else set()
+    mounted_skill_ids = {ref.skill_id for ref in resource.workbench_skill_refs} if mounted else set()
     tools = {}
-    for name, reference in references.items():
+    for name, (version, reference) in references.items():
         if isinstance(reference, ScopedSharedAidpBinding):
             if require_scoped_aidp_instance:
                 bound = read_bound_local_tools(resource.agent_id, resource.version_no, actor.tenant_id, [name])
@@ -108,11 +111,14 @@ def materialize_local_tools(
             continue
         if isinstance(reference, StoredLocalToolBinding):
             row = by_instance.get((reference.instance_id, name))
+        elif version == "4":
+            row = mounted.get((reference.tool_id, name))
         else:
             row = by_tool.get((reference.tool_id, name))
         if row is None:
             raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
-        if isinstance(reference, SkillDerivedLocalToolBinding) and not set(row["skill_instance_ids"]) <= skill_ids:
+        if (version == "2" and not set(row["skill_instance_ids"]) <= skill_ids
+                or version == "4" and not set(row["workbench_skill_ids"]) <= mounted_skill_ids):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
         try:
             tool = build_local_tool(row, language, reference.description_zh, reference.inputs)

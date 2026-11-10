@@ -45,6 +45,7 @@ from infrastructure.rdb.mcp_execution_records import (
 )
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
+from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
 from management.db.conversation.repository import get_conversation, get_historical_context
@@ -419,13 +420,18 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
         origin_name, server_id, host,
     )
     common = {"tool_name": tool.name, "server_id": server_id, "revision": revision}
-    if "skill_instance_ids" in row:
+    if "workbench_skill_ids" in row or "skill_instance_ids" in row:
         reference = SkillDerivedMCPBinding(tool_id=row["tool_id"], **common)
-        version = "2"
+        version = "3" if "workbench_skill_ids" in row else "2"
     else:
         reference = MCPExecutionBinding(instance_id=row["tool_instance_id"], **common)
         version = "1"
     return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json"))
+
+
+def _workbench_skill_row(skill):
+    return {"skill_id": skill.skill_id, "name": skill.name, "description": skill.description,
+            "config": dict(skill.config_values), "tool_ids": sorted(skill.tool_ids)}
 
 
 def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=()):
@@ -437,11 +443,7 @@ def _export_skill_bindings(agent, tenant_id, context_items, workbench_skills=())
         raise ValueError("Incomplete evaluation skill tools")
 
     if workbench_skills:
-        rows = [
-            {"skill_id": skill.skill_id, "name": skill.name, "description": skill.description,
-             "config": dict(skill.config_values), "tool_ids": sorted(skill.tool_ids)}
-            for skill in workbench_skills
-        ]
+        rows = [_workbench_skill_row(skill) for skill in workbench_skills]
     else:
         rows = read_bound_skills(agent.agent_id, agent.version_no, tenant_id)
     configs = {row["name"]: row["config"] for row in rows}
@@ -533,6 +535,16 @@ def _export_resource(
             profile.update(context_items=portable_items, render_executor_context=True)
     refs = _export_skill_bindings(agent, tenant_id, profile.get("context_items"), workbench_skills)
     skill_refs = [] if workbench_skills else refs
+    local_scope = (agent.agent_id, agent.version_no, tenant_id)
+    try:
+        mounted_tools = read_workbench_derived_tools(
+            *local_scope, [_workbench_skill_row(skill) for skill in workbench_skills],
+        ) if workbench_skills else []
+    except ValidationError as exc:
+        raise ValueError("Workbench Skill tool configuration changed") from exc
+    compiled_tools = {(tool.source, tool.name) for tool in agent.tools}
+    if any((row["source"], row["name"]) not in compiled_tools for row in mounted_tools):
+        raise ValueError("Workbench Skill tool was omitted by the compiled scope")
     tools = []
     mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]
     candidates = read_bound_mcp_tools(agent.agent_id, agent.version_no, tenant_id, mcp_names) if mcp_names else []
@@ -543,13 +555,13 @@ def _export_resource(
             row for row in read_skill_derived_mcp_tools(agent.agent_id, agent.version_no, tenant_id, unresolved)
             if set(row["skill_instance_ids"]) <= authorized
         )
+    candidates.extend(row for row in mounted_tools if row["source"] == "mcp" and row["name"] in mcp_names)
     mcp_servers = read_servers(tenant_id) if mcp_names else []
     local_names = [
         tool.name for tool in agent.tools
         if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES
         and SCOPED_SHARED_AIDP_CATALOG_ID not in (tool.metadata or {})
     ]
-    local_scope = (agent.agent_id, agent.version_no, tenant_id)
     local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
     unresolved_local = sorted(set(local_names) - {row["name"] for row in local_candidates})
     if unresolved_local and authorized:
@@ -557,6 +569,7 @@ def _export_resource(
             row for row in read_skill_derived_local_tools(*local_scope, unresolved_local)
             if set(row["skill_instance_ids"]) <= authorized
         )
+    local_candidates.extend(row for row in mounted_tools if row["source"] == "local" and row["name"] in local_names)
     langchain_names = [tool.name for tool in agent.tools if tool.source == "langchain"]
     langchain_candidates = read_bound_langchain_tools(*local_scope, langchain_names) if langchain_names else []
     unresolved_langchain = sorted(set(langchain_names) - {row["name"] for row in langchain_candidates})
@@ -565,6 +578,9 @@ def _export_resource(
             row for row in read_skill_derived_langchain_tools(*local_scope, unresolved_langchain)
             if set(row["skill_instance_ids"]) <= authorized
         )
+    langchain_candidates.extend(
+        row for row in mounted_tools if row["source"] == "langchain" and row["name"] in langchain_names
+    )
     plugins = discover_langchain_plugin_refs(set(langchain_names)) if langchain_names else {}
     for tool in agent.tools:
         if tool.source == "mcp":

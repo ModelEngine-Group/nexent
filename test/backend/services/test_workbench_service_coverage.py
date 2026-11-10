@@ -407,8 +407,7 @@ def test_resolve_skill_mounts_skips_unrelated_tool_values(monkeypatch):
     assert [skill.skill_id for skill in result] == [1, 2]
 
 
-@pytest.mark.parametrize("bound", [[], [{"tool_id": 19}]])
-def test_portable_workbench_preserves_skills_with_explicit_tool_bindings(monkeypatch, bound):
+def test_portable_workbench_keeps_tools_required_by_mounted_skills(monkeypatch):
     from contracts.agent import AgentRequest
 
     config = WorkbenchSessionConfig(mode="generic_chat", skill_mounts=[{"skill_id": 11}])
@@ -419,11 +418,7 @@ def test_portable_workbench_preserves_skills_with_explicit_tool_bindings(monkeyp
     )
     monkeypatch.setattr(workbench_service, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(workbench_service, "resolve_workbench_config", lambda *_args, **_kwargs: (config, plan))
-    monkeypatch.setattr(workbench_service, "search_tools_for_sub_agent", lambda *_args, **_kwargs: bound)
 
     result = workbench_service.prepare_portable_workbench(request, None, "actor", "tenant")
 
-    if bound:
-        assert result.plan is plan and result.version == 1
-    else:
-        assert result is None
+    assert result.plan is plan and result.version == 1

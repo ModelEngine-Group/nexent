@@ -71,7 +71,10 @@ def local_tool_rerank_name(tool: ToolConfig) -> str | None:
 def local_tool_revision(tenant_id: str, agent_id: int, version_no: int, row: dict, tool: ToolConfig) -> str:
     if not environment.JWT_SECRET:
         raise ValueError("AgentOS signing is not configured")
-    if "skill_instance_ids" in row:
+    if "workbench_skill_ids" in row:
+        identity = row["workbench_skill_ids"]
+        key_scope = b"nexent/agentos/local-sdk-tool/workbench/v1"
+    elif "skill_instance_ids" in row:
         identity = sorted(row["skill_instance_ids"])
         key_scope = b"nexent/agentos/local-sdk-tool/v2"
     else:

@@ -10,7 +10,7 @@ from nexent.core.agents.nexent_agent import NexentAgent
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("derived", [False, True])
+@pytest.mark.parametrize("derived", [False, True, "workbench"])
 async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_accepts(mocker, derived):
     from infrastructure import ind_aidp_images
     from management.services.agent.preparation import local_tool, tools
@@ -29,13 +29,17 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     }
     if derived:
         row.pop("tool_instance_id")
-        row["skill_instance_ids"] = [42]
+        row["workbench_skill_ids" if derived == "workbench" else "skill_instance_ids"] = [42]
     mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
     mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[row])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={})
     compile_callback = mocker.patch.object(tools, "create_ind_aidp_image_url_builder")
     tool, = await tools.create_tool_config_list(8, "tenant-a", "user-a", version_no=4, portable_evaluation=True)
     compile_callback.assert_not_called()
+    if derived == "workbench":
+        with pytest.raises(ValueError, match="Workbench image proxy"):
+            local_tool.export_local_tool(tool, [row], 8, 4, "tenant-a", "zh")
+        return
     binding = local_tool.export_local_tool(tool, [row], 8, 4, "tenant-a", "zh")
     for secret in ("https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb"):
         assert secret not in binding.model_dump_json()

@@ -265,7 +265,7 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
 
     def materialize_skills(resource, actor, path, *, publish_artifacts, public_reference, workbench_version):
         calls.append(publish_artifacts)
-        return {}
+        return {}, []
 
     monkeypatch.setattr(prepared_evaluation, "materialize_skill_tools", materialize_skills)
     actor = ServicePrincipal("actor", "tenant")
@@ -318,11 +318,12 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
         (directory / "SKILL.md").write_text("tampered", encoding="utf-8")
     try:
         if status is None:
-            tools = prepared_skills.materialize_skill_tools(
+            tools, verified = prepared_skills.materialize_skill_tools(
                 resource, actor, workspace, public_reference=reference, workbench_version=3,
             )
             assert tools["read_skill_config"].params["config_overrides"] == {"summarize": row["config"]}
             assert tools["read_skill_md"].params["authorized_skill_names"] == ["summarize"]
+            assert verified == [catalog]
         else:
             with pytest.raises(HTTPException) as error:
                 prepared_skills.materialize_skill_tools(

@@ -18,7 +18,7 @@ from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from infrastructure.workbench_skill_execution import resolve_skill_config
 from management.db.skill import repository as skill_db
-from management.db.tool.repository import query_tools_by_ids, search_tools_for_sub_agent
+from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
@@ -568,12 +568,6 @@ def prepare_portable_workbench(
     if requested is None:
         raise ValidationError("Workbench configuration is required")
     canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
-    required = {tool_id for skill in plan.root_skills for tool_id in skill.tool_ids}
-    if required:
-        root = plan.root.identity
-        bound = search_tools_for_sub_agent(root.agent_id, tenant_id, version_no=root.version_no)
-        if not required <= {tool.get("tool_id") for tool in bound}:
-            return None
     version = previous_version + int(canonical.model_dump(mode="json") != stored)
     if canonical.knowledge_scope is None:
         return PreparedWorkbench(canonical, plan, previous_version, version)

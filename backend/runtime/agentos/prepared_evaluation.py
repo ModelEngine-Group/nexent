@@ -20,7 +20,7 @@ from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
-from contracts.errors.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError, ValidationError as AgentValidationError
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
@@ -37,6 +37,7 @@ from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
 from infrastructure.rdb.agent_model_overrides import read_agent_model_overrides
 from infrastructure.rdb.model_records import get_model_by_model_id
+from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools
 from infrastructure.redis.client import get_redis_client
 from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
@@ -187,10 +188,16 @@ def _materialize_agent(
     ):
         raise ValueError("Unsupported prepared planning bindings")
 
-    local_tools = materialize_skill_tools(
+    local_tools, mounted_skills = materialize_skill_tools(
         resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
         public_reference=public_reference, workbench_version=workbench_version,
     )
+    try:
+        mounted_tools = read_workbench_derived_tools(
+            resource.agent_id, resource.version_no, actor.tenant_id, mounted_skills,
+        ) if mounted_skills else []
+    except AgentValidationError as exc:
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_TOOL_REVISION_MISMATCH"}) from exc
     local_tools.update(materialize_automation_tool(resource, actor, public_reference))
     memory_tools, pre_run_tool_events = materialize_memory(resource, actor, memory_conversation_id)
     local_tools.update(memory_tools)
@@ -199,6 +206,7 @@ def _materialize_agent(
     local_tools.update(materialize_local_tools(
         resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,
         require_scoped_aidp_instance=native_knowledge,
+        workbench_tools=mounted_tools,
     ))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
@@ -210,8 +218,8 @@ def _materialize_agent(
         [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)], actor,
     ))
     ordered_tools = {
-        "mcp": iter(mcp.materialize(resource)),
-        "langchain": iter(materialize_langchain_tools(resource, actor)),
+        "mcp": iter(mcp.materialize(resource, workbench_tools=mounted_tools)),
+        "langchain": iter(materialize_langchain_tools(resource, actor, workbench_tools=mounted_tools)),
     }
     files = iter(_materialize_file_tools(
         [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id not in ordered_tools],

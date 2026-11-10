@@ -126,6 +126,9 @@ case:
   - order: 33
     action: Run a signed Workbench snapshot with an authorized root Skill and a conversation override.
     expected: Runtime rebuilds the root SDK Skill tools and refuses a modified bundle or revoked binding.
+  - order: 34
+    action: Run a signed Workbench snapshot whose mounted Skill contributes Local, MCP, and LangChain tools.
+    expected: Runtime reconstructs the tools from scoped catalog records and rejects a changed effective binding.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -161,6 +164,7 @@ case:
   - Memory-enabled public turns use signed prepared admission and record completion work with the owned assistant projection.
   - Automation recovery uses the original Memory Agent and prompt message under the owned automation projection.
   - Workbench root Skill execution pins visible Skill files and effective settings without transporting Skill configuration values.
+  - Mounted Skills contribute only their authorized Local, MCP, and LangChain tools without transporting credentials or plugin code.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -393,4 +397,9 @@ case:
     description: A prepared Workbench run binds its root Skill to the owned conversation revision and rechecks the Skill bundle.
     steps: [33]
     expected_results: [34]
+    forbidden_side_effects: [1, 2]
+  - id: AC-43
+    description: A signed Workbench run reconstructs tools contributed by its mounted root Skill.
+    steps: [34]
+    expected_results: [35]
     forbidden_side_effects: [1, 2]

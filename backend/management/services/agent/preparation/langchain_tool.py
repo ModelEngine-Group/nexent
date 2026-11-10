@@ -16,9 +16,9 @@ def export_langchain_tool(tool: ToolConfig, candidates, artifacts, agent_id, ver
     if persisted != tool:
         raise ValueError("LangChain tool differs from its persisted instance")
     filename, digest = artifact
-    version = "2" if "skill_instance_ids" in row else "1"
+    version = "3" if "workbench_skill_ids" in row else "2" if "skill_instance_ids" in row else "1"
     reference = LangChainToolBinding(
-        binding_id=row["tool_id"] if version == "2" else row["tool_instance_id"], tool_name=tool.name,
+        binding_id=row["tool_instance_id"] if version == "1" else row["tool_id"], tool_name=tool.name,
         module_file=filename, module_revision=digest,
         revision=langchain_binding_revision((agent_id, version_no, tenant_id), row, persisted, filename, digest),
     )

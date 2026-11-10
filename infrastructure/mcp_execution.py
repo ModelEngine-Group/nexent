@@ -60,13 +60,15 @@ def select_mcp_server(records: list[dict], usage: str, tenant_id: str) -> tuple[
     return server_id, host
 
 
-def mcp_binding_identity(row: dict) -> int | list[int]:
+def mcp_binding_identity(row: dict) -> int | list[int | str]:
+    if "workbench_skill_ids" in row:
+        return ["workbench", row["tool_id"], *row["workbench_skill_ids"]]
     if "skill_instance_ids" in row:
         return [row["tool_id"], *row["skill_instance_ids"]]
     return row["tool_instance_id"]
 
 
-def mcp_execution_revision(tenant_id: str, agent_id: int, version_no: int, binding_identity: int | list[int],
+def mcp_execution_revision(tenant_id: str, agent_id: int, version_no: int, binding_identity: int | list[int | str],
                            tool: ToolConfig, origin_name: str, server_id: int | None, host: dict) -> str:
     if not environment.JWT_SECRET:
         raise ValueError("AgentOS signing is not configured")

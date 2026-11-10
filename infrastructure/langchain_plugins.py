@@ -42,10 +42,12 @@ def build_langchain_tool(row: dict) -> ToolConfig:
 def langchain_binding_revision(scope, row, tool, module_file, module_revision) -> str:
     if not environment.JWT_SECRET:
         raise ValueError("AgentOS signing is not configured")
-    identity = (
-        ["skill", *sorted(row["skill_instance_ids"])] if "skill_instance_ids" in row
-        else ["explicit", row["tool_instance_id"]]
-    )
+    if "workbench_skill_ids" in row:
+        identity = ["workbench", *row["workbench_skill_ids"]]
+    elif "skill_instance_ids" in row:
+        identity = ["skill", *sorted(row["skill_instance_ids"])]
+    else:
+        identity = ["explicit", row["tool_instance_id"]]
     payload = json.dumps(
         [scope, row["tool_id"], identity, tool.model_dump(mode="json"), module_file, module_revision],
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),

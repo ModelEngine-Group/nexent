@@ -2069,13 +2069,16 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     from contracts.agentos import EvaluationSkillTool
+    from infrastructure import langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
+    from infrastructure.local_tool_execution import build_local_tool
+    from infrastructure.mcp_execution import build_mcp_tool
     from infrastructure.skill_execution import capture_skill_files
     from management.services.agent.preparation import evaluation_snapshot
     from management.services.agent.workbench import ResolvedSkillMount
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_run, prepared_skills
+    from runtime.agentos import prepared_mcp, prepared_run, prepared_skills
 
     actor = ServicePrincipal("workbench-user", "workbench-tenant")
     reference = AgentRunReference(conversation_id=88, run_id="a" * 32)
@@ -2088,8 +2091,45 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     (skill_dir / "config" / "config.yaml").write_text("value: default", encoding="utf-8")
     monkeypatch.setattr(environment, "CONTAINER_SKILLS_PATH", str(root))
     effective = {"value": "synthetic-private-setting"}
+    tool_ids = [21, 22, 23]
+    common_row = {"description": "Tool", "origin_name": None, "inputs": None, "output_type": "string",
+                  "instance_params": {}, "workbench_skill_ids": [45],
+                  "params": [{"name": "value", "default": effective["value"]}]}
+    local_row = {**common_row, "tool_id": 21, "name": "deepseek_search", "class_name": "DeepSeekSearchTool",
+                 "source": "local", "usage": None,
+                 "params": [{"name": "deepseek_api_key", "default": effective["value"]}]}
+    mcp_row = {**common_row, "tool_id": 22, "name": "mounted_mcp", "class_name": "mounted_mcp",
+               "source": "mcp", "usage": "mounted-provider", "origin_name": "upstream_mcp"}
+    chain_row = {**common_row, "tool_id": 23, "name": "mounted_plugin", "class_name": "mounted_plugin",
+                 "source": "langchain", "usage": None}
+    servers = [{"mcp_id": 31, "mcp_name": "mounted-provider", "mcp_server": "https://mcp.invalid/v1",
+                "enabled": True, "authorization_token": "private-mcp-header", "custom_headers": {}}]
+    plugin_root = tmp_path / "workbench-plugins"
+    plugin_root.mkdir()
+    (plugin_root / "mounted.py").write_text(
+        'from langchain_core.tools import tool\n'
+        '@tool\n'
+        'def mounted_plugin(value: str) -> str:\n'
+        '    """Return the value."""\n'
+        '    return value\n', encoding="utf-8",
+    )
+    monkeypatch.setattr(langchain_plugins, "LANGCHAIN_PLUGIN_DIRECTORY", plugin_root)
+    for name in ("read_bound_local_tools", "read_bound_mcp_tools", "read_bound_langchain_tools"):
+        monkeypatch.setattr(evaluation_snapshot, name, lambda *_: [])
+    monkeypatch.setattr(prepared_mcp, "read_mcp_execution_servers", lambda tenant: servers)
+    access = {"visible": True, "change_tool": False}
+
+    def read_tools(agent_id, version, tenant, skills):
+        assert (agent_id, version, tenant) == (7, 3, actor.tenant_id)
+        assert len(skills) == 1 and skills[0]["tool_ids"] == tool_ids and skills[0]["config"] == effective
+        if access["change_tool"]:
+            return [{**local_row, "params": [{"name": "deepseek_api_key", "default": "changed"}]}, mcp_row, chain_row]
+        return [local_row, mcp_row, chain_row]
+
+    monkeypatch.setattr(evaluation_snapshot, "read_workbench_derived_tools", read_tools)
+    monkeypatch.setattr(prepared_evaluation, "read_workbench_derived_tools", read_tools)
     skill = ResolvedSkillMount(
-        45, "mounted", "Example", (), effective,
+        45, "mounted", "Example", tuple(tool_ids), effective,
         files=tuple(capture_skill_files(actor.tenant_id, "mounted").items()),
     )
     common = {"local_skills_dir": str(root), "authorized_skill_names": ["mounted"]}
@@ -2101,9 +2141,16 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
             metadata={"agent_id": 7, "version_no": 3, "tenant_id": actor.tenant_id},
             params={**common, **({"config_overrides": {"mounted": effective}} if tool == EvaluationSkillTool.CONFIG
                                 else {"isolated_skills_root": False})},
-        ) for tool in EvaluationSkillTool],
+        ) for tool in EvaluationSkillTool] + [
+            build_local_tool(local_row, "en", None, None), build_mcp_tool(mcp_row),
+            langchain_plugins.build_langchain_tool(chain_row),
+        ],
     )
-    resource = evaluation_snapshot._export_resource(agent, {}, actor.tenant_id, "en", None, {}, workbench_skills=(skill,))
+    resource = evaluation_snapshot._export_resource(
+        agent, {}, actor.tenant_id, "en", lambda tenant: servers, {}, workbench_skills=(skill,),
+    )
+    versions = {binding.tool_id: binding.version for binding in resource.tools}
+    assert (versions["deepseek_search"], versions["mcp"], versions["langchain"]) == ("4", "3", "3")
     model = {
         "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
         "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
@@ -2117,14 +2164,15 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     })
     assert effective["value"] not in payload.model_dump_json()
     assert "Mounted skill guide" not in payload.model_dump_json()
-    access = {"visible": True}
+    assert "private-mcp-header" not in payload.model_dump_json()
+    assert "from langchain_core" not in payload.model_dump_json()
     scoped_reads = []
 
     def read(ref, principal, version, agent_id, agent_version, ids):
         assert (ref, principal, version, agent_id, agent_version, ids) == (reference, actor, 4, 7, 3, {45})
         scoped_reads.append(version)
         return {45: {"skill_id": 45, "name": "mounted", "description": "Example", "config": effective,
-                     "tool_ids": []}} if access["visible"] else {}
+                     "tool_ids": tool_ids}} if access["visible"] else {}
 
     async def execute(signed, principal):
         info = prepared_evaluation.prepare_run_snapshot(signed, principal)
@@ -2134,6 +2182,12 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
             config = NexentAgent.create_builtin_tool(None, tools["read_skill_config"])
             assert json.loads(config.forward("mounted")) == effective
             assert tools["run_skill_script"].params["publish_file_artifacts"]
+            search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tools["deepseek_search"])
+            assert search._api_key == effective["value"] and search.language == "en"
+            assert tools["mounted_mcp"].params == effective
+            assert info.mcp_host[0]["headers"]["Authorization"] == "private-mcp-header"
+            assert info.mcp_host[0]["allowed_tools"] == {"upstream_mcp": "mounted_mcp"}
+            assert tools["mounted_plugin"].metadata.invoke({"value": "local"}) == "local"
         finally:
             prepared_evaluation._remove_skill_files(info.workspace_path)
         return reference
@@ -2149,6 +2203,11 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     with serve(runtime) as runtime_url:
         client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         assert await client.start_prepared_run(payload, actor.user_id, actor.tenant_id) == reference
+        access["change_tool"] = True
+        with pytest.raises(RuntimeUpstreamError) as changed_tool:
+            await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
+        assert changed_tool.value.status_code == 409
+        access["change_tool"] = False
         guide.write_text("modified", encoding="utf-8")
         with pytest.raises(RuntimeUpstreamError) as stale:
             await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
@@ -2157,7 +2216,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
         with pytest.raises(RuntimeUpstreamError) as denied:
             await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)
         assert denied.value.status_code == 404
-    assert scoped_reads == [4, 4, 4]
+    assert scoped_reads == [4, 4, 4, 4]
 
 
 async def _assert_public_prepared_turn_over_signed_http(
