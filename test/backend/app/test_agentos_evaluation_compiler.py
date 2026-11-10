@@ -33,7 +33,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     ))
     mocker.patch.object(compiler, "resolve_sub_agent_version_no", return_value=5)
     mocker.patch.object(compiler, "_get_external_a2a_agents", return_value=[])
-    mocker.patch.object(compiler, "create_tool_config_list", return_value=[])
+    compile_tools = mocker.patch.object(compiler, "create_tool_config_list", return_value=[])
     mocker.patch.object(compiler, "get_model_by_model_id", return_value=record)
     mocker.patch.object(compiler, "_resolve_context_budget", return_value=None)
     mocker.patch.object(compiler.tenant_config_manager, "get_context_policy", return_value=None)
@@ -56,6 +56,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         client.run_prepared_evaluation.return_value
     )
     client.run_evaluation_case.assert_not_called()
+    assert [call.kwargs["portable_evaluation"] for call in compile_tools.await_args_list] == [True, True]
     prepared, user, tenant = client.run_prepared_evaluation.await_args.args
     assert (user, tenant) == ("user-a", "tenant-a")
     assert prepared.resource.subagents[0].version_no == 5

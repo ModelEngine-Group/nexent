@@ -2,6 +2,7 @@
 
 """Translate an already authorized model record into SDK configuration."""
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
@@ -13,6 +14,23 @@ from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 COMMON_REASONING_LEVELS = ("low", "medium", "high")
 
 COMMON_REASONING_DEFAULT = "auto"
+
+
+def normalize_model_revision(value: datetime | str | None) -> str:
+    """Compare catalog timestamps independent of the query's serialization format."""
+    if isinstance(value, str) and "T" in value:
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        timestamp = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return timestamp.isoformat().replace("+00:00", "Z")
+    return value or "legacy"
+
+
+def model_record_revision(record: dict) -> str:
+    return normalize_model_revision(record.get("update_time") or record.get("create_time"))
 
 
 def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:

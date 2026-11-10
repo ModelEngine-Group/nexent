@@ -211,6 +211,8 @@ async def create_agent_run_info(
         "enable_planning": enable_planning,
         "runtime_file_context": runtime_file_context,
     }
+    if export_evaluation:
+        create_config_kwargs["portable_evaluation"] = True
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if runtime_skill_snapshot is not None:

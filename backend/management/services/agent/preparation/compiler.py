@@ -91,7 +91,10 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    *,
+    portable_evaluation: bool = False,
 ):
+    portable_options = {"portable_evaluation": True} if portable_evaluation else {}
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -144,6 +147,7 @@ async def create_agent_config(
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
+            **portable_options,
         )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
@@ -180,6 +184,7 @@ async def create_agent_config(
             runtime_skill_snapshot=None,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
+            **portable_options,
         )
         invocation_name = str(
             mount.get("invocation_name")
@@ -213,6 +218,7 @@ async def create_agent_config(
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
         language=language,
+        **portable_options,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]

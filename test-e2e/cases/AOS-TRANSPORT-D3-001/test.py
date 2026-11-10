@@ -203,12 +203,13 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_parallel_executor_tool_config
     from management.services.agent import runtime_client
-    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.agent.preparation import evaluation_snapshot, knowledge_search
+    from management.services.knowledge_base import permission as knowledge_permission
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from infrastructure.mcp_execution import build_mcp_tool
     from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_mcp, prepared_skills
+    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_knowledge, prepared_mcp, prepared_skills
     from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
@@ -322,6 +323,43 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluation_snapshot, "read_bound_skills", read_skills)
     monkeypatch.setattr(prepared_skills, "read_bound_skills", read_skills)
 
+    knowledge_row = {
+        "knowledge_id": 90, "index_name": "kb-open", "knowledge_name": "Open", "tenant_id": "tenant-a",
+        "created_by": "owner", "group_ids": "42", "ingroup_permission": "READ_ONLY", "embedding_model_id": 91,
+    }
+    blocked_knowledge = dict(knowledge_row, knowledge_id=92, index_name="kb-blocked", knowledge_name="Blocked", group_ids="43")
+    embedding_row = dict(record, model_id=91, model_type="embedding", api_key="private-knowledge-embedding")
+    groups = [42]
+    knowledge_queries = []
+
+    def read_knowledge(tenant_id, names):
+        if tenant_id != "tenant-a":
+            return []
+        return [row for row in (knowledge_row, blocked_knowledge) if row["index_name"] in names]
+
+    def accurate_search(**kwargs):
+        knowledge_queries.append(kwargs)
+        return [
+            {"index": "kb-open", "score": 1, "document": {"content": content, "path_or_url": path}}
+            for content, path in [("authorized-document", "reports/allowed.txt"), ("secret-document", "reports/hidden.txt")]
+        ]
+
+    membership = {"tenant_id": "tenant-a", "user_role": "DEV"}
+    for module in (knowledge_search, prepared_knowledge):
+        monkeypatch.setattr(module, "read_knowledge_search_records", read_knowledge)
+        monkeypatch.setattr(module, "get_model_by_model_id", lambda model_id, tenant_id: embedding_row
+                            if (model_id, tenant_id) == (91, "tenant-a") else None)
+    monkeypatch.setattr(knowledge_permission, "get_user_tenant_by_user_id", lambda user_id: membership)
+    monkeypatch.setattr(knowledge_permission, "query_group_ids_by_user", lambda user_id: list(groups))
+    monkeypatch.setattr(prepared_knowledge, "read_knowledge_search_actor", lambda user_id: (membership, list(groups)))
+    monkeypatch.setattr(prepared_knowledge, "build_adapter_fresh", lambda *args: object())
+    monkeypatch.setattr(prepared_knowledge, "create_elasticsearch_core", lambda **kwargs: SimpleNamespace(accurate_search=accurate_search))
+    kb_tool = ToolConfig(
+        class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+        params={"index_names": ["kb-open", "kb-blocked"], "search_mode": "accurate", "top_k": 4},
+    )
+    assert knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
+
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.sandbox_config.level.value == "docker"
@@ -344,13 +382,18 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         by_name = {tool.name: tool for tool in info.agent_config.tools}
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
-            "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup",
+            "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", "knowledge_base_search",
         ]
         parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
         assert parallel.inputs["timeout"]["default"] == 47
         assert parallel.forward([]) == []
         assert by_name["skill_lookup"].params == {"scope": "private-skill-tool-value"}
+        knowledge = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["knowledge_base_search"])
+        result = knowledge.forward("facts", ["Blocked"])
+        assert "authorized-document" in result and "secret-document" not in result
+        assert "no read permission" in result
+        assert knowledge_queries == [{"index_names": ["kb-open"], "query_text": "facts", "top_k": 4}]
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
         config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
         stage = prepared_skills.skill_stage_path(info.workspace_path)
@@ -400,7 +443,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools, build_mcp_tool(derived_tool)],
+        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools, build_mcp_tool(derived_tool), kb_tool],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -424,7 +467,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
     assert "private-skill-tool-value" not in prepared.model_dump_json()
-    assert prepared.resource.tools[-1].version == "2"
+    assert next(tool for tool in prepared.resource.tools if tool.tool_id == "mcp" and tool.version == "2")
+    assert "private-knowledge-embedding" not in prepared.model_dump_json()
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
     assert "local-secret" not in prepared.model_dump_json()
     assert "Runtime skill guide" not in prepared.model_dump_json()
@@ -461,6 +505,13 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         with pytest.raises(RuntimeUpstreamError) as refused:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
         assert refused.value.status_code == 404
+        groups.clear()
+        with pytest.raises(RuntimeUpstreamError) as revoked_knowledge:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert revoked_knowledge.value.status_code == 403
+        assert "AGENTOS_KNOWLEDGE_FORBIDDEN" in revoked_knowledge.value.content.decode()
+        groups.append(42)
+        assert len(knowledge_queries) == 1
         mcp_server["authorization_token"] = "rotated-mcp-token"
         with pytest.raises(RuntimeUpstreamError) as changed_mcp:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")

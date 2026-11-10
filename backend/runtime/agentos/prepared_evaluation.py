@@ -8,7 +8,6 @@ from contextlib import ExitStack
 from hmac import compare_digest
 from functools import partial
 from uuid import uuid4
-from datetime import datetime
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -23,7 +22,7 @@ from contracts.constants.environment import (
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
-from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
@@ -43,6 +42,7 @@ from runtime.adapters.nexent.runner import agent_run
 from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
 from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
+from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_mcp import PreparedMCP
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
@@ -164,6 +164,9 @@ def _materialize_agent(
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
     ))
+    local_tools.update(materialize_knowledge_search(
+        [binding for binding in resource.tools if binding.tool_id == "knowledge_base_search"], actor,
+    ))
     files = iter(_materialize_file_tools(
         [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id != "mcp"],
         actor, workspace_path, workspace_run_id,
@@ -200,10 +203,7 @@ def _materialize_model(binding, actor):
         raise HTTPException(status_code=404, detail={"code": "MODEL_NOT_FOUND"})
     if record.get("model_type") != "llm":
         raise HTTPException(status_code=422, detail={"code": "MODEL_OPERATION_UNSUPPORTED"})
-    revision = record.get("update_time") or record.get("create_time")
-    if isinstance(revision, datetime):
-        revision = revision.isoformat()
-    if (revision or "legacy") != binding.revision:
+    if model_record_revision(record) != normalize_model_revision(binding.revision):
         raise HTTPException(status_code=409, detail={"code": "MODEL_REVISION_MISMATCH"})
 
     updates = binding.overrides.model_dump(exclude_unset=True) if binding.overrides is not None else {}

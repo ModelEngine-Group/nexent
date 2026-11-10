@@ -137,3 +137,41 @@ def _matched_groups(user_groups: List[object], resource_groups: List[object]) ->
     normalized_user_groups = {str(item) for item in user_groups}
     normalized_resource_groups = {str(item) for item in resource_groups}
     return sorted(normalized_user_groups & normalized_resource_groups)
+
+
+def resolve_knowledge_permissions(
+    records: list[dict], user_id: str, tenant_id: str | None,
+    user_tenant: dict | None, groups: list[int], *, speed_mode: bool,
+    asset_owner_tenant_id: str = ASSET_OWNER_TENANT_ID,
+) -> dict[str, str | None]:
+    """Apply knowledge-base DAC to the supplied membership and resource records."""
+    if not user_tenant and not speed_mode:
+        return {record["index_name"]: None for record in records}
+    user_role = (user_tenant or {}).get("user_role")
+    user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
+    if user_id == user_tenant_id:
+        user_role = "ADMIN"
+    elif speed_mode and not user_role:
+        user_role = "SPEED"
+    role = (user_role or "").upper()
+    permissions = {}
+    for record in records:
+        index_name = record["index_name"]
+        effective_tenant = user_tenant_id
+        if speed_mode and not effective_tenant:
+            effective_tenant = str(record.get("tenant_id") or tenant_id or "")
+        access = ResourceAccessControl.check(
+            Resource(
+                resource_type="knowledge_base",
+                resource_id=index_name,
+                tenant_id=record.get("tenant_id"),
+                created_by=record.get("created_by"),
+                ingroup_permission=record.get("ingroup_permission"),
+                group_ids=record.get("group_ids"),
+                knowledge_sources=record.get("knowledge_sources"),
+            ),
+            user_id=user_id, role=role, user_groups=groups,
+            user_tenant_id=effective_tenant, asset_owner_tenant_id=asset_owner_tenant_id,
+        )
+        permissions[index_name] = access.permission_label
+    return permissions

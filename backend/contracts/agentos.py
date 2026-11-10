@@ -241,6 +241,33 @@ class FileToolDescription(RunSpecModel):
     output_type: str | None = None
 
 
+class KnowledgeSearchIndexBinding(RunSpecModel):
+    knowledge_id: PositiveInt
+    index_name: str = Field(min_length=1)
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgeSearchModelBinding(RunSpecModel):
+    model_id: PositiveInt
+    revision: str = Field(min_length=1)
+
+
+class KnowledgeSearchBinding(RunSpecModel):
+    description: FileToolDescription
+    index_names: list[str]
+    allowed: list[KnowledgeSearchIndexBinding]
+    display_name_to_index: dict[str, str]
+    document_paths: list[str] | None = None
+    top_k: int = 3
+    search_mode: Literal["accurate", "hybrid", "semantic"] = "hybrid"
+    rerank: bool = False
+    rerank_model_name: str = ""
+    embedding: KnowledgeSearchModelBinding | None = None
+    reranker: KnowledgeSearchModelBinding | None = None
+    default_reranker: KnowledgeSearchModelBinding | None = None
+    usage: str | None = None
+
+
 class EvaluationAgentOptions(RunSpecModel):
     render_executor_context: bool = False
     display_name: str | None = None

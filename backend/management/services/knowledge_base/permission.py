@@ -10,8 +10,7 @@ from contracts.constants.environment import IS_SPEED_MODE
 from management.db.identity.group import query_group_ids_by_user
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from permissions.dac import ResourceAccessControl
-from permissions.models import Resource
+from permissions.dac import ResourceAccessControl as ResourceAccessControl, resolve_knowledge_permissions
 
 logger = logging.getLogger("knowledge_base_permission_service")
 
@@ -38,37 +37,12 @@ def resolve_knowledge_base_permissions(
     if not records:
         return {}
     user_tenant = get_user_tenant_by_user_id(user_id)
-    if not user_tenant and not IS_SPEED_MODE:
-        return {record["index_name"]: None for record in records}
-    user_role = (user_tenant or {}).get("user_role")
-    user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
-    if user_id == user_tenant_id:
-        user_role = "ADMIN"
-    elif IS_SPEED_MODE and not user_role:
-        user_role = "SPEED"
-    role = (user_role or "").upper()
-    groups = query_group_ids_by_user(user_id)
-    permissions = {}
-    for record in records:
-        index_name = record["index_name"]
-        effective_tenant = user_tenant_id
-        if IS_SPEED_MODE and not effective_tenant:
-            effective_tenant = str(record.get("tenant_id") or tenant_id or "")
-        access = ResourceAccessControl.check(
-            Resource(
-                resource_type="knowledge_base",
-                resource_id=index_name,
-                tenant_id=record.get("tenant_id"),
-                created_by=record.get("created_by"),
-                ingroup_permission=record.get("ingroup_permission"),
-                group_ids=record.get("group_ids"),
-                knowledge_sources=record.get("knowledge_sources"),
-            ),
-            user_id=user_id, role=role, user_groups=groups,
-            user_tenant_id=effective_tenant, asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
-        )
-        permissions[index_name] = access.permission_label
-    return permissions
+    groups = query_group_ids_by_user(user_id) if user_tenant or IS_SPEED_MODE else []
+    return resolve_knowledge_permissions(
+        records, user_id, tenant_id, user_tenant, groups,
+        speed_mode=IS_SPEED_MODE, asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+    )
+
 
 
 def require_knowledge_base_permission(

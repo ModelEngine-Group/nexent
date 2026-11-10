@@ -20,6 +20,19 @@ class UserTenant(TableBase):
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
 
 
+class TenantGroupUser(TableBase):
+    """
+    Tenant group user membership table
+    """
+    __tablename__ = "tenant_group_user_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    group_user_id = Column(Integer, Sequence("tenant_group_user_t_group_user_id_seq", schema=SCHEMA),
+                           primary_key=True, nullable=False, doc="Group user ID, primary key")
+    group_id = Column(Integer, nullable=False, doc="Group ID, foreign key")
+    user_id = Column(String(100), nullable=False, doc="User ID, foreign key")
+
+
 class UserAccount(TableBase):
     """Authentication identity independent of tenant membership and provider bindings."""
 

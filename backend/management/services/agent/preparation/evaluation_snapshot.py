@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Export authorized evaluation resources from the existing compiler."""
 
-from datetime import datetime
 from functools import cache
 
 from pydantic_core import PydanticSerializationError
@@ -9,14 +8,14 @@ from pydantic_core import PydanticSerializationError
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
-    ExternalA2AExecutionBinding, FileToolDescription, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
+    ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
-from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
 from infrastructure.rdb.mcp_execution_records import (
@@ -188,6 +187,9 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
     for tool in agent.tools:
         if tool.source == "mcp":
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
+        elif tool.name == "knowledge_base_search" and tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
+            descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
+            binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in set(EvaluationSkillTool):
@@ -239,11 +241,8 @@ def _export_model(alias, models, tenant_id):
     # Every difference must be representable without endpoint, credential or arbitrary body overrides.
     if base.model_copy(update=changes) != selected:
         raise ValueError("Unsupported evaluation model override")
-    revision = record.get("update_time") or record.get("create_time")
-    if isinstance(revision, datetime):
-        revision = revision.isoformat()
     return RunModelBinding(
-        model_id=record["model_id"], alias=alias, revision=revision or "legacy",
+        model_id=record["model_id"], alias=alias, revision=model_record_revision(record),
         overrides=RunModelOverrides(**changes) if changes else None,
     )
 

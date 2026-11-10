@@ -348,6 +348,8 @@ async def create_tool_config_list(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     language: str = "zh",
+    *,
+    portable_evaluation: bool = False,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -572,6 +574,12 @@ async def create_tool_config_list(
 
         # special logic for search tools that may use reranking models
         if tool_config.class_name == "KnowledgeBaseSearchTool":
+            if portable_evaluation:
+                from management.services.agent.preparation.knowledge_search import prepare_knowledge_search
+
+                if prepare_knowledge_search(tool_config, user_id, tenant_id, document_paths):
+                    tool_config_list.append(tool_config)
+                    continue
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None
