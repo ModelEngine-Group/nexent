@@ -15,12 +15,13 @@ from contracts.agent import AgentRequest, NL2AgentRunRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from permissions.depends import require
 from permissions.models import CurrentUser
-from management.services.agent.service import is_agent_running, run_agent_background, run_agent_stream, stop_agent_tasks
+from management.services.agent.service import run_agent_background, run_agent_stream
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from management.services.permission.identity.session import get_current_user_info, get_current_user_id
+from management.services.permission.identity.session import get_current_user_info
+from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
 from contracts.agentos import (
@@ -29,6 +30,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_state import tenant_membership_matches
+from runtime.executions import agent_run_manager, stop_registered_run
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -55,19 +57,25 @@ def _runtime_overload_response(exc: Exception) -> JSONResponse:
     )
 
 
+def _gateway_session_principal() -> ServicePrincipal:
+    try:
+        identity = trusted_identity("session")
+    except IdentityError as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+    if not identity or not identity.get("user_id") or not identity.get("tenant_id"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return ServicePrincipal(identity["user_id"], identity["tenant_id"])
+
+
 @agent_runtime_router.post("/run")
 async def agent_run_api(
     agent_request: AgentRequest,
     http_request: Request,
-    authorization: str = Header(None),
     resume: bool = Query(False, description="Resume an existing streaming conversation"),
 ):
-    """
-    Agent execution API endpoint.
-    If resume=true, attempts to continue streaming from where it left off after a tab switch.
-    """
+    """Legacy signed Gateway entry for starting or resuming a stream."""
     return await _run_public_conversation(
-        agent_request, http_request, lambda: get_current_user_id(authorization), resume,
+        agent_request, http_request, _gateway_session_principal(), resume,
     )
 
 
@@ -84,7 +92,7 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
 
     async def execute():
         return await _run_public_conversation(
-            request, context, lambda: (principal.user_id, principal.tenant_id), payload.resume,
+            request, context, principal, payload.resume,
         )
 
     if payload.idempotency_key is not None:
@@ -94,14 +102,13 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     return await execute()
 
 
-async def _run_public_conversation(agent_request, http_request, resolve_actor, resume):
+async def _run_public_conversation(agent_request, http_request, principal, resume):
     try:
-        user_id, tenant_id = resolve_actor()
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
+            user_id=principal.user_id,
+            tenant_id=principal.tenant_id,
             resume=resume,
         )
     except ActiveExecutionError:
@@ -176,7 +183,7 @@ def _require_owned_conversation(conversation_id: int, principal: ServicePrincipa
 async def stop_agentos_compatibility(conversation_id: int, principal: ServicePrincipal):
     def stop_owned_conversation():
         _require_owned_conversation(conversation_id, principal)
-        return stop_agent_tasks(conversation_id, principal.user_id)
+        return stop_registered_run(conversation_id, principal.user_id)
 
     return await run_blocking(
         "agentos-stop-conversation", stop_owned_conversation, lane="control-io", owner="runtime",
@@ -208,7 +215,7 @@ async def stop_agentos_debug(run_id: str, principal: ServicePrincipal):
         with get_db_session() as session:
             if not tenant_membership_matches(session, principal.user_id, principal.tenant_id):
                 raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
-        return stop_agent_tasks(run_id, principal.user_id)
+        return stop_registered_run(run_id, principal.user_id)
 
     return await run_blocking("agentos-stop-debug", stop_debug, lane="control-io", owner="runtime")
 
@@ -284,7 +291,7 @@ async def run_agentos_tracked_background(payload: BackgroundRun, principal: Serv
 async def inspect_agentos_conversation(conversation_id: int, principal: ServicePrincipal) -> AgentRunningState:
     def inspect_owned_conversation():
         _require_owned_conversation(conversation_id, principal)
-        return is_agent_running(conversation_id, principal.user_id)
+        return agent_run_manager.get_agent_run_info(conversation_id, principal.user_id) is not None
 
     running = await run_blocking(
         "agentos-inspect-conversation", inspect_owned_conversation, lane="control-io", owner="runtime",
@@ -420,12 +427,12 @@ async def nl2agent_run_api(
 
 
 @agent_runtime_router.get("/stop/{run_id}")
-async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None)):
-    """
-    Stop an agent run by conversation ID or ephemeral debug run ID.
-    """
-    user_id, tenant_id = get_current_user_id(authorization)
-    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
+async def agent_stop_api(run_id: str):
+    """Stop a run owned by the signed Gateway session."""
+    principal = _gateway_session_principal()
+    if run_id.isdecimal():
+        return await stop_agentos_compatibility(int(run_id), principal)
+    return await stop_agentos_debug(run_id, principal)
 
 
 @agent_runtime_router.post(
@@ -439,9 +446,9 @@ async def northbound_agent_stop_api(
     """Stop a northbound agent run inside the runtime service."""
     try:
         user_id, tenant_id = verify_internal_runtime_jwt(authorization)
-        return stop_agent_tasks(conversation_id, user_id)
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+    return await stop_agentos_compatibility(conversation_id, ServicePrincipal(user_id, tenant_id))

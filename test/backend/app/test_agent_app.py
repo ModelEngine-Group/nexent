@@ -170,6 +170,22 @@ config_app.include_router(agent_config_router)
 config_client = TestClient(config_app)
 
 
+@pytest.fixture(autouse=True)
+def verified_runtime_session(mocker):
+    return mocker.patch("runtime.api.agent.execution.trusted_identity", return_value={
+        "user_id": "test_user", "tenant_id": "test_tenant", "kind": "session",
+    })
+
+
+@pytest.fixture
+def owned_runtime_conversation(mocker):
+    async def run_control_io(_name, function, *args, **kwargs):
+        return function(*args)
+
+    mocker.patch("runtime.api.agent.execution.run_blocking", side_effect=run_control_io)
+    return mocker.patch("infrastructure.rdb.conversation_state.conversation_belongs_to", return_value=True)
+
+
 @pytest.fixture
 def mock_auth_header():
     return {"Authorization": "Bearer test_token"}
@@ -182,6 +198,20 @@ def mock_conversation_id():
 
 # Agent Runtime API Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("method", "path"), [("POST", "/agent/run"), ("GET", "/agent/stop/123")])
+def test_runtime_compatibility_ingress_does_not_accept_bearer_without_gateway_identity(
+    mocker, verified_runtime_session, method, path,
+):
+    verified_runtime_session.return_value = None
+    run = mocker.patch("runtime.api.agent.execution.run_agent_stream")
+    stop = mocker.patch("runtime.api.agent.execution.stop_registered_run")
+    request = {"json": {"query": "hello"}} if method == "POST" else {}
+    response = runtime_client.request(method, path, headers={"Authorization": "Bearer unsigned"}, **request)
+    assert response.status_code == 401
+    run.assert_not_called()
+    stop.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -383,11 +413,6 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
-    mocker.patch(
-        "runtime.api.agent.execution.get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
@@ -523,13 +548,13 @@ def test_northbound_agent_run_api_maps_unexpected_error(mocker):
 
 
 @pytest.mark.asyncio
-async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
+async def test_northbound_agent_stop_api_uses_internal_identity(mocker, owned_runtime_conversation):
     mocker.patch(
         "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     stop_agent = mocker.patch(
-        "runtime.api.agent.execution.stop_agent_tasks",
+        "runtime.api.agent.execution.stop_registered_run",
         return_value={"message": "stopped"},
     )
 
@@ -564,7 +589,7 @@ async def test_agentos_conversation_uses_signed_actor_and_preserves_request_cont
     from infrastructure.agentos_identity import ServicePrincipal
     from runtime.api.agent import execution
 
-    auth = mocker.patch.object(execution, "get_current_user_id")
+    auth = mocker.patch.object(execution, "trusted_identity")
     runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock(return_value=object()))
     actor = ServicePrincipal("actor", "tenant")
     payload = CompatibilityConversationRun(
@@ -597,7 +622,7 @@ async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, 
         return_value=owned,
     )
     stop = mocker.patch(
-        "runtime.api.agent.execution.stop_agent_tasks", return_value={"message": "stopped"},
+        "runtime.api.agent.execution.stop_registered_run", return_value={"message": "stopped"},
     )
     actor = ServicePrincipal("user-a", "tenant-a")
 
@@ -629,7 +654,7 @@ async def test_agentos_automation_checks_owner_before_background_run_and_inspect
     run = mocker.patch.object(execution, "run_agent_background", new=AsyncMock(return_value={
         "conversation_id": 123, "assistant_message_id": 456, "chunks": 2,
     }))
-    running = mocker.patch.object(execution, "is_agent_running", return_value=True)
+    running = mocker.patch.object(execution.agent_run_manager, "get_agent_run_info", return_value=object())
     actor = ServicePrincipal("user-a", "tenant-a")
     payload = {"conversation_id": 123, "query": "scheduled", "agent_id": 7, "enable_automation_tool": True}
 
@@ -918,7 +943,6 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
         await agent_run_api(
             agent_request=request,
             http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
             resume=False,
         )
 
@@ -952,7 +976,6 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
         await agent_run_api(
             agent_request=request,
             http_request=Request({"type": "http", "headers": []}),
-            authorization="Bearer token",
             resume=False,
         )
 
@@ -960,12 +983,11 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
     assert exc_info.value.detail == "Selected knowledge bases are incompatible"
 
 
-def test_agent_stop_api_success(mocker, mock_conversation_id):
+def test_agent_stop_api_success(mocker, mock_conversation_id, owned_runtime_conversation, verified_runtime_session):
     """Test agent_stop_api success case."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    verified_runtime_session.return_value = {"user_id": "test_user_id", "tenant_id": "test_tenant_id"}
 
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_registered_run")
     mock_stop_tasks.return_value = {"status": "success"}
 
     response = runtime_client.get(
@@ -974,18 +996,20 @@ def test_agent_stop_api_success(mocker, mock_conversation_id):
     )
 
     assert response.status_code == 200
-    mock_get_user_id.assert_called_once_with("Bearer test_token")
+    verified_runtime_session.assert_called_once_with("session")
+    owned_runtime_conversation.assert_called_once_with(
+        mock_conversation_id, user_id="test_user_id", tenant_id="test_tenant_id",
+    )
     mock_stop_tasks.assert_called_once_with(
         mock_conversation_id, "test_user_id")
     assert response.json()["status"] == "success"
 
 
-def test_agent_stop_api_exception(mocker, mock_conversation_id):
+def test_agent_stop_api_exception(mocker, mock_conversation_id, owned_runtime_conversation, verified_runtime_session):
     """Test agent_stop_api exception handling - exception propagates without catch."""
-    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    verified_runtime_session.return_value = {"user_id": "test_user_id", "tenant_id": "test_tenant_id"}
 
-    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_registered_run")
     mock_stop_tasks.side_effect = Exception("Stop error")
 
     # The endpoint doesn't catch exceptions, so they propagate

@@ -127,13 +127,13 @@ async def test_capability_preview_is_hidden_when_disabled(monkeypatch):
 )
 async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detail):
     monkeypatch.setattr(runtime_agent, "run_agent_stream", AsyncMock(side_effect=error))
+    monkeypatch.setattr(runtime_agent, "trusted_identity", lambda _kind: {"user_id": "user-a", "tenant_id": "tenant-a"})
     request = runtime_agent.AgentRequest(query="hello", agent_id=7)
 
     with pytest.raises(HTTPException) as caught:
         await runtime_agent.agent_run_api(
             request,
             Request(scope={"type": "http", "headers": []}),
-            "Bearer token",
         )
     assert caught.value.status_code == status
     assert caught.value.detail == detail

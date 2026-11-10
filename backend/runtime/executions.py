@@ -2,11 +2,12 @@
 import logging
 import threading
 import uuid
-from typing import Dict, Union
-
-from nexent.core.agents.agent_model import AgentRunInfo
+from typing import TYPE_CHECKING, Dict, Union
 
 from infrastructure.redis.run_state import runtime_state_service
+
+if TYPE_CHECKING:
+    from nexent.core.agents.agent_model import AgentRunInfo
 
 logger = logging.getLogger("agent_run_manager")
 
@@ -241,3 +242,17 @@ class AgentRunManager(LocalExecutionRegistry):
 
 
 agent_run_manager = AgentRunManager()
+
+
+def stop_registered_run(run_id: int | str, user_id: str) -> dict:
+    """Cancel Runtime's live run while preserving the legacy response shape."""
+    stopped = agent_run_manager.stop_agent_run(run_id, user_id)
+    if stopped:
+        message = f"successfully stopped agent run for user_id {user_id}, run_id {run_id}"
+    else:
+        message = f"no running agent or preprocess tasks found for user_id {user_id}, run_id {run_id}"
+    logger.info(message)
+    result = {"status": "success", "message": message}
+    if not stopped:
+        result["already_stopped"] = True
+    return result

@@ -193,7 +193,9 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
-    await _assert_public_stop_and_background(monkeypatch)
+    with monkeypatch.context() as lifecycle_patches:
+        await _assert_public_stop_and_background(lifecycle_patches)
+    await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
@@ -861,3 +863,84 @@ async def _assert_public_stop_and_background(monkeypatch):
         assert state.status == "completed" and state.resource_versions.agent_version_no == 4
     assert stopped == [run_id, run_id, blocked_id]
     assert launches == [automation_id]
+
+async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
+    from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+    from infrastructure.rdb import conversation_state
+    from runtime import executions
+    from runtime.api.agent import execution
+
+    key = "synthetic-runtime-ingress-signing-key"
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
+    monkeypatch.setattr(environment, "JWT_SECRET", key)
+    conversation_id = 66142
+    identity = {"kind": "session", "user_id": "legacy-actor", "tenant_id": "tenant-a"}
+    checks = []
+    starts = []
+
+    def owns(conversation, *, user_id, tenant_id):
+        checks.append((conversation, user_id, tenant_id))
+        return (conversation, user_id, tenant_id) == (conversation_id, "legacy-actor", "tenant-a")
+
+    async def control_io(_task, callback, *args, **kwargs):
+        return callback(*args)
+
+    async def stream(**kwargs):
+        starts.append((kwargs["user_id"], kwargs["tenant_id"]))
+
+        async def events():
+            yield _EVENTS
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    registry = executions.LocalExecutionRegistry()
+    from threading import Event
+    info = SimpleNamespace(stop_event=Event())
+    registry.register_agent_run(conversation_id, info, "legacy-actor")
+    monkeypatch.setattr(executions, "agent_run_manager", registry)
+    monkeypatch.setattr(execution, "agent_run_manager", registry)
+    monkeypatch.setattr(conversation_state, "conversation_belongs_to", owns)
+    monkeypatch.setattr(execution, "run_blocking", control_io)
+    monkeypatch.setattr(execution, "run_agent_stream", stream)
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(execution.agent_runtime_router)
+    runtime.include_router(create_compatibility_router(execution.run_agentos_compatibility, execution.stop_agentos_compatibility))
+    runtime.include_router(create_background_router(execution.run_agentos_background, execution.inspect_agentos_conversation))
+
+    run_path = "/api/agent/run"
+    stop_path = f"/api/agent/stop/{conversation_id}"
+
+    def signed(method, path, actor=identity):
+        return {IDENTITY_HEADER: sign_identity(actor, "runtime", method, path, b"")}
+
+    try:
+        with serve(runtime) as runtime_url:
+            agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            async with httpx.AsyncClient(base_url=runtime_url, trust_env=False) as client:
+                response = await client.post(run_path, json={"query": "hello"}, headers={"Authorization": "Bearer raw"})
+                assert response.status_code == 401 and starts == []
+                wrong_kind = signed("POST", run_path, dict(identity, kind="api_key"))
+                response = await client.post(run_path, json={"query": "hello"}, headers=wrong_kind)
+                assert response.status_code == 401 and starts == []
+                response = await client.post(run_path, json={"query": "hello"}, headers=signed("POST", run_path))
+                assert response.status_code == 200 and response.content == _EVENTS
+                response = await client.get(stop_path, headers=signed("GET", stop_path, dict(identity, tenant_id="tenant-b")))
+                assert response.status_code == 404 and not info.stop_event.is_set()
+            state = await agentos.inspect(conversation_id, "legacy-actor", "tenant-a")
+            assert state.running
+            with pytest.raises(RuntimeUpstreamError) as foreign:
+                await agentos.stop(conversation_id, "legacy-actor", "tenant-b")
+            assert foreign.value.status_code == 404 and not info.stop_event.is_set()
+            result = await agentos.stop(conversation_id, "legacy-actor", "tenant-a")
+            assert result["status"] == "success" and info.stop_event.is_set()
+            assert starts == [("legacy-actor", "tenant-a")]
+            assert checks == [
+                (conversation_id, "legacy-actor", "tenant-b"),
+                (conversation_id, "legacy-actor", "tenant-a"),
+                (conversation_id, "legacy-actor", "tenant-b"),
+                (conversation_id, "legacy-actor", "tenant-a"),
+            ]
+    finally:
+        registry.unregister_agent_run(conversation_id, "legacy-actor", agent_run_info=info)
