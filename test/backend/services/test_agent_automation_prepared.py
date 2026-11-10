@@ -71,6 +71,21 @@ async def test_automation_records_projection_before_dispatch_and_keeps_uncertain
 
 
 @pytest.mark.asyncio
+async def test_automation_missing_projection_index_does_not_launch_legacy_run(automation, mocker):
+    executor, run, task, client = automation
+    runner.automation_conversation_adapter.append_run_prompt.return_value = {"user_message_id": 31, "history": []}
+    compile_snapshot = mocker.patch.object(runner, "prepare_conversation_snapshot")
+    legacy = mocker.patch.object(runner, "forward_tracked_background")
+
+    with pytest.raises(KeyError, match="assistant_message_index"):
+        await executor._execute_active_run(run, task)
+
+    compile_snapshot.assert_not_awaited()
+    legacy.assert_not_awaited()
+    client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_recovery_uses_the_original_reference_and_never_dispatches(automation, mocker):
     executor, run, task, client = automation
     run["projection_message_index"] = 9

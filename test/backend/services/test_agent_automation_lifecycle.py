@@ -199,7 +199,7 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             "role": "user",
             "message": [{"type": "string", "content": prompt}],
         })
-        return {"user_message_id": message_id, "history": []}
+        return {"user_message_id": message_id, "assistant_message_index": message_id, "history": []}
 
     def fake_create_run(values, user_id):
         run = {
@@ -222,6 +222,7 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         return tasks[task_id]
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
+    monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
     monkeypatch.setattr(

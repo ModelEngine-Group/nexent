@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 from contracts.conversation import HistoryItem, MessageRequest, MessageUnit
 from contracts.conversation import MessageSource
@@ -13,6 +13,12 @@ from management.services.conversation.service import (
 )
 
 logger = logging.getLogger("agent_automation.conversation_adapter")
+
+
+class AutomationPromptTurn(TypedDict):
+    user_message_id: int
+    assistant_message_index: int
+    history: list[HistoryItem]
 
 
 class AutomationConversationAdapter:
@@ -71,7 +77,7 @@ class AutomationConversationAdapter:
         prompt: str,
         user_id: str,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> AutomationPromptTurn:
         """Append a new automation turn without regenerating an existing message."""
         history_payload = get_conversation_history_service(conversation_id, user_id)
         messages = history_payload[0].get("message", []) if history_payload else []

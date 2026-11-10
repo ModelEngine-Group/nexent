@@ -180,6 +180,7 @@ class AgentAutomationRunner:
             task["user_id"],
             task["tenant_id"],
         )
+        message_index = turn["assistant_message_index"]
 
         agent_request = AgentRequest(
             query=generated_prompt,
@@ -191,47 +192,46 @@ class AgentAutomationRunner:
             tool_params=runtime_snapshot.get("tool_params"),
             enable_automation_tool=False,
         )
-        message_index = turn.get("assistant_message_index")
-        if message_index is not None:
-            reference = AgentRunReference(run_id=run["runtime_run_id"], conversation_id=run["conversation_id"])
-            snapshot = await prepare_conversation_snapshot(
-                agent_request, reference, run["user_id"], run["tenant_id"],
-                current_user_message_id=turn["user_message_id"],
-            )
-            if snapshot is not None:
-                pending = agent_automation_db.update_run(run["run_id"], {
-                    "generated_prompt": generated_prompt,
-                    "user_message_id": turn["user_message_id"],
-                    "projection_message_index": message_index,
-                    "projection_memory_agent_id": snapshot.resource.agent_id if snapshot.memory_enabled else None,
-                }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value], tenant_id=run["tenant_id"])
-                if pending is None:
-                    return agent_automation_db.get_run(run["run_id"], run["tenant_id"], run["user_id"]) or run
-                run.update(pending)
-                client = _agentos_client()
-                try:
-                    admitted = await client.start_prepared_run(snapshot, run["user_id"], run["tenant_id"])
-                    if admitted != reference:
-                        raise RuntimeServiceUnavailableError("AgentOS returned a different automation run")
-                except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
-                    return run
-                except RuntimeUpstreamError as exc:
-                    if exc.status_code in {400, 401, 403, 404, 413, 422}:
-                        return self._finish_prepared_projection(run, task, None)
-                    return run
-                projected = await self._project_prepared_run(client, reference, run)
-                return self._finish_prepared_projection(run, task, projected)
-        result = await forward_tracked_background(
-            agent_request=agent_request,
-            run_id=run["runtime_run_id"],
-            user_id=task["user_id"],
-            tenant_id=task["tenant_id"],
+        reference = AgentRunReference(run_id=run["runtime_run_id"], conversation_id=run["conversation_id"])
+        snapshot = await prepare_conversation_snapshot(
+            agent_request, reference, run["user_id"], run["tenant_id"],
+            current_user_message_id=turn["user_message_id"],
         )
-        return self._finish_run(run, task, AutomationRunStatus.SUCCEEDED.value, {
+        if snapshot is None:
+            result = await forward_tracked_background(
+                agent_request=agent_request,
+                run_id=run["runtime_run_id"],
+                user_id=task["user_id"],
+                tenant_id=task["tenant_id"],
+            )
+            return self._finish_run(run, task, AutomationRunStatus.SUCCEEDED.value, {
+                "generated_prompt": generated_prompt,
+                "user_message_id": turn["user_message_id"],
+                "assistant_message_id": result.assistant_message_id,
+            })
+
+        pending = agent_automation_db.update_run(run["run_id"], {
             "generated_prompt": generated_prompt,
             "user_message_id": turn["user_message_id"],
-            "assistant_message_id": result.assistant_message_id,
-        })
+            "projection_message_index": message_index,
+            "projection_memory_agent_id": snapshot.resource.agent_id if snapshot.memory_enabled else None,
+        }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value], tenant_id=run["tenant_id"])
+        if pending is None:
+            return agent_automation_db.get_run(run["run_id"], run["tenant_id"], run["user_id"]) or run
+        run.update(pending)
+        client = _agentos_client()
+        try:
+            admitted = await client.start_prepared_run(snapshot, run["user_id"], run["tenant_id"])
+            if admitted != reference:
+                raise RuntimeServiceUnavailableError("AgentOS returned a different automation run")
+        except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+            return run
+        except RuntimeUpstreamError as exc:
+            if exc.status_code in {400, 401, 403, 404, 413, 422}:
+                return self._finish_prepared_projection(run, task, None)
+            return run
+        projected = await self._project_prepared_run(client, reference, run)
+        return self._finish_prepared_projection(run, task, projected)
 
     async def _project_prepared_run(self, client, reference, run) -> ProjectedRun:
         receipt = await run_blocking(

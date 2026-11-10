@@ -35,6 +35,7 @@ def _load_runner_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)
     runner_module = importlib.import_module("management.services.automation.runner")
+    monkeypatch.setattr(runner_module, "prepare_conversation_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "forward_tracked_background", fail_run_agent_background)
     monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())
     monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
@@ -45,6 +46,7 @@ def _load_runner_with_stubs(monkeypatch):
         types.SimpleNamespace(
             append_run_prompt=lambda conversation_id, prompt, user_id, tenant_id: {
                 "user_message_id": 101,
+                "assistant_message_index": 1,
                 "history": [],
             },
         ),
@@ -300,6 +302,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         message_id = next(user_message_ids)
         return {
             "user_message_id": message_id,
+            "assistant_message_index": (message_id - 100) * 2 - 1,
             "history": [_Payload(role="user", content="previous")] * (message_id - 100),
         }
 
