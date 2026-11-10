@@ -36,26 +36,9 @@ from management.services.model.resolver import get_rerank_model
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.concurrency import run_blocking
-from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
-
-
-def _build_parallel_executor_tool_config(default_timeout_seconds: int) -> ToolConfig:
-    return ToolConfig(
-        class_name=ParallelExecutorTool.__name__,
-        name=ParallelExecutorTool.name,
-        description=ParallelExecutorTool.description,
-        description_zh=ParallelExecutorTool.description_zh,
-        inputs=json.dumps(
-            ParallelExecutorTool.inputs_for_timeout(default_timeout_seconds),
-            ensure_ascii=False,
-        ),
-        output_type=ParallelExecutorTool.output_type,
-        params={"default_timeout_seconds": default_timeout_seconds},
-        source="local",
-    )
 
 
 def _normalize_tool_params_request(

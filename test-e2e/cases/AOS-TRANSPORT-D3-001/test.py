@@ -201,6 +201,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure import agent_attachments
     from infrastructure.object_storage.client import minio_client
     from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.agent_tool_config import build_parallel_executor_tool_config
     from management.services.agent import runtime_client
     from management.services.agent.preparation import evaluation_snapshot
     from infrastructure.a2a_execution import build_external_agent_config
@@ -341,6 +342,14 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
         assert info.agent_config.tools[1].params == {"scope": "private-tool-default"}
         by_name = {tool.name: tool for tool in info.agent_config.tools}
+        assert list(by_name) == [
+            "download_from_s3", "catalog_lookup", "parallel_executor",
+            "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup",
+        ]
+        parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
+        assert parallel.default_timeout_seconds == 47
+        assert parallel.inputs["timeout"]["default"] == 47
+        assert parallel.forward([]) == []
         assert by_name["skill_lookup"].params == {"scope": "private-skill-tool-value"}
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
         config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
@@ -391,7 +400,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool), *skill_tools, build_mcp_tool(derived_tool)],
+        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools, build_mcp_tool(derived_tool)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -435,11 +444,20 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         ]
         assert "only-in-runtime" not in result.model_dump_json()
         assert signed_files == [("attachments/user-a/report.txt", "bucket")]
+        invalid_parallel = prepared.model_copy(deep=True)
+        parallel_binding = next(tool for tool in invalid_parallel.resource.tools if tool.tool_id == "parallel_executor")
+        parallel_binding.parameters["default_timeout_seconds"] = 0
+        with pytest.raises(RuntimeUpstreamError) as invalid:
+            await agentos.run_prepared_evaluation(invalid_parallel, "user-a", "tenant-a")
+        assert invalid.value.status_code == 422
+        assert "AGENTOS_RESOURCE_UNSUPPORTED" in invalid.value.content.decode()
+        assert invocations == [("user-a", "tenant-a", -42)]
+        assert len(signed_files) == 2
         with pytest.raises(RuntimeUpstreamError) as foreign_attachment:
             await agentos.run_prepared_evaluation(prepared, "user-b", "tenant-a")
         assert foreign_attachment.value.status_code == 403
         assert "AGENTOS_ATTACHMENT_FORBIDDEN" in foreign_attachment.value.content.decode()
-        assert len(signed_files) == 1
+        assert len(signed_files) == 2
         with pytest.raises(RuntimeUpstreamError) as refused:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
         assert refused.value.status_code == 404

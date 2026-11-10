@@ -13,7 +13,9 @@ from datetime import datetime
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from contracts.agentos import EvaluationAgentResult, EvaluationFileTool, FileToolDescription, PreparedEvaluationRun
+from contracts.agentos import (
+    EvaluationAgentResult, EvaluationFileTool, FileToolDescription, ParallelExecutorBinding, PreparedEvaluationRun,
+)
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
@@ -22,6 +24,7 @@ from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
@@ -77,6 +80,15 @@ def _materialize_file_tools(bindings, actor, workspace_path, workspace_run_id):
         ))
         seen.add(builtin.value)
     return tools
+
+
+def _materialize_parallel_executor(bindings):
+    if not bindings:
+        return {}
+    if len(bindings) != 1 or bindings[0].version != "1" or bindings[0].credential_ref is not None:
+        raise ValueError("Unsupported parallel executor binding")
+    config = ParallelExecutorBinding.model_validate(bindings[0].parameters)
+    return {"parallel_executor": build_parallel_executor_tool_config(config.default_timeout_seconds)}
 
 
 def _agent_options(resource, language, sandbox_enabled):
@@ -148,14 +160,18 @@ def _materialize_agent(
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
 
-    skills = materialize_skill_tools(resource, actor, workspace_path)
+    local_tools = materialize_skill_tools(resource, actor, workspace_path)
+    local_tools.update(_materialize_parallel_executor(
+        [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
+    ))
     files = iter(_materialize_file_tools(
-        [binding for binding in resource.tools if binding.tool_id not in skills and binding.tool_id != "mcp"],
+        [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id != "mcp"],
         actor, workspace_path, workspace_run_id,
     ))
     mcp_tools = iter(mcp.materialize(resource))
     tools = [
-        skills[binding.tool_id] if binding.tool_id in skills else next(mcp_tools if binding.tool_id == "mcp" else files)
+        local_tools[binding.tool_id] if binding.tool_id in local_tools
+        else next(mcp_tools if binding.tool_id == "mcp" else files)
         for binding in resource.tools
     ]
     options = _agent_options(resource, language, sandbox_enabled)

@@ -13,6 +13,7 @@ from contracts.constants.environment import (
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import WorkbenchError
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -25,7 +26,6 @@ from management.services.agent.preparation.resources import (
     _get_external_a2a_agents,
 )
 from management.services.agent.preparation.tools import (
-    _build_parallel_executor_tool_config,
     _get_skill_script_tools,
     _inject_plan_tools,
     _normalize_tool_params_request,
@@ -221,7 +221,7 @@ async def create_agent_config(
     # Memory handling is wired separately below: only store_memory is exposed
     # to the model, while search_memory runs once during preparation.
     tool_list.append(
-        _build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
+        build_parallel_executor_tool_config(RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS)
     )
 
     if (

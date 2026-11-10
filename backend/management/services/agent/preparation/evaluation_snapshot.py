@@ -9,14 +9,15 @@ from pydantic_core import PydanticSerializationError
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
-    ExternalA2AExecutionBinding,
-    FileToolDescription, MCPExecutionBinding, SkillDerivedMCPBinding, SkillExecutionBinding, ToolCallerContext,
-    ModelBindings, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
+    ExternalA2AExecutionBinding, FileToolDescription, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
+    PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
+    SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record
+from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
@@ -85,6 +86,13 @@ def _builtin_binding(tool):
         inputs=tool.inputs, output_type=tool.output_type,
     )
     return ToolBinding(tool_id=tool.name, version="1", parameters=description.model_dump(mode="json"))
+
+
+def _export_parallel_executor_binding(tool):
+    binding = ParallelExecutorBinding.model_validate(tool.params)
+    if tool != build_parallel_executor_tool_config(binding.default_timeout_seconds):
+        raise ValueError("Unsupported parallel executor configuration")
+    return ToolBinding(tool_id="parallel_executor", version="1", parameters=binding.model_dump())
 
 
 def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_servers):
@@ -180,6 +188,8 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
     for tool in agent.tools:
         if tool.source == "mcp":
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
+        elif tool.name == "parallel_executor":
+            binding = _export_parallel_executor_binding(tool)
         elif tool.name in set(EvaluationSkillTool):
             binding = _builtin_binding(tool)
         else:

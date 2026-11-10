@@ -44,6 +44,7 @@ change:
     - Prepared evaluation rechecks versioned skill bindings, reads verified guide and configuration files, and refuses changed revisions.
     - Skill-derived MCP tools preserve parameter precedence, reject conflicting skill contributions, and bind the exact sources without transmitting credentials.
     - Prepared evaluations use the Runtime sandbox deployment policy and regenerate executor context while retaining existing event semantics.
+    - The production evaluation compiler exports the required parallel executor for the root and each child; Runtime restores it without changing tool order.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -54,6 +55,8 @@ change:
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
     - test/backend/app/test_agentos_prepared_evaluation.py
+    - test/backend/app/test_agentos_evaluation_compiler.py
+    - test/sdk/core/tools/test_parallel_executor.py
     - test/backend/agents/test_sandbox_config.py
     - test/sdk/core/agents/test_agent_prompt_composer.py
     - test/backend/app/test_agentos_prepared_attachments.py

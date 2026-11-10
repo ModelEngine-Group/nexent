@@ -148,6 +148,10 @@ class ToolBinding(RunSpecModel):
     credential_ref: str | None = None
 
 
+class ParallelExecutorBinding(RunSpecModel):
+    default_timeout_seconds: Annotated[int, Field(strict=True, gt=0)]
+
+
 class RunModelOverrides(RunSpecModel):
     temperature: float | None = Field(default=None, ge=0, le=2)
     top_p: float | None = Field(default=None, ge=0, le=1)
