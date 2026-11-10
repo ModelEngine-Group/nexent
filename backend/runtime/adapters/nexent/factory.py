@@ -5,6 +5,8 @@
 import threading
 from pathlib import Path
 
+from contracts.constants import environment
+from infrastructure.sandbox_deployment import get_sandbox_minio_client
 from nexent.core.agents.agent_model import AgentRunInfo
 from nexent.core.utils.observer import MessageObserver
 
@@ -17,27 +19,24 @@ def build_run_info(*, language="zh", **prepared_values) -> AgentRunInfo:
         prepared_values["stop_event"] = threading.Event()
     return AgentRunInfo(**prepared_values)
 
-def materialize_legacy_run(
-    *, agent_config, workspace_path, workspace_root, sandbox_policy, sandbox_minio_client_factory, **values,
-) -> AgentRunInfo:
-    """Build sandbox resources and local SDK objects for the compatibility path."""
-    from contracts.constants.environment import (
-        NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
-        NEXENT_SANDBOX_FAILURE_POLICY,
-        NEXENT_SANDBOX_WORKSPACE_MODE,
-        NEXENT_SANDBOX_WORKSPACE_VOLUME,
-    )
-    from runtime.adapters.nexent.sandbox import resolve_sandbox_config
 
-    sandbox_config = resolve_sandbox_config(
-        getattr(agent_config, "sandbox_policy", None),
-        sandbox_policy,
-        workspace_mode=NEXENT_SANDBOX_WORKSPACE_MODE,
-        container_workspace_root=NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
-        failure_policy=NEXENT_SANDBOX_FAILURE_POLICY,
+def materialize_legacy_run(*, agent_config, workspace_path, workspace_root, **values) -> AgentRunInfo:
+    """Resolve deployment policy for the in-process compatibility path."""
+    from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
+
+    return materialize_run(
+        agent_config=agent_config,
+        workspace_path=workspace_path,
+        workspace_root=workspace_root,
+        sandbox_config=resolve_deployed_sandbox(getattr(agent_config, "sandbox_policy", None)),
+        **values,
     )
+
+
+def materialize_run(*, agent_config, workspace_path, workspace_root, sandbox_config, **values) -> AgentRunInfo:
+    """Attach the sandbox workspace and output storage to the SDK run."""
     sandbox_minio_client = (
-        sandbox_minio_client_factory() if sandbox_config and sandbox_config.auto_sync_outputs else None
+        get_sandbox_minio_client() if sandbox_config and sandbox_config.auto_sync_outputs else None
     )
     if sandbox_config is not None:
         sandbox_config.output_dir = str(Path(workspace_path) / "outputs")
@@ -52,7 +51,7 @@ def materialize_legacy_run(
             and sandbox_config.workspace_mode == "legacy"
         ):
             sandbox_config.extra_kwargs.update(
-                {"workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME, "shared_workspace": True}
+                {"workspace_volume_name": environment.NEXENT_SANDBOX_WORKSPACE_VOLUME, "shared_workspace": True}
             )
 
     return build_run_info(

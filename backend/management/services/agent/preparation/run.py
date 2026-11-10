@@ -431,13 +431,10 @@ async def create_agent_run_info(
     converted_history = _convert_history_with_minio_files(history, language=language)
 
     # The compatibility path still invokes the materializer in-process.
-    from management.services.agent.policy import build_sandbox_policy, get_sandbox_minio_client
     from runtime.adapters.nexent.factory import materialize_legacy_run
 
     return materialize_legacy_run(
         workspace_root=AGENT_WORKSPACE_ROOT,
-        sandbox_policy=build_sandbox_policy(tenant_id=tenant_id, agent_type=""),
-        sandbox_minio_client_factory=get_sandbox_minio_client,
         query=final_query,
         model_config_list=model_list,
         language=language,

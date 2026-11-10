@@ -3,6 +3,8 @@
 
 from hmac import compare_digest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Lock
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -12,7 +14,25 @@ from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
 from nexent.core.agents.agent_model import ToolConfig
 
-SKILL_SNAPSHOT_DIR = ".evaluation-skills"
+_stage_lock = Lock()
+_stage_directory: TemporaryDirectory | None = None
+
+
+def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | None:
+    """Keep verified skill files outside the workspace copied or mounted into sandboxes."""
+    global _stage_directory
+    with _stage_lock:
+        if _stage_directory is None:
+            if not create:
+                return None
+            _stage_directory = TemporaryDirectory(prefix="nexent-evaluation-skills-")
+        run_path = Path(workspace_path)
+        stage_directory = Path(_stage_directory.name).resolve()
+        if stage_directory.is_relative_to(run_path.parent.parent.resolve()):
+            if create:
+                raise ValueError("Skill staging must be outside the run workspace root")
+            return None
+        return stage_directory / run_path.name
 
 
 def materialize_skill_tools(resource, actor, workspace_path: str) -> dict[str, ToolConfig]:
@@ -36,7 +56,8 @@ def materialize_skill_tools(resource, actor, workspace_path: str) -> dict[str, T
     if rows.keys() != ids:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_SKILL_NOT_FOUND"})
 
-    stage = Path(workspace_path) / SKILL_SNAPSHOT_DIR / uuid4().hex
+    stage_root = skill_stage_path(workspace_path, create=True)
+    stage = stage_root / uuid4().hex
     validate_skill_context(context_items, rows.values())
     configs = {}
     stage.mkdir(parents=True, mode=0o700)

@@ -12,7 +12,7 @@ from runtime.agentos.prepared_evaluation import prepare_evaluation_run
 
 @pytest.fixture(autouse=True)
 def local_sandbox(monkeypatch):
-    monkeypatch.setattr("runtime.agentos.prepared_evaluation.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
 
 
 def evaluation_payload():
@@ -76,7 +76,7 @@ def test_runtime_rejects_unavailable_model_before_constructing_sdk_objects(mocke
     from fastapi import HTTPException
 
     mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=model_record(**change))
-    build = mocker.patch("runtime.agentos.prepared_evaluation.build_run_info", new=MagicMock())
+    build = mocker.patch("runtime.agentos.prepared_evaluation.materialize_run", new=MagicMock())
 
     with pytest.raises(HTTPException) as error:
         prepare_evaluation_run(
@@ -273,7 +273,7 @@ def test_runtime_rejects_child_model_scope_or_revision_before_worker_creation(mo
         "runtime.agentos.prepared_evaluation.get_model_by_model_id",
         side_effect=[model_record(), model_record(**record_change)],
     )
-    build = mocker.patch("runtime.agentos.prepared_evaluation.build_run_info")
+    build = mocker.patch("runtime.agentos.prepared_evaluation.materialize_run")
 
     with pytest.raises(HTTPException) as error:
         prepare_evaluation_run(PreparedEvaluationRun.model_validate(payload), ServicePrincipal("user-a", "tenant-a"))
@@ -426,3 +426,83 @@ def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, 
         assert info.user_context["tenant_id"] == "tenant-a"
         assert info.user_context["user_groups"] == ["Support"]
     reader.assert_called_once_with(7, 2, "tenant-a", ["lookup"])
+
+
+@pytest.mark.parametrize("level", ["local", "docker"])
+def test_prepared_evaluation_rebuilds_executor_context_from_runtime_settings(mocker, tmp_path, level):
+    from contracts.constants import environment
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
+
+    record = model_record(model_id=11)
+    selected = create_model_config_from_record(record)
+    agent = AgentConfig(
+        agent_id=7, version_no=2, name="evaluation", description="", model_name=selected.cite_name, tools=[],
+        context_items=[{
+            "id": "system:restricted_python_execution", "type": "system", "content": {"text": "management-only"},
+            "metadata": {"authority": "platform", "layout_order": 32},
+        }],
+    )
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[record])
+    mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=record)
+    mocker.patch("runtime.agentos.prepared_evaluation.AGENT_WORKSPACE_ROOT", str(tmp_path))
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", level)
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_SCOPE", "system")
+    mocker.patch.object(environment, "NEXENT_SANDBOX_WORKSPACE_MODE", "legacy")
+    mocker.patch.object(environment, "NEXENT_SANDBOX_WORKSPACE_VOLUME", "runtime-managed-volume")
+    mocker.patch.object(environment, "NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", True)
+    client = mocker.patch("runtime.adapters.nexent.factory.get_sandbox_minio_client")
+
+    prepared = export_snapshot(agent, [selected], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
+    assert prepared is not None
+    assert prepared.resource.evaluation_options.render_executor_context
+    assert "management-only" not in prepared.model_dump_json()
+    info = prepare_evaluation_run(prepared, ServicePrincipal("user-a", "tenant-a"))
+
+    composer = AgentPromptComposer(AgentPromptBundle.from_resource(role="managed", language="en"))
+    hints = [item for item in info.agent_config.context_items if item.metadata.get("layout_order") == 32]
+    hint, = hints
+    if level == "docker":
+        assert info.sandbox_config.level.value == "docker"
+        assert info.sandbox_config.extra_kwargs["workspace_volume_name"] == "runtime-managed-volume"
+        assert info.sandbox_config.extra_kwargs["workspace_path"] == info.workspace_path
+        assert info.sandbox_config.output_dir.endswith("outputs")
+        assert info.minio_client is client.return_value
+        client.assert_called_once_with()
+        assert hint.id == "system:sandbox_workspace_guidance"
+        assert hint.content["text"] == composer.render_system_section("sandbox_workspace_guidance")
+    else:
+        assert info.sandbox_config is None
+        client.assert_not_called()
+        assert hint.id == "system:restricted_python_execution"
+
+
+def test_invalid_runtime_sandbox_settings_fail_before_execution(mocker):
+    from fastapi import HTTPException
+    from contracts.constants import environment
+
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "invalid")
+    reader = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id")
+    with pytest.raises(HTTPException) as error:
+        prepare_evaluation_run(
+            PreparedEvaluationRun.model_validate(evaluation_payload()), ServicePrincipal("user-a", "tenant-a"),
+        )
+    assert error.value.status_code == 422
+    reader.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_management_prepares_evaluation_with_nonlocal_deployment_setting(mocker):
+    from contracts.agentos import EvaluationAgentRun
+    from contracts.constants import environment
+    from management.services.agent.preparation import evaluation_snapshot
+
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker")
+    mocker.patch.object(evaluation_snapshot, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker", create=True)
+    compiler = mocker.patch("management.services.agent.preparation.run.create_agent_run_info")
+    request = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
+    assert await evaluation_snapshot.prepare_evaluation_snapshot(request, "user-a", "tenant-a") is compiler.return_value
+    compiler.assert_awaited_once()
+    assert compiler.call_args.kwargs["export_evaluation"] is True

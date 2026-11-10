@@ -14,7 +14,6 @@ from contracts.agentos import (
     ModelBindings, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
 )
 from contracts.constants import environment
-from contracts.constants.environment import NEXENT_SANDBOX_DEFAULT_LEVEL
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record
@@ -25,6 +24,7 @@ from infrastructure.rdb.mcp_execution_records import (
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
+from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
 from nexent.multi_modal.utils import parse_s3_url
 
 
@@ -55,9 +55,6 @@ def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> R
 
 
 async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str, tenant_id: str):
-    if NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local":
-        return None
-
     from management.services.agent.preparation.run import create_agent_run_info
 
     history = AgentRequest(
@@ -163,6 +160,11 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
         raise ValueError("Unsupported evaluation resource")
 
     profile = agent.model_dump(mode="json", include=set(EvaluationAgentOptions.model_fields))
+    context_items = profile.get("context_items")
+    if context_items is not None:
+        portable_items = [item for item in context_items if item["id"] not in EXECUTOR_CONTEXT_IDS]
+        if len(portable_items) != len(context_items):
+            profile.update(context_items=portable_items, render_executor_context=True)
     skill_refs = _export_skill_bindings(agent, tenant_id, profile.get("context_items"))
     tools = []
     mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]

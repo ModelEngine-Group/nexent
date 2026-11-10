@@ -5,7 +5,6 @@ import asyncio
 import logging
 import shutil
 from contextlib import ExitStack
-from pathlib import Path
 from hmac import compare_digest
 from functools import partial
 from uuid import uuid4
@@ -16,7 +15,7 @@ from pydantic import ValidationError
 
 from contracts.agentos import EvaluationAgentResult, EvaluationFileTool, FileToolDescription, PreparedEvaluationRun
 from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
+    AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from infrastructure.a2a_execution import (
@@ -31,13 +30,18 @@ from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
 from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.context_input import build_authorized_context_input
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
+from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
+from nexent.core.agents.sandbox import SandboxLevel
 from nexent.core.concurrency import run_blocking
-from runtime.adapters.nexent.factory import build_run_info
+from runtime.adapters.nexent.factory import materialize_run
 from runtime.adapters.nexent.runner import agent_run
+from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
 from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_mcp import PreparedMCP
-from runtime.agentos.prepared_skills import SKILL_SNAPSHOT_DIR, materialize_skill_tools
+from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
@@ -75,10 +79,22 @@ def _materialize_file_tools(bindings, actor, workspace_path, workspace_run_id):
     return tools
 
 
-def _agent_options(resource):
+def _agent_options(resource, language, sandbox_enabled):
     if resource.evaluation_options is None:
         return {}
     options = resource.evaluation_options.model_dump()
+    if options.pop("render_executor_context"):
+        items = options.get("context_items") or []
+        if any(item.get("id") in EXECUTOR_CONTEXT_IDS for item in items):
+            raise ValueError("Executor context must be rendered by Runtime")
+        role = "manager" if resource.subagents or resource.external_a2a else "managed"
+        composer = AgentPromptComposer(AgentPromptBundle.from_resource(role=role, language=language))
+        context = composer.executor_context_item(
+            sandbox_workspace_enabled=sandbox_enabled,
+            restricted_python_authorized_imports=None if sandbox_enabled else get_local_python_authorized_imports(),
+        )
+        if context is not None:
+            options["context_items"] = [*items, context]
     context_config = options.pop("context_manager_config")
     if context_config is not None:
         if "history_summary_sink" in context_config or "history_summary_status_sink" in context_config:
@@ -116,7 +132,10 @@ def _materialize_external_agents(resource, actor):
     return agents
 
 
-def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp, *, root_alias=None):
+def _materialize_agent(
+    resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
+    *, language, sandbox_enabled, root_alias=None,
+):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
         resource.memory_ref is not None, resource.sandbox_policy is not None,
@@ -139,7 +158,7 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         skills[binding.tool_id] if binding.tool_id in skills else next(mcp_tools if binding.tool_id == "mcp" else files)
         for binding in resource.tools
     ]
-    options = _agent_options(resource)
+    options = _agent_options(resource, language, sandbox_enabled)
     legacy_root = root_alias is not None and resource.model_alias is None
     return AgentConfig(
         name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
@@ -149,7 +168,10 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
         external_a2a_agents=_materialize_external_agents(resource, actor),
         worker_agents=[
-            _materialize_agent(child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp)
+            _materialize_agent(
+                child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
+                language=language, sandbox_enabled=sandbox_enabled,
+            )
             for child in resource.subagents
         ],
         **options,
@@ -175,8 +197,11 @@ def _materialize_model(binding, actor):
 def _remove_skill_files(workspace_path: str | None) -> None:
     if workspace_path is None:
         return
+    stage = skill_stage_path(workspace_path)
+    if stage is None:
+        return
     try:
-        shutil.rmtree(Path(workspace_path) / SKILL_SNAPSHOT_DIR)
+        shutil.rmtree(stage)
     except FileNotFoundError:
         pass
     except OSError:
@@ -185,7 +210,6 @@ def _remove_skill_files(workspace_path: str | None) -> None:
 
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     if any((
-        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local",
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
     )):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
@@ -199,12 +223,14 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
     with ExitStack() as cleanup:
         cleanup.callback(_remove_skill_files, workspace_path)
         try:
+            sandbox_config = resolve_deployed_sandbox(None)
+            sandbox_enabled = sandbox_config is not None and sandbox_config.level is not SandboxLevel.LOCAL
             if len(aliases) != len(bindings):
                 raise ValueError("Duplicate evaluation model binding")
             used_aliases = set()
             agent_config = _materialize_agent(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
-                root_alias=payload.models.llm.alias,
+                language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")
@@ -216,7 +242,9 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
             user_context.update(user_id=actor.user_id, tenant_id=actor.tenant_id)
-        info = build_run_info(
+        info = materialize_run(
+            sandbox_config=sandbox_config,
+            workspace_root=AGENT_WORKSPACE_ROOT,
             mcp_host=list(mcp.hosts.values()) or None,
             mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
             mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,

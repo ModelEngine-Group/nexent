@@ -4,7 +4,19 @@
 
 from typing import Any
 
+from contracts.constants import environment
+from infrastructure.sandbox_deployment import default_sandbox_policy
 from nexent.core.agents.sandbox import SandboxConfig
+
+
+def resolve_deployed_sandbox(database_policy: dict[str, Any] | None) -> SandboxConfig | None:
+    return resolve_sandbox_config(
+        database_policy,
+        default_sandbox_policy(),
+        workspace_mode=environment.NEXENT_SANDBOX_WORKSPACE_MODE,
+        container_workspace_root=environment.NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+        failure_policy=environment.NEXENT_SANDBOX_FAILURE_POLICY,
+    )
 
 
 def resolve_sandbox_config(

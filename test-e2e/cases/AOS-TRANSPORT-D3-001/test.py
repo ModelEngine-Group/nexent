@@ -213,7 +213,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     key = "synthetic-prepared-evaluation-fixture-secret"
     monkeypatch.setattr(environment, "JWT_SECRET", key)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
-    monkeypatch.setattr(prepared_evaluation, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker")
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_SCOPE", "session")
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", False)
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_WORKSPACE_MODE", "legacy")
 
     monkeypatch.setattr(agent_attachments, "MINIO_DEFAULT_BUCKET", "bucket")
     monkeypatch.setattr(prepared_attachments, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid")
@@ -226,6 +229,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(minio_client, "get_file_url", get_file_url)
     lookups = []
     invocations = []
+    skill_stages = []
     registry = LocalExecutionRegistry()
     monkeypatch.setattr(prepared_evaluation, "agent_run_manager", registry)
 
@@ -319,6 +323,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
 
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
+        assert info.sandbox_config.level.value == "docker"
+        assert info.sandbox_config.scope.value == "session"
+        assert info.sandbox_config.output_dir.endswith("outputs")
+        guidance, = info.agent_config.context_items
+        assert guidance.id == "system:sandbox_workspace_guidance"
+        assert "management-local-executor" not in guidance.content["text"]
         assert info.model_config_list[0].api_key == "only-in-runtime"
         assert info.agent_config.model_name == "evaluation_llm"
         assert info.model_config_list[0].temperature == 0.17
@@ -334,6 +344,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert by_name["skill_lookup"].params == {"scope": "private-skill-tool-value"}
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
         config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
+        stage = prepared_skills.skill_stage_path(info.workspace_path)
+        assert stage.is_dir()
+        assert not stage.is_relative_to(tmp_path / "runs")
+        skill_stages.append(stage)
         assert "Runtime skill guide" in reader.forward("summarize")
         assert json.loads(config_reader.forward("summarize")) == {"keep": True, "value": "local-secret"}
         assert "not authorized" in config_reader.forward("other-skill").lower()
@@ -365,6 +379,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation_agent", description="Prepared evaluation",
         prompt_templates={"system_prompt": "Answer the query"}, model_name=model.cite_name,
+        context_items=[{
+            "id": "system:restricted_python_execution", "type": "system",
+            "content": {"text": "management-local-executor"},
+        }],
         worker_agents=[AgentConfig(
             agent_id=8, version_no=5, name="child", invocation_name="child_lookup",
             description="Static child", model_name=model.cite_name, tools=[], external_a2a_agents=[external],
@@ -391,6 +409,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "only-in-runtime" not in prepared.model_dump_json()
     assert external_row["agent_url"] not in prepared.model_dump_json()
     assert "local-peer-token" not in prepared.model_dump_json()
+    assert "management-local-executor" not in prepared.model_dump_json()
+    assert prepared.resource.evaluation_options.render_executor_context
     assert "previous-link-from-history" not in prepared.model_dump_json()
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
@@ -458,7 +478,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-a", [19])]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None
-    assert not list((tmp_path / "runs").rglob(".evaluation-skills"))
+    assert skill_stages and not any(stage.exists() for stage in skill_stages)
 
 
 async def _assert_resume_over_signed_http(monkeypatch):

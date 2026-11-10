@@ -34,7 +34,7 @@ def skill_snapshot(mocker, tmp_path):
     mocker.patch.object(skill_execution.environment, "CONTAINER_SKILLS_PATH", str(skills))
     mocker.patch.object(skill_execution.environment, "JWT_SECRET", "evaluation-skill-signing-key")
     mocker.patch.object(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "runs"))
-    mocker.patch.object(prepared_evaluation, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
 
     row = {"instance_id": 23, "name": "summarize", "description": "Summarize",
            "config": {"value": "tenant-secret-value"}}
@@ -99,11 +99,12 @@ def test_evaluation_skill_snapshot_authorizes_and_pins_local_files(skill_snapsho
         run_script, guide, config = info.agent_config.tools
         assert run_script.params["workspace_path"] == info.workspace_path
         assert run_script.params["authorized_skill_names"] == ["summarize"]
+        Path(info.workspace_path).mkdir(parents=True)
         sdk_agent = SimpleNamespace(observer=None, _push_file_workspace_to_sandbox=lambda: None)
         script = NexentAgent.create_builtin_tool(sdk_agent, run_script)
         assert "skill-script-output" in script.forward("summarize", "scripts/demo.py")
         assert "not enabled" in script.forward("another-skill", "scripts/demo.py").lower()
-        assert Path(guide.params["local_skills_dir"]).is_relative_to(info.workspace_path)
+        assert not Path(guide.params["local_skills_dir"]).is_relative_to(Path(info.workspace_path).parent.parent)
         (directory / "SKILL.md").write_text("changed after validation", encoding="utf-8")
         guide_tool = NexentAgent.create_builtin_tool(None, guide)
         config_tool = NexentAgent.create_builtin_tool(None, config)
@@ -111,6 +112,7 @@ def test_evaluation_skill_snapshot_authorizes_and_pins_local_files(skill_snapsho
         assert "not authorized" in guide_tool.forward("another-skill").lower()
         assert json.loads(config_tool.forward("summarize")) == {"keep": True, "value": "tenant-secret-value"}
         assert "not authorized" in config_tool.forward("another-skill").lower()
+        prepared_evaluation._remove_skill_files(info.workspace_path)
     runtime_read.assert_called_once_with(7, 2, actor.tenant_id)
 
 
@@ -153,7 +155,7 @@ async def test_cancellation_during_preparation_removes_staged_skill_files(skill_
 
     async def blocking(_name, prepare, *args, **_kwargs):
         info = prepare(*args)
-        workspaces.append(Path(info.workspace_path) / ".evaluation-skills")
+        workspaces.append(prepared_evaluation.skill_stage_path(info.workspace_path))
         staged.set()
         await finish.wait()
         return info
@@ -231,6 +233,7 @@ def test_skill_derived_mcp_binding(skill_snapshot, mocker, change, status):
         info = prepared_evaluation.prepare_evaluation_run(payload, actor)
         assert info.agent_config.tools[-1].params == {"value": "private-tool-config"}
         assert info.mcp_host[0]["allowed_tools"] == {"lookup": "derived_lookup"}
+        prepared_evaluation._remove_skill_files(info.workspace_path)
     derived.assert_called_once_with(7, 2, "tenant-a", ["derived_lookup"])
     direct.assert_not_called()
 
@@ -243,3 +246,13 @@ def test_skill_parameter_merge_preserves_falsey_and_rejects_conflicts():
     assert merge_skill_tool_parameters(77, values) == {"flag": False, "number": 0, "path": None}
     with pytest.raises(ValidationError, match=r"first.*second.*77.*flag"):
         merge_skill_tool_parameters(77, [values[0], ("second", {"flag": True})])
+
+
+def test_skill_staging_rejects_a_temp_root_inside_the_mounted_workspace(mocker, tmp_path):
+    from runtime.agentos import prepared_skills
+
+    mocker.patch.object(prepared_skills, "_stage_directory", SimpleNamespace(name=str(tmp_path / "temp")))
+    workspace = str(tmp_path / "user-a" / "run")
+    with pytest.raises(ValueError, match="outside the run workspace root"):
+        prepared_skills.skill_stage_path(workspace, create=True)
+    assert prepared_skills.skill_stage_path(workspace) is None

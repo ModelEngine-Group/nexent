@@ -238,6 +238,7 @@ class FileToolDescription(RunSpecModel):
 
 
 class EvaluationAgentOptions(RunSpecModel):
+    render_executor_context: bool = False
     display_name: str | None = None
     output_protocol: Literal["code_action", "final_envelope"] = "code_action"
     enable_protocol_repair_retry: bool = False

@@ -102,7 +102,6 @@ async def test_evaluation_compiler_exports_history_refs_without_pre_rendering_li
     config = AgentConfig(
         agent_id=7, version_no=2, name="evaluation", description="", model_name=model.cite_name, tools=[],
     )
-    mocker.patch.object(evaluation_snapshot, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
     mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
