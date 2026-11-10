@@ -7,6 +7,8 @@ from contracts.errors.exceptions import RuntimeMetadataValidationError
 from contracts.errors.codes import RuntimeMetadataValidationCode
 
 from infrastructure.serialization.runtime_metadata import (
+    MAX_MCP_HEADERS_TOTAL_BYTES,
+    MAX_MCP_HEADER_VALUE_BYTES,
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
     MAX_RUNTIME_METADATA_BYTES,
     MAX_RUNTIME_METADATA_DEPTH,
@@ -104,3 +106,74 @@ def test_validate_runtime_metadata_rejects_overlong_key():
         validate_runtime_metadata({long_key: "value"})
 
     assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: northbound MCP header passthrough reserved fields
+# UT-BE-PASS-004 (key whitelist) / UT-BE-PASS-005 (size limits)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key", ["authorization", "Cookie", "X-User-Id", "x-trace-id"])
+def test_ut_be_pass_004_accepts_whitelisted_and_x_prefixed_keys(key):
+    value = {"_mcp_headers": {key: "value"}}
+
+    assert validate_runtime_metadata(value) is value
+
+
+@pytest.mark.parametrize("key", ["Host", "content-length", "Connection", "TE"])
+def test_ut_be_pass_004_rejects_hop_by_hop_headers(key):
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({"_mcp_headers": {key: "value"}})
+
+    assert exc_info.value.code == RuntimeMetadataValidationCode.MCP_HEADER_KEY_FORBIDDEN
+
+
+@pytest.mark.parametrize("key", ["Referer", "User-Agent", "Set-Cookie"])
+def test_ut_be_pass_004_rejects_non_whitelisted_headers(key):
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({"_mcp_headers": {key: "value"}})
+
+    assert exc_info.value.code == RuntimeMetadataValidationCode.MCP_HEADER_KEY_FORBIDDEN
+
+
+def test_ut_be_pass_004_rejects_non_object_header_block():
+    for metadata in (
+        {"_mcp_headers": ["Cookie"]},
+        {"_mcp_headers": {"Cookie": 1}},
+        {"_mcp_headers": {"": "value"}},
+        {"_mcp_headers_by_server": ["http://a/mcp"]},
+        {"_mcp_headers_by_server": {"": {"Cookie": "value"}}},
+    ):
+        with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+            validate_runtime_metadata(metadata)
+
+        assert exc_info.value.code == RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID
+
+
+def test_ut_be_pass_005_rejects_oversized_single_header_value():
+    oversized = "a" * (MAX_MCP_HEADER_VALUE_BYTES + 1)
+
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({"_mcp_headers": {"Cookie": oversized}})
+
+    assert exc_info.value.code == RuntimeMetadataValidationCode.MCP_HEADER_VALUE_TOO_LARGE
+
+
+def test_ut_be_pass_005_rejects_oversized_cumulative_header_values():
+    per_value = "a" * (MAX_MCP_HEADER_VALUE_BYTES - 1)
+    # Each block stays under the per-header limit; together they blow the cap.
+    blocks = {
+        f"http://server-{index}/mcp": {f"X-Header-{index}": per_value}
+        for index in range(MAX_MCP_HEADERS_TOTAL_BYTES // MAX_MCP_HEADER_VALUE_BYTES + 2)
+    }
+
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({"_mcp_headers_by_server": blocks})
+
+    assert exc_info.value.code == RuntimeMetadataValidationCode.MCP_HEADER_VALUE_TOO_LARGE
+
+
+def test_ut_be_pass_005_accepts_values_at_the_size_limit():
+    value = {"_mcp_headers": {"Cookie": "a" * MAX_MCP_HEADER_VALUE_BYTES}}
+
+    assert validate_runtime_metadata(value) is value

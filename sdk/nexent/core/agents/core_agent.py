@@ -87,6 +87,27 @@ def _extract_final_answer_body(output: Any) -> str | None:
     return re.sub(r"</?final_answer>", "", text[opening.end():], flags=re.IGNORECASE) if opening else None
 
 
+def _strip_reserved_metadata_keys(node: Any) -> Any:
+    """Recursively remove every top-level and nested dict entry whose key
+    starts with an underscore.  This keeps Phase-1 reserved fields like
+    ``_mcp_headers`` / ``_mcp_headers_by_server`` out of the LLM prompt
+    while leaving the rest of the metadata intact.
+
+    The filter runs on a shallow copy of every dict so the caller-owned
+    runtime metadata is never mutated in place.
+    """
+    if isinstance(node, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, value in node.items():
+            if isinstance(key, str) and key.startswith("_"):
+                continue
+            cleaned[key] = _strip_reserved_metadata_keys(value)
+        return cleaned
+    if isinstance(node, list):
+        return [_strip_reserved_metadata_keys(item) for item in node]
+    return node
+
+
 class NonterminalThoughtTurn(Exception):
     """A model turn produced visible text without an executable action."""
 
@@ -1874,8 +1895,9 @@ Additional Args:
             if other_args:
                 self.task += render_user_context(getattr(self, "lang", "en"), "additional_arguments", {"arguments": str(other_args)})
             if runtime_metadata is not None:
+                runtime_metadata_for_prompt = _strip_reserved_metadata_keys(runtime_metadata)
                 serialized_metadata = json.dumps(
-                    runtime_metadata,
+                    runtime_metadata_for_prompt,
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),

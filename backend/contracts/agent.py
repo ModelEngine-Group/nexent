@@ -453,6 +453,8 @@ class ExportAndImportAgentInfo(BaseModel):
     is_main_agent: bool = True
     provide_run_summary: bool
     allow_chat_metadata: bool = False
+    allow_mcp_header_passthrough: bool = False
+    strict_mcp_placeholder_resolution: bool = False
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None

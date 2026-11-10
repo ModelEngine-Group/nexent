@@ -446,6 +446,10 @@ async def run_chat(
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
+    except AppException:
+        # Let the global AppException handler map error codes to HTTP status
+        # (runtime metadata / MCP header passthrough failures rely on this).
+        raise
     except HTTPException as e:
         raise e
     except Exception as e:

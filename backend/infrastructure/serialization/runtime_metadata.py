@@ -19,6 +19,137 @@ from contracts.constants.constants import MAX_RUNTIME_METADATA_ARRAY_ITEMS
 from contracts.constants.constants import MAX_RUNTIME_METADATA_KEY_LENGTH
 
 
+# ---------------------------------------------------------------------------
+# Phase 1: northbound MCP header passthrough — reserved-field whitelist rules
+# ---------------------------------------------------------------------------
+
+# Max size of one MCP header value (4 KB as UTF-8 bytes).
+MAX_MCP_HEADER_VALUE_BYTES = 4 * 1024
+
+# Max cumulative size of all injected MCP header values across one run (16 KB).
+MAX_MCP_HEADERS_TOTAL_BYTES = 16 * 1024
+
+# Header name whitelist.  Lowercased on input so the comparison is
+# case-insensitive and HTTP-correct.
+ALLOWED_MCP_HEADER_KEYS = frozenset({
+    "authorization",
+    "cookie",
+    "x-tenant-id",
+    "x-user-id",
+    "x-request-id",
+    "x-trace-id",
+})
+
+# Hop-by-hop headers that MUST NEVER be injected through metadata.
+# See RFC 7230 §6.1 and RFC 8620 §13.5.1.
+FORBIDDEN_HOP_BY_HOP_KEYS = frozenset({
+    "host",
+    "content-length",
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "te",
+    "trailer",
+    "proxy-connection",
+    "proxy-authorization",
+    "proxy-authenticate",
+})
+
+
+def _is_passthrough_header_allowed(key: str) -> bool:
+    """Return True iff ``key`` is a header name we will accept for passthrough.
+
+    - ``key`` is lowercased before every comparison.
+    - Hop-by-hop headers are rejected even when they would otherwise match
+      a broader pattern (defense-in-depth).
+    - Whitelist entries and any ``x-*`` custom header are accepted.
+    """
+    normalized = key.strip().lower()
+    if not normalized:
+        return False
+    if normalized in FORBIDDEN_HOP_BY_HOP_KEYS:
+        return False
+    if normalized in ALLOWED_MCP_HEADER_KEYS:
+        return True
+    return normalized.startswith("x-")
+
+
+def _validate_single_mcp_header_dict(headers: Any) -> int:
+    """Validate one ``Dict[str, str]`` header block.
+
+    Returns the cumulative UTF-8 byte count of all header values.  Raises
+    :class:`RuntimeMetadataValidationError` on any structural failure.
+    """
+    if not isinstance(headers, dict):
+        raise RuntimeMetadataValidationError(
+            RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID,
+            "Reserved _mcp_headers* fields must be objects of string -> string",
+        )
+
+    total_bytes = 0
+    for raw_key, value in headers.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID,
+                "Header keys must be non-empty strings",
+            )
+        if not isinstance(value, str):
+            raise RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID,
+                f"Header value for '{raw_key}' must be a string",
+            )
+        if not _is_passthrough_header_allowed(raw_key):
+            raise RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.MCP_HEADER_KEY_FORBIDDEN,
+                f"Header key '{raw_key}' is not whitelisted for MCP passthrough",
+            )
+        byte_len = len(value.encode("utf-8"))
+        if byte_len > MAX_MCP_HEADER_VALUE_BYTES:
+            raise RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.MCP_HEADER_VALUE_TOO_LARGE,
+                f"Header value for '{raw_key}' exceeds {MAX_MCP_HEADER_VALUE_BYTES} bytes",
+            )
+        total_bytes += byte_len
+    return total_bytes
+
+
+def _validate_mcp_headers_reserved_fields(metadata: Dict[str, Any]) -> None:
+    """Validate the ``_mcp_headers`` / ``_mcp_headers_by_server`` reserved fields.
+
+    Raises :class:`RuntimeMetadataValidationError` for any structural, size,
+    or whitelist failure.  When both reserved forms are present the
+    ``_mcp_headers_by_server`` shape wins (``_mcp_headers`` is ignored, but
+    its structural validity is still checked so the caller is not
+    surprised by a half-valid payload).
+    """
+    total_bytes = 0
+    seen = False
+
+    if "_mcp_headers" in metadata and metadata["_mcp_headers"] is not None:
+        seen = True
+        total_bytes += _validate_single_mcp_header_dict(metadata["_mcp_headers"])
+
+    if "_mcp_headers_by_server" in metadata and metadata["_mcp_headers_by_server"] is not None:
+        if not isinstance(metadata["_mcp_headers_by_server"], dict):
+            raise RuntimeMetadataValidationError(
+                RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID,
+                "_mcp_headers_by_server must be an object of server URL -> headers",
+            )
+        seen = True
+        for url, block in metadata["_mcp_headers_by_server"].items():
+            if not isinstance(url, str) or not url.strip():
+                raise RuntimeMetadataValidationError(
+                    RuntimeMetadataValidationCode.MCP_HEADER_TYPE_INVALID,
+                    "_mcp_headers_by_server keys must be non-empty MCP server URLs",
+                )
+            total_bytes += _validate_single_mcp_header_dict(block)
+
+    if seen and total_bytes > MAX_MCP_HEADERS_TOTAL_BYTES:
+        raise RuntimeMetadataValidationError(
+            RuntimeMetadataValidationCode.MCP_HEADER_VALUE_TOO_LARGE,
+            f"Total size of injected MCP headers exceeds {MAX_MCP_HEADERS_TOTAL_BYTES} bytes",
+        )
 
 
 def canonical_runtime_metadata_json(metadata: Mapping[str, Any]) -> str:
@@ -124,5 +255,10 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
             RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
             f"Runtime metadata exceeds {MAX_RUNTIME_METADATA_BYTES} bytes",
         )
+
+    # Phase 1: northbound MCP header passthrough reserved-field validation.
+    # Runs AFTER the generic structural checks so callers get a single,
+    # layered stack of errors rather than two competing reasons.
+    _validate_mcp_headers_reserved_fields(value)
 
     return value

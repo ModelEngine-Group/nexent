@@ -37,6 +37,7 @@ from management.services.agent.preparation.inputs import (
     join_minio_file_description_to_query,
 )
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
+from management.services.agent.mcp_passthrough import apply_mcp_header_passthrough
 from management.services.agent.tool_identity import resolve_tool_user_context
 from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
@@ -113,6 +114,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -363,6 +365,17 @@ async def create_agent_run_info(
             # Fallback to string format if record not found
             mcp_host.append(url)
 
+    # Phase 1: northbound MCP header passthrough — placeholder resolution
+    # + dynamic header injection, both gated by the per-agent switch.
+    apply_mcp_header_passthrough(
+        mcp_host,
+        metadata,
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no,
+        run_id=workspace_run_id,
+    )
+
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)
 
@@ -417,6 +430,7 @@ async def create_agent_run_info(
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
+        runtime_metadata=metadata or {},
         mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=converted_history,
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,

@@ -47,6 +47,10 @@ class ErrorMessage:
         ErrorCode.CHAT_METADATA_INVALID: "Runtime metadata is invalid.",
         ErrorCode.CHAT_METADATA_TOO_LARGE: "Runtime metadata exceeds the maximum allowed size.",
         ErrorCode.CHAT_METADATA_VERSION_CONFLICT: "Runtime metadata was updated by another request.",
+        ErrorCode.CHAT_MCP_HEADER_KEY_FORBIDDEN: "Reserved _mcp_headers field contains disallowed header keys (hop-by-hop or non-whitelisted).",
+        ErrorCode.CHAT_MCP_HEADER_VALUE_TOO_LARGE: "Reserved _mcp_headers field contains oversized values (>4KB per header or >16KB total).",
+        ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND: "_mcp_headers_by_server URLs do not match any configured MCP server.",
+        ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED: "MCP static headers contain unresolved ${HeaderName} placeholders (strict mode).",
         # ==================== 02 QuickConfig / 快速配置 ====================
         ErrorCode.QUICK_CONFIG_INVALID: "Invalid configuration.",
         ErrorCode.QUICK_CONFIG_SYNC_FAILED: "Sync configuration failed.",

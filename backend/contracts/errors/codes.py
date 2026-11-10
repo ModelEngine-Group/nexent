@@ -35,6 +35,12 @@ class RuntimeMetadataValidationCode(str, Enum):
     METADATA_TOO_DEEP = "METADATA_TOO_DEEP"
     METADATA_TOO_MANY_ITEMS = "METADATA_TOO_MANY_ITEMS"
     METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+    # Phase 1: MCP header passthrough
+    MCP_HEADER_TYPE_INVALID = "MCP_HEADER_TYPE_INVALID"
+    MCP_HEADER_KEY_FORBIDDEN = "MCP_HEADER_KEY_FORBIDDEN"
+    MCP_HEADER_VALUE_TOO_LARGE = "MCP_HEADER_VALUE_TOO_LARGE"
+    MCP_HEADER_ROUTE_NOT_FOUND = "MCP_HEADER_ROUTE_NOT_FOUND"
+    MCP_PLACEHOLDER_UNRESOLVED = "MCP_PLACEHOLDER_UNRESOLVED"
 
 
 class ErrorCode(Enum):
@@ -78,6 +84,10 @@ class ErrorCode(Enum):
     CHAT_METADATA_INVALID = "010106"  # Runtime metadata is invalid
     CHAT_METADATA_TOO_LARGE = "010107"  # Runtime metadata is too large
     CHAT_METADATA_VERSION_CONFLICT = "010108"  # Runtime metadata version conflict
+    CHAT_MCP_HEADER_KEY_FORBIDDEN = "010109"  # Reserved _mcp_headers field contains disallowed header keys
+    CHAT_MCP_HEADER_VALUE_TOO_LARGE = "010110"  # Reserved _mcp_headers field contains oversized values
+    CHAT_MCP_HEADER_ROUTE_NOT_FOUND = "010111"  # _mcp_headers_by_server URL does not match any configured MCP server
+    CHAT_MCP_PLACEHOLDER_UNRESOLVED = "010112"  # Strict mode: unresolved ${HeaderName} placeholders in MCP static headers
 
     # ==================== 02 QuickConfig / 快速配置 ====================
     # 01 - Configuration
@@ -325,6 +335,10 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.CHAT_METADATA_INVALID: 422,
     ErrorCode.CHAT_METADATA_TOO_LARGE: 413,
     ErrorCode.CHAT_METADATA_VERSION_CONFLICT: 409,
+    ErrorCode.CHAT_MCP_HEADER_KEY_FORBIDDEN: 400,
+    ErrorCode.CHAT_MCP_HEADER_VALUE_TOO_LARGE: 400,
+    ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND: 400,
+    ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED: 400,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: 403,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: 503,
     ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: 400,
