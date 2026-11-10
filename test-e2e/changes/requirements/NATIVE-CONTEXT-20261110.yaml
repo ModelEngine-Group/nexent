@@ -42,6 +42,6 @@
         "test/sdk/core/model_service/test_native_context_recovery.py"
       ]
     },
-    "notes": "Existing native ownership routing; case-owned loopback server/client cleanup. No new D1. Stage1 local container acceptance passed before stacking; full feature matrix remains pending."
+    "notes": "Existing native ownership routing; case-owned loopback server/client cleanup. No new D1. Shared local container acceptance passed before stacking. Current broad matrix, long-run, image and Phoenix evidence are maintained in the native runtime SPEC execution record; formal mapping is separate from whole-Case semantic review."
   }
 }
