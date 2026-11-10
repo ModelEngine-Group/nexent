@@ -33,14 +33,17 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
     ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),
 ])
 @pytest.mark.parametrize("scoped", [False, True])
-async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, scoped):
+@pytest.mark.parametrize("legacy_reasoning", [False, True])
+async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, scoped, legacy_reasoning):
     mounts = [{"agent_id": child_id, "version_no": 5} for child_id in child_ids]
     request = AgentRequest(
         query="hello", is_debug=True, entrypoint="workbench",
         metadata={"project": "fixture"} if scoped else None,
+        reasoning_effort="low" if legacy_reasoning else None,
         workbench={
             "mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4},
             "knowledge_scope": {"local": {"mode": "disabled"}} if scoped else None,
+            "model_id": 11 if legacy_reasoning else None,
         },
     )
     config = request.workbench
@@ -74,6 +77,9 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     raw = evaluation_payload()
     raw["resource"]["origin"] = "SYSTEM"
     raw["models"]["llm"]["root_generation"] = {"temperature": 0.4}
+    if legacy_reasoning:
+        mocker.patch("management.services.model.run_controls.get_model_by_model_id", return_value=model_record(connect_status="available"))
+        raw["models"]["llm"]["turn_generation"] = {"reasoning_effort": "low"}
     if children:
         raw["models"]["additional_llms"] = [{"model_id": 11, "alias": "child_model", "revision": "revision-1"}]
         raw["resource"]["subagents"] = [
@@ -103,6 +109,7 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     options = compile_run.await_args.kwargs
     assert options["prepared_workbench"].plan == plan
     assert options["override_version_no"] == 2
+    assert options["reasoning_effort"] == ("low" if legacy_reasoning else None)
     assert options["runtime_sub_agent_mounts"] == [asdict(child) for child in children]
     if scoped:
         metadata_policy.assert_called_once_with(7, "tenant-a", 2)
@@ -234,6 +241,7 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
                  "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
                  "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_mixed_controls",
+                 "workbench_legacy_reasoning",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
     for persisted_body in (False, True)
 ] + [("a2a_default_model", False)])
@@ -340,11 +348,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 mode="single_agent_chat", agent_mounts=[{"agent_id": 8, "version_no": 5}],
                 generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
             )
-            if kind == "workbench_mixed_controls":
+            if kind in {"workbench_mixed_controls", "workbench_legacy_reasoning"}:
                 from management.services.model import run_controls
 
                 config.model_id = 11
-                request.generation_config = WorkbenchGenerationConfig(temperature=1.7, top_p=0.8)
+                if kind == "workbench_mixed_controls":
+                    request.generation_config = WorkbenchGenerationConfig(temperature=1.7, top_p=0.8)
+                else:
+                    request.reasoning_effort = "low"
                 mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
                 mocker.patch.object(run, "get_model_by_model_id", return_value=record)
                 preflight_overlay = mocker.patch.object(run_controls, "overlay_root_model", wraps=run_controls.overlay_root_model)
@@ -423,6 +434,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             if workbench_metadata:
                 permission.assert_called_once_with(7, tenant, 2)
             assert payload.models.llm.root_generation.temperature == 0.4
+            if kind == "workbench_legacy_reasoning":
+                assert payload.models.llm.turn_generation.model_dump() == {"reasoning_effort": "low"}
             assert info.agent_config.invocation_name == "workbench_main"
             assert info.agent_config.worker_agents[0].invocation_name == "agent_8_v5"
             assert info.agent_config.model_name != info.agent_config.worker_agents[0].model_name

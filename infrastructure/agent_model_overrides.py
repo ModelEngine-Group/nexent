@@ -11,6 +11,7 @@ from nexent.core.agents.agent_model import ModelConfig
 from contracts.agentos import TurnModelGeneration
 from contracts.constants import environment
 from contracts.errors.exceptions import RunModelControlsError
+from contracts.model import WorkbenchGenerationConfig
 from infrastructure.model_reasoning import reasoning_controls
 
 
@@ -114,3 +115,14 @@ def apply_turn_model_generation(base: ModelConfig, generation: TurnModelGenerati
     if generation.reasoning_budget_tokens is not None:
         legacy["reasoning_budget_tokens"] = generation.reasoning_budget_tokens
     return overlay_root_model(root, legacy, alias) if legacy else root
+
+
+def apply_run_model_generation(
+    base: ModelConfig, alias: str, root_generation: WorkbenchGenerationConfig | None,
+    turn_generation: TurnModelGeneration | None,
+) -> ModelConfig:
+    if root_generation is not None:
+        base = overlay_root_model(base, root_generation.model_dump(), alias)
+    if turn_generation is not None:
+        base = apply_turn_model_generation(base, turn_generation, alias)
+    return base

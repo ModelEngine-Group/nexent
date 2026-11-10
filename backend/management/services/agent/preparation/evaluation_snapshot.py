@@ -31,7 +31,7 @@ from infrastructure.agent_model_config import (
     create_model_config_from_record, create_tenant_default_model_config, model_record_revision,
 )
 from infrastructure.agent_model_overrides import (
-    apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
+    apply_run_model_generation, get_provider_body_patch, merge_provider_body, provider_body_revision,
 )
 from infrastructure.agent_tool_config import (
     AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, STORE_MEMORY_TOOL, build_automation_proposal_tool,
@@ -182,9 +182,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
 
     config = request.workbench
-    if (config is None or config.mode in {"skill_create", "agent_create"}
-            or request.reasoning_effort is not None
-            or request.reasoning_budget_tokens is not None):
+    if config is None or config.mode in {"skill_create", "agent_create"}:
         return None
 
     await run_blocking(
@@ -229,6 +227,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         override_version_no=root.version_no, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
         requested_output_tokens=request.requested_output_tokens,
+        reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
         context_policy=request.context_policy, enable_automation_tool=False,
         enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
         export_evaluation=True, runtime_skill_snapshot=runtime_skill_snapshot(plan),
@@ -799,10 +798,7 @@ def _export_model(
     else:
         raise ValueError("Evaluation requires an unambiguous model binding")
     if root_generation is not None or turn_generation is not None:
-        overlay = (
-            apply_turn_model_generation(selected, turn_generation, alias) if turn_generation is not None
-            else overlay_root_model(selected, root_generation.model_dump(), alias)
-        )
+        overlay = apply_run_model_generation(selected, alias, root_generation, turn_generation)
         if [model for model in models if model.cite_name == alias] != [overlay]:
             raise ValueError("Unsupported root model overlay")
     changes = {

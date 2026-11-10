@@ -30,7 +30,7 @@ from infrastructure.agent_model_config import (
     create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
 )
 from infrastructure.agent_model_overrides import (
-    apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
+    apply_run_model_generation, get_provider_body_patch, merge_provider_body, provider_body_revision,
 )
 from infrastructure.agent_tool_config import (
     PLAN_TOOL_NAMES, build_parallel_executor_tool_config, build_plan_tool_configs,
@@ -294,13 +294,9 @@ def _materialize_model(binding, actor, resource):
         updates["extra_body"] = body
     model = model.model_copy(update={"cite_name": binding.alias, **updates})
     try:
-        if binding.turn_generation is not None:
-            return apply_turn_model_generation(model, binding.turn_generation, binding.alias)
-        if binding.root_generation is not None:
-            return overlay_root_model(model, binding.root_generation.model_dump(), binding.alias)
+        return apply_run_model_generation(model, binding.alias, binding.root_generation, binding.turn_generation)
     except RunModelControlsError as exc:
         raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
-    return model
 
 
 def _remove_skill_files(workspace_path: str | None) -> None:
@@ -355,7 +351,9 @@ def prepare_run_snapshot(
     if (
         (root_generation is not None) != (workbench_version is not None or workbench_debug)
         or (native_knowledge and (workbench_version is not None or workbench_debug))
-        or (turn_generation is not None and (workbench_version is not None or not native_run))
+        or (turn_generation is not None and (
+            not native_run or (root_generation is not None and turn_generation.settings is not None)
+        ))
         or any(binding.root_generation is not None or binding.turn_generation is not None
                for binding in payload.models.additional_llms)
     ):
