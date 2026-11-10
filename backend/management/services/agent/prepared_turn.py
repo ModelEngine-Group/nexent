@@ -319,6 +319,21 @@ async def find_pending_turn(conversation_id, user_id, tenant_id):
         return None
 
 
+async def resume_cursorless(conversation_id, user_id, tenant_id, client):
+    try:
+        current = await _io("prepared-turn-cursorless-resume", store.read_cursorless_resume,
+                            conversation_id, user_id, tenant_id)
+    except AdmissionScopeError as exc:
+        raise HTTPException(status_code=403, detail="Conversation is not accessible to the current identity") from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    if isinstance(current, str):
+        return JSONResponse({"status": current, "message": f"Stream already {current}: backend_{current}"})
+    if current is not None:
+        return await resume_turn(current, client)
+    return None
+
+
 async def resume_turn(turn, client):
     if turn.assistant_message_id is None:
         return JSONResponse({"status": "streaming", "message": "Waiting for Runtime admission"})

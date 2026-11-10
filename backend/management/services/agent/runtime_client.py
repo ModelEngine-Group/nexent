@@ -12,7 +12,7 @@ from contracts.agentos import (
     AgentResume, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
 )
-from contracts.constants.environment import RUNTIME_SERVICE_URL
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
@@ -74,6 +74,8 @@ async def forward_conversation_run(
     from management.services.agent.conversation_submission import submit_conversation
 
     request = AgentRequest.model_validate(payload.request)
+    if payload.resume and request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=404, detail={"code": "WORKBENCH_DISABLED"})
     if request.is_debug and not payload.resume and northbound_fallback is None:
         from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 
@@ -108,10 +110,11 @@ async def forward_conversation_run(
                 await prepared_turn.reject_unstaged_turn(claimed, owner, tenant)
                 claimed = payload
         if conversation_id and conversation_id > 0 and not request.is_debug:
-            pending = await prepared_turn.find_pending_turn(conversation_id, owner, tenant)
-            if pending is not None:
-                if claimed.resume:
-                    return await prepared_turn.resume_turn(pending, client)
+            if claimed.resume:
+                response = await prepared_turn.resume_cursorless(conversation_id, owner, tenant, client)
+                if response is not None:
+                    return response
+            elif await prepared_turn.find_pending_turn(conversation_id, owner, tenant) is not None:
                 raise prepared_turn.active_turn_conflict()
         if northbound_fallback is not None:
             return await northbound_fallback()

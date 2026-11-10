@@ -9,8 +9,9 @@ from sqlalchemy import func, select, update
 
 from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict
+from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
@@ -86,14 +87,49 @@ def _pending(*conditions):
     )
 
 
-def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> PreparedTurn | None:
+def _pending_for_conversation(session, conversation_id, user_id, tenant_id):
     admission = ConversationRunAdmission
+    return session.scalar(_pending(
+        admission.conversation_id == conversation_id,
+        admission.created_by == user_id, admission.tenant_id == tenant_id,
+    ).limit(1))
+
+
+def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> PreparedTurn | None:
     with get_db_session() as session:
         if _owned(session, conversation_id, user_id, tenant_id) is None:
             raise AdmissionScopeError
-        row = session.scalar(_pending(admission.conversation_id == conversation_id,
-                                      admission.created_by == user_id, admission.tenant_id == tenant_id).limit(1))
+        row = _pending_for_conversation(session, conversation_id, user_id, tenant_id)
         return _view(row) if row is not None else None
+
+
+def read_cursorless_resume(conversation_id: int, user_id: str, tenant_id: str) -> PreparedTurn | str | None:
+    """Return the pending run or the terminal status of the latest closed prepared turn."""
+    admission, message = ConversationRunAdmission, ConversationMessage
+    with get_db_session() as session:
+        conversation = _owned(session, conversation_id, user_id, tenant_id, lock=True)
+        if conversation is None:
+            raise AdmissionScopeError
+        if not ENABLE_AGENT_WORKBENCH and conversation.workbench_config:
+            raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+        row = _pending_for_conversation(session, conversation_id, user_id, tenant_id)
+        if row is not None:
+            return _view(row)
+
+        # Inspect the latest message before filtering so an earlier assistant cannot mask a newer turn.
+        latest_message_id = select(message.message_id).where(
+            message.conversation_id == conversation_id, message.delete_flag == "N",
+        ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1).correlate(None).scalar_subquery()
+        return session.scalar(select(message.status).join(
+            admission, admission.prepared_assistant_id == message.message_id,
+        ).where(
+            message.message_id == latest_message_id, message.created_by == user_id,
+            message.message_role == "assistant", message.streaming_owner == "management",
+            message.status.in_(("completed", "failed", "stopped")),
+            admission.conversation_id == conversation_id, admission.created_by == user_id,
+            admission.tenant_id == tenant_id, admission.delete_flag == "N",
+            admission.status == "admitted", admission.prepared_message_index.is_(None),
+        ).limit(1))
 
 
 def read_workbench_skill_mounts(

@@ -253,7 +253,7 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True, use_root_skill=True)
     with monkeypatch.context() as native_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
-            native_metadata_patches, metadata={},
+            native_metadata_patches, metadata={}, check_cursorless_resume=True,
         )
     with monkeypatch.context() as native_first_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
@@ -1272,6 +1272,11 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
         return AdmissionClaim(run_id, status, 42, True, False)
 
     monkeypatch.setattr(conversation_submission, "_control_io", control_io)
+    def read_legacy_cursorless(conversation_id, user_id, tenant_id):
+        assert (conversation_id, user_id, tenant_id) == (42, "user-a", "tenant-a")
+        return None
+
+    monkeypatch.setattr(prepared_turn.store, "read_cursorless_resume", read_legacy_cursorless)
     monkeypatch.setattr(prepared_turn, "find_pending_turn", lambda *_: asyncio.sleep(0, result=None))
     monkeypatch.setattr(prepared_turn, "start_turn", lambda *_: asyncio.sleep(0, result=None))
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
@@ -2330,6 +2335,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
     use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
+    check_cursorless_resume=False,
 ):
     from contracts.agent import WorkbenchSessionConfig
     from contracts.clarification import ClarificationResponse
@@ -2581,6 +2587,26 @@ async def _assert_public_prepared_turn_over_signed_http(
             first = await browser.post("/agent/run", json=request, headers=headers)
             retry = await browser.post("/agent/run", json=request, headers=headers)
             denied = await browser.post("/agent/run", json=request, headers={**headers, "Authorization": "foreign"})
+            if check_cursorless_resume:
+                def read_terminal(conversation_id, user_id, tenant_id):
+                    if (conversation_id, user_id, tenant_id) != (reference.conversation_id, actor.user_id, actor.tenant_id):
+                        raise AdmissionScopeError
+                    assert calls == ["stage", "start", "confirm", "project", "close"]
+                    return "completed"
+
+                def deny_runtime_http(**_options):
+                    pytest.fail("A terminal cursorless resume must not contact Runtime")
+
+                monkeypatch.setattr(prepared_turn.store, "read_cursorless_resume", read_terminal)
+                monkeypatch.setattr(runtime_client, "_agentos_client",
+                                    lambda: AgentOSClient(runtime_url, deny_runtime_http))
+                body = {"query": "", "conversation_id": reference.conversation_id}
+                terminal = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": actor.tenant_id})
+                assert terminal.status_code == 200 and terminal.json() == {
+                    "status": "completed", "message": "Stream already completed: backend_completed",
+                }
+                forbidden = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "foreign"})
+                assert forbidden.status_code == 403
         assert first.status_code == 200 and first.headers["run_id"] == reference.run_id
         assert first.headers["conversation_id"] == str(reference.conversation_id)
         prefix = f'id: {reference.run_id}:1\ndata: {{"type":"final_answer","content":"answer"}}\n\n'

@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -173,16 +174,85 @@ async def test_cursorless_resume_uses_the_pending_prepared_turn(flow, mocker):
     current = SimpleNamespace(**{**vars(staged), "assistant_message_id": 61})
     client.run_conversation = AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
-    mocker.patch.object(prepared_turn.store, "pending_turn", return_value=current)
+    lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value=current)
     payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
 
     response = await runtime_client.forward_conversation_run(payload, *ACTOR)
 
+    lookup.assert_called_once_with(42, *ACTOR)
     assert response.headers["X-Stream-Status"] == "resumed"
     assert response.headers["run_id"] == REFERENCE.run_id
     client.run_conversation.assert_not_awaited()
     client.start_prepared_run.assert_not_awaited()
     await response.body_iterator.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["completed", "failed", "stopped", "awaiting", "unknown", "foreign", "disabled"])
+async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker, state):
+    from fastapi import HTTPException
+
+    from infrastructure.rdb.agent_admission import AdmissionScopeError
+
+    operations, _, client, staged = flow
+    client.run_conversation = AsyncMock()
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value={
+        "awaiting": staged, "unknown": None,
+    }.get(state, state))
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+    if state == "foreign":
+        lookup.side_effect = AdmissionScopeError
+        with pytest.raises(HTTPException) as denied:
+            await runtime_client.forward_conversation_run(payload, *ACTOR)
+        assert denied.value.status_code == 403
+        assert denied.value.detail == "Conversation is not accessible to the current identity"
+    elif state == "disabled":
+        from contracts.errors.exceptions import WorkbenchError
+
+        lookup.side_effect = WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+        with pytest.raises(HTTPException) as denied:
+            await runtime_client.forward_conversation_run(payload, *ACTOR)
+        assert denied.value.status_code == 404
+        assert denied.value.detail == {"code": "WORKBENCH_DISABLED"}
+    else:
+        result = await runtime_client.forward_conversation_run(payload, *ACTOR)
+        if state == "unknown":
+            assert result is client.run_conversation.return_value
+        elif state == "awaiting":
+            assert json.loads(result.body) == {"status": "streaming", "message": "Waiting for Runtime admission"}
+        else:
+            assert json.loads(result.body) == {"status": state, "message": f"Stream already {state}: backend_{state}"}
+    lookup.assert_called_once_with(42, *ACTOR)
+    if state == "unknown":
+        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+    else:
+        client.run_conversation.assert_not_awaited()
+    assert operations == []
+    client.start_prepared_run.assert_not_awaited()
+    client.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(flow, mocker):
+    from fastapi import HTTPException
+
+    _, _, client, _ = flow
+    client.run_conversation = AsyncMock()
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", False)
+    lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume")
+    payload = CompatibilityConversationRun(
+        request={"query": "", "conversation_id": 42, "entrypoint": "workbench"}, resume=True,
+    )
+
+    with pytest.raises(HTTPException) as denied:
+        await runtime_client.forward_conversation_run(payload, *ACTOR)
+
+    assert denied.value.status_code == 404
+    assert denied.value.detail == {"code": "WORKBENCH_DISABLED"}
+    lookup.assert_not_called()
+    client.run_conversation.assert_not_awaited()
 
 
 @pytest.mark.asyncio
