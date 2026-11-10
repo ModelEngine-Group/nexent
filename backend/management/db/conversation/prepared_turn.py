@@ -47,6 +47,12 @@ class LegacyResumeReceipt:
     status: str
 
 
+@dataclass(frozen=True)
+class LegacyTerminalMessage:
+    assistant_message_id: int
+    status: str
+
+
 NO_ASSISTANT_MESSAGE = "no_assistant_message"
 _TERMINAL_RESUME_STATUSES = ("completed", "failed", "stopped")
 
@@ -125,7 +131,7 @@ def _latest_message_id(conversation_id):
 
 def read_cursorless_resume(
     conversation_id: int, user_id: str, tenant_id: str,
-) -> PreparedTurn | LegacyResumeReceipt | str | None:
+) -> PreparedTurn | LegacyResumeReceipt | LegacyTerminalMessage | str | None:
     """Resolve a pending turn, terminal projection, or absence of an assistant."""
     admission, message = ConversationRunAdmission, ConversationMessage
     with get_db_session() as session:
@@ -153,16 +159,23 @@ def read_cursorless_resume(
             return terminal
 
         receipt = ConversationProjectionReceipt
+        legacy_message = (
+            message.message_id == _latest_message_id(conversation_id), message.created_by == user_id,
+            message.message_role == "assistant", message.streaming_owner.is_distinct_from("management"),
+            message.status.in_(_TERMINAL_RESUME_STATUSES),
+        )
         legacy = session.execute(select(receipt.run_id, message.message_id, message.status).join(
             message, message.message_id == receipt.message_id,
         ).where(
-            message.message_id == _latest_message_id(conversation_id), message.created_by == user_id,
-            message.message_role == "assistant", message.streaming_owner.is_distinct_from("management"),
-            message.status.in_(_TERMINAL_RESUME_STATUSES), receipt.created_by == user_id,
+            *legacy_message, receipt.created_by == user_id,
             receipt.tenant_id == tenant_id, receipt.delete_flag == "N",
         ).limit(2)).all()
         if len(legacy) == 1:
             return LegacyResumeReceipt(*legacy[0])
+        if not legacy:
+            terminal_message = session.execute(select(message.message_id, message.status).where(*legacy_message)).one_or_none()
+            if terminal_message is not None:
+                return LegacyTerminalMessage(*terminal_message)
         assistant = session.scalar(select(message.message_id).where(
             message.conversation_id == conversation_id, message.delete_flag == "N", message.message_role == "assistant",
         ).limit(1))

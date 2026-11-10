@@ -16,6 +16,51 @@ ACTOR = ServicePrincipal("actor", "tenant")
 
 
 @pytest.mark.asyncio
+async def test_signed_inspect_supports_owned_terminal_message_reference(mocker):
+    import httpx
+    from fastapi import FastAPI
+
+    from contracts.agentos import AgentMessageRunLookup, AgentOperation
+    from contracts.constants import environment
+    from contracts.errors.exceptions import RuntimeUpstreamError
+    from management.clients.agentos import AgentOSClient
+    from runtime.agentos.middleware import AgentOSMiddleware
+
+    def read(conversation_id, assistant_message_id, user_id, tenant_id):
+        assert (conversation_id, assistant_message_id) == (42, 61)
+        if (user_id, tenant_id) != (ACTOR.user_id, ACTOR.tenant_id):
+            raise PermissionError
+        return RUN_ID, {
+            "conversation_id": 42, "assistant_message_id": 61, "status": "failed",
+            "cancellation_requested": False,
+        }
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch.object(environment, "JWT_SECRET", "synthetic-inspect-terminal-key")
+    mocker.patch.object(resume, "_control_io", side_effect=control_io)
+    lookup = mocker.patch.object(resume, "read_terminal_execution_for_message", side_effect=read)
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(resume.create_run_lifecycle_router())
+    transport = httpx.ASGITransport(app=app)
+    agentos = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs))
+    message = AgentMessageRunLookup(conversation_id=42, assistant_message_id=61)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://runtime") as client:
+        response = await client.post(f"/api{AgentOperation.INSPECT.value}", json=message.model_dump())
+        assert response.status_code == 401
+    lookup.assert_not_called()
+
+    result = await agentos.inspect_run(message, ACTOR.user_id, ACTOR.tenant_id)
+    assert (result.run_id, result.conversation_id, result.assistant_message_id, result.status) == (RUN_ID, 42, 61, "failed")
+    with pytest.raises(RuntimeUpstreamError) as denied:
+        await agentos.inspect_run(message, ACTOR.user_id, "other")
+    assert denied.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_standard_stop_dispatches_signed_debug_id_without_conversation_scope(mocker):
     import httpx
     from fastapi import FastAPI

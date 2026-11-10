@@ -11,6 +11,7 @@ from contracts.agentos import (
     AgentActiveRun,
     AgentMemoryReceipt,
     AgentMemoryStore,
+    AgentMessageRunLookup,
     AgentOperation,
     AgentRunLookup,
     AgentRunReference,
@@ -164,7 +165,9 @@ class AgentOSClient:
             AgentOperation.STOP, DebugRunReference(run_id=run_id), user_id, tenant_id,
         )
 
-    async def inspect_run(self, payload: AgentRunLookup, user_id: str, tenant_id: str) -> AgentRunState:
+    async def inspect_run(
+        self, payload: AgentRunLookup | AgentMessageRunLookup, user_id: str, tenant_id: str,
+    ) -> AgentRunState:
         result = await self._post_json(AgentOperation.INSPECT, payload, user_id, tenant_id)
         return self._validate_result(AgentRunState, result)
 

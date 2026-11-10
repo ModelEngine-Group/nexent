@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
 
-from contracts.agentos import REPLAY_COUNT_HEADER, AgentResume, AgentRunLookup, AgentRunReference, AgentStop
+from contracts.agentos import REPLAY_COUNT_HEADER, AgentMessageRunLookup, AgentResume, AgentRunLookup, AgentRunReference, AgentStop
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
@@ -331,15 +331,29 @@ async def resume_cursorless(conversation_id, user_id, tenant_id, client):
         return JSONResponse({"status": None, "message": "Stream already None: no_assistant_message"})
     if isinstance(current, store.LegacyResumeReceipt):
         state = await _inspect_legacy_run(conversation_id, current.run_id, user_id, tenant_id, client)
-        current = current.status if (
-            state is not None and state.assistant_message_id == current.assistant_message_id
-            and state.status == current.status
-        ) else None
+        current = _confirmed_legacy_status(conversation_id, current, state)
+    elif isinstance(current, store.LegacyTerminalMessage):
+        lookup = AgentMessageRunLookup(conversation_id=conversation_id, assistant_message_id=current.assistant_message_id)
+        try:
+            state = await client.inspect_run(lookup, user_id, tenant_id)
+        except RuntimeUpstreamError as exc:
+            if exc.status_code not in {404, 422, 503}:
+                raise
+            state = None
+        current = _confirmed_legacy_status(conversation_id, current, state)
     if isinstance(current, str):
         return JSONResponse({"status": current, "message": f"Stream already {current}: backend_{current}"})
     if current is not None:
         return await resume_turn(current, client)
     return await _resume_tracked_legacy(conversation_id, user_id, tenant_id, client)
+
+
+def _confirmed_legacy_status(conversation_id, message, state):
+    if state is not None and (state.conversation_id, state.assistant_message_id, state.status) == (
+        conversation_id, message.assistant_message_id, message.status,
+    ):
+        return message.status
+    return None
 
 
 async def _inspect_legacy_run(conversation_id, run_id, user_id, tenant_id, client):

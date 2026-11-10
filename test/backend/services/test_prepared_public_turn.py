@@ -271,6 +271,41 @@ async def test_cursorless_resume_confirms_legacy_receipt_with_agentos(flow, mock
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "failed", "stopped", "other-message", "other-conversation", "unconfirmed", 404, 422, 503])
+async def test_cursorless_resume_inspects_old_terminal_message_without_receipt(flow, mocker, outcome):
+    from contracts.agentos import AgentMessageRunLookup
+
+    _, _, client, _ = flow
+    status = outcome if outcome in {"completed", "failed", "stopped"} else "failed"
+    mocker.patch.object(
+        prepared_turn.store, "read_cursorless_resume",
+        return_value=prepared_turn.store.LegacyTerminalMessage(61, status),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    client.run_conversation = AsyncMock()
+    client.inspect_run = AsyncMock(return_value=SimpleNamespace(
+        conversation_id=43 if outcome == "other-conversation" else 42,
+        assistant_message_id=62 if outcome == "other-message" else 61,
+        status="running" if outcome == "unconfirmed" else status,
+    ))
+    if isinstance(outcome, int):
+        client.inspect_run.side_effect = RuntimeUpstreamError(status_code=outcome, content=b"", headers={})
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+
+    result = await runtime_client.forward_conversation_run(payload, *ACTOR)
+
+    client.inspect_run.assert_awaited_once_with(AgentMessageRunLookup(conversation_id=42, assistant_message_id=61), *ACTOR)
+    client.resume.assert_not_awaited()
+    if outcome in {"completed", "failed", "stopped"}:
+        assert json.loads(result.body) == {"status": status, "message": f"Stream already {status}: backend_{status}"}
+        client.find_active_run.assert_not_awaited()
+        client.run_conversation.assert_not_awaited()
+    else:
+        client.find_active_run.assert_awaited_once_with(42, *ACTOR)
+        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["available", "missing", "expired", "old_runtime", "missing_message", "broken"])
 async def test_cursorless_resume_adapts_retained_legacy_journal(flow, mocker, mode):
     from contracts.agentos import AgentResume

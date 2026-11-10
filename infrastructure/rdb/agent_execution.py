@@ -124,6 +124,35 @@ def _snapshot(row):
     }
 
 
+def read_terminal_execution_for_message(conversation_id, assistant_message_id, user_id, tenant_id):
+    """Resolve an unambiguous terminal execution of the latest legacy assistant."""
+    execution, message = AgentExecution, ConversationMessage
+    with get_db_session() as session:
+        if not _owned_conversation(session, conversation_id, user_id, tenant_id):
+            raise PermissionError("Conversation is not accessible")
+        latest = select(message.message_id).where(
+            message.conversation_id == conversation_id, message.delete_flag == "N",
+        ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1).correlate(None).scalar_subquery()
+        active = select(execution.run_id).where(
+            execution.conversation_id == conversation_id, *_active(),
+        ).correlate(None).exists()
+        rows = session.execute(select(execution, message.status).join(
+            message, message.message_id == execution.assistant_message_id,
+        ).where(
+            execution.conversation_id == conversation_id, execution.tenant_id == tenant_id,
+            execution.created_by == user_id, execution.delete_flag == "N",
+            message.message_id == assistant_message_id, message.message_id == latest,
+            message.created_by == user_id, message.message_role == "assistant",
+            message.streaming_owner.is_distinct_from("management"), ~active,
+        ).limit(2)).all()
+        if len(rows) != 1:
+            return None
+        run, status = rows[0]
+        if run.status == status and status in TERMINAL:
+            return run.run_id, _snapshot(run)
+        return None
+
+
 def read_execution(run_id, user_id, tenant_id, conversation_id=None, *, request_stop=False,
                    prevent_start=False) -> dict | None:
     with get_db_session() as session:

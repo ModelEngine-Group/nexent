@@ -10,10 +10,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentOperation, AgentResume, AgentRunLookup,
+    BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentMessageRunLookup, AgentOperation, AgentResume, AgentRunLookup,
     AgentRunReference, AgentRunState, AgentStop, CompatibilityStop, DebugRunReference,
 )
-from infrastructure.rdb.agent_execution import active_execution, read_execution
+from infrastructure.rdb.agent_execution import active_execution, read_execution, read_terminal_execution_for_message
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from infrastructure.redis.agent_events import START, RunJournal
 from infrastructure.redis.run_state import runtime_state_service
@@ -161,6 +161,24 @@ async def stop_run(payload: AgentStop | DebugRunReference, actor):
     return await run_state(payload, actor, request_stop=True)
 
 
+async def inspect_run(payload: AgentRunLookup | AgentMessageRunLookup, actor):
+    if isinstance(payload, AgentRunLookup):
+        return await run_state(payload, actor)
+    try:
+        result = await _control_io(
+            "agentos-inspect-terminal-message", read_terminal_execution_for_message,
+            payload.conversation_id, payload.assistant_message_id, actor.user_id, actor.tenant_id,
+        )
+    except PermissionError:
+        result = None
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
+    run_id, record = result
+    return AgentRunState(run_id=run_id, latest_event_id=None, **record)
+
+
 def create_run_lifecycle_router():
     router = APIRouter()
 
@@ -183,7 +201,8 @@ def create_run_lifecycle_router():
         AgentOperation.RESUME.value, handler(AgentResume, resume_run), methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
-        AgentOperation.INSPECT.value, handler(AgentRunLookup, run_state), methods=["POST"], include_in_schema=False,
+        AgentOperation.INSPECT.value, handler(AgentRunLookup | AgentMessageRunLookup, inspect_run),
+        methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
         AgentOperation.STOP.value, handler(AgentStop | DebugRunReference, stop_run),

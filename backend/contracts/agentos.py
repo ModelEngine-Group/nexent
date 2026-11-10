@@ -111,6 +111,13 @@ class AgentRunLookup(RunSpecModel):
     conversation_id: PositiveInt | None = None
 
 
+class AgentMessageRunLookup(RunSpecModel):
+    """Inspect the terminal execution that produced the latest assistant message."""
+
+    conversation_id: PositiveInt
+    assistant_message_id: PositiveInt
+
+
 class AgentStop(AgentRunLookup):
     prevent_start: bool = False
 
