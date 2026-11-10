@@ -54,6 +54,7 @@ class StreamingChannel:
         self._completion_status: Optional[str] = None
         self._error: Optional[str] = None
         self._journal: RunJournal | None = None
+        self.execution_identity = None
         self._journal_sequence = 0
         self._journal_fragment = ""
         self._journal_gap = False

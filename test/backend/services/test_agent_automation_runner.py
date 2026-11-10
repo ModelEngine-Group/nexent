@@ -34,9 +34,9 @@ def _load_runner_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)
     runner_module = importlib.import_module("management.services.automation.runner")
-    monkeypatch.setattr(runner_module, "forward_agent_background", fail_run_agent_background)
-    monkeypatch.setattr(runner_module, "forward_agent_stop", AsyncMock())
-    monkeypatch.setattr(runner_module, "forward_agent_inspect", AsyncMock(return_value=False))
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fail_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())
+    monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
         runner_module,
@@ -126,7 +126,7 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -159,11 +159,11 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
 @pytest.mark.asyncio
 async def test_runner_skips_when_conversation_agent_is_running(monkeypatch):
     runner_module = _load_runner_with_stubs(monkeypatch)
-    monkeypatch.setattr(runner_module, "forward_agent_inspect", AsyncMock(return_value=True))
+    monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value="a" * 32))
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -200,18 +200,18 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     async def fake_validate_bindings_available(*args, **kwargs):
         return {"available": True, "unavailable_bindings": []}
 
-    async def fake_run_agent_background(agent_request, user_id, tenant_id):
+    async def fake_run_agent_background(agent_request, run_id, user_id, tenant_id):
         captured["agent_request"] = agent_request
         captured["user_id"] = user_id
         captured["tenant_id"] = tenant_id
         return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "forward_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "has_active_run_for_conversation",
-        lambda conversation_id: False,
+        lambda *_scope: False,
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -283,7 +283,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         return run
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "forward_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(runner_module.agent_automation_db, "create_run", fake_create_run)
     monkeypatch.setattr(runner_module.agent_automation_db, "update_run", fake_update_run)
@@ -357,7 +357,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
         return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "forward_agent_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -408,11 +408,12 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
         return {"available": True, "unavailable_bindings": []}
 
     async def slow_run_agent_background(*args, **kwargs):
+        stopped["dispatched_run_id"] = kwargs["run_id"]
         await asyncio.sleep(1)
         return _Payload(assistant_message_id=456)
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "forward_agent_background", slow_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", slow_run_agent_background)
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *args: False)
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -431,9 +432,11 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     )
     monkeypatch.setattr(
         runner_module,
-        "forward_agent_stop",
-        AsyncMock(side_effect=lambda conversation_id, user_id, tenant_id: stopped.update({
-            "conversation_id": conversation_id,
+        "forward_scoped_stop",
+        AsyncMock(side_effect=lambda payload, user_id, tenant_id: stopped.update({
+            "conversation_id": payload.conversation_id,
+            "cancelled_run_id": payload.run_id,
+            "prevent_start": payload.prevent_start,
             "user_id": user_id,
             "tenant_id": tenant_id,
         })),
@@ -448,7 +451,11 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     assert run["error_code"] == "AUTOMATION_RUN_TIMEOUT"
     assert updates["task"]["last_run_status"] == "TIMEOUT"
     assert updates["task"]["consecutive_failures"] == 1
-    assert stopped == {"conversation_id": 100, "user_id": "user", "tenant_id": "tenant"}
+    assert stopped == {
+        "conversation_id": 100, "user_id": "user", "tenant_id": "tenant", "prevent_start": True,
+        "dispatched_run_id": stopped["cancelled_run_id"], "cancelled_run_id": stopped["dispatched_run_id"],
+    }
+    assert len(stopped["dispatched_run_id"]) == 32
 
 
 def test_finish_run_does_not_overwrite_canceled_run(monkeypatch):
@@ -646,7 +653,7 @@ async def test_execute_task_cancels_interrupted_run_and_maps_unexpected_failure(
         "cancel_run",
         lambda *args: canceled.append(args) or {"run_id": 22, "status": "CANCELED"},
     )
-    monkeypatch.setattr(runner, "cancel_for_conversation", AsyncMock(side_effect=lambda *args: canceled.append(args)))
+    monkeypatch.setattr(runner, "cancel_runtime_run", AsyncMock(side_effect=lambda *args: canceled.append(args)))
 
     async def interrupt(*args):
         raise asyncio.CancelledError
@@ -725,9 +732,9 @@ async def test_runtime_unavailable_during_inspection_fails_without_starting_agen
     task = _base_task()
     monkeypatch.setattr(runner_module.agent_automation_db, "has_active_run_for_conversation", lambda *_: False)
     inspect = AsyncMock(side_effect=runner_module.RuntimeServiceUnavailableError("Runtime service is unavailable"))
-    monkeypatch.setattr(runner_module, "forward_agent_inspect", inspect)
+    monkeypatch.setattr(runner_module, "forward_active_run", inspect)
     background = AsyncMock()
-    monkeypatch.setattr(runner_module, "forward_agent_background", background)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", background)
     monkeypatch.setattr(
         runner_module.agent_automation_db, "create_run",
         lambda values, _user: {"run_id": 3, **values},

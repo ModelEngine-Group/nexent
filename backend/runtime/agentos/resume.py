@@ -6,9 +6,14 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentResume, AgentRunReference, AgentRunState
+from contracts.agentos import (
+    BODY_KEY, PRINCIPAL_KEY, AgentActiveRun, AgentOperation, AgentResume, AgentRunLookup,
+    AgentRunReference, AgentRunState, AgentStop, CompatibilityStop,
+)
+from infrastructure.rdb.agent_execution import active_execution, read_execution
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from infrastructure.redis.agent_events import START, RunJournal
 from infrastructure.redis.run_state import runtime_state_service
@@ -36,7 +41,46 @@ async def _owned_journal(payload: AgentRunReference, actor) -> RunJournal:
     return RunJournal(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
 
 
-async def run_state(payload: AgentRunReference, actor, *, request_stop: bool = False) -> AgentRunState:
+async def find_active(payload: CompatibilityStop, actor) -> AgentActiveRun:
+    try:
+        run_id = await _control_io(
+            "agentos-active-execution", active_execution, payload.conversation_id, actor.user_id, actor.tenant_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
+    return AgentActiveRun(run_id=run_id)
+
+
+async def run_state(payload: AgentRunLookup, actor, *, request_stop: bool = False) -> AgentRunState:
+    prevent_start = isinstance(payload, AgentStop) and payload.prevent_start
+    if prevent_start and payload.conversation_id is None:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_REQUEST"})
+    try:
+        record = await _control_io(
+            "agentos-read-execution", read_execution, payload.run_id, actor.user_id, actor.tenant_id,
+            payload.conversation_id, request_stop=request_stop, prevent_start=prevent_start,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EXECUTION_STORE_UNAVAILABLE"}) from exc
+
+    if record is not None:
+        latest_event_id = None
+        if runtime_state_service.enabled:
+            journal = RunJournal(actor.tenant_id, actor.user_id, record["conversation_id"], payload.run_id)
+            try:
+                state = await _control_io("agentos-run-cursor", journal.run_state)
+            except (RedisError, RuntimeError):
+                state = None
+            if state is not None and state[0] != START:
+                latest_event_id = f"{payload.run_id}:{state[0].split('-')[0]}"
+        return AgentRunState(run_id=payload.run_id, latest_event_id=latest_event_id, **record)
+
+    if payload.conversation_id is None:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
     journal = await _owned_journal(payload, actor)
     try:
         state = await _control_io("agentos-run-state", journal.run_state, request_stop=request_stop)
@@ -126,10 +170,13 @@ def create_run_lifecycle_router():
         AgentOperation.RESUME.value, handler(AgentResume, resume_run), methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
-        AgentOperation.INSPECT.value, handler(AgentRunReference, run_state), methods=["POST"], include_in_schema=False,
+        AgentOperation.INSPECT.value, handler(AgentRunLookup, run_state), methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
-        AgentOperation.STOP.value, handler(AgentRunReference, run_state, request_stop=True),
+        AgentOperation.STOP.value, handler(AgentStop, run_state, request_stop=True),
         methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        AgentOperation.ACTIVE.value, handler(CompatibilityStop, find_active), methods=["POST"], include_in_schema=False,
     )
     return router

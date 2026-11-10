@@ -35,6 +35,8 @@ change:
     - Ordinary assistant projections replay by run ID and payload digest after committing their receipt in the same transaction.
     - Signed ordinary submissions bind a stable run ID to the actor, key and normalized request before execution.
     - Signed inspect and stop enforce actor ownership and scope cancellation to the exact run journal.
+    - Durable runtime state fences a stopped automation admission and preserves a committed assistant outcome after an expired Runtime lease.
+    - Public and automation cancellation use only their captured run identity and keep user and tenant authorization.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -46,9 +48,12 @@ change:
     - test/backend/app/test_agent_app.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_resume.py
+    - test/backend/app/test_agentos_tracked_background.py
+    - test/backend/services/test_startup_recovery_service.py
     - test/backend/services/test_agent_subscription_lifecycle.py
     - test/backend/app/test_conversation_run_app.py
     - test/backend/app/test_agentos_admission.py
     - test/backend/database/test_conversation_projection_receipt.py
     - test/backend/gateway/test_exposure.py
+    - frontend/tests/apiProxyRouting.test.mjs
   requirement_id: AOS-REQ-001

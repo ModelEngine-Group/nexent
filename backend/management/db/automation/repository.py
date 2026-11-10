@@ -453,13 +453,14 @@ def soft_delete_run(
         return as_dict(run) if run else None
 
 
-def cancel_runs_by_conversation(conversation_id: int, user_id: str, reason: str) -> int:
+def cancel_runs_by_conversation(conversation_id: int, user_id: str, tenant_id: str, reason: str) -> int:
     with get_db_session() as session:
         result = session.execute(
             update(AgentAutomationRun)
             .where(
                 AgentAutomationRun.conversation_id == conversation_id,
                 AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.tenant_id == tenant_id,
                 AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
                 AgentAutomationRun.delete_flag == "N",
             )
@@ -552,12 +553,26 @@ def get_active_run_task_ids(task_ids: List[int], tenant_id: str, user_id: str) -
         return {int(task_id) for task_id in rows}
 
 
-def has_active_run_for_conversation(conversation_id: int) -> bool:
+def list_active_runtime_run_ids(conversation_id: int, user_id: str, tenant_id: str) -> list[str]:
+    with get_db_session() as session:
+        return list(session.scalars(select(AgentAutomationRun.runtime_run_id).where(
+            AgentAutomationRun.conversation_id == conversation_id,
+            AgentAutomationRun.tenant_id == tenant_id,
+            AgentAutomationRun.user_id == user_id,
+            AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
+            AgentAutomationRun.delete_flag == "N",
+            AgentAutomationRun.runtime_run_id.is_not(None),
+        )))
+
+
+def has_active_run_for_conversation(conversation_id: int, user_id: str, tenant_id: str) -> bool:
     with get_db_session() as session:
         run = session.execute(
             select(AgentAutomationRun.run_id)
             .where(
                 AgentAutomationRun.conversation_id == conversation_id,
+                AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.tenant_id == tenant_id,
                 AgentAutomationRun.status.in_(["QUEUED", "RUNNING"]),
                 AgentAutomationRun.delete_flag == "N",
             )

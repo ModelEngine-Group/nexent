@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
-    AgentOperation, AgentResume, AgentRunReference, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
+    AgentOperation, AgentResume, AgentRunReference, AgentRunningState, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityOperation, CompatibilityRun,
     EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants import environment
@@ -193,6 +193,7 @@ async def test_signed_agentos_transport(monkeypatch):
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
+    await _assert_public_stop_and_background(monkeypatch)
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
@@ -471,6 +472,7 @@ async def _assert_run_lifecycle_over_signed_http(monkeypatch):
         return function(*args, **kwargs)
 
     monkeypatch.setattr(resume, "_control_io", control_io)
+    monkeypatch.setattr(resume, "read_execution", lambda *args, **kwargs: None)
     monkeypatch.setattr(resume, "RunJournal", Journal)
     monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=True))
     monkeypatch.setattr(
@@ -505,3 +507,99 @@ async def _assert_run_lifecycle_over_signed_http(monkeypatch):
         next_state = await agentos.inspect_run(next_run, "user-a", "tenant-a")
         assert next_state.status == "starting" and next_state.latest_event_id is None and not next_state.cancellation_requested
         assert requested == {first.run_id}
+
+
+async def _assert_public_stop_and_background(monkeypatch):
+    from management.api.agent import conversation_run
+    from management.services.agent import runtime_client
+    from runtime.agentos import resume
+    from runtime.api.agent import execution
+
+    run_id, blocked_id, automation_id = ("b" * 32, "c" * 32, "d" * 32)
+    states = {run_id: "running"}
+    stopped = []
+    launches = []
+
+    def require_owner(conversation_id, user_id, tenant_id):
+        if (conversation_id, user_id, tenant_id) != (42, "user-a", "tenant-a"):
+            raise PermissionError
+
+    async def control_io(_task, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    def read_execution(run_id, user_id, tenant_id, conversation_id, *, request_stop=False, prevent_start=False):
+        require_owner(42 if conversation_id is None else conversation_id, user_id, tenant_id)
+        if prevent_start and run_id not in states:
+            states[run_id] = "stopped"
+        if run_id not in states:
+            return None
+        if request_stop:
+            stopped.append(run_id)
+        return {
+            "conversation_id": 42, "status": states[run_id], "resource_versions": {"agent_id": 3, "agent_version_no": 4},
+            "assistant_message_id": 77 if states[run_id] == "completed" else None,
+            "cancellation_requested": request_stop and states[run_id] == "running",
+        }
+
+    def active_execution(conversation_id, user_id, tenant_id):
+        require_owner(conversation_id, user_id, tenant_id)
+        return run_id
+
+    async def stream(*, agent_request, user_id, tenant_id, skip_user_save, http_request):
+        require_owner(agent_request.conversation_id, user_id, tenant_id)
+        assert agent_request._track_execution and skip_user_save and not agent_request.enable_automation_tool
+        assert agent_request._message_source == "AUTOMATION"
+        launches.append(agent_request._projection_run_id)
+
+        async def chunks():
+            yield "data: done\n\n"
+            states[agent_request._projection_run_id] = "completed"
+
+        return StreamingResponse(chunks())
+
+    monkeypatch.setattr(resume, "_control_io", control_io)
+    monkeypatch.setattr(resume, "read_execution", read_execution)
+    monkeypatch.setattr(resume, "active_execution", active_execution)
+    monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
+    monkeypatch.setattr(execution, "read_execution", read_execution)
+    monkeypatch.setattr(execution, "run_blocking", control_io)
+    monkeypatch.setattr(execution, "_require_owned_conversation", lambda cid, actor: require_owner(cid, actor.user_id, actor.tenant_id))
+    monkeypatch.setattr(execution, "run_agent_stream", stream)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda auth: ("user-a", auth or "tenant-a"))
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(resume.create_run_lifecycle_router())
+    runtime.include_router(create_background_router(None, None, tracked_run=execution.run_agentos_tracked_background))
+    management = FastAPI(root_path="/api")
+    management.include_router(conversation_run.router)
+
+    with serve(runtime) as runtime_url, serve(management) as management_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        async with httpx.AsyncClient(trust_env=False) as browser:
+            response = await browser.get(f"{management_url}/api/agent/stop/{run_id}", headers={"Authorization": "foreign"})
+            assert response.status_code == 404 and not stopped
+            for public_id in (run_id, "42"):
+                response = await browser.get(f"{management_url}/api/agent/stop/{public_id}")
+                assert response.status_code == 200 and response.json()["run_id"] == run_id
+                assert response.json()["cancellation_requested"]
+
+        fenced = await agentos.stop_run(
+            AgentStop(run_id=blocked_id, conversation_id=42, prevent_start=True), "user-a", "tenant-a",
+        )
+        assert fenced.status == "stopped"
+        request = {"conversation_id": 42, "query": "automation"}
+        with pytest.raises(RuntimeUpstreamError) as blocked:
+            await agentos.run_tracked_background(BackgroundRun(run_id=blocked_id, request=request), "user-a", "tenant-a")
+        assert blocked.value.status_code == 409 and not launches
+
+        result = await agentos.run_tracked_background(BackgroundRun(run_id=automation_id, request=request), "user-a", "tenant-a")
+        assert (result.run_id, result.assistant_message_id) == (automation_id, 77)
+        state = await agentos.inspect_run(AgentRunReference(conversation_id=42, run_id=automation_id), "user-a", "tenant-a")
+        assert state.status == "completed" and state.resource_versions.agent_version_no == 4
+    assert stopped == [run_id, run_id, blocked_id]
+    assert launches == [automation_id]

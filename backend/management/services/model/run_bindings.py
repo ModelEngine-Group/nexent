@@ -19,9 +19,15 @@ from infrastructure.agent_model_config import (
 )
 
 
-async def create_model_config_list(tenant_id):
+async def create_model_config_list(tenant_id, *, versions=None):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = [create_model_config_from_record(record) for record in records]
+    if versions is not None:
+        for config, record in zip(model_list, records):
+            revision = record.get("update_time") or record.get("create_time")
+            if hasattr(revision, "isoformat"):
+                revision = revision.isoformat()
+            versions.setdefault(config.cite_name, (record.get("model_id"), revision or "legacy"))
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(

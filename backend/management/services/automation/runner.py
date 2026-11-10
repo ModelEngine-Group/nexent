@@ -3,11 +3,13 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
 from contracts.agent import AgentRequest
+from contracts.agentos import AgentStop
 from management.db.automation import repository as agent_automation_db
-from management.services.agent.runtime_client import forward_agent_background, forward_agent_inspect, forward_agent_stop
+from management.services.agent.runtime_client import forward_active_run, forward_scoped_stop, forward_tracked_background
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 
 from management.services.automation.capabilities import validate_bindings_available
@@ -40,11 +42,13 @@ class AgentAutomationRunner:
         lease_owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         scheduled = scheduled_fire_at or _parse_dt(task.get("next_fire_at"))
-        active = agent_automation_db.has_active_run_for_conversation(task["conversation_id"])
+        active = agent_automation_db.has_active_run_for_conversation(
+            task["conversation_id"], task["user_id"], task["tenant_id"],
+        )
         inspection_error = None
         if not active:
             try:
-                active = await forward_agent_inspect(task["conversation_id"], task["user_id"], task["tenant_id"])
+                active = await forward_active_run(task["conversation_id"], task["user_id"], task["tenant_id"]) is not None
             except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as exc:
                 inspection_error = exc
         if active:
@@ -86,6 +90,7 @@ class AgentAutomationRunner:
             "actual_fire_at": _utcnow(),
             "trigger_type": trigger_type,
             "status": AutomationRunStatus.RUNNING.value,
+            "runtime_run_id": uuid4().hex,
             "started_at": _utcnow(),
         }, task["user_id"])
         if lease_owner:
@@ -101,13 +106,13 @@ class AgentAutomationRunner:
                 timeout=max(1, timeout_seconds),
             )
         except asyncio.TimeoutError:
-            await self.cancel_for_conversation(task["conversation_id"], task["user_id"], task["tenant_id"])
+            await self.cancel_runtime_run(run.get("runtime_run_id"), task["conversation_id"], task["user_id"], task["tenant_id"])
             return self._finish_run(run, task, AutomationRunStatus.TIMEOUT.value, {
                 "error_code": "AUTOMATION_RUN_TIMEOUT",
                 "error_message": f"Automation run exceeded {timeout_seconds} seconds.",
             })
         except asyncio.CancelledError:
-            await self.cancel_for_conversation(task["conversation_id"], task["user_id"], task["tenant_id"])
+            await self.cancel_runtime_run(run.get("runtime_run_id"), task["conversation_id"], task["user_id"], task["tenant_id"])
             agent_automation_db.cancel_run(
                 run["run_id"],
                 task["tenant_id"],
@@ -172,8 +177,9 @@ class AgentAutomationRunner:
             tool_params=runtime_snapshot.get("tool_params"),
             enable_automation_tool=False,
         )
-        result = await forward_agent_background(
+        result = await forward_tracked_background(
             agent_request=agent_request,
+            run_id=run["runtime_run_id"],
             user_id=task["user_id"],
             tenant_id=task["tenant_id"],
         )
@@ -184,10 +190,17 @@ class AgentAutomationRunner:
         })
 
     async def cancel_for_conversation(self, conversation_id: int, user_id: str, tenant_id: str) -> None:
+        for run_id in agent_automation_db.list_active_runtime_run_ids(conversation_id, user_id, tenant_id):
+            await self.cancel_runtime_run(run_id, conversation_id, user_id, tenant_id)
+
+    async def cancel_runtime_run(self, run_id: str | None, conversation_id: int, user_id: str, tenant_id: str) -> None:
+        if run_id is None:
+            return
+        payload = AgentStop(run_id=run_id, conversation_id=conversation_id, prevent_start=True)
         try:
-            await asyncio.wait_for(forward_agent_stop(conversation_id, user_id, tenant_id), timeout=3)
+            await asyncio.wait_for(forward_scoped_stop(payload, user_id, tenant_id), timeout=3)
         except (TimeoutError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError):
-            logger.warning("Unable to stop automation for conversation_id=%s", conversation_id)
+            logger.warning("Unable to stop automation run_id=%s", run_id)
 
     def _fail_run(
         self,

@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Public conversation streaming facade backed by signed AgentOS calls."""
 
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -8,12 +9,14 @@ from starlette.responses import Response
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    EVENT_ID_PATTERN, IDEMPOTENCY_KEY_PATTERN, RUN_ID_PATTERN, AgentResume, CompatibilityConversationRun,
+    EVENT_ID_PATTERN, IDEMPOTENCY_KEY_PATTERN, RUN_ID_PATTERN, AgentResume, AgentStop, CompatibilityConversationRun,
 )
 from contracts.errors.exceptions import (
     RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError,
 )
-from management.services.agent.runtime_client import forward_conversation_resume, forward_conversation_run
+from management.services.agent.runtime_client import (
+    forward_active_run, forward_conversation_resume, forward_conversation_run, forward_debug_stop, forward_scoped_stop,
+)
 from management.services.permission.identity.session import get_current_user_id
 from management.utils.request_context import get_user_language
 
@@ -55,6 +58,46 @@ async def run_conversation(
             idempotency_key=idempotency_key,
         )
         return await forward_conversation_run(payload, user_id, tenant_id)
+    except RuntimeServiceTimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Runtime service timed out") from exc
+    except RuntimeServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Runtime service is unavailable") from exc
+    except RuntimeUpstreamError as exc:
+        return Response(content=exc.content, status_code=exc.status_code, headers=exc.headers)
+
+
+@router.get("/stop/{run_id}")
+async def stop_conversation(run_id: str, response: Response, authorization: Annotated[str | None, Header()] = None):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+
+    try:
+        if re.fullmatch(r"debug-[0-9a-f]{32}", run_id):
+            return await forward_debug_stop(run_id, user_id, tenant_id)
+
+        conversation_id = None
+        if not re.fullmatch(RUN_ID_PATTERN, run_id):
+            if not re.fullmatch(r"[0-9]{1,10}", run_id) or not 0 < int(run_id) <= 2147483647:
+                raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
+            conversation_id = int(run_id)
+            run_id = await forward_active_run(conversation_id, user_id, tenant_id)
+            if run_id is None:
+                return {"status": "success", "message": "No active run found", "already_stopped": True}
+
+        state = await forward_scoped_stop(AgentStop(run_id=run_id, conversation_id=conversation_id), user_id, tenant_id)
+        result = {
+            "status": "success",
+            "message": "Run cancellation requested" if state.cancellation_requested else "Run has already ended",
+            "run_id": state.run_id,
+            "run_status": state.status,
+            "cancellation_requested": state.cancellation_requested,
+        }
+        if not state.cancellation_requested:
+            result["already_stopped"] = True
+        return result
     except RuntimeServiceTimeoutError as exc:
         raise HTTPException(status_code=504, detail="Runtime service timed out") from exc
     except RuntimeServiceUnavailableError as exc:

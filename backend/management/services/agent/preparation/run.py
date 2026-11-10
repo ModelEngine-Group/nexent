@@ -133,6 +133,7 @@ async def create_agent_run_info(
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     export_evaluation: bool = False,
+    resource_versions: dict | None = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -190,7 +191,9 @@ async def create_agent_run_info(
         history=history,
         language=language,
     )
-    model_list = await create_model_config_list(tenant_id)
+    model_versions = {} if resource_versions is not None else None
+    model_options = {"versions": model_versions} if model_versions is not None else {}
+    model_list = await create_model_config_list(tenant_id, **model_options)
     create_config_kwargs = {
         "agent_id": agent_id,
         "tenant_id": tenant_id,
@@ -356,6 +359,12 @@ async def create_agent_run_info(
             agent_config, model_list, final_query, _convert_history_with_minio_files(history, language=language),
             tenant_id=tenant_id, conversation_id=conversation_id, language=language,
         )
+
+    if resource_versions is not None:
+        resource_versions.update(agent_id=int(agent_id), agent_version_no=version_no)
+        model_id, revision = model_versions.get(agent_config.model_name, (None, None))
+        if model_id is not None:
+            resource_versions.update(model_id=int(model_id), model_revision=revision)
 
     remote_mcp_list = await get_remote_mcp_server_list(
         tenant_id=tenant_id, is_need_auth=True

@@ -54,6 +54,9 @@ case:
   - order: 9
     action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
+  - order: 10
+    action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
+    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -64,6 +67,7 @@ case:
   - Management relays the Runtime response and run ID while preserving the signed scope and request context.
   - The admission claim returns the original run identity on retry without starting a second execution.
   - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
+  - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -131,4 +135,9 @@ case:
     description: Signed inspect and stop target one retained run and enforce user and tenant ownership.
     steps: [9]
     expected_results: [9]
+    forbidden_side_effects: [2]
+  - id: AC-10
+    description: Public stop and automation background operations preserve exact run identity across signed HTTP.
+    steps: [10]
+    expected_results: [10]
     forbidden_side_effects: [2]

@@ -182,6 +182,7 @@ class AgentRequest(BaseModel):
     _message_source: str = PrivateAttr(default="CHAT")
     _projection_run_id: str | None = PrivateAttr(default=None)
     _run_admission_scope: str | None = PrivateAttr(default=None)
+    _track_execution: bool = PrivateAttr(default=False)
     query: str
     clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None

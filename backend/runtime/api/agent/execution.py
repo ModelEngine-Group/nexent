@@ -1,12 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contracts.authentication import AuthenticatedIdentity
+import asyncio
 import logging
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError as PayloadValidationError
+from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, NL2AgentRunRequest
@@ -21,7 +23,12 @@ from management.services.conversation.creation_history import prepare_creation_h
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
-from contracts.agentos import AgentRunningState, BackgroundAgentResult, CompatibilityConversationRun
+from contracts.agentos import (
+    AgentRunningState, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, TrackedBackgroundResult,
+)
+from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
+from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.conversation_state import tenant_membership_matches
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -73,6 +80,7 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     except (PayloadValidationError, UnicodeEncodeError) as exc:
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
     context = Request({"type": "http", "headers": headers})
+    request._track_execution = not payload.resume and not request.is_debug
 
     async def execute():
         return await _run_public_conversation(
@@ -96,6 +104,12 @@ async def _run_public_conversation(agent_request, http_request, resolve_actor, r
             tenant_id=tenant_id,
             resume=resume,
         )
+    except ActiveExecutionError:
+        return JSONResponse(
+            {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}, status_code=409, headers={"X-Stream-Status": "conflict"},
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except WorkbenchError as e:
@@ -187,6 +201,84 @@ async def run_agentos_background(payload: dict, principal: ServicePrincipal) -> 
         agent_request=agent_request, user_id=principal.user_id, tenant_id=principal.tenant_id, skip_user_save=True,
     )
     return BackgroundAgentResult.model_validate(result)
+
+
+async def stop_agentos_debug(run_id: str, principal: ServicePrincipal):
+    def stop_debug():
+        with get_db_session() as session:
+            if not tenant_membership_matches(session, principal.user_id, principal.tenant_id):
+                raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
+        return stop_agent_tasks(run_id, principal.user_id)
+
+    return await run_blocking("agentos-stop-debug", stop_debug, lane="control-io", owner="runtime")
+
+
+async def run_agentos_tracked_background(payload: BackgroundRun, principal: ServicePrincipal) -> TrackedBackgroundResult:
+    try:
+        request = AgentRequest.model_validate(payload.request)
+    except PayloadValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
+    conversation_id = request.conversation_id
+    if type(conversation_id) is not int or conversation_id <= 0 or request.is_debug:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"})
+
+    await run_blocking(
+        "agentos-background-ownership", _require_owned_conversation,
+        conversation_id, principal, lane="control-io", owner="runtime",
+    )
+    request.enable_automation_tool = False
+    request._track_execution = True
+    request._projection_run_id = payload.run_id
+    request._message_source = "AUTOMATION"
+
+    async def read_state(**options):
+        return await run_blocking(
+            "agentos-background-state", read_execution, payload.run_id, principal.user_id, principal.tenant_id,
+            conversation_id, lane="control-io", owner="runtime", **options,
+        )
+
+    producer = None
+    try:
+        if await read_state() is not None:
+            raise ActiveExecutionError
+        response = await run_agent_stream(
+            agent_request=request, http_request=None, user_id=principal.user_id, tenant_id=principal.tenant_id,
+            skip_user_save=True,
+        )
+        if response.headers.get("X-Stream-Status") == "conflict":
+            raise ActiveExecutionError
+        producer = getattr(response, "agentos_producer", None)
+        chunks = 0
+        async for _ in response.body_iterator:
+            chunks += 1
+        if producer is not None:
+            try:
+                await asyncio.shield(producer)
+            except asyncio.CancelledError:
+                if not producer.cancelled() or asyncio.current_task().cancelling():
+                    raise
+        state = await read_state()
+    except asyncio.CancelledError:
+        try:
+            await read_state(request_stop=True, prevent_start=True)
+        except (PermissionError, SQLAlchemyError, RuntimeError):
+            if producer is not None:
+                producer.cancel()
+            logger.warning("Could not persist background disconnect cancellation for run_id=%s", payload.run_id)
+        raise
+    except ActiveExecutionError as exc:
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
+
+    if state is None or state["status"] != "completed":
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_BACKGROUND_NOT_COMPLETED"})
+    return TrackedBackgroundResult(
+        run_id=payload.run_id, conversation_id=conversation_id,
+        assistant_message_id=state["assistant_message_id"], chunks=chunks,
+    )
 
 
 async def inspect_agentos_conversation(conversation_id: int, principal: ServicePrincipal) -> AgentRunningState:

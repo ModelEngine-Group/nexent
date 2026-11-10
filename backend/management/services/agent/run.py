@@ -42,8 +42,10 @@ from management.services.agent.stream import (
 from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
 )
+from infrastructure.rdb.agent_execution import RunIdentity, mark_running
 from nexent.core.concurrency import (
     ManagedExecution,
+    run_blocking,
 )
 from nexent.monitor import (
     agent_monitoring_context,
@@ -125,6 +127,7 @@ async def prepare_agent_run(
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
     reservation_token: Optional[str] = None,
+    resource_versions: dict | None = None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
@@ -191,6 +194,8 @@ async def prepare_agent_run(
         ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
+    if resource_versions is not None:
+        create_run_kwargs["resource_versions"] = resource_versions
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
@@ -201,6 +206,11 @@ async def prepare_agent_run(
             runtime_mount_plan, agent_run_info.agent_config
         )
         agent_run_info.agent_config = executable_tree.root.agent_config
+        if resource_versions is not None:
+            resource_versions["mounted_agents"] = [
+                {"agent_id": child.agent_id, "version_no": child.version_no}
+                for child in runtime_mount_plan.child_mounts
+            ]
     agent_run_info.runtime_metadata = dict(
         getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
     )
@@ -305,13 +315,14 @@ async def generate_stream(
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
     _outer_task = asyncio.current_task()
+    journal = _run_journal(channel)
     cancel_poll_task = (
         asyncio.create_task(
             _cancel_task_on_runtime_signal(
                 agent_request.conversation_id, user_id, _outer_task
             )
         )
-        if _outer_task
+        if _outer_task and not isinstance(journal, RunIdentity)
         else None
     )
 
@@ -326,7 +337,6 @@ async def generate_stream(
     memory_enabled_runtime = False
     agent_run_info = None
     scoped_preparation_stop = False
-    journal = _run_journal(channel)
     try:
         if enable_memory:
             # Resolve the user-level switch for tool loading only.
@@ -340,12 +350,15 @@ async def generate_stream(
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
         preparation_poll = None
+        resource_versions = {}
         try:
             if journal is not None and _outer_task is not None:
                 if await _journal_stop_requested(journal):
                     raise asyncio.CancelledError(AGENTOS_PREPARATION_STOP)
                 preparation_poll = asyncio.create_task(_cancel_preparation_on_agentos_stop(journal, _outer_task))
             prepare_kwargs = {}
+            if isinstance(journal, RunIdentity):
+                prepare_kwargs["resource_versions"] = resource_versions
             if reservation_token is not None:
                 prepare_kwargs["reservation_token"] = reservation_token
             agent_run_info, memory_context = await prepare_agent_run(
@@ -366,6 +379,17 @@ async def generate_stream(
         finally:
             if preparation_poll is not None:
                 preparation_poll.cancel()
+
+        if isinstance(journal, RunIdentity):
+            for version in ("runtime_metadata_version", "workbench_config_version"):
+                value = getattr(agent_request, f"_{version}", None)
+                if type(value) is int:
+                    resource_versions[version] = value
+            if not await run_blocking(
+                "agentos-execution-running", mark_running, journal, resource_versions,
+                lane="control-io", owner="runtime",
+            ):
+                agent_run_manager.stop_local_run(_agent_run_identifier(agent_request), user_id, agent_run_info)
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -449,7 +473,9 @@ async def generate_stream(
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
         if (
-            agent_run_info is None
+            (agent_run_info is None or (
+                isinstance(journal, RunIdentity) and getattr(agent_run_info, "thread_future", None) is None
+            ))
             and deferred_run is not None
             and execution is not None
             and not execution.future.done()

@@ -776,7 +776,9 @@ class AgentAutomationFacade:
         if run["status"] not in {AutomationRunStatus.QUEUED.value, AutomationRunStatus.RUNNING.value}:
             return run
 
-        await self._request_conversation_stop(run["conversation_id"], user_id, tenant_id)
+        from management.services.automation.runner import agent_automation_runner
+
+        await agent_automation_runner.cancel_runtime_run(run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id)
         canceled = agent_automation_db.cancel_run(
             run_id,
             tenant_id,
@@ -846,7 +848,7 @@ class AgentAutomationFacade:
 
     async def _cancel_active_runs_for_conversation(self, conversation_id: int, user_id: str, tenant_id: str, reason: str) -> None:
         await self._request_conversation_stop(conversation_id, user_id, tenant_id)
-        agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, reason)
+        agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, tenant_id, reason)
 
     async def _request_conversation_stop(self, conversation_id: int, user_id: str, tenant_id: str) -> None:
         from management.services.automation.runner import agent_automation_runner

@@ -22,6 +22,7 @@ def journal(mocker):
 
     mocker.patch.object(resume, "_control_io", side_effect=control_io)
     mocker.patch.object(resume, "conversation_belongs_to", return_value=True)
+    mocker.patch.object(resume, "read_execution", return_value=None)
     mocker.patch.object(resume, "runtime_state_service", MagicMock(enabled=True))
     return mocker.patch.object(resume, "RunJournal").return_value
 
@@ -159,3 +160,25 @@ async def test_stop_denial_has_no_conversation_wide_fallback(journal, owned, ena
     assert (exc.value.status_code, exc.value.detail) == (status, {"code": code})
     assert journal.run_state.call_count == int(owned and enabled)
     resume.runtime_state_service.set_cancel_signal.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_durable_status_returns_resolved_versions_without_redis(journal):
+    from contracts.agentos import AgentRunLookup
+
+    resume.runtime_state_service.enabled = False
+    resume.read_execution.return_value = {
+        "conversation_id": 42, "status": "completed", "assistant_message_id": 97,
+        "cancellation_requested": False,
+        "resource_versions": {"agent_id": 9, "agent_version_no": 3, "model_id": 8, "model_revision": "2026-11-10"},
+    }
+
+    result = await resume.run_state(AgentRunLookup(run_id=RUN_ID), ACTOR)
+
+    assert (result.conversation_id, result.status, result.latest_event_id, result.assistant_message_id) == (
+        42, "completed", None, 97,
+    )
+    assert result.resource_versions.agent_version_no == 3
+    assert result.resource_versions.model_revision == "2026-11-10"
+    resume.read_execution.assert_called_once_with(RUN_ID, "actor", "tenant", None, request_stop=False, prevent_start=False)
+    journal.run_state.assert_not_called()

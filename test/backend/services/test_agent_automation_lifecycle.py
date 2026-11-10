@@ -2,13 +2,14 @@
 import os
 import sys
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
+from contracts.agentos import TrackedBackgroundResult
 from management.services.automation import conversation as adapter_module
 from management.services.automation import service as facade_module
 # Exercise the real automation runner with Agent execution isolated.
@@ -176,7 +177,7 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             },
         }
 
-    async def fake_run_agent_background(agent_request, user_id, tenant_id, skip_user_save=False):
+    async def fake_run_agent_background(agent_request, run_id, user_id, tenant_id):
         captured["agent_calls"] += 1
         captured["agent_request"] = agent_request
         messages.append({
@@ -185,7 +186,10 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             "role": "assistant",
             "message": [{"type": "final_answer", "content": "本周管理周报"}],
         })
-        return {"assistant_message_id": messages[-1]["message_id"]}
+        return TrackedBackgroundResult(
+            run_id=run_id, conversation_id=agent_request.conversation_id,
+            assistant_message_id=messages[-1]["message_id"], chunks=1,
+        )
 
     def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id):
         message_id = len(messages) + 1
@@ -218,8 +222,8 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         return tasks[task_id]
 
     monkeypatch.setattr(runner_module, "validate_bindings_available", fake_validate_bindings_available)
-    monkeypatch.setattr(runner_module, "run_agent_background", fake_run_agent_background)
-    monkeypatch.setattr(runner_module, "is_agent_running", lambda *args: False)
+    monkeypatch.setattr(runner_module, "forward_tracked_background", fake_run_agent_background)
+    monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
     monkeypatch.setattr(
         runner_module.automation_conversation_adapter,
         "append_run_prompt",

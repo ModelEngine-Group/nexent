@@ -15,6 +15,7 @@ from typing import (
 )
 
 from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
 from management.services.agent.lifecycle import (
     agent_run_manager,
@@ -94,6 +95,7 @@ from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
+from infrastructure.rdb.agent_execution import RunIdentity, finish_execution, stop_requested
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import (
     runtime_state_service,
@@ -227,6 +229,12 @@ async def _consume_agent_stream_producer(
             )
             _channel_cleanup_tasks.add(cleanup_task)
             cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+        identity = getattr(channel, "execution_identity", None)
+        if isinstance(identity, RunIdentity):
+            await run_blocking(
+                "agentos-execution-finish", finish_execution, identity, channel.completion_status or fallback_status,
+                lane="control-io", owner="runtime",
+            )
         logger.info(
             "Agent stream cleanup conversation=%s status=%s active_runs=%s "
             "active_channels=%s active_producers=%s replay_bytes=%s",
@@ -239,24 +247,31 @@ async def _consume_agent_stream_producer(
         )
 
 
-def _run_journal(channel) -> RunJournal | None:
+def _run_journal(channel) -> RunIdentity | RunJournal | None:
+    identity = getattr(channel, "execution_identity", None)
+    if isinstance(identity, RunIdentity):
+        return identity
     journal = getattr(channel, "run_journal", None)
     return journal if isinstance(journal, RunJournal) else None
 
 
-async def _journal_stop_requested(journal: RunJournal | None) -> bool:
+async def _journal_stop_requested(journal: RunIdentity | RunJournal | None) -> bool:
     if journal is None:
         return False
     try:
+        if isinstance(journal, RunIdentity):
+            return await run_blocking(
+                "agentos-poll-stop", stop_requested, journal, lane="control-io", owner="runtime",
+            )
         return await run_blocking(
             "agentos-poll-stop", journal.is_stop_requested, lane="control-io", owner="runtime",
         )
-    except (RedisError, RuntimeError):
+    except (RedisError, SQLAlchemyError, RuntimeError):
         logger.warning("Could not check AgentOS stop signal for run %s", journal.run_id)
         return False
 
 
-async def _cancel_preparation_on_agentos_stop(journal: RunJournal, task: asyncio.Task) -> None:
+async def _cancel_preparation_on_agentos_stop(journal: RunIdentity | RunJournal, task: asyncio.Task) -> None:
     while not task.done():
         if await _journal_stop_requested(journal):
             task.cancel(AGENTOS_PREPARATION_STOP)
@@ -269,9 +284,11 @@ async def _poll_runtime_cancel_signal(
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
-        if await _journal_stop_requested(journal) or await runtime_state_service.is_cancelled_async(
-            user_id=user_id, conversation_id=conversation_id
-        ):
+        scoped_stop = await _journal_stop_requested(journal)
+        legacy_stop = not isinstance(journal, RunIdentity) and not scoped_stop and await runtime_state_service.is_cancelled_async(
+            user_id=user_id, conversation_id=conversation_id,
+        )
+        if scoped_stop or legacy_stop:
             stop_event.set()
             if cancellation_scope is not None:
                 cancellation_scope.cancel()
@@ -364,6 +381,8 @@ async def _stream_agent_chunks(
             message=[],
             minio_files=None,
         )
+        tracking = _run_journal(channel)
+        projection_options = {"execution_identity": tracking} if isinstance(tracking, RunIdentity) else {}
         try:
             streaming_message_id = save_message(
                 assistant_message_req,
@@ -371,8 +390,11 @@ async def _stream_agent_chunks(
                 tenant_id=tenant_id,
                 status="streaming",
                 message_source=getattr(agent_request, "_message_source", "CHAT"),
+                **projection_options,
             )
         except Exception as msg_exc:
+            if isinstance(tracking, RunIdentity):
+                raise
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )

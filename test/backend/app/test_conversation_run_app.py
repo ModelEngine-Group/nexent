@@ -95,3 +95,30 @@ async def test_public_run_forwards_idempotency_key_only_for_new_conversations(ap
             assert response.status_code == 422
 
     forward.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("path_id", "conversation_id"), [(RUN_ID, None), ("42", 42)])
+async def test_public_stop_dispatches_one_exact_run(app, mocker, path_id, conversation_id):
+    from contracts.agentos import AgentRunState, AgentStop
+
+    active = mocker.patch.object(conversation_run, "forward_active_run", return_value=RUN_ID)
+    stop = mocker.patch.object(conversation_run, "forward_scoped_stop", return_value=AgentRunState(
+        run_id=RUN_ID, conversation_id=42, status="running", latest_event_id=None, cancellation_requested=True,
+    ))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        response = await client.get(f"/agent/stop/{path_id}")
+    assert response.status_code == 200
+    assert response.json()["run_id"] == RUN_ID and response.json()["cancellation_requested"]
+    assert active.await_count == int(conversation_id is not None)
+    stop.assert_awaited_once_with(AgentStop(run_id=RUN_ID, conversation_id=conversation_id), "actor", "tenant")
+
+
+@pytest.mark.asyncio
+async def test_public_numeric_stop_without_active_run_never_broadcasts(app, mocker):
+    mocker.patch.object(conversation_run, "forward_active_run", return_value=None)
+    stop = mocker.patch.object(conversation_run, "forward_scoped_stop")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        response = await client.get("/agent/stop/42")
+    assert response.status_code == 200 and response.json()["already_stopped"]
+    stop.assert_not_awaited()

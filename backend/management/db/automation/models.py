@@ -118,6 +118,7 @@ class AgentAutomationRun(TableBase):
     actual_fire_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Actual fire time")
     trigger_type = Column(String(32), nullable=False, doc="SCHEDULED or MANUAL")
     status = Column(String(32), nullable=False, doc="Run lifecycle status")
+    runtime_run_id = Column(String(32), doc="Stable AgentOS execution ID assigned before dispatch")
     generated_prompt = Column(Text, nullable=True, doc="Prompt appended to the conversation")
     user_message_id = Column(BigInteger, nullable=True, doc="Automation user message ID")
     assistant_message_id = Column(BigInteger, nullable=True, doc="Assistant message ID")

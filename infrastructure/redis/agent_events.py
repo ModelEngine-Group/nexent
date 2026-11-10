@@ -83,6 +83,24 @@ class RunJournal:
     def is_stop_requested(self) -> bool:
         return bool(runtime_state_service.client.exists(self.cancel_key))
 
+    def repair_terminal(self, status: str) -> None:
+        # Finish an existing journal exactly once; never reconstruct expired output.
+        runtime_state_service.client.eval(
+            """
+            local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
+            if #tail == 0 then return end
+            local fields = tail[1][2]
+            for i = 1, #fields, 2 do
+                if fields[i] == 'kind' and fields[i + 1] == 'terminal' then return end
+            end
+            local index = tonumber(string.match(tail[1][1], '^%d+'))
+            local next_id = string.format('%.0f-0', index + 1)
+            redis.call('XADD', KEYS[1], 'MAXLEN', '=', ARGV[2], next_id, 'kind', 'terminal', 'status', ARGV[1])
+            redis.call('EXPIRE', KEYS[1], ARGV[3])
+            """,
+            1, self.key, status, max(1, RUNTIME_STREAM_MAX_LEN), max(1, RUNTIME_COMPLETED_TTL_SECONDS),
+        )
+
     def replay(self, after_id):
         with runtime_state_service.client.pipeline() as pipe:
             pipe.xrange(self.key, min=after_id, max=after_id, count=1)

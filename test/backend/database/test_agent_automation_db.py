@@ -423,9 +423,9 @@ def test_run_crud_helpers_cover_lifecycle_and_owner_filters(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") == payload
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") == payload
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["CANCELED"]) == payload
-    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "deleted") == 1
+    assert agent_automation_db.cancel_runs_by_conversation(9, "user", "tenant", "deleted") == 1
     assert agent_automation_db.list_runs(1, "tenant", "user", limit=1) == [payload]
-    assert agent_automation_db.has_active_run_for_conversation(9) is True
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is True
 
 
 def test_list_runs_paginated_counts_and_applies_offset(monkeypatch):
@@ -503,5 +503,5 @@ def test_optional_database_rows_return_empty_values(monkeypatch):
     assert agent_automation_db.get_run(3, "tenant", "user") is None
     assert agent_automation_db.cancel_run(3, "tenant", "user", "cancel") is None
     assert agent_automation_db.soft_delete_run(3, "tenant", "user", ["FAILED"]) is None
-    assert agent_automation_db.has_active_run_for_conversation(9) is False
+    assert agent_automation_db.has_active_run_for_conversation(9, "user", "tenant") is False
     assert agent_automation_db.renew_task_lock(1, "scheduler-a", 30) is False

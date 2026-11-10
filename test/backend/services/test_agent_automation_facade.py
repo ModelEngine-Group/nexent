@@ -759,9 +759,8 @@ async def test_confirm_proposal_rejects_and_marks_expired_proposal(monkeypatch):
 async def test_cancel_run_marks_running_run_canceled(monkeypatch):
     stopped = {}
 
-    async def fake_stop(conversation_id, user_id, tenant_id):
-        stopped["conversation_id"] = conversation_id
-        stopped["user_id"] = user_id
+    async def fake_stop(runtime_run_id, conversation_id, user_id, tenant_id):
+        stopped.update(runtime_run_id=runtime_run_id, conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id)
 
     monkeypatch.setattr(
         facade_module.agent_automation_db,
@@ -772,6 +771,7 @@ async def test_cancel_run_marks_running_run_canceled(monkeypatch):
             "user_id": user_id,
             "task_id": 88,
             "conversation_id": 99,
+            "runtime_run_id": "a" * 32,
             "status": AutomationRunStatus.RUNNING.value,
         },
     )
@@ -793,12 +793,12 @@ async def test_cancel_run_marks_running_run_canceled(monkeypatch):
     )
 
     service = AgentAutomationFacade()
-    monkeypatch.setattr(service, "_request_conversation_stop", fake_stop)
+    monkeypatch.setattr("management.services.automation.runner.agent_automation_runner.cancel_runtime_run", fake_stop)
 
     canceled = await service.cancel_run(7, "tenant", "user")
 
     assert canceled["status"] == AutomationRunStatus.CANCELED.value
-    assert stopped == {"conversation_id": 99, "user_id": "user"}
+    assert stopped == {"runtime_run_id": "a" * 32, "conversation_id": 99, "user_id": "user", "tenant_id": "tenant"}
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):

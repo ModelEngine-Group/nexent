@@ -266,3 +266,30 @@ async def test_upload_recovery_uses_management_lane_and_returns_owned_task(monke
     assert manager.run.await_count == 2
     assert fail_uploads.call_count == 2
     assert all(call.args[1] == "nexent-config" for call in fail_uploads.call_args_list)
+
+
+def test_durable_recovery_retries_failed_redis_write_without_clearing_repair(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    from infrastructure.rdb.agent_execution import RunIdentity
+    from runtime import recovery
+
+    identity = RunIdentity("tenant", "user", 42, "a" * 32)
+    renew = MagicMock()
+    reclaim = MagicMock()
+    clear = MagicMock()
+    journal = MagicMock()
+    journal.return_value.repair_terminal.side_effect = [ConnectionError("Redis unavailable"), None]
+    monkeypatch.setattr(recovery, "renew_execution_leases", renew)
+    monkeypatch.setattr(recovery, "recover_expired_executions", reclaim)
+    monkeypatch.setattr(recovery, "pending_journal_repairs", lambda: [(identity, "stopped")])
+    monkeypatch.setattr(recovery, "mark_journal_repaired", clear)
+    monkeypatch.setattr(recovery, "RunJournal", journal)
+    monkeypatch.setattr(recovery, "runtime_state_service", MagicMock(enabled=True))
+
+    recovery.reconcile_executions()
+    clear.assert_not_called()
+    recovery.reconcile_executions()
+    clear.assert_called_once_with(identity)
+    assert renew.call_count == reclaim.call_count == 2
+    assert journal.return_value.repair_terminal.call_args_list == [call("stopped"), call("stopped")]

@@ -476,3 +476,36 @@ async def test_agentos_stop_between_preparation_and_sdk_dispatch(lifecycle, monk
     worker.agent_run.assert_not_called()
     env.deferred.cancel.assert_called_once()
     assert info.thread_future is env.future
+
+
+@pytest.mark.asyncio
+async def test_tracked_run_owns_identity_and_finalizes_with_redis_disabled(lifecycle, monkeypatch):
+    env = lifecycle
+    execution = service_tests.agent_execution
+    calls = []
+    run_id = "d" * 32
+    env.request._track_execution = True
+    env.request._projection_run_id = run_id
+    monkeypatch.setattr(env.service.runtime_state_service, "enabled", False)
+    monkeypatch.setattr(env.service, "track_execution", lambda identity: calls.append(("track", identity.run_id)))
+    monkeypatch.setattr(env.service, "untrack_execution", lambda identity: None)
+    monkeypatch.setattr(env.service, "begin_execution", lambda identity: calls.append(("begin", identity.run_id)))
+    monkeypatch.setattr(
+        execution, "finish_execution", lambda identity, status: calls.append(("finish", identity.run_id, status)),
+    )
+
+    async def direct(_name, function, *args, **kwargs):
+        return function(*args)
+
+    async def source(_request, **kwargs):
+        assert kwargs["channel"].execution_identity.run_id == run_id
+        env.channel.complete("completed")
+        env.future.set_result(None)
+        yield "done"
+
+    monkeypatch.setattr(env.service, "run_blocking", direct)
+    monkeypatch.setattr(execution, "run_blocking", direct)
+    response = await env.start(source)
+    await response.agentos_producer
+    assert response.headers["run_id"] == response.headers["X-AgentOS-Run-ID"] == run_id
+    assert calls == [("begin", run_id), ("track", run_id), ("finish", run_id, "completed")]

@@ -20,6 +20,7 @@ class CompatibilityOperation(str, Enum):
     BACKGROUND = NAMESPACE + "v1/compat/agent/background"
     INSPECT = NAMESPACE + "v1/compat/agent/inspect"
     EVALUATION_CASE = NAMESPACE + "v1/compat/agent/evaluation-case"
+    DEBUG_STOP = NAMESPACE + "v1/compat/agent/debug-stop"
 
 
 class CompatibilityRun(BaseModel):
@@ -71,6 +72,8 @@ class AgentOperation(str, Enum):
     RESUME = NAMESPACE + "v1/agent/resume"
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"
+    ACTIVE = NAMESPACE + "v1/agent/active"
+    BACKGROUND = NAMESPACE + "v1/agent/background"
 
 
 class RunSpecModel(BaseModel):
@@ -90,10 +93,52 @@ class AgentResume(AgentRunReference):
     after_event_id: str | None = Field(default=None, pattern=EVENT_ID_PATTERN)
 
 
+class DebugRunReference(RunSpecModel):
+    run_id: str = Field(pattern=r"^debug-[0-9a-f]{32}$")
+
+
+class AgentRunLookup(RunSpecModel):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    conversation_id: PositiveInt | None = None
+
+
+class AgentStop(AgentRunLookup):
+    prevent_start: bool = False
+
+
+class AgentActiveRun(RunSpecModel):
+    run_id: str | None = Field(pattern=RUN_ID_PATTERN)
+
+
+class BackgroundRun(CompatibilityRun):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+
+
+class TrackedBackgroundResult(BackgroundAgentResult):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+
+
+class AgentVersionReference(RunSpecModel):
+    agent_id: PositiveInt
+    version_no: int = Field(ge=0)
+
+
+class AgentResourceVersions(RunSpecModel):
+    agent_id: PositiveInt | None = None
+    agent_version_no: int | None = Field(default=None, ge=0)
+    model_id: PositiveInt | None = None
+    model_revision: str | None = None
+    mounted_agents: list[AgentVersionReference] = Field(default_factory=list)
+    runtime_metadata_version: int | None = Field(default=None, ge=0)
+    workbench_config_version: int | None = Field(default=None, ge=0)
+
+
 class AgentRunState(AgentRunReference):
     status: Literal["starting", "running", "completed", "failed", "stopped"]
     latest_event_id: str | None = Field(pattern=EVENT_ID_PATTERN)
     cancellation_requested: bool
+    resource_versions: AgentResourceVersions | None = None
+    assistant_message_id: PositiveInt | None = None
 
 
 class ToolBinding(RunSpecModel):

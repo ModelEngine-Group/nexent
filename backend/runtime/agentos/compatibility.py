@@ -8,11 +8,12 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, CompatibilityConversationRun, CompatibilityOperation, CompatibilityRun, CompatibilityStop,
+    BODY_KEY, PRINCIPAL_KEY, AgentOperation, BackgroundRun, CompatibilityConversationRun, CompatibilityOperation,
+    CompatibilityRun, CompatibilityStop, DebugRunReference,
 )
 
 
-def create_compatibility_router(run, stop, *, conversation_run=None) -> APIRouter:
+def create_compatibility_router(run, stop, *, conversation_run=None, debug_stop=None) -> APIRouter:
     router = APIRouter()
 
     @router.post(CompatibilityOperation.RUN.value, include_in_schema=False)
@@ -49,10 +50,22 @@ def create_compatibility_router(run, stop, *, conversation_run=None) -> APIRoute
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         return await stop(payload.conversation_id, principal)
 
+    if debug_stop is not None:
+        @router.post(CompatibilityOperation.DEBUG_STOP.value, include_in_schema=False)
+        async def stop_debug(request: Request):
+            principal = request.scope.get(PRINCIPAL_KEY)
+            if principal is None:
+                return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+            try:
+                payload = DebugRunReference.model_validate_json(request.scope[BODY_KEY])
+            except ValidationError:
+                return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+            return await debug_stop(payload.run_id, principal)
+
     return router
 
 
-def create_background_router(run, inspect) -> APIRouter:
+def create_background_router(run, inspect, *, tracked_run=None) -> APIRouter:
     router = APIRouter()
 
     @router.post(CompatibilityOperation.BACKGROUND.value, include_in_schema=False)
@@ -66,6 +79,18 @@ def create_background_router(run, inspect) -> APIRouter:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
 
         return await run_until_disconnect(request, run(payload.request, principal))
+
+    if tracked_run is not None:
+        @router.post(AgentOperation.BACKGROUND.value, include_in_schema=False)
+        async def run_tracked_background(request: Request):
+            principal = request.scope.get(PRINCIPAL_KEY)
+            if principal is None:
+                return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+            try:
+                payload = BackgroundRun.model_validate_json(request.scope[BODY_KEY])
+            except ValidationError:
+                return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+            return await run_until_disconnect(request, tracked_run(payload, principal))
 
     @router.post(CompatibilityOperation.INSPECT.value, include_in_schema=False)
     async def inspect_agent(request: Request):

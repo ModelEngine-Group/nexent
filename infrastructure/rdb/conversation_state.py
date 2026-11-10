@@ -48,7 +48,13 @@ def fail_streaming_assistant_messages() -> list[dict]:
     corresponding short-lived Redis state with the existing runtime-state API.
     The conditional update makes repeated startup recovery idempotent.
     """
+    from infrastructure.rdb.agent_execution import AgentExecution
+
     with get_db_session() as session:
+        tracked_message = select(AgentExecution.run_id).where(
+            AgentExecution.assistant_message_id == ConversationMessage.message_id,
+            AgentExecution.delete_flag == "N",
+        ).exists()
         rows = (
             session.query(
                 ConversationMessage.message_id,
@@ -59,6 +65,7 @@ def fail_streaming_assistant_messages() -> list[dict]:
                 ConversationMessage.message_role == "assistant",
                 ConversationMessage.status == "streaming",
                 ConversationMessage.delete_flag == "N",
+                ~tracked_message,
             )
             .with_for_update()
             .all()

@@ -698,8 +698,8 @@
       "method": "GET",
       "path": "/api/agent/stop/{run_id}",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/agent/execution.py",
+      "target": "management",
+      "source": "backend/management/api/agent/conversation_run.py",
       "route_id": "route-8c19578cd9103a27",
       "credential_kinds": [
         "session"

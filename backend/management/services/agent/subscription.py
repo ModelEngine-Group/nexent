@@ -85,6 +85,7 @@ from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
+from infrastructure.rdb.agent_execution import RunIdentity, begin_execution, finish_execution, track_execution, untrack_execution
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
@@ -857,7 +858,18 @@ async def run_agent_stream(
 
     channel = None
     admission_scope = getattr(agent_request, "_run_admission_scope", None)
+    tracked_execution = None
     try:
+        if getattr(agent_request, "_track_execution", False) is True and not agent_request.is_debug:
+            agent_request._projection_run_id = agent_request._projection_run_id or uuid.uuid4().hex
+            identity = RunIdentity(
+                resolved_tenant_id, resolved_user_id, agent_request.conversation_id, agent_request._projection_run_id,
+            )
+            await run_blocking(
+                "agentos-execution-start", begin_execution, identity, lane="control-io", owner="runtime",
+            )
+            tracked_execution = identity
+            track_execution(identity)
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
@@ -894,6 +906,8 @@ async def run_agent_stream(
             agent_request._projection_run_id = (
                 getattr(agent_request, "_projection_run_id", None) or uuid.uuid4().hex
             )
+            if tracked_execution is not None:
+                channel.execution_identity = tracked_execution
             if runtime_state_service.enabled is True:
                 journal_run_id = await channel.start_journal(resolved_tenant_id, agent_request._projection_run_id)
             if admission_scope is not None:
@@ -916,7 +930,12 @@ async def run_agent_stream(
             mark_stuck_on_timeout=False,
         )
         try:
-            if admission_scope is not None and channel is not None:
+            if tracked_execution is not None:
+                await run_blocking(
+                    "agentos-execution-setup-failed", finish_execution, tracked_execution, "failed",
+                    lane="control-io", owner="runtime",
+                )
+            if (admission_scope is not None or tracked_execution is not None) and channel is not None:
                 await channel.finish_journal("failed")
                 await streaming_channel_manager.remove_channel(
                     agent_request.conversation_id, resolved_user_id, expected_channel=channel,
@@ -1032,8 +1051,12 @@ async def run_agent_stream(
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
+    if tracked_execution is not None:
+        headers["run_id"] = tracked_execution.run_id
     if journal_run_id is not None:
         headers["X-AgentOS-Run-ID"] = journal_run_id
+    elif tracked_execution is not None:
+        headers["X-AgentOS-Run-ID"] = tracked_execution.run_id
     debug_run_id = getattr(agent_request, "_debug_run_id", None)
     if debug_run_id is not None:
         headers["run_id"] = debug_run_id
@@ -1056,6 +1079,10 @@ async def run_agent_stream(
         def release_producer_resources(task: asyncio.Task) -> None:
             """Retain preparation ownership until the detached producer exits."""
             _agent_stream_producer_tasks.discard(task)
+            if tracked_execution is not None:
+                untrack_execution(tracked_execution)
+            if not task.cancelled() and task.exception() is not None:
+                logger.error("Agent stream producer did not finalize", exc_info=task.exception())
             reservation_released = agent_run_manager.release_agent_run_reservation(
                 run_identifier,
                 resolved_user_id,
@@ -1087,5 +1114,7 @@ async def run_agent_stream(
         )
         _agent_stream_producer_tasks.add(producer_task)
         producer_task.add_done_callback(release_producer_resources)
+        if tracked_execution is not None:
+            response.agentos_producer = producer_task
 
     return response

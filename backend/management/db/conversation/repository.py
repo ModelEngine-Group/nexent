@@ -255,7 +255,7 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *,
-                                 message_source: MessageSource = MessageSource.CHAT) -> int:
+                                 message_source: MessageSource = MessageSource.CHAT, execution_identity=None) -> int:
     """
     Create a conversation message record
 
@@ -310,6 +310,10 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         stmt = insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
+        if execution_identity is not None:
+            from infrastructure.rdb.agent_execution import bind_assistant_message
+
+            bind_assistant_message(session, execution_identity, message_id)
         if response is not None:
             unit_data = {
                 'conversation_id': conversation_id, 'message_id': message_id,

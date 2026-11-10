@@ -42,7 +42,13 @@ for (const [method, path, target] of [
   ["GET", "/api/file/download/attachments/owner/report.txt", "config"],
   ["POST", "/api/file/upload", "config"],
   ["POST", "/api/file/preprocess", "runtime"],
-  ["POST", "/api/agent/run", "runtime"],
+  ["POST", "/api/agent/run", "config"],
+  ["POST", "/api/agent/run/", "config"],
+  ["GET", "/api/agent/stop/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "config"],
+  ["GET", "/api/agent/stop/42", "config"],
+  ["GET", "/api/agent/automations", "config"],
+  ["POST", "/api/agent/nl2agent/run", "runtime"],
+  ["POST", "/api/skills/nl2skill/run", "runtime"],
   ["GET", "/api/conversation/42", "runtime"],
 ]) {
   test(`${method} ${path} routes to ${target}`, () => {
@@ -61,6 +67,7 @@ test("authentication interception and streaming timeout are preserved", () => {
     assert.equal(dispatch("POST", path).calls[0].auth, true);
   }
   assert.equal(dispatch("POST", "/api/agent/run").calls[0].proxyTimeout, 200);
+  assert.equal(dispatch("GET", "/api/agent/stop/42").calls[0].proxyTimeout, 100);
   assert.equal(
     dispatch("GET", "/api/conversation/42").calls[0].proxyTimeout,
     100

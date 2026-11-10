@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -11,11 +12,13 @@ from runtime.agentos.model import create_model_router
 from runtime.agentos.model_administration import create_model_administration_router
 from runtime.agentos.resume import create_run_lifecycle_router
 from runtime.model.service import ModelService
-from runtime.recovery import recover_streaming_runs
+from runtime.recovery import recover_streaming_runs, watch_executions
 from runtime.api.agent.execution import (
     agent_runtime_router as agent_router,
     inspect_agentos_conversation,
     run_agentos_background,
+    run_agentos_tracked_background,
+    stop_agentos_debug,
     run_agentos_compatibility,
     run_agentos_conversation,
     stop_agentos_compatibility,
@@ -67,7 +70,12 @@ async def runtime_lifespan(_app):
             fail_detecting_models_on_startup,
         )
         await recover_runtime_state()
-        yield
+        reconciler = asyncio.create_task(watch_executions(runtime_thread_manager))
+        try:
+            yield
+        finally:
+            reconciler.cancel()
+            await asyncio.gather(reconciler, return_exceptions=True)
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 
@@ -109,8 +117,11 @@ app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 app.include_router(create_compatibility_router(
     run_agentos_compatibility, stop_agentos_compatibility, conversation_run=run_agentos_conversation,
+    debug_stop=stop_agentos_debug,
 ))
-app.include_router(create_background_router(run_agentos_background, inspect_agentos_conversation))
+app.include_router(create_background_router(
+    run_agentos_background, inspect_agentos_conversation, tracked_run=run_agentos_tracked_background,
+))
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_model_administration_router())

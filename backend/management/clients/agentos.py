@@ -7,9 +7,13 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
+    AgentActiveRun,
     AgentOperation,
+    AgentRunLookup,
+    AgentStop,
+    BackgroundRun,
+    DebugRunReference,
     AgentResume,
-    AgentRunReference,
     AgentRunState,
     AgentRunningState,
     BackgroundAgentResult,
@@ -25,6 +29,7 @@ from contracts.agentos import (
     ModelReference,
     ModelResult,
     PreparedEvaluationRun,
+    TrackedBackgroundResult,
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
@@ -129,11 +134,29 @@ class AgentOSClient:
         payload = CompatibilityStop(conversation_id=conversation_id)
         return await self._post_json(CompatibilityOperation.STOP, payload, user_id, tenant_id)
 
-    async def inspect_run(self, payload: AgentRunReference, user_id: str, tenant_id: str) -> AgentRunState:
+    async def run_tracked_background(self, payload: BackgroundRun, user_id: str, tenant_id: str) -> TrackedBackgroundResult:
+        result = await self._post_json(AgentOperation.BACKGROUND, payload, user_id, tenant_id, _STREAM_TIMEOUT)
+        tracked_result = self._validate_result(TrackedBackgroundResult, result)
+        if tracked_result.run_id != payload.run_id:
+            raise RuntimeServiceUnavailableError("AgentOS returned a different background run ID")
+        return tracked_result
+
+    async def find_active_run(self, conversation_id: int, user_id: str, tenant_id: str) -> str | None:
+        result = await self._post_json(
+            AgentOperation.ACTIVE, CompatibilityStop(conversation_id=conversation_id), user_id, tenant_id,
+        )
+        return self._validate_result(AgentActiveRun, result).run_id
+
+    async def stop_debug_run(self, run_id: str, user_id: str, tenant_id: str) -> dict:
+        return await self._post_json(
+            CompatibilityOperation.DEBUG_STOP, DebugRunReference(run_id=run_id), user_id, tenant_id,
+        )
+
+    async def inspect_run(self, payload: AgentRunLookup, user_id: str, tenant_id: str) -> AgentRunState:
         result = await self._post_json(AgentOperation.INSPECT, payload, user_id, tenant_id)
         return self._validate_result(AgentRunState, result)
 
-    async def stop_run(self, payload: AgentRunReference, user_id: str, tenant_id: str) -> AgentRunState:
+    async def stop_run(self, payload: AgentStop, user_id: str, tenant_id: str) -> AgentRunState:
         result = await self._post_json(AgentOperation.STOP, payload, user_id, tenant_id)
         return self._validate_result(AgentRunState, result)
 
