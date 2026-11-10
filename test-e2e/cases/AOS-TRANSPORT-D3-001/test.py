@@ -234,6 +234,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
     with monkeypatch.context() as turn_patches:
         await _assert_public_prepared_turn_over_signed_http(turn_patches)
+    with monkeypatch.context() as new_turn_patches:
+        await _assert_public_prepared_turn_over_signed_http(new_turn_patches, new_conversation=True)
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -1831,15 +1833,15 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
 
 
-async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from infrastructure.rdb.agent_admission import AdmissionClaim
+async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conversation=False):
+    from contracts.constants.constants import DEFAULT_EN_TITLE
+    from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
     from management.services.agent import conversation_submission, prepared_projection, prepared_turn, runtime_client
     from runtime.agentos import prepared_run, resume
 
+    boundary = 0 if new_conversation else 4
     actor = ServicePrincipal("public-user", "public-tenant")
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
     snapshot = PreparedAgentRun.model_validate({
@@ -1852,18 +1854,20 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     state = {"status": "pending"}
     calls = []
     pending = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
-                              message_index=5, assistant_message_id=None)
+                              message_index=boundary + 1, assistant_message_id=None)
     confirmed = SimpleNamespace(**{**vars(pending), "assistant_message_id": 81})
 
     def claim(_scope, _fingerprint, user_id, tenant_id):
-        assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        if (user_id, tenant_id) != (actor.user_id, actor.tenant_id):
+            raise AdmissionScopeError
         if state.get("claimed"):
             return AdmissionClaim(reference.run_id, state["status"], 55, True, False)
         state["claimed"] = True
         return AdmissionClaim(reference.run_id, "pending", None, False, True)
 
-    def stage(_scope, ref, user_id, tenant_id, index, turn):
-        assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, 4)
+    def stage(_scope, ref, user_id, tenant_id, index, turn, *, initial_title=None):
+        assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
+        assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
         assert turn["query"] == "test"
         assert turn["automation"] == {
             "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
@@ -1917,7 +1921,15 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(conversation_submission, "conversation_belongs_to", owned)
     monkeypatch.setattr(prepared_turn, "run_blocking", inline)
-    monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", AsyncMock(return_value=snapshot))
+    async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
+        assert request.conversation_id == reference.conversation_id and ref == reference
+        assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        if new_conversation:
+            assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
+        return snapshot
+
+    monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", compile_snapshot)
+    monkeypatch.setattr(prepared_turn.store, "allocate_conversation_id", lambda: reference.conversation_id)
     monkeypatch.setattr(prepared_turn.store, "next_message_index", lambda *_: 4)
     monkeypatch.setattr(prepared_turn.store, "stage_turn", stage)
     monkeypatch.setattr(prepared_turn.store, "confirm_turn", confirm)
@@ -1942,17 +1954,25 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     with serve(runtime) as runtime_url:
         monkeypatch.setattr(runtime_client, "_agentos_client",
                             lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
-        request = {"conversation_id": reference.conversation_id, "query": "test", "agent_id": 7}
-        headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1"}
+        request = {"query": "test", "agent_id": 7}
+        if not new_conversation:
+            request["conversation_id"] = reference.conversation_id
+        headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1", "Cookie": "NEXT_LOCALE=en"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
                                      base_url="http://management") as browser:
             first = await browser.post("/agent/run", json=request, headers=headers)
             retry = await browser.post("/agent/run", json=request, headers=headers)
             denied = await browser.post("/agent/run", json=request, headers={**headers, "Authorization": "foreign"})
         assert first.status_code == 200 and first.headers["run_id"] == reference.run_id
-        assert first.text.startswith(f'id: {reference.run_id}:1\ndata: {{"type":"final_answer","content":"answer"}}\n\n')
+        assert first.headers["conversation_id"] == str(reference.conversation_id)
+        prefix = f'id: {reference.run_id}:1\ndata: {{"type":"final_answer","content":"answer"}}\n\n'
+        if new_conversation:
+            created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
+            prefix = f"data: {json.dumps(created, separators=(',', ':'))}\n\n" + prefix
+        assert first.text.startswith(prefix)
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
+        assert retry.json()["conversation_id"] == reference.conversation_id
         assert denied.status_code == 404
     assert calls == ["stage", "start", "confirm", "project", "close"]
 

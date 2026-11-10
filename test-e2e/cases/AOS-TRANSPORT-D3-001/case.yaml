@@ -75,6 +75,9 @@ case:
   - order: 16
     action: Invoke the prepared SDK proposal tool through the Runtime-to-Management AgentOS callback.
     expected: Management uses the stored source message and Agent version, returns the original proposal response, and rejects unsigned, forward-signed, modified, and foreign-tenant calls.
+  - order: 17
+    action: Submit a first public turn without a conversation ID and repeat it with the same submission key.
+    expected: Management creates one conversation with the localized default title, announces its ID without consuming a Runtime cursor, and the retry returns the same conversation and run.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -92,6 +95,7 @@ case:
   - Planning runs use built-in tool bindings and Runtime-managed plan storage.
   - One prepared public submission creates one Runtime execution and one assistant projection.
   - The SDK tool emits the original proposal event while only the signed owned turn may create it.
+  - First-turn submission keeps one conversation, run, and original creation event.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -234,4 +238,9 @@ case:
     description: The Runtime proposal tool uses a direction-bound callback and Management derives its trusted inputs from the owned turn.
     steps: [16]
     expected_results: [16]
+    forbidden_side_effects: [1, 2]
+  - id: AC-25
+    description: Management owns first-turn creation and preserves the public conversation ID and event without duplicate signed execution.
+    steps: [17]
+    expected_results: [17]
     forbidden_side_effects: [1, 2]

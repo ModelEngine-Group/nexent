@@ -112,21 +112,23 @@ def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConver
 async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
-    before_message_index: int | None = None,
+    before_message_index: int | None = None, new_conversation: bool = False,
 ) -> PreparedAgentRun | None:
-    """Compile an existing authorized conversation without constructing Runtime SDK objects."""
+    """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
     from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
     from management.db.agent.repository import search_agent_info_by_agent_id
 
     if request.conversation_id != reference.conversation_id:
         raise ForbiddenError("Conversation does not match the admitted run")
-    conversation = await run_blocking(
-        "snapshot-conversation-scope", get_conversation, reference.conversation_id,
-        user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
-    )
-    if conversation is None:
-        raise ForbiddenError("Conversation is not accessible to the current identity")
+    conversation = {}
+    if not new_conversation:
+        conversation = await run_blocking(
+            "snapshot-conversation-scope", get_conversation, reference.conversation_id,
+            user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
+        )
+        if conversation is None:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
     if any((
         request.agent_id is None, request.is_debug, request.entrypoint,
         request.generation_config, request.metadata is not None,

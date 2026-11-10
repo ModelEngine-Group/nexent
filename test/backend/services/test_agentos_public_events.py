@@ -82,7 +82,8 @@ async def test_public_resume_signs_only_an_output_of_the_scoped_run(mocker):
 
 
 @pytest.mark.asyncio
-async def test_closing_the_public_response_closes_the_upstream_subscription():
+@pytest.mark.parametrize("created", [False, True])
+async def test_closing_the_public_response_closes_the_upstream_subscription(created):
     closed = []
 
     async def journal():
@@ -92,9 +93,10 @@ async def test_closing_the_public_response_closes_the_upstream_subscription():
         finally:
             closed.append(True)
 
-    output = public_events.present_public_resume(StreamingResponse(journal()), CURSOR, "actor")
+    output = public_events.present_public_resume(StreamingResponse(journal()), CURSOR, "actor", created=created)
     iterator = output.body_iterator
-    assert b"thought" in await anext(iterator)
+    expected = b"conversation_created" if created else b"thought"
+    assert expected in await anext(iterator)
     await iterator.aclose()
     assert closed == [True]
 

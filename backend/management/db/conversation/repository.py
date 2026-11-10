@@ -155,6 +155,9 @@ def create_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    *,
+    reserved_conversation_id: int | None = None,
+    db_session=None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation record
@@ -169,11 +172,13 @@ def create_conversation(
     Returns:
         Dict[str, Any]: Dictionary containing complete information of the newly created conversation
     """
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         _enforce_user_conversation_limit(session, user_id)
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
+        if reserved_conversation_id is not None:
+            data["conversation_id"] = reserved_conversation_id
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:

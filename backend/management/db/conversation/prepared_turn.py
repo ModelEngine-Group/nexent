@@ -12,7 +12,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.repository import (
-    _enforce_conversation_turn_limit, _lock_conversation_limit_scope, create_conversation_message,
+    _enforce_conversation_turn_limit, _lock_conversation_limit_scope, create_conversation, create_conversation_message,
 )
 
 
@@ -46,6 +46,13 @@ def _next_index(session, conversation_id):
         ConversationMessage.conversation_id == conversation_id, ConversationMessage.delete_flag == "N",
     ))
     return 0 if last is None else 2 * (last // 2 + 1)
+
+
+def allocate_conversation_id() -> int:
+    """Reserve a sequence value without exposing a conversation before compilation."""
+    sequence = ConversationRecord.__table__.c.conversation_id.default
+    with get_db_session() as session:
+        return session.scalar(select(sequence.next_value()))
 
 
 def next_message_index(conversation_id: int, user_id: str, tenant_id: str) -> int:
@@ -83,29 +90,43 @@ def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> Prepared
 
 def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
+    *, initial_title: str | None = None,
 ) -> PreparedTurn:
     admission = ConversationRunAdmission
     with get_db_session() as session:
-        if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
+        if initial_title is None:
+            if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
+                raise AdmissionScopeError
+            # Keep the legacy order of quota lock followed by conversation row.
+            _enforce_conversation_turn_limit(session, reference.conversation_id, "user", user_id)
+            if _owned(session, reference.conversation_id, user_id, tenant_id, lock=True) is None:
+                raise AdmissionScopeError
+            if (session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None
+                    or _next_index(session, reference.conversation_id) != message_index):
+                raise PreparedTurnConflict
+        elif not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
-        # Keep the legacy order of quota lock followed by conversation row.
-        _enforce_conversation_turn_limit(session, reference.conversation_id, "user", user_id)
-        if _owned(session, reference.conversation_id, user_id, tenant_id, lock=True) is None:
-            raise AdmissionScopeError
-        if (session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None
-                or _next_index(session, reference.conversation_id) != message_index):
-            raise PreparedTurnConflict
         row = session.scalar(select(admission).where(
             admission.scope_sha256 == scope, admission.run_id == reference.run_id,
             admission.created_by == user_id, admission.tenant_id == tenant_id,
             admission.delete_flag == "N", admission.status == "pending",
         ).with_for_update())
-        if row is None:
+        if row is None or row.conversation_id is not None:
             raise AdmissionScopeError
+        if initial_title is not None:
+            if message_index != 0:
+                raise PreparedTurnConflict
+            create_conversation(
+                initial_title, user_id, agent_id=user_turn["agent_id"], chat_mode=user_turn["chat_mode"],
+                reserved_conversation_id=reference.conversation_id, db_session=session,
+            )
         row.status = "dispatching"
         row.conversation_id = reference.conversation_id
         row.prepared_automation_context = user_turn.get("automation")
-        row.prepared_user_turn = {key: value for key, value in user_turn.items() if key != "automation"}
+        row.prepared_user_turn = {
+            **{key: value for key, value in user_turn.items() if key != "automation"},
+            "new_conversation": initial_title is not None,
+        }
         row.prepared_message_index = message_index + 1
         row.update_time = datetime.now(timezone.utc).replace(tzinfo=None)
         return _view(row)
@@ -165,6 +186,11 @@ def close_turn(turn: PreparedTurn, *, failure_status: str | None = None) -> None
         if row.prepared_assistant_id is None:
             row.status = "rejected"
             row.journal_available = False
+            if (conversation is not None and (row.prepared_user_turn or {}).get("new_conversation")
+                    and _next_index(session, conversation_id) == 0):
+                conversation.delete_flag = "Y"
+                conversation.updated_by = turn.user_id
+                row.conversation_id = None
         elif failure_status is not None and conversation is not None:
             message = ConversationMessage
             session.execute(update(message).where(

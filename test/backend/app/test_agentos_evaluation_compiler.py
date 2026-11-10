@@ -20,10 +20,11 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
+    new = kind == "new"
     redis = object()
     get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
@@ -69,7 +70,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     user, tenant = "user-a", "tenant-a"
     if kind != "evaluation":
         mocker.patch.object(run, "query_current_version_no", return_value=2)
-        mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
+        read_conversation = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
             "runtime_metadata": {"project": "test"},
             "runtime_metadata_version": 4,
         })
@@ -82,18 +83,25 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             AgentRequest(query="hello", agent_id=7, conversation_id=42,
-                         enable_automation_tool=kind == "default", enable_plan=planning),
-            reference, user, tenant, language="en", timezone="Asia/Shanghai", current_user_message_id=23,
+                         enable_automation_tool=kind in {"default", "new"}, enable_plan=planning),
+            reference, user, tenant, language="en", timezone="Asia/Shanghai",
+            **({"new_conversation": True} if new else {"current_user_message_id": 23}),
         )
         assert isinstance(prepared, PreparedAgentRun)
         assert (prepared.run_id, prepared.conversation_id, prepared.resource.version_no) == (reference.run_id, 42, 2)
         assert prepared.input.query != "hello" and "hello" in prepared.input.query
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
-        assert info.runtime_metadata == {"project": "test"}
-        assert info.runtime_metadata_version == 4
-        read_history.assert_called_once_with(42, 23, user, tenant)
-        assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+        if new:
+            read_conversation.assert_not_called()
+            read_history.assert_not_called()
+            assert info.runtime_metadata == {} and info.runtime_metadata_version == 0
+            assert prepared.historical_context is None
+        else:
+            assert info.runtime_metadata == {"project": "test"}
+            assert info.runtime_metadata_version == 4
+            read_history.assert_called_once_with(42, 23, user, tenant)
+            assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
     else:
         case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
         assert await runtime_client.forward_evaluation_case(case, user, tenant) is client.run_prepared_evaluation.return_value
@@ -137,7 +145,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     try:
         for agent in [info.agent_config, *info.agent_config.worker_agents]:
             expected = ["parallel_executor", "download_from_s3", "upload_to_s3"]
-            if kind == "default" and agent is info.agent_config:
+            if kind in {"default", "new"} and agent is info.agent_config:
                 expected.insert(1, "create_scheduled_task_proposal")
                 tool = next(tool for tool in agent.tools if tool.name == "create_scheduled_task_proposal")
                 assert callable(tool.metadata["create_proposal"])

@@ -38,7 +38,7 @@ def flow(mocker):
     mocker.patch.object(prepared_turn, "run_blocking", side_effect=inline)
     mocker.patch.object(prepared_turn.store, "next_message_index", return_value=8)
     compile_snapshot = mocker.patch.object(prepared_turn, "prepare_conversation_snapshot", return_value=snapshot)
-    mocker.patch.object(prepared_turn.store, "stage_turn", side_effect=lambda *_: operations.append("stage") or staged)
+    mocker.patch.object(prepared_turn.store, "stage_turn", side_effect=lambda *_args, **_kwargs: operations.append("stage") or staged)
     mocker.patch.object(prepared_turn.store, "confirm_turn", side_effect=lambda *_: operations.append("confirm") or confirmed)
     mocker.patch.object(prepared_turn.store, "close_turn", side_effect=lambda *_args, **_kwargs: operations.append("close"))
 
@@ -155,3 +155,33 @@ async def test_event_store_rejection_does_not_create_a_visible_turn(flow):
 
     assert operations == ["stage", "close"]
     client.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_prepared_turn_compiles_before_creating_a_conversation(flow, mocker):
+    operations, compile_snapshot, client, _ = flow
+    mocker.patch.object(prepared_turn.store, "allocate_conversation_id", return_value=REFERENCE.conversation_id)
+    payload = PAYLOAD.model_copy(update={"request": {"query": "question", "agent_id": 7,
+                                                        "enable_automation_tool": False}, "language": "en"})
+
+    response = await prepared_turn.start_turn(payload, AgentRequest.model_validate(payload.request), *ACTOR, client)
+
+    assert operations == ["stage", "start", "confirm"]
+    assert compile_snapshot.await_args.kwargs["new_conversation"] is True
+    assert response.headers["conversation_id"] == str(REFERENCE.conversation_id)
+    output = b"".join([part async for part in response.body_iterator])
+    assert b'"type":"conversation_created"' in output and output.endswith(b"data: answer\n\n")
+    client.find_active_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unexportable_first_turn_never_creates_a_conversation(flow, mocker):
+    operations, compile_snapshot, client, _ = flow
+    mocker.patch.object(prepared_turn.store, "allocate_conversation_id", return_value=REFERENCE.conversation_id)
+    compile_snapshot.return_value = None
+    request = AgentRequest(query="question", agent_id=7, enable_automation_tool=False)
+    payload = PAYLOAD.model_copy(update={"request": request.model_dump(mode="json", exclude_none=True)})
+
+    assert await prepared_turn.start_turn(payload, request, *ACTOR, client) is None
+    assert operations == [] and request.conversation_id is None
+    client.start_prepared_run.assert_not_awaited()

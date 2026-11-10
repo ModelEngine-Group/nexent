@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from starlette.responses import JSONResponse
 
 from contracts.agentos import AgentResume, AgentRunLookup, AgentRunReference, AgentStop
+from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
     ForbiddenError, RunModelControlsError, RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError,
@@ -38,8 +39,8 @@ async def _io(name, fn, *args, **kwargs):
 
 def is_prepared_candidate(payload, request):
     return bool(
-        not payload.resume and not request.is_debug and request.conversation_id and request.conversation_id > 0
-        and request.agent_id and not request.entrypoint
+        not payload.resume and not request.is_debug and request.agent_id and not request.entrypoint
+        and (request.conversation_id is None or request.conversation_id > 0)
     )
 
 
@@ -72,18 +73,29 @@ def _definitive_rejection(error):
 
 
 async def start_turn(payload, request, user_id, tenant_id, client):
-    reference = AgentRunReference(conversation_id=request.conversation_id, run_id=payload.claimed_run_id)
+    run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
+    initial_title = None
     try:
-        boundary = await _io("prepared-turn-boundary", store.next_message_index,
-                             reference.conversation_id, user_id, tenant_id)
+        conversation_id = request.conversation_id
+        if conversation_id is None:
+            conversation_id = await _io("prepared-turn-sequence", store.allocate_conversation_id)
+            request = request.model_copy(update={"conversation_id": conversation_id})
+            boundary = 0
+            initial_title = DEFAULT_EN_TITLE if payload.language == "en" else DEFAULT_ZH_TITLE
+            options = {"new_conversation": True}
+        else:
+            boundary = await _io("prepared-turn-boundary", store.next_message_index,
+                                 conversation_id, user_id, tenant_id)
+            options = {"before_message_index": boundary}
+        reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
-            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
-            before_message_index=boundary,
+            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
         )
         if snapshot is None:
             return None
-        if await client.find_active_run(reference.conversation_id, user_id, tenant_id) is not None:
+        if (initial_title is None
+                and await client.find_active_run(reference.conversation_id, user_id, tenant_id) is not None):
             raise active_turn_conflict()
         automation = None
         if request.enable_automation_tool and any(
@@ -96,13 +108,14 @@ async def start_turn(payload, request, user_id, tenant_id, client):
                 "tool_params": request.tool_params.model_dump(mode="json") if request.tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }
+        creation = {"initial_title": initial_title} if initial_title is not None else {}
         turn = await _io("prepared-turn-stage", store.stage_turn, scope, reference, user_id, tenant_id, boundary, {
             "query": strip_current_time_prefix(request.query), "minio_files": request.minio_files,
             "chat_mode": "planning" if request.enable_plan else "execution", "agent_id": request.agent_id,
             "automation": automation,
-        })
+        }, **creation)
     except Exception as exc:
-        await _io("prepared-turn-reject-claim", set_conversation_admission, scope, reference.run_id, user_id, tenant_id,
+        await _io("prepared-turn-reject-claim", set_conversation_admission, scope, run_id, user_id, tenant_id,
                   conversation_id=None, journal_available=False)
         if isinstance(exc, (AdmissionScopeError, ForbiddenError)):
             raise _not_owned() from exc
@@ -134,7 +147,9 @@ async def start_turn(payload, request, user_id, tenant_id, client):
         raise active_turn_conflict() from exc
     if confirmed is None:
         raise RuntimeServiceUnavailableError("Prepared conversation admission is no longer pending")
-    return await _stream_turn(confirmed, client, metadata_version=snapshot.runtime_metadata_version)
+    return await _stream_turn(
+        confirmed, client, metadata_version=snapshot.runtime_metadata_version, created=initial_title is not None,
+    )
 
 
 async def _cancel_unbound_turn(client, turn):
@@ -148,7 +163,7 @@ async def _cancel_unbound_turn(client, turn):
     await _io("prepared-turn-unbound", store.close_turn, turn)
 
 
-async def _stream_turn(turn, client, *, metadata_version=None, resumed=False):
+async def _stream_turn(turn, client, *, metadata_version=None, resumed=False, created=False):
     reference = turn.reference
     cursor = AgentResume(**reference.model_dump())
     upstream = await client.resume(cursor, turn.user_id, turn.tenant_id)
@@ -160,7 +175,7 @@ async def _stream_turn(turn, client, *, metadata_version=None, resumed=False):
             logger.warning("Deferred terminal conversation projection run_id=%s error=%s",
                            reference.run_id, type(exc).__name__)
 
-    response = present_public_resume(upstream, cursor, turn.user_id, on_terminal=on_terminal)
+    response = present_public_resume(upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created)
     response.headers.update({"conversation_id": str(reference.conversation_id), "run_id": reference.run_id})
     if metadata_version is not None:
         response.headers["X-Runtime-Metadata-Version"] = str(metadata_version)
