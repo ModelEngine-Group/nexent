@@ -20,7 +20,7 @@ from smolagents.models import (
 )
 from smolagents.monitoring import TokenUsage
 
-from nexent.core.models.context_usage import InputUsageObservation, context_model_key
+from nexent.core.context_runtime.usage import InputUsageObservation, context_model_key
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions

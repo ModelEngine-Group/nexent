@@ -13,7 +13,7 @@ from smolagents.memory import AgentMemory
 from smolagents.models import ChatMessage, Model
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext, ModelTool
-from ...models.context_usage import normalized_chars_per_token
+from ...context_runtime.usage import normalized_chars_per_token
 from .evidence import ContextEvidenceCollector
 from .manager import ContextManager
 from .models import ContextItem, ContextItemInput

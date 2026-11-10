@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
-from nexent.core.models.context_usage import (
+from nexent.core.context_runtime.usage import (
     InputUsageObservation,
     context_model_key,
     request_characters,

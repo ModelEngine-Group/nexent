@@ -14,6 +14,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 
 def normalized_chars_per_token(value: Any) -> float:
     """Keep an unavailable local estimation ratio from blocking inference."""
@@ -21,10 +23,8 @@ def normalized_chars_per_token(value: Any) -> float:
 
 
 def _json_value(value: Any) -> Any:
-    if hasattr(value, 'model_dump'):
+    if isinstance(value, BaseModel):
         return value.model_dump(mode='json')
-    if hasattr(value, 'dict'):
-        return value.dict()
     return str(value)
 
 
@@ -52,7 +52,7 @@ def request_characters(messages, tools) -> int:
 def context_model_key(model) -> str:
     """Bind observations to the saved outlet and its configuration revision."""
     profile = getattr(model, 'profile', None)
-    value = profile.model_dump(mode='json') if profile is not None else {
+    value = profile.model_dump(mode='json') if isinstance(profile, BaseModel) else {
         'model_id': getattr(model, 'model_id', None),
         'model_name': getattr(model, 'model_name', None),
         'model_factory': getattr(model, 'model_factory', None),

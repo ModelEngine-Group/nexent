@@ -17,7 +17,7 @@ from smolagents.memory import ActionStep, AgentMemory, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
-from ...models.context_usage import InputUsageObservation, context_model_key, normalized_chars_per_token, request_characters
+from ...context_runtime.usage import InputUsageObservation, context_model_key, normalized_chars_per_token, request_characters
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
