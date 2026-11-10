@@ -152,7 +152,7 @@ def _materialize_external_agents(resource, actor):
 
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
-    *, language, sandbox_enabled, root_alias=None,
+    *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -166,7 +166,9 @@ def _materialize_agent(
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
 
-    local_tools = materialize_skill_tools(resource, actor, workspace_path)
+    local_tools = materialize_skill_tools(
+        resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
+    )
     local_tools.update(materialize_local_tools(resource, actor, language))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
@@ -202,7 +204,7 @@ def _materialize_agent(
         worker_agents=[
             _materialize_agent(
                 child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
-                language=language, sandbox_enabled=sandbox_enabled,
+                language=language, sandbox_enabled=sandbox_enabled, publish_skill_artifacts=publish_skill_artifacts,
             )
             for child in resource.subagents
         ],
@@ -256,7 +258,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
-    workspace_run_id = uuid4().hex
+    workspace_run_id = payload.run_id if isinstance(payload, PreparedAgentRun) else uuid4().hex
     workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
     with ExitStack() as cleanup:
         cleanup.callback(_remove_skill_files, workspace_path)
@@ -269,6 +271,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
             agent_config = _materialize_agent(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
+                publish_skill_artifacts=isinstance(payload, PreparedAgentRun),
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")

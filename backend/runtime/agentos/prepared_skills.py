@@ -35,7 +35,7 @@ def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | Non
         return stage_directory / run_path.name
 
 
-def materialize_skill_tools(resource, actor, workspace_path: str) -> dict[str, ToolConfig]:
+def materialize_skill_tools(resource, actor, workspace_path: str, *, publish_artifacts: bool = False) -> dict[str, ToolConfig]:
     bindings = [binding for binding in resource.tools if binding.tool_id in set(EvaluationSkillTool)]
     context_items = resource.evaluation_options.context_items if resource.evaluation_options is not None else None
     refs = resource.skill_refs
@@ -90,6 +90,8 @@ def materialize_skill_tools(resource, actor, workspace_path: str) -> dict[str, T
         builtin_params = dict(params)
         if builtin is EvaluationSkillTool.SCRIPT:
             builtin_params["workspace_path"] = workspace_path
+            if publish_artifacts:
+                builtin_params["publish_file_artifacts"] = True
         if builtin is EvaluationSkillTool.CONFIG:
             builtin_params["config_overrides"] = configs
         tools[binding.tool_id] = ToolConfig(

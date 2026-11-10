@@ -1424,6 +1424,9 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
 
 
 async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
+    from pathlib import Path
+    from unittest.mock import Mock
+
     from contracts.agent import AgentRequest
     from contracts.conversation import MessageSource
     from infrastructure.agent_model_config import create_model_config_from_record
@@ -1432,6 +1435,9 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from management.services.agent import prepared_projection
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
+    from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
     from runtime.agentos import prepared_evaluation, prepared_run, resume
 
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
@@ -1441,6 +1447,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     calls = []
     finished = threading.Event()
     persisted = []
+    uploaded = []
 
     def owns(conversation_id, *, user_id, tenant_id):
         return (conversation_id, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id)
@@ -1528,6 +1535,41 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         yield '{"type":"thought","content":"step"}'
         yield '{"type":"final_answer","content":"answer"}'
 
+        assert info.workspace_run_id == reference.run_id
+        workspace = Path(info.workspace_path)
+        output = workspace / "outputs" / "report.txt"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"report")
+        published = []
+
+        def save_file(path, key):
+            uploaded.append((Path(path).read_bytes(), key))
+            return True, "stored"
+
+        agent = NexentAgent.__new__(NexentAgent)
+        agent.workspace_path = str(workspace)
+        agent.workspace_mapping = None
+        uploader = UploadToS3Tool(
+            workspace_path=str(workspace), user_id=actor.user_id, run_id=info.workspace_run_id,
+            minio_client=SimpleNamespace(upload_file=save_file, default_bucket="bucket"),
+        )
+        agent.agent = SimpleNamespace(tools={"upload_to_s3": uploader})
+        script = RunSkillScriptTool(
+            observer=SimpleNamespace(add_message=lambda _agent, kind, content: published.append({
+                "type": kind.value, "content": content,
+            })),
+            artifact_uploader=agent._upload_skill_artifacts, artifact_path_resolver=agent._resolve_skill_artifact_path,
+        )
+        script.skill_manager = Mock()
+        script.skill_manager.load_skill.return_value = {"script_outputs": {"report.py": {"kind": "file"}}}
+        script.skill_manager.run_skill_script.return_value = json.dumps({"status": "success", "artifacts": [{
+            "kind": "file", "absolute_path": str(output), "file_name": "report.txt",
+            "mime_type": "text/plain", "file_size_bytes": 6,
+        }]})
+        result = script.execute("skill", "report.py")
+        assert "absolute_path" not in result and len(published) == 1
+        yield json.dumps(published[0])
+
     from runtime.executions import LocalExecutionRegistry
     registry = LocalExecutionRegistry()
     monkeypatch.setattr(prepared_run, "agent_run_manager", registry)
@@ -1574,12 +1616,12 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         cursor = AgentResume(**reference.model_dump(), after_event_id=f"{reference.run_id}:1")
         replay = await agentos.resume(cursor, actor.user_id, actor.tenant_id)
         body = b"".join([chunk async for chunk in replay.body_iterator]).decode()
-        assert body == (
+        assert body.startswith(
             f"id: {reference.run_id}:2\nevent: agentos_observer\n"
             'data: {"type":"final_answer","content":"answer"}\n\n'
-            f"id: {reference.run_id}:3\nevent: agentos_terminal\n"
-            'data: {"status": "completed"}\n\n'
         )
+        assert body.endswith(f'id: {reference.run_id}:4\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
+        assert "absolute_path" not in body and '"type":"file_artifact"' in body
         def persist(**fields):
             persisted.append(fields)
             return 77
@@ -1590,11 +1632,17 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             agentos.resume, reference, actor.user_id, actor.tenant_id,
             message_index=1, message_source=MessageSource.AUTOMATION,
         )
-        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 2)
+        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 3)
         assert len(persisted) == 1
         batch = persisted[0]
         assert (batch["projection_run_id"], batch["conversation_id"]) == (reference.run_id, 42)
         assert batch["message_content"] == "answer"
+        key = f"workspace/{actor.user_id}/{reference.run_id}/outputs/report.txt"
+        assert uploaded == [(b"report", key)]
+        assert batch["skill_files"] == [{
+            "object_name": key, "name": "report.txt", "type": "file",
+            "size": 6, "url": f"s3://bucket/{key}", "description": "",
+        }]
         assert [(unit["unit_index"], unit["unit_content"]) for unit in batch["message_units"]] == [
             (0, "step"), (1, "answer"),
         ]

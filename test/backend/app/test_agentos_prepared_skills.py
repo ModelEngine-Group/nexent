@@ -256,3 +256,26 @@ def test_skill_staging_rejects_a_temp_root_inside_the_mounted_workspace(mocker, 
     with pytest.raises(ValueError, match="outside the run workspace root"):
         prepared_skills.skill_stage_path(workspace, create=True)
     assert prepared_skills.skill_stage_path(workspace) is None
+
+
+def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations(monkeypatch):
+    from runtime.agentos import prepared_evaluation
+
+    calls = []
+
+    def materialize_skills(resource, actor, path, *, publish_artifacts):
+        calls.append(publish_artifacts)
+        return {}
+
+    monkeypatch.setattr(prepared_evaluation, "materialize_skill_tools", materialize_skills)
+    actor = ServicePrincipal("actor", "tenant")
+    from contracts.agentos import AgentResource
+    from runtime.agentos.prepared_mcp import PreparedMCP
+
+    resource = AgentResource(agent_id=1, version_no=1, name="agent", description="", prompt_templates={})
+    for publish in (False, True):
+        prepared_evaluation._materialize_agent(
+            resource, actor, "/workspace", "run", {"llm"}, set(), PreparedMCP(actor),
+            language="en", sandbox_enabled=False, root_alias="llm", publish_skill_artifacts=publish,
+        )
+    assert calls == [False, True]

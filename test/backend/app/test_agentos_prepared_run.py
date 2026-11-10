@@ -155,3 +155,15 @@ async def test_missing_event_store_fails_before_admission(payload, runtime):
 def test_prepared_conversation_metadata_uses_existing_limits(payload, overrides):
     with pytest.raises(ValidationError):
         PreparedAgentRun.model_validate(payload.model_dump() | overrides)
+
+
+@pytest.mark.asyncio
+async def test_runtime_never_journals_unresolved_skill_artifact(monkeypatch, payload, runtime):
+    async def runner(_info, **_kwargs):
+        yield '{"type":"skill_artifact","content":{"artifacts":[{"absolute_path":"/workspace/report"}]}}'
+
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    await prepared_run.start_prepared_run(payload, ACTOR)
+    await asyncio.wait_for(asyncio.gather(*runtime.tasks), timeout=2)
+    runtime.journal.return_value.append.assert_not_called()
+    runtime.journal.return_value.repair_terminal.assert_called_once_with("failed")

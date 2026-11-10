@@ -71,7 +71,10 @@ async def _run_snapshot(payload, actor, identity, journal):
         async with aclosing(agent_run(info, thread_manager=runtime_thread_manager)) as chunks:
             async for chunk in chunks:
                 # Re-encode JSON to keep each payload within one SSE data line.
-                event = json.dumps(json.loads(chunk), ensure_ascii=False, separators=(",", ":"))
+                observer_event = json.loads(chunk)
+                if observer_event.get("type") == "skill_artifact":
+                    raise ValueError("Prepared runs cannot journal local skill artifact paths")
+                event = json.dumps(observer_event, ensure_ascii=False, separators=(",", ":"))
                 index += 1
                 await _control_io(
                     "agentos-prepared-event", journal.append, index, f"event: agentos_observer\ndata: {event}\n\n",
