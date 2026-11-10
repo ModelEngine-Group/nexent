@@ -124,23 +124,6 @@ class UpdateEvaluatorRequest(EvaluatorFields):
     """All fields optional — only supplied fields are updated."""
 
 
-class EvaluationRunRequest(BaseModel):
-    """Payload used by config service to dispatch one evaluation run."""
-
-    agent_evaluation_id: int = Field(gt=0)
-
-
-class RuntimeEvaluationTrialRunRequest(BaseModel):
-    """Payload used by Config service for a non-persistent trial evaluation."""
-
-    agent_id: int
-    agent_version_no: int = 1
-    query: str
-    judge_model_id: int
-    evaluator_ids: list[int] | None = None
-    language: str = "zh"
-
-
 def get_report_labels(language: str = "zh") -> dict:
     """Return the label dict for the given language. Falls back to 'zh'."""
     return _REPORT_LABELS.get(language, _REPORT_LABELS["zh"])

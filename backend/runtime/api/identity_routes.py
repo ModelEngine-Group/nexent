@@ -9,7 +9,6 @@ from gateway.security.policy import canonical_path
 def is_runtime_service_request(method: str, path: str) -> bool:
     path = canonical_path(path)
     return method == "POST" and bool(
-        path in {"/agent/internal/northbound/run", "/agent-evaluations/internal/run",
-                 "/agent-evaluations/internal/trial-run"}
+        path == "/agent/internal/northbound/run"
         or re.fullmatch(r"/agent/internal/northbound/stop/[^/]+", path)
     )

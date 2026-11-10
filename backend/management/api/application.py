@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
-from management.api.conversation.conversation_management import title_router
+from management.api.conversation.conversation_management import router as conversation_router
 from management.api.conversation.workbench_pins import router as workbench_pins_router
 from management.api.conversation.conversation_share import router as conversation_share_router
 from management.api.agent.agent_repository import agent_repository_router
@@ -146,7 +146,7 @@ app.include_router(config_sync_router)
 app.include_router(agent_router)
 app.include_router(workbench_pins_router)
 app.include_router(conversation_share_router)
-app.include_router(title_router)
+app.include_router(conversation_router)
 app.include_router(agent_repository_router)
 app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)

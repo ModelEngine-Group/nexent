@@ -1031,7 +1031,7 @@ class TestPlanSearchQueries:
     def test_returns_empty_without_descriptions(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(service, "_build_kb_descriptions", MagicMock(return_value=""))
-        assert service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1") == []
+        assert service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1", user_id="actor") == []
 
     def test_plans_from_llm(self, service_module, monkeypatch):
         service, _ = service_module
@@ -1040,10 +1040,10 @@ class TestPlanSearchQueries:
         )
         monkeypatch.setattr(
             service,
-            "call_llm_for_system_prompt",
+            "invoke_chat_prompt_in_worker",
             MagicMock(return_value='{"queries": ["q1", "q2"]}'),
         )
-        queries = service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1")
+        queries = service._plan_search_queries([{"display_name": "kb1"}], "d", "m", "t1", user_id="actor")
         assert queries == ["q1", "q2"]
 
     def test_falls_back_when_llm_fails(self, service_module, monkeypatch):
@@ -1052,10 +1052,10 @@ class TestPlanSearchQueries:
             service, "_build_kb_descriptions", MagicMock(return_value="block")
         )
         monkeypatch.setattr(
-            service, "call_llm_for_system_prompt", MagicMock(side_effect=ValueError("x"))
+            service, "invoke_chat_prompt_in_worker", MagicMock(side_effect=ValueError("x"))
         )
         queries = service._plan_search_queries(
-            [{"display_name": "kb1", "index_name": "i1"}], "d", "m", "t1"
+            [{"display_name": "kb1", "index_name": "i1"}], "d", "m", "t1", user_id="actor"
         )
         assert queries == ["kb1", "overview", "policy", "process", "rule"]
 
@@ -1647,23 +1647,23 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "call_llm_for_system_prompt",
+            "invoke_chat_prompt_in_worker",
             MagicMock(
                 return_value='[{"inputs": {"query": "q1"}, "label": {"answer": "a1"}}, '
                 '{"inputs": {"query": "q2"}, "label": {"answer": "a2"}}]'
             ),
         )
-        cases = service._call_llm_and_extract_cases("m", "prompt", "t1")
+        cases = service._call_llm_and_extract_cases("m", "prompt", "t1", user_id="actor")
         assert len(cases) == 2
         assert cases[0]["inputs"]["query"] == "q1"
 
     def test_raises_when_no_valid_cases(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "call_llm_for_system_prompt", MagicMock(return_value="[]")
+            service, "invoke_chat_prompt_in_worker", MagicMock(return_value="[]")
         )
         with pytest.raises(_AppException) as excinfo:
-            service._call_llm_and_extract_cases("m", "prompt", "t1")
+            service._call_llm_and_extract_cases("m", "prompt", "t1", user_id="actor")
         assert (
             excinfo.value.error_code
             == service.ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY

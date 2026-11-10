@@ -21,9 +21,8 @@ from management.api.automation.agent_automation import (
     conversation_automation_router,
     router as agent_automation_router,
 )
-from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
+from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from management.api.conversation.conversation_management import router as conversation_management_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
@@ -126,10 +125,9 @@ app.include_router(create_compatibility_router(run_agentos_compatibility, stop_a
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_model_administration_router())
 app.include_router(agent_router)
-app.include_router(agent_evaluation_runtime_router)
+app.include_router(create_evaluation_router())
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
-app.include_router(conversation_management_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)

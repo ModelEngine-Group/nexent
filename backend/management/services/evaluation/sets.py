@@ -18,7 +18,7 @@ from infrastructure.rdb.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase, KnowledgeRecord
 from management.db.evaluation.sets import batch_delete_evaluation_set_cases, count_evaluation_set_cases, count_evaluation_sets, create_evaluation_set, get_cases_by_ids, get_evaluation_set, get_evaluation_set_cases_all, hard_delete_evaluation_set, insert_evaluation_set_cases, list_case_turn_orders_by_session, list_evaluation_set_cases, list_evaluation_sets, update_evaluation_set_case_count
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
-from management.services.model.invocation import call_llm_for_system_prompt
+from management.clients.model import invoke_chat_prompt_in_worker
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_evaluation_case_context_blocks,
@@ -493,7 +493,7 @@ def _build_kb_descriptions(kb_info, tenant_id):
     return "\n".join(lines) if lines else ""
 
 
-def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_block=None):
+def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_block=None, *, user_id):
     if kb_desc_block is None:
         kb_desc_block = _build_kb_descriptions(kb_info, tenant_id)
     if not kb_desc_block:
@@ -503,10 +503,11 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id, kb_desc_bloc
             "zh", "evaluation_kb_plan",
             {"description": description, "knowledge_bases": kb_desc_block},
         )
-        response = call_llm_for_system_prompt(
+        response = invoke_chat_prompt_in_worker(
             model_id=model_id,
             user_prompt=prompt.user,
             system_prompt=prompt.system,
+            user_id=user_id,
             tenant_id=tenant_id,
         )
         data = json.loads(response) if isinstance(response, str) else response
@@ -797,6 +798,7 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_i
             model_id,
             tenant_id,
             kb_desc_block=_build_aidp_kb_descriptions(kb_info),
+            user_id=user_id,
         )
         if not queries:
             return "", display_names
@@ -806,7 +808,7 @@ def _do_kb_search(knowledge_base_names, description, model_id, tenant_id, user_i
         display_names = [kb["display_name"] for kb in kb_info]
         if not kb_info:
             return "", []
-        queries = _plan_search_queries(kb_info, description, model_id, tenant_id)
+        queries = _plan_search_queries(kb_info, description, model_id, tenant_id, user_id=user_id)
         if not queries:
             return "", display_names
         kb_context = _execute_kb_searches(kb_info, queries, tenant_id)
@@ -950,14 +952,15 @@ def _normalize_one_generated_case(d) -> dict | None:
     return case
 
 
-def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id) -> list:
+def _call_llm_and_extract_cases(model_id, user_prompt, tenant_id, *, user_id) -> list:
     """Call LLM for case generation, parse JSON response, return normalized case list."""
-    resp = call_llm_for_system_prompt(
+    resp = invoke_chat_prompt_in_worker(
         model_id=model_id,
         user_prompt=user_prompt,
         system_prompt=compose_evaluation_set_system(
             "zh", max_turns=MAX_TURNS_PER_SESSION
         ),
+        user_id=user_id,
         tenant_id=tenant_id,
     )
     data = _parse_llm_cases_response(resp)
@@ -1098,7 +1101,7 @@ def _generate_cases_async(
         )
         _report_progress(set_id, tenant_id, 10)
 
-        cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id)
+        cases = _call_llm_and_extract_cases(model_id, user_prompt, tenant_id, user_id=user_id)
         _report_progress(set_id, tenant_id, 50)
 
         # Enforce requested count (LLM may return more than asked)

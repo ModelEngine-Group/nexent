@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Verify the signed model API and SDK dispatch to a controlled provider."""
 
+import asyncio
 import json
 import socket
 import threading
@@ -20,6 +21,7 @@ from contracts.model_administration import ModelHealthcheck, ModelRegistration, 
 from contracts.errors.exceptions import RuntimeUpstreamError
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
+from management.clients.model import invoke_chat_prompt_in_worker
 from nexent.core.concurrency import shutdown_fallback_thread_manager
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.middleware import AgentOSMiddleware
@@ -169,6 +171,17 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                     await agentos.invoke_model(invalid, "user-a", tenant)
                 assert failure.value.status_code == status
 
+            monkeypatch.setattr(environment, "RUNTIME_SERVICE_URL", runtime_url)
+            output = await asyncio.to_thread(
+                invoke_chat_prompt_in_worker,
+                model_id=11,
+                system_prompt="system",
+                user_prompt="worker model request",
+                user_id="worker-a",
+                tenant_id="tenant-a",
+            )
+            assert output == "verified answer"
+
             registration = ModelRegistration(
                 model_name="new-model", model_type="llm", base_url=record["base_url"], api_key="test-registration-key",
             )
@@ -205,7 +218,8 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert set(records) == {("tenant-a", "new-model"), ("tenant-b", "other-model")}
     assert retired == {("tenant-a", "new-model")}
     assert checked_keys == ["test-registration-key"]
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert calls[1][1]["messages"][-1]["content"] == "worker model request"
     authorization, provider_input = calls[0]
     assert authorization == "Bearer provider-secret"
     assert provider_input["model"] == "test-model"

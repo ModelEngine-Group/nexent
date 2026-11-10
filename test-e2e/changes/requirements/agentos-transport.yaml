@@ -26,11 +26,14 @@ change:
     - Service credential binds the exact operation and payload and expires.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
+    - Evaluation case requests preserve observer events and cannot select a real conversation.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
     - test/backend/services/test_agentos_proxy_service.py
     - test/backend/services/test_runtime_proxy_service.py
+    - test/backend/services/test_evaluation_dispatch.py
+    - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
     - test/backend/gateway/test_exposure.py
   requirement_id: AOS-REQ-001

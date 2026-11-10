@@ -168,7 +168,11 @@ def client():
 
 def _mock_impls(**overrides):
     """Replace the imported service/auth names on the app module with mocks."""
+    async def run_blocking(_label, fn, *, lane, owner, **kwargs):
+        return fn(**kwargs)
+
     defaults = {
+        "run_blocking": run_blocking,
         "get_current_user_id": MagicMock(return_value=("u1", "t1")),
         "get_current_user_info": MagicMock(return_value=("u1", "t1", "zh")),
         "create_agent_evaluation_run_impl": MagicMock(
@@ -186,7 +190,7 @@ def _mock_impls(**overrides):
             return_value={"items": [], "total": 0}
         ),
         "list_agent_evaluations_by_agent_impl": MagicMock(return_value=[{"id": 1}]),
-        "forward_agent_evaluation_trial_run": AsyncMock(return_value={"result": "ok"}),
+        "run_evaluation_trial_in_worker": MagicMock(return_value={"result": "ok"}),
         "generate_agent_evaluation_report_impl": MagicMock(
             return_value=(b"%PDF-1.4 fake", 0)
         ),
@@ -624,7 +628,7 @@ class TestTrialRun:
         )
         assert response.status_code == 200
         assert response.json()["data"] == {"result": "ok"}
-        assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
+        assert app.run_evaluation_trial_in_worker.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
         from contracts.errors.exceptions import UnauthorizedError
@@ -638,7 +642,7 @@ class TestTrialRun:
 
     def test_500_on_exception(self, client):
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(side_effect=RuntimeError("boom"))
+            run_evaluation_trial_in_worker=MagicMock(side_effect=RuntimeError("boom"))
         )
         response = client.post(
             "/agent-evaluations/trial-run",
@@ -648,7 +652,7 @@ class TestTrialRun:
 
     def test_app_exception_propagates(self, client):
         _mock_impls(
-            forward_agent_evaluation_trial_run=AsyncMock(
+            run_evaluation_trial_in_worker=MagicMock(
                 side_effect=_exc(_code("COMMON_RESOURCE_NOT_FOUND"), "missing")
             )
         )

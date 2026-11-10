@@ -14,7 +14,7 @@ from management.services.file.service import validate_urls_access
 from nexent.core.agents.agent_model import AgentHistory
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.agents.prompt.user_context import render_user_context
-from runtime.workspace import create_run_workspace
+from infrastructure.workspace_paths import create_run_workspace
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)

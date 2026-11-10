@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise real AgentOS HTTP boundaries with a recording execution adapter."""
 
+import json
 import socket
 import threading
 import time
@@ -13,7 +14,7 @@ import uvicorn
 from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
-from contracts.agentos import CompatibilityOperation, CompatibilityRun
+from contracts.agentos import CompatibilityOperation, CompatibilityRun, EvaluationAgentResult, EvaluationAgentRun
 from contracts.constants import environment
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from gateway.security.context import trusted_identity
@@ -21,6 +22,7 @@ from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
 from runtime.agentos.compatibility import create_compatibility_router
+from runtime.agentos.evaluation import create_evaluation_router
 from runtime.agentos.middleware import AgentOSMiddleware
 
 _EVENTS = b"id: 1\ndata: first\n\nid: 2\ndata: done\n\n"
@@ -71,10 +73,17 @@ async def test_signed_agentos_transport(monkeypatch):
         calls.append(("stop", conversation_id, actor))
         return {"message": "stopped"}
 
+    case_events = [{"type": "thought", "content": "step"}, {"type": "final_answer", "content": "answer"}]
+
+    async def evaluate(payload, actor):
+        calls.append(("evaluate", payload.conversation_id, actor))
+        return EvaluationAgentResult(answer="answer", events=case_events)
+
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_compatibility_router(run, stop))
+    runtime.include_router(create_evaluation_router(evaluate))
 
     with serve(runtime) as runtime_url:
         def client_factory(**kwargs):
@@ -121,4 +130,21 @@ async def test_signed_agentos_transport(monkeypatch):
                 assert result.status_code == status
                 assert "conversation_id" not in result.text
 
-    assert calls == [("run", {"conversation_id": 42}, principal), ("stop", 42, principal)]
+            case = EvaluationAgentRun(agent_id=7, version_no=3, query="question", conversation_id=-12)
+            result = await agentos.run_evaluation_case(case, principal.user_id, principal.tenant_id)
+            assert result.answer == "answer"
+            assert result.events == case_events
+            invalid = json.dumps(case.model_dump() | {"conversation_id": 42}).encode()
+            signed = sign_call(CompatibilityOperation.EVALUATION_CASE, invalid, principal)
+            response = await client.post(
+                f"{runtime_url}/api{CompatibilityOperation.EVALUATION_CASE.value}",
+                content=invalid,
+                headers={"Authorization": f"Bearer {signed}"},
+            )
+            assert response.status_code == 422
+
+    assert calls == [
+        ("run", {"conversation_id": 42}, principal),
+        ("stop", 42, principal),
+        ("evaluate", -12, principal),
+    ]

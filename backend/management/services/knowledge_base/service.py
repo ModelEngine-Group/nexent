@@ -156,6 +156,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                     cluster_max_words=150,
                     model_id=model_id,
                     tenant_id=tenant_id,
+                    user_id=user_id,
                 )
 
                 # Step 4: Merge into final summary

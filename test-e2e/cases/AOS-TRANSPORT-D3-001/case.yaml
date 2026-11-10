@@ -33,9 +33,13 @@ case:
       operation, an expired credential and an unknown version.
     expected: Authentication failures are 401; the unsupported path is 404; no rejected
       call enters the execution sink.
+  - order: 3
+    action: Run a synthetic evaluation case and attempt to submit a persistent conversation ID.
+    expected: Runtime returns the answer and ordered observer events for the synthetic case and rejects the positive ID.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
+  - Evaluation returns exact ordered events without using a real conversation.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -69,3 +73,8 @@ case:
     forbidden_side_effects:
     - 1
     - 2
+  - id: AC-03
+    description: Signed evaluation case transport preserves events and rejects a real conversation key.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [2]

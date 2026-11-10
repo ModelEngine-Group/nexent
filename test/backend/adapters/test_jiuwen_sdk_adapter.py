@@ -739,6 +739,27 @@ def _patch_build_configs(adapter_module):
 
 
 class TestEvaluateSemanticConsistency:
+    def test_injected_judge_does_not_create_provider_client(self, adapter_module, monkeypatch):
+        build = MagicMock(side_effect=AssertionError("Provider configuration must stay in Runtime"))
+        monkeypatch.setattr(adapter_module, "build_jiuwen_model_configs", build)
+        _build_metric_mock(adapter_module, invoke_response_content="", judge_payload={"result": True, "reason": "一致"})
+        module = types.ModuleType("openjiuwen.agent_evolving.evaluator.templates")
+        module.LLM_METRIC_TEMPLATE = MagicMock()
+        message = types.SimpleNamespace(role="user", content="judge prompt")
+        module.LLM_METRIC_TEMPLATE.format.return_value.format.return_value.to_messages.return_value = [message]
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        invoke = MagicMock(return_value='{"result": true, "reason": "一致"}')
+        adapter = adapter_module.JiuwenSDKAdapter(model_id=1, tenant_id="t1")
+
+        score, reason = adapter.evaluate_semantic_consistency(
+            question="q", expected_answer="a", model_answer="b", judge_invoker=invoke,
+        )
+
+        assert (score, reason) == (1.0, "一致")
+        invoke.assert_called_once_with([message])
+        assert "judge prompt" in message.content
+        build.assert_not_called()
+
     def test_result_true_string_returns_score_one(self, adapter_module):
         # LLM says result="true" → score 1.0.
         _patch_build_configs(adapter_module)

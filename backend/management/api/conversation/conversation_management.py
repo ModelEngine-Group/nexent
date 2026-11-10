@@ -36,7 +36,6 @@ from management.services.conversation.agent_history import (
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
-title_router = APIRouter(prefix="/conversation")
 
 
 @router.get("/agent_groups", response_model=ConversationResponse)
@@ -424,7 +423,7 @@ async def get_sources_endpoint(request: Dict[str, Any], authorization: Optional[
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@title_router.post("/generate_title", response_model=ConversationResponse)
+@router.post("/generate_title", response_model=ConversationResponse)
 async def generate_conversation_title_endpoint(
     request: GenerateTitleRequest, http_request: Request, authorization: Optional[str] = Header(None)
 ):

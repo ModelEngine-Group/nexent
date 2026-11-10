@@ -15,6 +15,7 @@ BODY_KEY = "nexent.agentos.body"
 class CompatibilityOperation(str, Enum):
     RUN = NAMESPACE + "v1/compat/agent/run"
     STOP = NAMESPACE + "v1/compat/agent/stop"
+    EVALUATION_CASE = NAMESPACE + "v1/compat/agent/evaluation-case"
 
 
 class CompatibilityRun(BaseModel):
@@ -29,6 +30,23 @@ class CompatibilityStop(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     conversation_id: PositiveInt
+
+
+class EvaluationAgentRun(BaseModel):
+    """Execute one synthetic evaluation case without a persisted conversation."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    agent_id: PositiveInt
+    version_no: Annotated[int, Field(ge=0)]
+    query: str
+    history: list[dict[str, JsonValue]] | None = None
+    conversation_id: Annotated[int, Field(le=0)] = 0
+
+
+class EvaluationAgentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    answer: str
+    events: list[dict[str, JsonValue]]
 
 
 class ModelOperation(str, Enum):

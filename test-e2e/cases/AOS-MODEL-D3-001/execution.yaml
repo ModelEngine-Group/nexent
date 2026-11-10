@@ -10,6 +10,7 @@ acceptance_bindings:
   AC-02: [test_agentos_model_over_http]
   AC-03: [test_agentos_model_over_http]
   AC-04: [test_agentos_model_over_http]
+  AC-05: [test_agentos_model_over_http]
 preparation:
   families: []
   anchors: false

@@ -30,11 +30,15 @@ case:
   - order: 4
     action: Retire the tenant models and repeat the operation.
     expected: Only the signed tenant models are retired, and retry returns zero.
+  - order: 5
+    action: Invoke a chat model through the Management worker adapter.
+    expected: The worker submits the same signed Model.invoke operation and receives the model text.
   expected_results:
   - Metadata and inference traverse the signed transport with the configured tenant model.
   - Rejected requests produce no provider calls.
   - Model management does not accept record ownership from the payload.
   - Tenant model cleanup is scoped and retryable.
+  - Management workers receive text through the same Runtime model operation.
   forbidden_side_effects:
   - AgentOS metadata must not expose provider credentials.
   - The case must not leave temporary servers running.
@@ -70,3 +74,8 @@ case:
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [2]
+  - id: AC-05
+    description: A synchronous Management worker uses signed Model.invoke.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
