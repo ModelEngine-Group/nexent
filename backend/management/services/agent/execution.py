@@ -78,7 +78,7 @@ from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from management.services.agent.channels import (
+from infrastructure.agent_stream_channels import (
     streaming_channel_manager,
 )
 from management.services.configuration.tenant.settings import (

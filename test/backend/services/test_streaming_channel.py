@@ -6,7 +6,7 @@ Unit tests for StreamingChannel event-driven implementation.
 import asyncio
 import pytest
 
-from management.services.agent.channels import (
+from infrastructure.agent_stream_channels import (
     StreamingChannel,
     StreamingChannelManager,
     DEFAULT_HISTORY_SIZE,
@@ -24,11 +24,11 @@ def disable_external_runtime_stream_writes(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "management.services.agent.channels.runtime_state_service.append_stream_event_async",
+        "infrastructure.agent_stream_channels.runtime_state_service.append_stream_event_async",
         _append,
     )
     monkeypatch.setattr(
-        "management.services.agent.channels.runtime_state_service.mark_stream_completed_async",
+        "infrastructure.agent_stream_channels.runtime_state_service.mark_stream_completed_async",
         _complete,
     )
 
@@ -168,7 +168,7 @@ class TestStreamingChannel:
     async def test_ac_001_history_buffer_obeys_byte_limit(self, monkeypatch):
         """AC-001: local replay evicts whole events to honor the byte policy."""
         monkeypatch.setattr(
-            "management.services.agent.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
+            "infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 8
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 
@@ -197,7 +197,7 @@ class TestStreamingChannel:
     async def test_ac_001_single_oversized_event_does_not_accumulate(self, monkeypatch):
         """AC-001: one live event may exceed the cap, but oversized events do not stack."""
         monkeypatch.setattr(
-            "management.services.agent.channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
+            "infrastructure.agent_stream_channels.RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", 4
         )
         channel = StreamingChannel("test-conv", "test-user", history_size=10)
 

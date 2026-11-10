@@ -100,7 +100,7 @@ from infrastructure.rdb.agent_execution import RunIdentity, begin_execution, fin
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
-from management.services.agent.channels import (
+from infrastructure.agent_stream_channels import (
     streaming_channel_manager,
 )
 from management.utils.request_context import get_user_language

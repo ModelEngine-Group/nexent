@@ -306,7 +306,7 @@ sys.modules["management.services.configuration.user.memory"] = memory_config_ser
 sys.modules["management.services.agent.versions"] = agent_version_service_mock
 sys.modules["management.services.skill.service"] = skill_service_mock
 sys.modules["management.services.file.service"] = MagicMock()
-sys.modules["management.services.agent.channels"] = MagicMock()
+sys.modules["infrastructure.agent_stream_channels"] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
@@ -382,7 +382,7 @@ streaming_channel_manager_mock.complete_channel = AsyncMock(
     side_effect=_complete_test_streaming_channel
 )
 sys.modules[
-    "management.services.agent.channels"
+    "infrastructure.agent_stream_channels"
 ].streaming_channel_manager = streaming_channel_manager_mock
 setattr(
     services_module, "skill_service", sys.modules["management.services.skill.service"]

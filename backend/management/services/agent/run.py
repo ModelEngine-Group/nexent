@@ -53,7 +53,7 @@ from management.services.conversation.service import (
 from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from management.services.agent.channels import (
+from infrastructure.agent_stream_channels import (
     streaming_channel_manager,
 )
 
