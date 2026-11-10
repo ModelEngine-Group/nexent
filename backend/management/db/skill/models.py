@@ -19,7 +19,11 @@ from management.db.base import (
     _PUBLISHER_TENANT_ID_DOC,
     _PUBLISHER_USER_ID_DOC,
 )
-from infrastructure.rdb.skill_execution_records import SkillInfo as SkillInfo, SkillInstance as SkillInstance
+from infrastructure.rdb.skill_execution_records import (
+    SkillInfo as SkillInfo,
+    SkillInstance as SkillInstance,
+    SkillToolRelation as SkillToolRelation,
+)
 
 
 class SkillRepository(TableBase):
@@ -47,18 +51,3 @@ class SkillRepository(TableBase):
     status = Column(String(30), default="not_shared",
                     doc="Listing status: not_shared / pending_review / rejected / shared")
     content = Column(Text, doc="Listing note on submit or review opinion on approve/reject")
-
-
-class SkillToolRelation(TableBase):
-    """
-    Skill-Tool relation table - many-to-many relationship between skills and tools.
-    """
-    __tablename__ = "ag_skill_tools_rel_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    rel_id = Column(Integer, Sequence("ag_skill_tools_rel_t_rel_id_seq", schema=SCHEMA),
-                    primary_key=True, nullable=False, autoincrement=True, doc="Relation ID")
-    skill_id = Column(Integer, nullable=False,
-                      doc="Foreign key to ag_skill_info_t.skill_id")
-    tool_id = Column(Integer, nullable=False,
-                     doc="Foreign key to ag_tool_info_t.tool_id")

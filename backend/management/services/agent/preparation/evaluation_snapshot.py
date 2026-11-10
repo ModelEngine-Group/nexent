@@ -10,7 +10,7 @@ from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding,
-    FileToolDescription, MCPExecutionBinding, SkillExecutionBinding, ToolCallerContext,
+    FileToolDescription, MCPExecutionBinding, SkillDerivedMCPBinding, SkillExecutionBinding, ToolCallerContext,
     ModelBindings, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
 )
 from contracts.constants import environment
@@ -18,8 +18,10 @@ from contracts.constants.environment import NEXENT_SANDBOX_DEFAULT_LEVEL
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record
-from infrastructure.mcp_execution import build_mcp_tool, mcp_execution_revision, select_mcp_server
-from infrastructure.rdb.mcp_execution_records import read_bound_mcp_tools, read_mcp_execution_servers
+from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
+from infrastructure.rdb.mcp_execution_records import (
+    read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
+)
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
@@ -91,7 +93,7 @@ def _builtin_binding(tool):
 def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_servers):
     matching = [row for row in candidates if row["name"] == tool.name]
     if len(matching) != 1 or build_mcp_tool(matching[0]) != tool:
-        raise ValueError("MCP tool differs from its explicit binding")
+        raise ValueError("MCP tool differs from its persisted binding")
     row = matching[0]
     server_id, host = select_mcp_server(servers, tool.usage, tenant_id)
     origin_name = row["origin_name"] or tool.class_name
@@ -99,13 +101,17 @@ def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_server
     if tool_servers.setdefault(tool.class_name, target) != target:
         raise ValueError("Ambiguous MCP callable")
     revision = mcp_execution_revision(
-        tenant_id, agent.agent_id, agent.version_no, row["tool_instance_id"], tool,
+        tenant_id, agent.agent_id, agent.version_no, mcp_binding_identity(row), tool,
         origin_name, server_id, host,
     )
-    reference = MCPExecutionBinding(
-        instance_id=row["tool_instance_id"], tool_name=tool.name, server_id=server_id, revision=revision,
-    )
-    return ToolBinding(tool_id="mcp", version="1", parameters=reference.model_dump(mode="json"))
+    common = {"tool_name": tool.name, "server_id": server_id, "revision": revision}
+    if "skill_instance_ids" in row:
+        reference = SkillDerivedMCPBinding(tool_id=row["tool_id"], **common)
+        version = "2"
+    else:
+        reference = MCPExecutionBinding(instance_id=row["tool_instance_id"], **common)
+        version = "1"
+    return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json"))
 
 
 def _export_skill_bindings(agent, tenant_id, context_items):
@@ -161,6 +167,13 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
     tools = []
     mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]
     candidates = read_bound_mcp_tools(agent.agent_id, agent.version_no, tenant_id, mcp_names) if mcp_names else []
+    unresolved = sorted(set(mcp_names) - {row["name"] for row in candidates})
+    if unresolved and skill_refs:
+        authorized = {ref.instance_id for ref in skill_refs}
+        candidates.extend(
+            row for row in read_skill_derived_mcp_tools(agent.agent_id, agent.version_no, tenant_id, unresolved)
+            if set(row["skill_instance_ids"]) <= authorized
+        )
     mcp_servers = read_servers(tenant_id) if mcp_names else []
     for tool in agent.tools:
         if tool.source == "mcp":

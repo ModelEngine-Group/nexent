@@ -177,3 +177,69 @@ async def test_cancellation_during_preparation_removes_staged_skill_files(skill_
     await asyncio.wait_for(removed.wait(), timeout=2)
     assert not workspaces[0].exists()
     registry.register_agent_run.assert_not_called()
+
+
+@pytest.mark.parametrize(("change", "status"), [
+    ("none", None), ("unbound", 404), ("new_source", 409), ("config", 409),
+])
+def test_skill_derived_mcp_binding(skill_snapshot, mocker, change, status):
+    from infrastructure.mcp_execution import build_mcp_tool
+    from runtime.agentos import prepared_mcp
+
+    agent, model, *_ = skill_snapshot
+    row = {
+        "tool_id": 77, "skill_instance_ids": [23], "name": "derived_lookup",
+        "class_name": "derived_lookup", "origin_name": "lookup", "usage": "registry",
+        "params": [{"name": "value", "default": "private-tool-config"}],
+        "instance_params": {}, "description": "Derived lookup", "inputs": None, "output_type": "object",
+    }
+    server = {
+        "mcp_id": 29, "mcp_name": "registry", "mcp_server": "https://registry.example/private",
+        "authorization_token": "private-mcp-token", "custom_headers": None, "enabled": True,
+    }
+    agent.tools.append(build_mcp_tool(row))
+    mocker.patch.object(evaluation_snapshot, "read_bound_mcp_tools", return_value=[])
+    mocker.patch.object(evaluation_snapshot, "read_skill_derived_mcp_tools", return_value=[row])
+    mocker.patch.object(evaluation_snapshot, "read_mcp_execution_servers", return_value=[server])
+    direct = mocker.patch.object(prepared_mcp, "read_bound_mcp_tools", return_value=[])
+    derived = mocker.patch.object(prepared_mcp, "read_skill_derived_mcp_tools", return_value=[row])
+    mocker.patch.object(prepared_mcp, "read_mcp_execution_servers", return_value=[server])
+
+    snapshot = evaluation_snapshot.export_snapshot(
+        agent, [model], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en",
+    )
+    assert snapshot is not None
+    binding = snapshot.resource.tools[-1]
+    assert (binding.tool_id, binding.version, binding.parameters["tool_id"]) == ("mcp", "2", 77)
+    encoded = snapshot.model_dump_json()
+    assert "private-tool-config" not in encoded
+    assert "private-mcp-token" not in encoded
+    if change == "unbound":
+        derived.return_value = []
+    elif change == "new_source":
+        row["skill_instance_ids"] = [23, 24]
+    elif change == "config":
+        row["params"] = [{"name": "value", "default": "changed"}]
+
+    payload = PreparedEvaluationRun.model_validate_json(encoded)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    if status:
+        with pytest.raises(HTTPException) as error:
+            prepared_evaluation.prepare_evaluation_run(payload, actor)
+        assert error.value.status_code == status
+    else:
+        info = prepared_evaluation.prepare_evaluation_run(payload, actor)
+        assert info.agent_config.tools[-1].params == {"value": "private-tool-config"}
+        assert info.mcp_host[0]["allowed_tools"] == {"lookup": "derived_lookup"}
+    derived.assert_called_once_with(7, 2, "tenant-a", ["derived_lookup"])
+    direct.assert_not_called()
+
+
+def test_skill_parameter_merge_preserves_falsey_and_rejects_conflicts():
+    from contracts.errors.exceptions import ValidationError
+    from infrastructure.skill_execution import merge_skill_tool_parameters
+
+    values = [("first", {"flag": False, "number": 0}), ("second", {"flag": False, "path": None})]
+    assert merge_skill_tool_parameters(77, values) == {"flag": False, "number": 0, "path": None}
+    with pytest.raises(ValidationError, match=r"first.*second.*77.*flag"):
+        merge_skill_tool_parameters(77, [values[0], ("second", {"flag": True})])

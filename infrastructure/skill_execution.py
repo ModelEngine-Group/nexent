@@ -8,6 +8,7 @@ from hashlib import sha256
 from pathlib import Path, PureWindowsPath
 
 from contracts.constants import environment
+from contracts.errors.exceptions import ValidationError
 
 MAX_SKILL_FILES = 256
 MAX_SKILL_BYTES = 16 * 1024 * 1024
@@ -63,6 +64,22 @@ def validate_skill_context(context_items, rows) -> None:
             if (not isinstance(content, dict) or not isinstance(content.get("name"), str)
                     or content != expected.get(content["name"])):
                 raise ValueError("Skill context does not match the authorized binding")
+
+
+def merge_skill_tool_parameters(tool_id: int, contributions) -> dict:
+    """Apply compatible skill overrides and report conflicting values with their sources."""
+    values = {}
+    sources = {}
+    for skill_name, config in contributions:
+        for name, value in config.items():
+            if name in values and values[name] != value:
+                raise ValidationError(
+                    f"Skills '{sources[name]}' and '{skill_name}' configure "
+                    f"tool ID {tool_id} parameter '{name}' with different values."
+                )
+            values[name] = value
+            sources[name] = skill_name
+    return values
 
 
 def skill_execution_revision(tenant_id: str, agent_id: int, version_no: int,

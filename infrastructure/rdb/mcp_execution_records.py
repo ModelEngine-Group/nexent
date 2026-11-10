@@ -1,10 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Neutral persistence and authorized execution reads for MCP tools."""
 
+from itertools import groupby
+
 from sqlalchemy import JSON, Boolean, Column, Integer, Sequence, String, Text, select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from infrastructure.rdb.base import SCHEMA, TableBase
+from infrastructure.rdb.skill_execution_records import SkillInfo, SkillInstance, SkillToolRelation, bound_skill_predicates
+from infrastructure.skill_execution import merge_skill_tool_parameters
 
 _MCP_NAME_DOC = "MCP name"
 
@@ -126,6 +130,55 @@ def read_bound_mcp_tools(agent_id: int, version_no: int, tenant_id: str, names: 
             tool.delete_flag != "Y", tool.is_available.is_not(False),
         )).mappings()
         return [dict(row) for row in rows]
+
+
+def read_skill_derived_mcp_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str]) -> list[dict]:
+    """Resolve tenant-owned MCP tools contributed by active skills unless explicitly bound."""
+    from infrastructure.rdb.client import get_db_session
+
+    tool, instance = ToolInfo, ToolInstance
+    explicit = select(instance.tool_instance_id).where(
+        instance.tool_id == tool.tool_id, instance.agent_id == agent_id, instance.version_no == version_no,
+        instance.tenant_id == tenant_id, instance.enabled.is_(True), instance.delete_flag != "Y",
+    ).exists()
+    statement = (
+        select(
+            tool.tool_id, tool.name, tool.class_name, tool.usage, tool.origin_name, tool.params,
+            tool.description, tool.inputs, tool.output_type, SkillInstance.skill_instance_id,
+            SkillInfo.skill_name, SkillInfo.config_values.label("defaults"), SkillInstance.config_values.label("overrides"),
+        )
+        .select_from(tool)
+        .join(SkillToolRelation, SkillToolRelation.tool_id == tool.tool_id)
+        .join(SkillInfo, SkillInfo.skill_id == SkillToolRelation.skill_id)
+        .join(SkillInstance, SkillInstance.skill_id == SkillInfo.skill_id)
+        .where(
+            *bound_skill_predicates(agent_id, version_no, tenant_id),
+            tool.source == "mcp", tool.author == tenant_id, tool.name.in_(names),
+            tool.delete_flag != "Y", tool.is_available.is_not(False), ~explicit,
+        )
+        .order_by(tool.tool_id, SkillInstance.skill_instance_id)
+    )
+    with get_db_session() as session:
+        rows = session.execute(statement).mappings().all()
+
+    tools = []
+    for tool_id, group in groupby(rows, key=lambda row: row["tool_id"]):
+        sources = {row["skill_instance_id"]: row for row in group}
+        values = merge_skill_tool_parameters(tool_id, [
+            (row["skill_name"], {**(row["defaults"] or {}), **(row["overrides"] or {})})
+            for row in sources.values()
+        ])
+        row = next(iter(sources.values()))
+        params = [
+            {**param, "default": values[param["name"]]} if param["name"] in values else param
+            for param in (row["params"] or [])
+        ]
+        tools.append({
+            **{key: row[key] for key in ("tool_id", "name", "class_name", "usage", "origin_name",
+                                         "description", "inputs", "output_type")},
+            "params": params, "instance_params": {}, "skill_instance_ids": sorted(sources),
+        })
+    return tools
 
 
 def read_mcp_execution_servers(tenant_id: str) -> list[dict]:

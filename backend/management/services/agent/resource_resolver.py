@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from contracts.errors.exceptions import ValidationError
+from infrastructure.skill_execution import merge_skill_tool_parameters
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids, search_tools_for_sub_agent
 
@@ -71,8 +72,7 @@ def _resolve_runtime_tool_records(
         if tool.get("tool_id") is not None
     }
 
-    dependency_values: Dict[int, Dict[str, Any]] = {}
-    dependency_sources: Dict[int, Dict[str, str]] = {}
+    dependencies: Dict[int, list[tuple[str, dict]]] = {}
     enabled_skill_instances = (
         skill_db.search_skills_for_agent(
             agent_id=agent_id,
@@ -97,8 +97,6 @@ def _resolve_runtime_tool_records(
         for tool_id in skill.get("tool_ids") or []:
             if tool_id in explicit_tool_ids:
                 continue
-            values = dependency_values.setdefault(tool_id, {})
-            sources = dependency_sources.setdefault(tool_id, {})
             runtime_definition = next(
                 (
                     item
@@ -110,21 +108,16 @@ def _resolve_runtime_tool_records(
             runtime_parameter_names = {
                 param.get("name") for param in runtime_definition.get("params") or []
             }
-            for name, value in effective_config.items():
-                if (
-                    runtime_skill_snapshot is not None
-                    and name not in runtime_parameter_names
-                ):
-                    continue
-                if name in values and values[name] != value:
-                    raise ValidationError(
-                        f"Skills '{sources[name]}' and '{skill_name}' configure "
-                        f"tool ID {tool_id} parameter '{name}' with different values."
-                    )
-                values[name] = value
-                sources[name] = skill_name
+            config = {
+                name: value for name, value in effective_config.items()
+                if runtime_skill_snapshot is None or name in runtime_parameter_names
+            }
+            dependencies.setdefault(tool_id, []).append((skill_name, config))
 
-    implicit_tool_ids = set(dependency_values) - explicit_tool_ids
+    dependency_values = {
+        tool_id: merge_skill_tool_parameters(tool_id, contributions) for tool_id, contributions in dependencies.items()
+    }
+    implicit_tool_ids = set(dependency_values)
     if not implicit_tool_ids:
         return explicit_tools
 

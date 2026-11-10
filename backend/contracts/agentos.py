@@ -253,11 +253,18 @@ class EvaluationAgentOptions(RunSpecModel):
     verification_config: dict[str, JsonValue] | None = None
 
 
-class MCPExecutionBinding(RunSpecModel):
-    instance_id: PositiveInt
+class MCPBindingReference(RunSpecModel):
     tool_name: str = Field(min_length=1)
     server_id: PositiveInt | None = None
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class MCPExecutionBinding(MCPBindingReference):
+    instance_id: PositiveInt
+
+
+class SkillDerivedMCPBinding(MCPBindingReference):
+    tool_id: PositiveInt
 
 
 class ToolCallerContext(RunSpecModel):

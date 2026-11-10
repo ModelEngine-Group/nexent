@@ -82,6 +82,33 @@ class SkillInstance(TableBase):
         JSON, doc="Per-agent parameter schema overrides from config/schema.yaml")
 
 
+class SkillToolRelation(TableBase):
+    """
+    Skill-Tool relation table - many-to-many relationship between skills and tools.
+    """
+    __tablename__ = "ag_skill_tools_rel_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    rel_id = Column(Integer, Sequence("ag_skill_tools_rel_t_rel_id_seq", schema=SCHEMA),
+                    primary_key=True, nullable=False, autoincrement=True, doc="Relation ID")
+    skill_id = Column(Integer, nullable=False,
+                      doc="Foreign key to ag_skill_info_t.skill_id")
+    tool_id = Column(Integer, nullable=False,
+                     doc="Foreign key to ag_tool_info_t.tool_id")
+
+
+def bound_skill_predicates(agent_id: int, version_no: int, tenant_id: str):
+    return (
+        SkillInstance.agent_id == agent_id,
+        SkillInstance.version_no == version_no,
+        SkillInstance.tenant_id == tenant_id,
+        SkillInstance.enabled.is_(True),
+        SkillInstance.delete_flag != "Y",
+        SkillInfo.tenant_id == tenant_id,
+        SkillInfo.delete_flag != "Y",
+    )
+
+
 def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[dict]:
     """Read enabled bindings scoped to the signed tenant and the selected Agent version."""
     from infrastructure.rdb.client import get_db_session
@@ -92,15 +119,7 @@ def read_bound_skills(agent_id: int, version_no: int, tenant_id: str) -> list[di
             SkillInfo.config_values, SkillInstance.config_values,
         )
         .join(SkillInfo, SkillInfo.skill_id == SkillInstance.skill_id)
-        .where(
-            SkillInstance.agent_id == agent_id,
-            SkillInstance.version_no == version_no,
-            SkillInstance.tenant_id == tenant_id,
-            SkillInstance.enabled.is_(True),
-            SkillInstance.delete_flag != "Y",
-            SkillInfo.tenant_id == tenant_id,
-            SkillInfo.delete_flag != "Y",
-        )
+        .where(*bound_skill_predicates(agent_id, version_no, tenant_id))
     )
     with get_db_session() as session:
         return [

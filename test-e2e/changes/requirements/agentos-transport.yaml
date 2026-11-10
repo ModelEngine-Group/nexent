@@ -42,6 +42,7 @@ change:
     - Prepared MCP evaluation pins enabled versioned tools and tenant connections without serializing transport or tool credentials.
     - Prepared evaluations retain historical attachment placement, recheck object scope in Runtime and regenerate only requested download URLs.
     - Prepared evaluation rechecks versioned skill bindings, reads verified guide and configuration files, and refuses changed revisions.
+    - Skill-derived MCP tools preserve parameter precedence, reject conflicting skill contributions, and bind the exact sources without transmitting credentials.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

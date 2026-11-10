@@ -266,7 +266,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     }
 
     def read_mcp_tools(agent_id, version_no, tenant_id, names):
-        assert (agent_id, version_no, names) == (7, 2, ["catalog_lookup"])
+        assert (agent_id, version_no) == (7, 2)
+        assert "catalog_lookup" in names
         return [mcp_tool] if tenant_id == "tenant-a" else []
 
     for module in (evaluation_snapshot, prepared_mcp):
@@ -280,6 +281,19 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     guide.write_text("---\nname: summarize\ndescription: Summarize\n---\nRuntime skill guide", encoding="utf-8")
     (skill_dir / "config" / "config.yaml").write_text("keep: true\nvalue: default", encoding="utf-8")
     skill = {"instance_id": 51, "name": "summarize", "description": "Summarize", "config": {"value": "local-secret"}}
+    derived_tool = {
+        **mcp_tool, "tool_id": 52, "skill_instance_ids": [51], "name": "skill_lookup",
+        "class_name": "skill_lookup", "origin_name": "skill_lookup",
+        "params": [{"name": "scope", "default": "private-skill-tool-value"}],
+    }
+
+    def read_derived(agent_id, version_no, tenant_id, names):
+        assert (agent_id, version_no, names) == (7, 2, ["skill_lookup"])
+        return [derived_tool] if tenant_id == "tenant-a" else []
+
+    for module in (evaluation_snapshot, prepared_mcp):
+        monkeypatch.setattr(module, "read_skill_derived_mcp_tools", read_derived)
+
     skill_metadata = {"agent_id": 7, "version_no": 2, "tenant_id": "tenant-a"}
     skill_tools = [
         ToolConfig(
@@ -317,6 +331,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
         assert info.agent_config.tools[1].params == {"scope": "private-tool-default"}
         by_name = {tool.name: tool for tool in info.agent_config.tools}
+        assert by_name["skill_lookup"].params == {"scope": "private-skill-tool-value"}
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
         config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
         assert "Runtime skill guide" in reader.forward("summarize")
@@ -324,7 +339,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert "not authorized" in config_reader.forward("other-skill").lower()
         host, = info.mcp_host
         assert host["headers"] == {"Authorization": "runtime-mcp-token"}
-        assert host["allowed_tools"] == {"catalog_lookup": "catalog_lookup"}
+        assert host["allowed_tools"] == {"catalog_lookup": "catalog_lookup", "skill_lookup": "skill_lookup"}
         assert info.user_context["user_id"] == "user-a"
         assert "attachments/user-a/report.txt" in info.query
         assert "fresh-evaluation-link" in info.history[0].content
@@ -358,7 +373,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool), *skill_tools],
+        ), build_mcp_tool(mcp_tool), *skill_tools, build_mcp_tool(derived_tool)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -379,6 +394,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "previous-link-from-history" not in prepared.model_dump_json()
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
+    assert "private-skill-tool-value" not in prepared.model_dump_json()
+    assert prepared.resource.tools[-1].version == "2"
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
     assert "local-secret" not in prepared.model_dump_json()
     assert "Runtime skill guide" not in prepared.model_dump_json()
@@ -412,6 +429,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert changed_mcp.value.status_code == 409
         assert "AGENTOS_MCP_REVISION_MISMATCH" in changed_mcp.value.content.decode()
         mcp_server["authorization_token"] = "runtime-mcp-token"
+        derived_tool["skill_instance_ids"] = [51, 53]
+        with pytest.raises(RuntimeUpstreamError) as changed_derivation:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_derivation.value.status_code == 409
+        assert "AGENTOS_MCP_REVISION_MISMATCH" in changed_derivation.value.content.decode()
+        derived_tool["skill_instance_ids"] = [51]
         original_guide = guide.read_bytes()
         guide.write_text("file revision changed", encoding="utf-8")
         with pytest.raises(RuntimeUpstreamError) as changed_skill:

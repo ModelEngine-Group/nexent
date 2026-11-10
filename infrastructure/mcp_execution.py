@@ -60,11 +60,17 @@ def select_mcp_server(records: list[dict], usage: str, tenant_id: str) -> tuple[
     return server_id, host
 
 
-def mcp_execution_revision(tenant_id: str, agent_id: int, version_no: int, instance_id: int,
+def mcp_binding_identity(row: dict) -> int | list[int]:
+    if "skill_instance_ids" in row:
+        return [row["tool_id"], *row["skill_instance_ids"]]
+    return row["tool_instance_id"]
+
+
+def mcp_execution_revision(tenant_id: str, agent_id: int, version_no: int, binding_identity: int | list[int],
                            tool: ToolConfig, origin_name: str, server_id: int | None, host: dict) -> str:
     if not environment.JWT_SECRET:
         raise ValueError("AgentOS signing is not configured")
     key = hmac.digest(environment.JWT_SECRET.encode(), b"nexent/agentos/mcp-execution/v1", "sha256")
-    values = [tenant_id, agent_id, version_no, instance_id, tool.model_dump(mode="json"), origin_name, server_id, host]
+    values = [tenant_id, agent_id, version_no, binding_identity, tool.model_dump(mode="json"), origin_name, server_id, host]
     payload = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hmac.digest(key, payload, "sha256").hex()
