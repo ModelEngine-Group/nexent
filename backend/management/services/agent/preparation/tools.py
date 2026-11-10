@@ -353,7 +353,7 @@ async def create_tool_config_list(
     portable_evaluation: bool = False,
 ):
     tool_config_list = []
-    langchain_tools = await discover_langchain_tools()
+    langchain_tools = [] if portable_evaluation else await discover_langchain_tools()
     normalized_tool_params = _normalize_tool_params_request(tool_params)
 
     tools_list = _resolve_runtime_tool_records(

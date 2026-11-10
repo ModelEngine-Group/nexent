@@ -139,7 +139,7 @@ def read_skill_derived_mcp_tools(agent_id: int, version_no: int, tenant_id: str,
 
 
 def read_skill_derived_tools(
-    agent_id: int, version_no: int, tenant_id: str, names: list[str], *, source: Literal["mcp", "local"],
+    agent_id: int, version_no: int, tenant_id: str, names: list[str], *, source: Literal["mcp", "local", "langchain"],
 ) -> list[dict]:
     """Read active skill contributions for tools of one catalog source."""
     from infrastructure.rdb.client import get_db_session

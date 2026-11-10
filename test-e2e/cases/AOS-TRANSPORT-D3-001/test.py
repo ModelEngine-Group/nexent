@@ -317,7 +317,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
 async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     from fastapi import Request, Response
 
-    from infrastructure import ind_aidp_images
+    from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
     from management.services.agent.preparation import evaluation_snapshot
@@ -325,7 +325,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
     from nexent.core.utils.observer import ProcessType
-    from runtime.agentos import prepared_evaluation, prepared_local_tool
+    from runtime.agentos import prepared_evaluation, prepared_langchain, prepared_local_tool
     from runtime.executions import LocalExecutionRegistry
 
     model_record = {
@@ -362,9 +362,23 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         if kind == ProcessType.PICTURE_WEB:
             image_refs.extend(json.loads(content)["images_url"])
 
+    plugin_dir = tmp_path / "langchain"
+    plugin_dir.mkdir()
+    plugin = plugin_dir / "fixture.py"
+    plugin.write_text(
+        'from langchain_core.tools import tool\n@tool\n'
+        'def fixture_double(value: int) -> int:\n    """Double the input."""\n    return value * 2\n',
+        encoding="utf-8",
+    )
+    original_plugin = plugin.read_bytes()
+    monkeypatch.setattr(langchain_plugins, "LANGCHAIN_PLUGIN_DIRECTORY", plugin_dir)
+
     async def run(info, thread_manager):
-        dify_config, aidp_config = info.agent_config.tools
-        assert (dify_config.name, aidp_config.name) == ("dify_search", "ind_aidp_search")
+        dify_config, plugin_config, aidp_config = info.agent_config.tools
+        assert (dify_config.name, plugin_config.name, aidp_config.name) == (
+            "dify_search", "fixture_double", "ind_aidp_search",
+        )
+        assert NexentAgent.create_langchain_tool(None, plugin_config).forward(value=7) == 14
         tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), dify_config)
         answer = await asyncio.to_thread(tool.forward, "fixture query")
         assert "scoped Dify result" in answer
@@ -406,6 +420,18 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             "params": [{"name": name, "default": None} for name in aidp_params],
         }
         enabled = [row, aidp_row]
+        plugin_row = {
+            **row, "tool_instance_id": 25, "tool_id": 7, "name": "fixture_double",
+            "class_name": "fixture_double", "source": "langchain", "description": "Double the input",
+            "instance_params": {}, "params": [], "output_type": "integer",
+        }
+
+        def read_plugin(agent_id, version_no, tenant_id, names):
+            assert (agent_id, version_no, names) == (8, 4, ["fixture_double"])
+            return [plugin_row] if tenant_id == "tenant-a" else []
+
+        for module in (evaluation_snapshot, prepared_langchain):
+            monkeypatch.setattr(module, "read_bound_langchain_tools", read_plugin)
 
         def read_image_tool(**scope):
             assert scope == {"agent_id": 8, "tool_id": 6, "tenant_id": "tenant-a", "version_no": 4}
@@ -424,7 +450,10 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         agent = AgentConfig(
             agent_id=8, version_no=4, name="eval", description="Scoped tool",
             prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
-            tools=[build_local_tool(tool, "en", None, None) for tool in enabled],
+            tools=[
+                build_local_tool(row, "en", None, None), langchain_plugins.build_langchain_tool(plugin_row),
+                build_local_tool(aidp_row, "en", None, None),
+            ],
         )
         prepared = evaluation_snapshot.export_snapshot(
             agent, [model], "question", None, tenant_id="tenant-a", conversation_id=-60, language="en",
@@ -432,7 +461,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert isinstance(prepared, PreparedEvaluationRun)
         for secret in (
             provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset",
-            "synthetic-private-aidp-key", "private-aidp-kb", "provider-fixture",
+            "synthetic-private-aidp-key", "private-aidp-kb", "provider-fixture", "return value * 2",
         ):
             assert secret not in prepared.model_dump_json()
 
@@ -445,6 +474,13 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert image_url.startswith("/api/ind-aidp/images/")
         image = await independent_aidp_proxy.fetch_ind_aidp_image_impl(image_url.rsplit("/", 1)[-1])
         assert image == (b"fixture-png", "image/png")
+        assert next(tool for tool in prepared.resource.tools if tool.tool_id == "langchain").version == "1"
+        plugin.write_text('raise AssertionError("changed plugin must not execute")\n', encoding="utf-8")
+        with pytest.raises(RuntimeUpstreamError) as changed_plugin:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_plugin.value.status_code == 409
+        assert "AGENTOS_LANGCHAIN_REVISION_MISMATCH" in changed_plugin.value.content.decode()
+        plugin.write_bytes(original_plugin)
         row["instance_params"]["top_k"] = 4
         with pytest.raises(RuntimeUpstreamError) as changed:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")

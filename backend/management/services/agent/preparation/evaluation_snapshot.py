@@ -17,6 +17,9 @@ from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+from infrastructure.langchain_plugins import (
+    discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
+)
 from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES
 from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
@@ -26,6 +29,7 @@ from infrastructure.rdb.mcp_execution_records import (
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
+from management.services.agent.preparation.langchain_tool import export_langchain_tool
 from management.services.agent.preparation.local_tool import export_local_tool
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
 from nexent.multi_modal.utils import parse_s3_url
@@ -204,9 +208,20 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             row for row in read_skill_derived_local_tools(*local_scope, unresolved_local)
             if set(row["skill_instance_ids"]) <= authorized
         )
+    langchain_names = [tool.name for tool in agent.tools if tool.source == "langchain"]
+    langchain_candidates = read_bound_langchain_tools(*local_scope, langchain_names) if langchain_names else []
+    unresolved_langchain = sorted(set(langchain_names) - {row["name"] for row in langchain_candidates})
+    if unresolved_langchain and authorized:
+        langchain_candidates.extend(
+            row for row in read_skill_derived_langchain_tools(*local_scope, unresolved_langchain)
+            if set(row["skill_instance_ids"]) <= authorized
+        )
+    plugins = discover_langchain_plugin_refs(set(langchain_names)) if langchain_names else {}
     for tool in agent.tools:
         if tool.source == "mcp":
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
+        elif tool.source == "langchain":
+            binding = export_langchain_tool(tool, langchain_candidates, plugins, *local_scope)
         elif tool.name == "knowledge_base_search" and tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
             descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
             binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))

@@ -29,15 +29,19 @@ LOCAL_SDK_TOOL_CLASSES = {
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 
 
+def catalog_tool_parameters(row: dict) -> dict:
+    overrides = row["instance_params"] or {}
+    return {
+        item["name"]: overrides[item["name"]] if overrides.get(item["name"]) is not None else item.get("default")
+        for item in (row["params"] or [])
+    }
+
+
 def build_local_tool(row: dict, language: str, description_zh: str | None, inputs: str | None) -> ToolConfig:
     name = row["name"]
     if row["source"] != "local" or LOCAL_SDK_TOOL_CLASSES.get(name) != row["class_name"]:
         raise ValueError("Unsupported local SDK tool")
-    overrides = row["instance_params"] or {}
-    params = {
-        item["name"]: overrides[item["name"]] if overrides.get(item["name"]) is not None else item.get("default")
-        for item in (row["params"] or [])
-    }
+    params = catalog_tool_parameters(row)
     if name == "deepseek_search":
         params.pop("localization", None)
         params.pop("max_content_chars", None)

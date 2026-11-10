@@ -44,6 +44,7 @@ from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_analysis import materialize_analysis_tools
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_knowledge import materialize_knowledge_search
+from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
@@ -173,14 +174,17 @@ def _materialize_agent(
     local_tools.update(materialize_analysis_tools(
         [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)], actor,
     ))
+    ordered_tools = {
+        "mcp": iter(mcp.materialize(resource)),
+        "langchain": iter(materialize_langchain_tools(resource, actor)),
+    }
     files = iter(_materialize_file_tools(
-        [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id != "mcp"],
+        [binding for binding in resource.tools if binding.tool_id not in local_tools and binding.tool_id not in ordered_tools],
         actor, workspace_path, workspace_run_id,
     ))
-    mcp_tools = iter(mcp.materialize(resource))
     tools = [
         local_tools[binding.tool_id] if binding.tool_id in local_tools
-        else next(mcp_tools if binding.tool_id == "mcp" else files)
+        else next(ordered_tools.get(binding.tool_id, files))
         for binding in resource.tools
     ]
     options = _agent_options(resource, language, sandbox_enabled)

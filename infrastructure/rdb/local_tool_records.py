@@ -7,6 +7,10 @@ from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance, rea
 
 
 def read_bound_local_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str]) -> list[dict]:
+    return read_bound_catalog_tools(agent_id, version_no, tenant_id, names, source="local")
+
+
+def read_bound_catalog_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str], *, source: str) -> list[dict]:
     from infrastructure.rdb.client import get_db_session
 
     tool, instance = ToolInfo, ToolInstance
@@ -17,7 +21,7 @@ def read_bound_local_tools(agent_id: int, version_no: int, tenant_id: str, names
         ).join(instance, instance.tool_id == tool.tool_id).where(
             instance.agent_id == agent_id, instance.version_no == version_no, instance.tenant_id == tenant_id,
             instance.enabled.is_(True), instance.delete_flag != "Y",
-            tool.source == "local", tool.name.in_(names), tool.delete_flag != "Y", tool.is_available.is_not(False),
+            tool.source == source, tool.name.in_(names), tool.delete_flag != "Y", tool.is_available.is_not(False),
         )).mappings()
         return [dict(row) for row in rows]
 

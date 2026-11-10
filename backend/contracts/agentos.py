@@ -300,6 +300,14 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+class LangChainToolBinding(RunSpecModel):
+    tool_name: str = Field(min_length=1)
+    binding_id: PositiveInt
+    module_file: str = Field(pattern=r"^[^/\\:]+\.py$")
+    module_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class KnowledgeSearchBinding(RunSpecModel):
     description: FileToolDescription
     index_names: list[str]
