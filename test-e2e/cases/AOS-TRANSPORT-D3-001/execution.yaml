@@ -17,6 +17,8 @@ acceptance_bindings:
   - test_signed_agentos_transport
   AC-05:
   - test_signed_agentos_transport
+  AC-06:
+  - test_signed_agentos_transport
 preparation:
   families: []
   anchors: false

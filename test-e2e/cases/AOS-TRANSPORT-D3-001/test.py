@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
-    AgentOperation, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
+    AgentOperation, AgentResume, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
     EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants import environment
@@ -190,9 +190,14 @@ async def test_signed_agentos_transport(monkeypatch):
         ("background", 43, principal),
     ]
     await _assert_prepared_evaluation_over_signed_http(monkeypatch)
+    await _assert_resume_over_signed_http(monkeypatch)
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent import runtime_client
+    from management.services.agent.preparation import evaluation_snapshot
+    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from runtime.agentos import prepared_evaluation
     from runtime.executions import LocalExecutionRegistry
 
@@ -208,16 +213,22 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
 
     def lookup(model_id, tenant_id):
         lookups.append((model_id, tenant_id))
-        return {
-            "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm", "model_name": "provider-model",
-            "model_repo": None, "display_name": "Evaluation model", "api_key": "only-in-runtime",
-            "base_url": "https://provider.example/v1", "update_time": "revision-1",
-        }
+        return record
+
+    record = {
+        "model_id": 11, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm", "model_name": "provider-model",
+        "model_repo": None, "display_name": "evaluation_llm", "api_key": "only-in-runtime",
+        "base_url": "https://provider.example/v1", "update_time": "revision-1",
+    }
 
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.model_config_list[0].api_key == "only-in-runtime"
         assert info.agent_config.model_name == "evaluation_llm"
+        access = info.agent_config.tools[0].metadata["validate_url_access"]
+        access(["s3://bucket/attachments/user-a/allowed.txt"])
+        with pytest.raises(PermissionError):
+            access(["s3://bucket/attachments/user-b/denied.txt"])
         invocations.append((info.user_id, info.tenant_id, info.conversation_id))
         yield json.dumps({"type": "thought", "content": "step"})
         yield json.dumps({"type": "final_answer", "content": "answer"})
@@ -230,19 +241,34 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_evaluation_router())
 
-    prepared = PreparedEvaluationRun.model_validate({
-        "mode": "nexent",
-        "resource": {
-            "agent_id": 7, "version_no": 2, "name": "evaluation_agent",
-            "description": "Prepared evaluation", "prompt_templates": {"system_prompt": "Answer the query"},
-        },
-        "models": {"llm": {"model_id": 11, "alias": "evaluation_llm", "revision": "revision-1"}},
-        "input": {"query": "question"},
-        "conversation_id": -42,
-    })
+    model = create_model_config_from_record(record)
+    agent = AgentConfig(
+        agent_id=7, version_no=2, name="evaluation_agent", description="Prepared evaluation",
+        prompt_templates={"system_prompt": "Answer the query"}, model_name=model.cite_name,
+        tools=[ToolConfig(
+            class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
+            params={"workspace_path": "/management/workspace"},
+            metadata={"validate_url_access": lambda _urls: None},
+        )],
+    )
+    monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
+    case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
+    prepared = evaluation_snapshot.export_snapshot(
+        agent, [model], case.query, None, tenant_id="tenant-a", conversation_id=-42, language="zh",
+    )
+    assert isinstance(prepared, PreparedEvaluationRun)
+    assert "/management/workspace" not in prepared.model_dump_json()
+    assert "only-in-runtime" not in prepared.model_dump_json()
+
+    async def prepare(payload, user_id, tenant_id):
+        assert (payload, user_id, tenant_id) == (case, "user-a", "tenant-a")
+        return prepared
+
+    monkeypatch.setattr(evaluation_snapshot, "prepare_evaluation_snapshot", prepare)
     with serve(runtime) as runtime_url:
         agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
-        result = await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        result = await runtime_client.forward_evaluation_case(case, "user-a", "tenant-a")
         assert result.answer == "answer"
         assert result.events == [
             {"type": "thought", "content": "step"}, {"type": "final_answer", "content": "answer"},
@@ -261,3 +287,63 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     assert lookups == [(11, "tenant-a"), (11, "tenant-b")]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None
+
+
+async def _assert_resume_over_signed_http(monkeypatch):
+    from runtime.agentos import resume
+
+    run_id = "1" * 32
+    reads = []
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    class Journal:
+        def __init__(self, tenant_id, user_id, conversation_id, requested_run_id):
+            assert (tenant_id, user_id, conversation_id, requested_run_id) == ("tenant-a", "user-a", 42, run_id)
+
+        def replay(self, after_id):
+            reads.append(after_id)
+            return (
+                [("1-0", {"kind": "chunk", "data": "data: earlier\n\n"})],
+                [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
+                [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
+            )
+
+        def wait(self, after_id):
+            reads.append(after_id)
+            return [
+                ("3-0", {"kind": "chunk", "data": "data: live\n\n"}),
+                ("4-0", {"kind": "terminal", "status": "completed"}),
+            ]
+
+    monkeypatch.setattr(resume, "_control_io", control_io)
+    monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=True))
+    monkeypatch.setattr(resume, "RunJournal", Journal)
+    monkeypatch.setattr(
+        resume, "conversation_belongs_to",
+        lambda conversation_id, *, user_id, tenant_id: (conversation_id, user_id, tenant_id) == (42, "user-a", "tenant-a"),
+    )
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(resume.create_resume_router())
+
+    with serve(runtime) as runtime_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        request = AgentResume(conversation_id=42, run_id=run_id, after_event_id=f"{run_id}:1")
+        response = await agentos.resume(request, "user-a", "tenant-a")
+        output = b"".join([chunk async for chunk in response.body_iterator])
+        assert response.status_code == 200
+        assert output.decode() == (
+            f"id: {run_id}:2\ndata: replay\n\n"
+            f"id: {run_id}:3\ndata: live\n\n"
+            f'id: {run_id}:4\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n'
+        )
+
+        denied = await agentos.resume(request, "user-a", "tenant-b")
+        assert denied.status_code == 404
+        assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([chunk async for chunk in denied.body_iterator])
+
+    assert reads == ["1-0", "2-0"]

@@ -135,3 +135,46 @@ async def test_cancellation_keeps_run_registered_until_worker_exits(mocker):
     future.set_result(None)
     assert registry.get_agent_run_info(-10, actor.user_id) is None
     unregister.assert_called_once_with(-10, actor.user_id, status="stopped", agent_run_info=info)
+
+
+def test_exported_builtin_binding_reconstructs_run_scope_without_transmitting_clients(mocker):
+    from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+    from nexent.core.agents.context import ContextManagerConfig
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+
+    record = model_record(model_id=11)
+    model = create_model_config_from_record(record)
+    agent = AgentConfig(
+        agent_id=7, version_no=2, name="test_agent", description="Evaluation agent",
+        model_name=model.cite_name, prompt_templates={"system_prompt": "original"},
+        tools=[ToolConfig(
+            class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
+            params={"workspace_path": "/management/workspace"},
+            metadata={"minio_client": object(), "validate_url_access": lambda _: None, "user_id": "other"},
+        )],
+        context_manager_config=ContextManagerConfig(token_threshold=1234),
+    )
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[record])
+    mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=record)
+
+    payload = export_snapshot(agent, [model], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
+
+    assert payload is not None
+    assert "runtime-only" not in payload.model_dump_json()
+    assert "/management/workspace" not in payload.model_dump_json()
+    info = prepare_evaluation_run(payload, ServicePrincipal("user-a", "tenant-a"))
+    tool = info.agent_config.tools[0]
+    assert tool.class_name == "DownloadFromS3Tool"
+    assert tool.metadata["user_id"] == "user-a"
+    assert tool.metadata["tenant_id"] == "tenant-a"
+    assert tool.params["workspace_path"] == info.workspace_path
+    assert info.agent_config.context_manager_config.token_threshold == 1234
+    tool.metadata["validate_url_access"](["s3://bucket/attachments/user-a/allowed.txt"])
+    with pytest.raises(PermissionError):
+        tool.metadata["validate_url_access"](["s3://bucket/attachments/user-b/denied.txt"])
+
+    assert export_snapshot(
+        agent, [model.model_copy(update={"temperature": 0.11})], "hello", None,
+        tenant_id="tenant-a", conversation_id=-42, language="en",
+    ) is None

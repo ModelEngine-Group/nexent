@@ -8,6 +8,7 @@ from starlette.responses import StreamingResponse
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
     AgentOperation,
+    AgentResume,
     AgentRunningState,
     BackgroundAgentResult,
     CompatibilityOperation,
@@ -60,9 +61,15 @@ class AgentOSClient:
         return f"{self.runtime_url}/api{operation.value}", body, headers
 
     async def run(self, request, user_id, tenant_id):
-        url, body, headers = self._request(
+        return await self._open_stream(
             CompatibilityOperation.RUN, CompatibilityRun(request=request), user_id, tenant_id,
         )
+
+    async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
+        return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)
+
+    async def _open_stream(self, operation, request, user_id, tenant_id):
+        url, body, headers = self._request(operation, request, user_id, tenant_id)
         client = self.create_client(headers=headers, timeout=_STREAM_TIMEOUT, follow_redirects=False)
         try:
             upstream = await client.send(client.build_request("POST", url, content=body), stream=True)

@@ -268,3 +268,25 @@ async def test_explicit_stop_after_subscriber_disconnect_still_reaches_worker(li
     assert env.channel.completion_status == "stopped"
     assert env.future.cancelled()
     assert not env.manager.agent_runs
+
+
+@pytest.mark.asyncio
+async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecycle, monkeypatch):
+    env = lifecycle
+    run_id = "a" * 32
+    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value=run_id), raising=False)
+
+    async def source(_request, **_kwargs):
+        await env.channel.publish("data: answer\n\n")
+        yield "data: answer\n\n"
+        env.channel.complete()
+        env.future.set_result(None)
+
+    response = await env.start(source)
+
+    assert response.headers["X-AgentOS-Run-ID"] == run_id
+    env.channel.start_journal.assert_awaited_once_with("t")
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert "conversation_created" in chunks[0]
+    assert chunks[1:] == ["data: answer\n\n"]

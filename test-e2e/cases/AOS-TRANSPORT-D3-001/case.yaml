@@ -41,13 +41,17 @@ case:
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
-    expected: Runtime builds the SDK request from a tenant model reference, preserves event order, and rejects both unauthorized requests.
+    expected: Runtime rebuilds the SDK request and scoped file tool from the Management snapshot, preserves event order, and rejects unauthorized access.
+  - order: 6
+    action: Resume after a scoped event cursor and attempt the same request under a different tenant.
+    expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
   - Evaluation returns exact ordered events without using a real conversation.
   - Background execution returns the assistant message ID and stops after the caller disconnects.
   - Prepared evaluation returns ordered events and releases the run registration. Unauthorized requests cannot start the runner.
+  - Resume returns only events after the supplied cursor and never opens a journal for an unauthorized actor.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -96,3 +100,8 @@ case:
     steps: [5]
     expected_results: [5]
     forbidden_side_effects: [1, 2]
+  - id: AC-06
+    description: Signed resume preserves the run cursor across retained and live events.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [2]

@@ -41,4 +41,10 @@ async def forward_agent_stop(
 
 
 async def forward_evaluation_case(payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
-    return await _agentos_client().run_evaluation_case(payload, user_id, tenant_id)
+    from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
+
+    prepared = await prepare_evaluation_snapshot(payload, user_id, tenant_id)
+    client = _agentos_client()
+    if prepared is not None:
+        return await client.run_prepared_evaluation(prepared, user_id, tenant_id)
+    return await client.run_evaluation_case(payload, user_id, tenant_id)

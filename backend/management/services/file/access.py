@@ -2,11 +2,11 @@
 
 
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from typing import Dict
 from typing import List
 from typing import Optional
 from nexent.multi_modal.utils import parse_s3_url
+from infrastructure.object_storage.read_access import can_read_object
 
 import logging
 logger = logging.getLogger('management.services.file.service')
@@ -41,9 +41,10 @@ def check_file_access(
     normalized_permission = str(required_permission or "READ").upper()
     is_read = normalized_permission in {"READ", "READ_ONLY"}
 
+    if is_read:
+        return can_read_object(object_name, user_id, caller_tenant_id)
+
     if object_name.startswith(ASSET_OWNER_ATTACHMENTS_PREFIX):
-        if is_read:
-            return caller_tenant_id == ASSET_OWNER_TENANT_ID
         from management.services.knowledge_base.storage import resolve_storage_object_access
 
         return resolve_storage_object_access(
@@ -54,9 +55,6 @@ def check_file_access(
         )
 
     if object_name.startswith("knowledge_base/"):
-        # Preserve the established compatibility policy for source reads.
-        if is_read:
-            return True
         from management.services.knowledge_base.storage import resolve_storage_object_access
 
         return resolve_storage_object_access(
@@ -67,9 +65,7 @@ def check_file_access(
         )
 
     if object_name.startswith("images_in_attachments/"):
-        # Extracted image files used by knowledge-base image chunks.
-        # Keep them readable for authenticated users to avoid broken image citations.
-        return is_read
+        return False
 
     if object_name.startswith("skill-files/"):
         # Generated documents are private to the uploader and must stay user-scoped.
@@ -87,13 +83,6 @@ def check_file_access(
     # Pattern: attachments/{user_id}/*
     if object_name.startswith(f"attachments/{user_id}/"):
         return True
-
-    # For backward compatibility, allow access to files in root attachments folder
-    # Pattern: attachments/{filename} (no user_id subfolder)
-    if object_name.startswith("attachments/") and "/" not in object_name.replace("attachments/", "", 1):
-        # Old format: attachments/filename (no subdirectory)
-        # Allow access for backward compatibility
-        return is_read
 
     return False
 

@@ -59,10 +59,21 @@ class EvaluationAgentRun(BaseModel):
 
 class AgentOperation(str, Enum):
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
+    RESUME = NAMESPACE + "v1/agent/resume"
 
 
 class RunSpecModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
+EVENT_ID_PATTERN = r"^[0-9a-f]{32}:[1-9][0-9]{0,18}$"
+
+
+class AgentResume(RunSpecModel):
+    conversation_id: PositiveInt
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    after_event_id: str | None = Field(default=None, pattern=EVENT_ID_PATTERN)
 
 
 class ToolBinding(RunSpecModel):
@@ -97,6 +108,41 @@ class RunInput(RunSpecModel):
     attachment_refs: list[str] = Field(default_factory=list)
 
 
+class EvaluationFileTool(str, Enum):
+    DOWNLOAD = "download_from_s3"
+    UPLOAD = "upload_to_s3"
+
+    @property
+    def class_name(self) -> str:
+        return {
+            EvaluationFileTool.DOWNLOAD: "DownloadFromS3Tool",
+            EvaluationFileTool.UPLOAD: "UploadToS3Tool",
+        }[self]
+
+
+class FileToolDescription(RunSpecModel):
+    description: str | None = None
+    description_zh: str | None = None
+    inputs: str | None = None
+    output_type: str | None = None
+
+
+class EvaluationAgentOptions(RunSpecModel):
+    display_name: str | None = None
+    output_protocol: Literal["code_action", "final_envelope"] = "code_action"
+    enable_protocol_repair_retry: bool = False
+    provide_run_summary: bool | None = None
+    allow_chat_metadata: bool = False
+    requested_output_tokens: PositiveInt | None = None
+    instructions: str | None = None
+    context_items: list[dict[str, JsonValue]] | None = None
+    context_manager_config: dict[str, JsonValue] | None = None
+    prompt_tool_policy_snapshot: dict[str, JsonValue] | None = None
+    capacity_snapshot: dict[str, JsonValue] | None = None
+    context_budget_snapshot: dict[str, JsonValue] | None = None
+    verification_config: dict[str, JsonValue] | None = None
+
+
 class AgentResource(RunSpecModel):
     agent_id: PositiveInt
     version_no: Annotated[int, Field(ge=0)]
@@ -111,6 +157,7 @@ class AgentResource(RunSpecModel):
     memory_ref: str | None = None
     subagents: list["AgentResource"] = Field(default_factory=list)
     sandbox_policy: dict[str, JsonValue] | None = None
+    evaluation_options: EvaluationAgentOptions | None = None
 
 
 class AgentRunSpec(RunSpecModel):

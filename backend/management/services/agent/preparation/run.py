@@ -132,6 +132,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    export_evaluation: bool = False,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -148,6 +149,8 @@ async def create_agent_run_info(
             tenant_id,
         )
     effective_minio_files = _collect_run_minio_files(minio_files, history)
+    if export_evaluation and effective_minio_files:
+        return None
     _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
     runtime_file_context = {
         "workspace_path": workspace_path,
@@ -345,6 +348,14 @@ async def create_agent_run_info(
         overlay = overlay_root_model(selected_config, legacy, selected_config.cite_name)
         index = model_list.index(selected_config)
         model_list[index] = overlay
+
+    if export_evaluation:
+        from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+
+        return export_snapshot(
+            agent_config, model_list, final_query, _convert_history_with_minio_files(history, language=language),
+            tenant_id=tenant_id, conversation_id=conversation_id, language=language,
+        )
 
     remote_mcp_list = await get_remote_mcp_server_list(
         tenant_id=tenant_id, is_need_auth=True

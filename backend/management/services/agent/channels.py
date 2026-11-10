@@ -11,9 +11,14 @@ import asyncio
 from collections import deque
 import logging
 from typing import AsyncIterator, Deque, Dict, List, Optional, Tuple
+from uuid import uuid4
+
+from redis.exceptions import RedisError
 
 from contracts.constants.environment import RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES
+from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import runtime_state_service
+from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +54,61 @@ class StreamingChannel:
         self._completed: bool = False
         self._completion_status: Optional[str] = None
         self._error: Optional[str] = None
+        self._journal: RunJournal | None = None
+        self._journal_sequence = 0
+        self._journal_fragment = ""
+        self._journal_gap = False
+
+    async def start_journal(self, tenant_id: str) -> str | None:
+        journal = RunJournal(tenant_id, self.user_id, self.conversation_id, uuid4().hex)
+        async with self._lock:
+            if self._journal is not None:
+                return self._journal.run_id
+            try:
+                await run_blocking("agentos-journal-start", journal.start, lane="control-io", owner="runtime")
+            except (RedisError, RuntimeError):
+                logger.warning("AgentOS output journal could not start")
+                return None
+            self._journal = journal
+            return journal.run_id
+
+    async def _journal_chunk(self, chunk: str) -> None:
+        if self._journal is None or self._journal_gap:
+            return
+        # Legacy producers may publish an event label separately from its data.
+        frames = (self._journal_fragment + chunk).split("\n\n")
+        self._journal_fragment = frames.pop()
+        if len(self._journal_fragment.encode("utf-8")) > self._history_max_bytes:
+            self._journal_fragment = ""
+            self._journal_gap = True
+            return
+        for frame in filter(None, frames):
+            if len(frame.encode("utf-8")) > self._history_max_bytes:
+                self._journal_gap = True
+                return
+            self._journal_sequence += 1
+            try:
+                await run_blocking(
+                    "agentos-journal-append", self._journal.append, self._journal_sequence, frame + "\n\n",
+                    lane="control-io", owner="runtime",
+                )
+            except (RedisError, RuntimeError):
+                self._journal_gap = True
+                logger.warning("AgentOS output journal append failed")
+                return
+
+    async def finish_journal(self, status: str) -> None:
+        async with self._lock:
+            if self._journal is None:
+                return
+            journal, self._journal = self._journal, None
+            # Leave a detectable gap after loss or an incomplete frame.
+            incomplete = self._journal_gap or bool(self._journal_fragment)
+            index = self._journal_sequence + (2 if incomplete else 1)
+            try:
+                await run_blocking("agentos-journal-finish", journal.finish, index, status, lane="control-io", owner="runtime")
+            except (RedisError, RuntimeError):
+                logger.warning("AgentOS output journal finalization failed")
 
     def add_subscriber(self):
         """Increment subscriber count."""
@@ -118,6 +178,7 @@ class StreamingChannel:
             ):
                 _, _, removed_bytes = self._history_buffer.popleft()
                 self._history_bytes -= removed_bytes
+            await self._journal_chunk(chunk)
 
         await runtime_state_service.append_stream_event_async(
             user_id=self.user_id,
@@ -328,6 +389,7 @@ class StreamingChannelManager:
         channel = self.get_channel(conversation_id, user_id)
         if channel:
             channel.complete(status)
+            await channel.finish_journal(status)
         await runtime_state_service.mark_stream_completed_async(
             user_id=user_id,
             conversation_id=conversation_id,
