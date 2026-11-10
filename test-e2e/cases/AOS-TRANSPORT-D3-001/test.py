@@ -266,14 +266,19 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.rdb import account_access
-    from management.services.agent.preparation import evaluation_snapshot
+    from contracts.agentos import PreparedConversationScope
+    from contracts.model import WorkbenchGenerationConfig
+    from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
+    from management.services.agent.preparation import evaluation_snapshot, local_tool
+    from management.services.agent.preparation.run import apply_root_generation_overlay
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
-    from runtime.agentos import prepared_evaluation, prepared_local_tool
+    from runtime.agentos import prepared_evaluation, prepared_local_tool, prepared_run
     from runtime.executions import LocalExecutionRegistry
 
     provider = FastAPI()
     searches = []
+    retrieval_options = []
     catalog_calls = []
     groups = [17]
     acl = [
@@ -296,6 +301,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     async def retrieve(request: Request):
         payload = await request.json()
         searches.append((request.headers.get("authorization"), payload["kds_list"]))
+        retrieval_options.append((payload["search_method"], payload["top_k"]))
         return {"result": []}
 
     observed_whitelists = []
@@ -314,6 +320,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_evaluation_router())
+    runtime.include_router(prepared_run.create_prepared_run_router())
     monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "shared-aidp-runs"))
     monkeypatch.setattr(prepared_evaluation, "agent_run_manager", LocalExecutionRegistry())
     monkeypatch.setattr(prepared_evaluation, "agent_run", run)
@@ -333,10 +340,25 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     row = {
         "tool_id": 10, "tool_instance_id": 21, "name": "aidp_search", "class_name": "AidpSearchTool",
         "source": "local", "description": "Shared AIDP", "inputs": None, "usage": None, "output_type": "string",
-        "instance_params": {}, "params": [{"name": "kds_list", "default": '["group-kb","private-kb"]'}],
+        "instance_params": {}, "params": [{"name": "kds_list", "default": '["group-kb","private-kb"]'},
+                                           {"name": "top_k", "default": 10},
+                                           {"name": "search_method", "default": "hybrid_search"}],
     }
     for module in (evaluation_snapshot, prepared_local_tool):
         monkeypatch.setattr(module, "read_bound_local_tools", lambda *_: [row])
+    for module in (local_tool, prepared_local_tool):
+        monkeypatch.setattr(module, "read_shared_aidp_catalog_tool",
+                            lambda tool_id, tenant: row if (tool_id, tenant) == (10, "tenant-a") else None)
+    scoped_runs = []
+
+    async def start_scoped(payload, actor):
+        assert payload.workbench_config_version == 3
+        assert payload.resource.tools[0].version == "3"
+        info = await asyncio.to_thread(prepared_evaluation.prepare_run_snapshot, payload, actor)
+        scoped_runs.append([json.loads(chunk) async for chunk in run(info, None)])
+        return AgentRunReference(conversation_id=payload.conversation_id, run_id=payload.run_id)
+
+    monkeypatch.setattr(prepared_run, "start_prepared_run", start_scoped)
 
     with serve(provider) as provider_url, serve(runtime) as runtime_url:
         agent = AgentConfig(
@@ -365,9 +387,35 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         groups.clear()
         assert (await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")).answer == "done"
 
-    assert observed_whitelists == [["group-kb"], []]
+        groups.append(17)
+        scoped_tool = build_local_tool(row, "en", None, None)
+        scoped_tool.params.update(kds_list=["group-kb"], search_method="full_text_search", top_k=7)
+        scoped_tool.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: row["tool_id"]}
+        workbench_agent = agent.model_copy(update={"tools": [scoped_tool]})
+        generation = WorkbenchGenerationConfig()
+        models = [create_model_config_from_record(model)]
+        source_alias = apply_root_generation_overlay(models, workbench_agent, generation.model_dump())
+        reference = AgentRunReference(conversation_id=61, run_id="e" * 32)
+        scoped = evaluation_snapshot.export_snapshot(
+            workbench_agent, models, "question", None, tenant_id="tenant-a", conversation_id=61, language="en",
+            prepared_conversation=PreparedConversationScope(**reference.model_dump(), workbench_config_version=3),
+            root_generation=generation, source_model_alias=source_alias,
+        )
+        assert isinstance(scoped, PreparedAgentRun)
+        for private in (provider_url, "synthetic-shared-aidp-key", "shared-provider", "private-kb"):
+            assert private not in scoped.model_dump_json()
+        assert scoped.resource.tools[0].parameters["options"] == {
+            "kds_list": ["group-kb"], "search_method": "full_text_search", "top_k": 7,
+        }
+        assert await client.start_prepared_run(scoped, "user-a", "tenant-a") == reference
+        groups.clear()
+        assert await client.start_prepared_run(scoped, "user-a", "tenant-a") == reference
+
+    assert observed_whitelists == [["group-kb"], [], ["group-kb"], []]
     assert catalog_calls == ["Bearer synthetic-shared-aidp-key"]
-    assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])]
+    assert searches == [("Bearer synthetic-shared-aidp-key", ["group-kb"])] * 2
+    assert retrieval_options == [("hybrid_search", 10), ("full_text_search", 7)]
+    assert len(scoped_runs) == 2 and all(events[-1]["content"] == "done" for events in scoped_runs)
 
 
 async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
@@ -1997,7 +2045,6 @@ async def _assert_public_prepared_turn_over_signed_http(
             from management.services.knowledge_base import mount, scope
 
             tool = {"class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "params": []}
-            monkeypatch.setattr(workbench, "ENABLE_AIDP_KNOWLEDGE", False)
             monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", False)
             monkeypatch.setattr(scope, "snapshot_runtime_knowledge_tree",
                                 lambda *_: [{"agent_name": "root", "tools": [tool]}])

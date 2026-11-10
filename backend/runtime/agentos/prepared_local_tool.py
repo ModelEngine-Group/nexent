@@ -6,7 +6,7 @@ from hmac import compare_digest
 
 from fastapi import HTTPException
 
-from contracts.agentos import AgentResource, SkillDerivedLocalToolBinding, StoredLocalToolBinding
+from contracts.agentos import AgentResource, ScopedSharedAidpBinding, SkillDerivedLocalToolBinding, StoredLocalToolBinding
 from contracts.constants import environment
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
@@ -14,8 +14,8 @@ from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder, in
 from infrastructure.local_tool_execution import (
     LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
 )
-from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
-from infrastructure.shared_aidp_tool import restrict_aidp_access
+from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
+from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
 from nexent.core.agents.agent_model import ToolConfig
 from runtime.agentos.prepared_knowledge import _reranker
 
@@ -38,15 +38,43 @@ def _aidp_access_metadata(tool: ToolConfig, actor: ServicePrincipal) -> dict:
     return restrict_aidp_access(params["kds_list"], snapshot)
 
 
-def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, language: str) -> dict[str, ToolConfig]:
+def _bind_shared_aidp_access(tool: ToolConfig, actor: ServicePrincipal) -> None:
+    tool.params.update(
+        server_url=environment.AIDP_SERVER_URL, api_key=environment.AIDP_API_KEY, tenant_id=environment.AIDP_TENANT_ID,
+    )
+    tool.metadata = _aidp_access_metadata(tool, actor)
+
+
+def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> ToolConfig:
+    row = read_shared_aidp_catalog_tool(reference.catalog_tool_id, actor.tenant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
+    try:
+        revision = scoped_shared_aidp_revision(actor.tenant_id, resource.agent_id, resource.version_no, row)
+        tool = build_local_tool(row, language, None, row["inputs"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
+    if not compare_digest(revision, reference.revision):
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
+    tool.params = reference.options.model_dump()
+    _bind_shared_aidp_access(tool, actor)
+    return tool
+
+
+def materialize_local_tools(
+    resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
+) -> dict[str, ToolConfig]:
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding}
     for binding in resource.tools:
         if binding.tool_id not in LOCAL_SDK_TOOL_CLASSES:
             continue
-        if binding.version not in schemas or binding.credential_ref is not None or binding.tool_id in references:
+        schema = schemas.get(binding.version)
+        if binding.tool_id == "aidp_search" and binding.version == "3" and allow_scoped_aidp:
+            schema = ScopedSharedAidpBinding
+        if schema is None or binding.credential_ref is not None or binding.tool_id in references:
             raise ValueError("Unsupported local SDK tool binding")
-        references[binding.tool_id] = schemas[binding.version].model_validate(binding.parameters)
+        references[binding.tool_id] = schema.model_validate(binding.parameters)
     if not references:
         return {}
 
@@ -63,6 +91,9 @@ def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, la
     skill_ids = {ref.instance_id for ref in resource.skill_refs} if derived_names else set()
     tools = {}
     for name, reference in references.items():
+        if isinstance(reference, ScopedSharedAidpBinding):
+            tools[name] = _materialize_scoped_shared_aidp(reference, resource, actor, language)
+            continue
         if isinstance(reference, StoredLocalToolBinding):
             row = by_instance.get((reference.instance_id, name))
         else:
@@ -95,9 +126,6 @@ def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, la
                 skill_revision=skill_revision,
             )}
         elif name == "aidp_search":
-            tool.params.update(
-                server_url=environment.AIDP_SERVER_URL, api_key=environment.AIDP_API_KEY, tenant_id=environment.AIDP_TENANT_ID,
-            )
-            tool.metadata = _aidp_access_metadata(tool, actor)
+            _bind_shared_aidp_access(tool, actor)
         tools[name] = tool
     return tools

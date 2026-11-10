@@ -41,12 +41,13 @@ from infrastructure.rdb.mcp_execution_records import (
 )
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
+from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
 from management.db.conversation.repository import get_conversation, get_historical_context
 from management.services.agent.context import prepend_current_time
 from management.services.configuration.user.memory import get_memory_switch
 from management.services.agent.preparation.langchain_tool import export_langchain_tool
-from management.services.agent.preparation.local_tool import export_local_tool
+from management.services.agent.preparation.local_tool import export_local_tool, export_scoped_shared_aidp
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
 from nexent.core.concurrency import run_blocking
 from nexent.multi_modal.utils import parse_s3_url
@@ -396,7 +397,11 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             if set(row["skill_instance_ids"]) <= authorized
         )
     mcp_servers = read_servers(tenant_id) if mcp_names else []
-    local_names = [tool.name for tool in agent.tools if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES]
+    local_names = [
+        tool.name for tool in agent.tools
+        if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES
+        and SCOPED_SHARED_AIDP_CATALOG_ID not in (tool.metadata or {})
+    ]
     local_scope = (agent.agent_id, agent.version_no, tenant_id)
     local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
     unresolved_local = sorted(set(local_names) - {row["name"] for row in local_candidates})
@@ -424,6 +429,8 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name in set(EvaluationAnalysisTool):
             binding = _export_analysis_binding(tool)
+        elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
+            binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES:
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.name == "parallel_executor":

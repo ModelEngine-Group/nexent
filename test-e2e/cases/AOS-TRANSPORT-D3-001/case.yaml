@@ -96,6 +96,9 @@ case:
   - order: 23
     action: Submit a Workbench turn with an authorized metadata replacement.
     expected: Signed execution receives the metadata and both revisions. The public response exposes both versions and one projected turn.
+  - order: 24
+    action: Send a Workbench turn with a mounted shared AIDP tool and revoke one selected KDS before Runtime materializes it.
+    expected: The signed binding keeps typed retrieval options, and Runtime permits only the KDS still authorized.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -120,6 +123,7 @@ case:
   - Workbench preserves the authorized local knowledge scope event and dispatches its scoped search binding once.
   - The signed ephemeral stream retains observer events and releases request-owned execution on disconnect.
   - Workbench preserves both configuration and metadata revisions across signed admission and one projection.
+  - Workbench carries a scoped shared AIDP catalog binding and Runtime enforces the narrowed KDS scope.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -297,4 +301,9 @@ case:
     description: Workbench dispatches authorized metadata and configuration revisions together through signed AgentOS.
     steps: [23]
     expected_results: [23]
+    forbidden_side_effects: [1, 2]
+  - id: AC-32
+    description: A signed Workbench turn mounts a shared AIDP catalog tool with Runtime ACL rechecks.
+    steps: [24]
+    expected_results: [24]
     forbidden_side_effects: [1, 2]

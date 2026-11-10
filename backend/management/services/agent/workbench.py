@@ -15,7 +15,7 @@ from nexent.core.agents.agent_model import AgentConfig
 
 from contracts.errors.exceptions import RuntimeMetadataVersionConflict, ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
@@ -606,10 +606,6 @@ def prepare_portable_workbench(
         raise ValidationError("Workbench configuration is required")
     if requested.skill_mounts:
         return None
-    scope = requested.knowledge_scope
-    if ENABLE_AIDP_KNOWLEDGE and scope is not None and scope.aidp.mode != "disabled":
-        return None
-
     canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
     if plan.root_skills:
         return None

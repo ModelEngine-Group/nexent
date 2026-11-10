@@ -323,6 +323,28 @@ class SkillDerivedLocalToolBinding(LocalToolBinding):
     tool_id: PositiveInt
 
 
+class ScopedSharedAidpOptions(RunSpecModel):
+    kds_list: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(max_length=10)
+    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] | None = None
+    reranking_enable: bool | None = None
+    reranking_mode: Literal["performance", "high_accuracy", "jargon_coverage"] | None = None
+    rewrite_enable: bool | None = None
+    related_search_enable: bool | None = None
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=1, le=100)
+    multi_modal: bool | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_explicit_options(self, handler):
+        return {name: value for name, value in handler(self).items() if name in self.model_fields_set}
+
+
+class ScopedSharedAidpBinding(RunSpecModel):
+    catalog_tool_id: PositiveInt
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    options: ScopedSharedAidpOptions
+
+
 class LangChainToolBinding(RunSpecModel):
     tool_name: str = Field(min_length=1)
     binding_id: PositiveInt

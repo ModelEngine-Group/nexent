@@ -21,7 +21,7 @@ from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_co
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
 from infrastructure.object_storage.client import minio_client
-from infrastructure.shared_aidp_tool import restrict_aidp_access, shared_aidp_parameters
+from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, restrict_aidp_access, shared_aidp_parameters
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
@@ -438,7 +438,9 @@ async def create_tool_config_list(
             usage=tool.get("usage"),
         )
 
-        if is_shared_aidp and not portable_evaluation:
+        if is_shared_aidp and portable_evaluation and runtime_knowledge_tools is not None:
+            tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}
+        elif is_shared_aidp and not portable_evaluation:
             tool_config.metadata = restrict_aidp_access(param_dict["kds_list"], aidp_snapshot)
             langchain_tool = next((item for item in langchain_tools if item.name == tool_config.class_name), None)
             if langchain_tool is not None:

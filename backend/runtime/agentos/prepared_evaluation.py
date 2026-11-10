@@ -161,7 +161,7 @@ def _materialize_external_agents(resource, actor):
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
-    root_only_alias=None,
+    root_only_alias=None, allow_scoped_aidp=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -191,7 +191,7 @@ def _materialize_agent(
     local_tools.update(materialize_automation_tool(resource, actor, public_reference))
     if plan_bindings:
         local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
-    local_tools.update(materialize_local_tools(resource, actor, language))
+    local_tools.update(materialize_local_tools(resource, actor, language, allow_scoped_aidp=allow_scoped_aidp))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
     ))
@@ -334,6 +334,7 @@ def prepare_run_snapshot(
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None else None,
+                allow_scoped_aidp=workbench_version is not None,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,

@@ -198,7 +198,6 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         )
         root = SimpleNamespace(agent_id=7, version_no=2)
         plan = SimpleNamespace(root=SimpleNamespace(identity=root), root_skills=())
-        mocker.patch.object(workbench, "ENABLE_AIDP_KNOWLEDGE", False)
         mocker.patch.object(mount, "ENABLE_AIDP_KNOWLEDGE", False)
         mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
         mocker.patch.object(mount, "query_all_tools", return_value=[definition])
