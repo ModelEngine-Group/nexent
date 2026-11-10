@@ -53,6 +53,7 @@ change:
     - Prepared shared AIDP tools recheck tenant and group permissions before retrieving from configured knowledge bases.
     - Prepared LangChain tools pin their persisted binding and deployed plugin revision without transporting code.
     - Prepared workspace and SSH tools pin local configuration, and provider bodies are rebuilt from the signed Agent version without serializing the body.
+    - Skill-derived independent AIDP signs the contributing binding for the image proxy, which rechecks that binding before downloading.
     - Runtime compatibility ingress requires a signed Gateway session, and compatibility inspect and stop use the Runtime registry with user and tenant ownership checks.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.

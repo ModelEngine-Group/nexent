@@ -8,6 +8,7 @@ import json
 from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
 
+from contracts.constants import environment
 from contracts.constants.environment import IND_AIDP_IMAGE_SIGNING_KEY
 
 _IMAGE_PATH_PREFIX = "/KnowledgeBase/Tenants/"
@@ -65,6 +66,19 @@ def _normalize_image_path(file_url: str, aidp_tenant_id: str) -> str:
     return path
 
 
+def ind_aidp_skill_revision(
+    agent_id: int, version_no: int, tenant_id: str, tool_id: int, skill_instance_ids: list[int], params: dict,
+) -> str:
+    payload = json.dumps(
+        [agent_id, version_no, tenant_id, tool_id, sorted(skill_instance_ids), params],
+        separators=(",", ":"), sort_keys=True,
+    )
+    if not environment.JWT_SECRET:
+        raise IndependentAidpServiceError("AgentOS signing is not configured")
+    key = hmac.digest(environment.JWT_SECRET.encode(), b"nexent/agentos/ind-aidp-skill-image/v1", "sha256")
+    return hmac.digest(key, payload.encode(), "sha256").hex()
+
+
 def create_ind_aidp_image_url_builder(
     *,
     agent_id: int,
@@ -72,6 +86,7 @@ def create_ind_aidp_image_url_builder(
     tenant_id: str,
     version_no: int,
     aidp_tenant_id: str,
+    skill_revision: str | None = None,
 ) -> Callable[[str], str]:
     """Create a runtime callback that turns an AIDP path into a signed proxy URL."""
     normalized_aidp_tenant = _validate_tenant_id(aidp_tenant_id)
@@ -86,6 +101,8 @@ def create_ind_aidp_image_url_builder(
             "aidp_tenant_id": normalized_aidp_tenant,
             "image_path": image_path,
         }
+        if skill_revision is not None:
+            payload["skill_revision"] = skill_revision
         encoded_payload = _b64encode(
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         )

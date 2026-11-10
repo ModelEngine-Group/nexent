@@ -542,7 +542,9 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.object_storage.client import minio_client
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+    from infrastructure import ind_aidp_images
     from infrastructure.local_tool_execution import build_local_tool
+    from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
     from management.services.agent import runtime_client
     from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search
     from management.services.model import adapter as management_model_adapter
@@ -677,12 +679,21 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         }.items()],
     }
 
-    def read_local_skill_tool(agent_id, version_no, tenant_id, names):
-        assert (agent_id, version_no, names) == (7, 2, ["dify_search"])
-        return [derived_local] if tenant_id == "tenant-a" else []
+    derived_aidp = {
+        **derived_local, "tool_id": 55, "name": "ind_aidp_search", "class_name": "IndependentAidpSearchTool",
+        "params": [{"name": name, "default": value} for name, value in {
+            "server_url": "https://derived-aidp.invalid", "api_key": "private-derived-aidp-key",
+            "tenant_id": "derived-provider", "kds_list": ["derived-image-kb"],
+        }.items()],
+    }
 
+    def read_local_skill_tool(agent_id, version_no, tenant_id, names):
+        assert (agent_id, version_no) == (7, 2)
+        return [row for row in (derived_local, derived_aidp) if row["name"] in names and tenant_id == "tenant-a"]
+
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "synthetic-derived-image-signing")
     monkeypatch.setattr(evaluation_snapshot, "read_bound_local_tools", lambda *_: [])
-    for module in (evaluation_snapshot, prepared_local_tool):
+    for module in (evaluation_snapshot, prepared_local_tool, independent_aidp_proxy):
         monkeypatch.setattr(module, "read_skill_derived_local_tools", read_local_skill_tool)
 
     knowledge_row = {
@@ -764,7 +775,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
             "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", "knowledge_base_search",
-            "analyze_image", "dify_search",
+            "analyze_image", "dify_search", "ind_aidp_search",
         ]
         parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
@@ -782,6 +793,19 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert (skill_search.api_key, skill_search.dataset_ids, skill_search.top_k) == (
             "private-skill-local-key", ["derived-private-dataset"], 3,
         )
+        aidp_tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["ind_aidp_search"])
+        image_ref = aidp_tool.image_url_builder("derived-image-kb/p.png").rsplit("/", 1)[-1]
+        image_payload = independent_aidp_proxy._decode_image_ref(image_ref)
+        assert image_payload["skill_revision"]
+        assert independent_aidp_proxy._resolve_image_credentials(image_payload) == (
+            "https://derived-aidp.invalid", "private-derived-aidp-key", "derived-provider", "derived-image-kb/p.png",
+        )
+        derived_aidp["skill_instance_ids"] = [53]
+        try:
+            with pytest.raises(independent_aidp_proxy.IndependentAidpServiceError, match="changed"):
+                independent_aidp_proxy._resolve_image_credentials(image_payload)
+        finally:
+            derived_aidp["skill_instance_ids"] = [51]
         with pytest.raises(PermissionError):
             image.forward(["s3:/bucket/attachments/user-b/denied.png"], "Inspect the image")
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
@@ -834,7 +858,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
         ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools,
-               build_mcp_tool(derived_tool), kb_tool, image_tool, build_local_tool(derived_local, "zh", None, None)],
+               build_mcp_tool(derived_tool), kb_tool, image_tool, build_local_tool(derived_local, "zh", None, None),
+               build_local_tool(derived_aidp, "zh", None, None)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -863,6 +888,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "private-image-model-key" not in prepared.model_dump_json()
     assert "private-skill-local-key" not in prepared.model_dump_json()
     assert "derived-private-dataset" not in prepared.model_dump_json()
+    assert "private-derived-aidp-key" not in prepared.model_dump_json()
+    assert next(tool for tool in prepared.resource.tools if tool.tool_id == "ind_aidp_search").version == "2"
     assert next(tool for tool in prepared.resource.tools if tool.tool_id == "dify_search").version == "2"
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
     assert "local-secret" not in prepared.model_dump_json()

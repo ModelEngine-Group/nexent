@@ -2,18 +2,23 @@
 """Services for the independently configured AIDP search connector."""
 
 import logging
+from hmac import compare_digest
 from typing import Any, Dict, Tuple
 from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 import httpx
 
+from contracts.errors.exceptions import ValidationError
 from infrastructure.ind_aidp_images import (
     IndependentAidpServiceError as IndependentAidpServiceError,
     _decode_image_ref,
     _normalize_image_path,
     _validate_tenant_id,
     create_ind_aidp_image_url_builder as create_ind_aidp_image_url_builder,
+    ind_aidp_skill_revision,
 )
+from infrastructure.local_tool_execution import catalog_tool_parameters
+from infrastructure.rdb.local_tool_records import read_skill_derived_local_tools
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 
 logger = logging.getLogger("ind_aidp_service")
@@ -78,7 +83,28 @@ async def fetch_ind_aidp_knowledge_bases_impl(
     return result
 
 
-def _resolve_image_credentials(payload: Dict[str, Any]) -> Tuple[str, str, str, str]:
+def _read_skill_image_params(payload: dict) -> dict:
+    scope = (int(payload["agent_id"]), int(payload["version_no"]), str(payload["tenant_id"]))
+    tool_id = int(payload["tool_id"])
+    try:
+        matches = [
+            row for row in read_skill_derived_local_tools(*scope, ["ind_aidp_search"])
+            if row["tool_id"] == tool_id and row["class_name"] == _IMAGE_CLASS_NAME
+        ]
+    except ValidationError as exc:
+        raise IndependentAidpServiceError("Independent AIDP skill tool changed") from exc
+    if len(matches) != 1:
+        raise IndependentAidpServiceError("Independent AIDP skill tool is unavailable")
+    row = matches[0]
+    params = catalog_tool_parameters(row)
+    revision = ind_aidp_skill_revision(*scope, tool_id, row["skill_instance_ids"], params)
+    supplied = payload["skill_revision"]
+    if not isinstance(supplied, str) or not compare_digest(revision, supplied):
+        raise IndependentAidpServiceError("Independent AIDP skill tool changed")
+    return params
+
+
+def _read_image_instance_params(payload: dict) -> dict:
     instance = query_tool_instances_by_id(
         agent_id=int(payload["agent_id"]),
         tool_id=int(payload["tool_id"]),
@@ -88,7 +114,11 @@ def _resolve_image_credentials(payload: Dict[str, Any]) -> Tuple[str, str, str, 
     definitions = query_tools_by_ids([int(payload["tool_id"])])
     if not instance or not definitions or definitions[0].get("class_name") != _IMAGE_CLASS_NAME:
         raise IndependentAidpServiceError("Independent AIDP tool instance is unavailable")
-    params = instance.get("params") or {}
+    return instance.get("params") or {}
+
+
+def _resolve_image_credentials(payload: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    params = _read_skill_image_params(payload) if "skill_revision" in payload else _read_image_instance_params(payload)
     base_url = _normalize_base_url(params.get("server_url"))
     api_key = params.get("api_key")
     aidp_tenant_id = _validate_tenant_id(params.get("tenant_id") or "aidp")

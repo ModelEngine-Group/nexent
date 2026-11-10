@@ -10,7 +10,8 @@ from nexent.core.agents.nexent_agent import NexentAgent
 
 
 @pytest.mark.asyncio
-async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_accepts(mocker):
+@pytest.mark.parametrize("derived", [False, True])
+async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_accepts(mocker, derived):
     from infrastructure import ind_aidp_images
     from management.services.agent.preparation import local_tool, tools
     from management.services.knowledge_base.providers import aidp as proxy
@@ -26,6 +27,9 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
             "tenant_id": "provider-a", "kds_list": ["private-kb"],
         }.items()],
     }
+    if derived:
+        row.pop("tool_instance_id")
+        row["skill_instance_ids"] = [42]
     mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
     mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[row])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={})
@@ -36,8 +40,14 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     for secret in ("https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb"):
         assert secret not in binding.model_dump_json()
 
-    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
-    resource = SimpleNamespace(agent_id=8, version_no=4, tools=[binding])
+    if derived:
+        mocker.patch.object(prepared_local_tool, "read_skill_derived_local_tools", return_value=[row])
+    else:
+        mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
+    resource = SimpleNamespace(
+        agent_id=8, version_no=4, tools=[binding],
+        skill_refs=[SimpleNamespace(instance_id=42)] if derived else [],
+    )
     hydrated = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "zh")
     instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), hydrated["ind_aidp_search"])
     assert instance.api_key == "runtime-aidp-fixture-key"
@@ -45,9 +55,26 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     reference = instance.image_url_builder("/KnowledgeBase/Tenants/provider-a/KnowledgeBases/private-kb/p.png")
     assert reference.startswith("/api/ind-aidp/images/")
     payload = proxy._decode_image_ref(reference.rsplit("/", 1)[-1])
+    revision = payload.pop("skill_revision", None)
+    assert bool(revision) is derived
     assert payload == {
         "agent_id": 8, "version_no": 4, "tenant_id": "tenant-a", "aidp_tenant_id": "provider-a",
         "tool_id": 10, "image_path": "private-kb/p.png",
     }
+    if derived:
+        payload["skill_revision"] = revision
+        lookup = mocker.patch.object(proxy, "read_skill_derived_local_tools", return_value=[row])
+        explicit = mocker.patch.object(proxy, "query_tool_instances_by_id")
+        assert proxy._resolve_image_credentials(payload) == (
+            "https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb/p.png",
+        )
+        lookup.assert_called_once_with(8, 4, "tenant-a", ["ind_aidp_search"])
+        explicit.assert_not_called()
+        row["skill_instance_ids"] = [43]
+        with pytest.raises(proxy.IndependentAidpServiceError, match="changed"):
+            proxy._resolve_image_credentials(payload)
+        lookup.return_value = []
+        with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
+            proxy._resolve_image_credentials(payload)
     with pytest.raises(ValueError):
         instance.image_url_builder("../outside.png")
