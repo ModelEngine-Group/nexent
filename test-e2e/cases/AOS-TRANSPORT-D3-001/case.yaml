@@ -61,8 +61,8 @@ case:
     action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
   - order: 12
-    action: Drop the prepared automation acknowledgement after Runtime accepts the run, then recover from the persisted Automation record.
-    expected: Management retains the exact execution ID and pending projection, inspects and replays the signed journal, and finalizes one assistant message without starting the run again.
+    action: Compile a conversation with a saved disabled knowledge scope, drop the prepared automation acknowledgement after Runtime accepts the run, and recover from the persisted Automation record.
+    expected: The signed snapshot excludes the disabled index. Management retains the exact execution ID and pending projection, replays the signed journal, and finalizes one assistant message without starting the run again.
   - order: 13
     action: Reconnect to a prepared journal through Management's public conversation route and repeat with a foreign tenant.
     expected: The response keeps the original event IDs and terminal state, presents observer events in the public format, signs only scoped output references, and rejects the foreign tenant.
@@ -168,7 +168,7 @@ case:
   - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
   - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
   - Prepared conversation execution starts once and is resumable independently of the submit connection.
-  - The prepared automation runner recovers the same scoped run and commits its assistant message after the lost acknowledgement.
+  - The prepared automation runner preserves the saved knowledge restriction, recovers the same scoped run and commits its assistant message after the lost acknowledgement.
   - The public route retains the signed cursor and presents the prepared output without exposing internal artifact paths.
   - Planning runs use built-in tool bindings and Runtime-managed plan storage.
   - One prepared public submission creates one Runtime execution and one assistant projection.
@@ -320,7 +320,7 @@ case:
     expected_results: [11]
     forbidden_side_effects: [2]
   - id: AC-20
-    description: Prepared automation recovers a dropped start acknowledgement through inspect and replay of the original execution.
+    description: Prepared automation carries the saved knowledge restriction and recovers a dropped start acknowledgement through inspect and replay of the original execution.
     steps: [12]
     expected_results: [12]
     forbidden_side_effects: [2]

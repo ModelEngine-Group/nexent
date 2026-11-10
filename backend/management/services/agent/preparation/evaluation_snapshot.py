@@ -311,11 +311,15 @@ async def prepare_conversation_snapshot(
     if any((
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug or (workbench is not None and request.generation_config is not None),
-        workbench is None and native_knowledge is None and (
-            request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None
-        ),
     )):
         return None
+    if workbench is None and native_knowledge is None and (
+        request.knowledge_scope is not None or isinstance(conversation.get("knowledge_scope"), dict)
+    ):
+        native_knowledge = await run_blocking(
+            "snapshot-conversation-knowledge", prepare_native_knowledge,
+            request, None if new_conversation else conversation, user_id, tenant_id, lane="control-io", owner="management",
+        )
     memory_enabled = await run_blocking(
         "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
     )

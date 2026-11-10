@@ -363,6 +363,7 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker)
     from contracts.errors.exceptions import ForbiddenError
 
     read = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value=None)
+    resolve_scope = mocker.patch.object(evaluation_snapshot, "prepare_native_knowledge")
     compile_run = mocker.patch.object(run, "create_agent_run_info")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
@@ -370,27 +371,56 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker)
     with pytest.raises(ForbiddenError):
         await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "foreign")
     read.assert_called_once_with(42, user_id="actor", tenant_id="foreign")
+    resolve_scope.assert_not_called()
     compile_run.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_prepared_conversation_does_not_drop_memory_or_scope(mocker):
-    get_conversation = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={"knowledge_scope": {"local": []}})
+async def test_prepared_conversation_preserves_memory_without_knowledge_scope(mocker):
+    mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={})
     memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
     compile_run = mocker.patch.object(run, "create_agent_run_info")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
 
-    assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
-    memory.assert_not_called()
-    compile_run.assert_not_called()
-    get_conversation.return_value = {}
     assert await evaluation_snapshot.prepare_conversation_snapshot(
         request, reference, "actor", "tenant",
     ) is compile_run.return_value
     memory.assert_called_once_with("actor")
     assert compile_run.await_args.kwargs["allow_memory_search"] is True
     assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_prepared_conversation_reauthorizes_saved_knowledge_before_compilation(mocker):
+    from management.services.knowledge_base import scope
+
+    saved = {"local": {"mode": "override", "knowledge_ids": ["7", "8"]}, "aidp": {"mode": "disabled"}}
+    mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={"knowledge_scope": saved})
+    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    tree = mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[{
+        "agent_id": 7, "version_no": 3, "agent_name": "root",
+        "tools": [{"class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "source": "local"}],
+    }])
+    mocker.patch.object(scope, "get_knowledge_info_by_ids_and_tenant", return_value=[
+        {"knowledge_id": 7, "index_name": "kb-allowed", "knowledge_name": "Allowed"},
+        {"knowledge_id": 8, "index_name": "kb-revoked", "knowledge_name": "Revoked"},
+    ])
+    permissions = mocker.patch.object(scope.ElasticSearchService, "filter_accessible_indices", return_value=["kb-allowed"])
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    request = AgentRequest(query="hello", agent_id=7, version_no=3, conversation_id=42, enable_automation_tool=False)
+
+    assert await evaluation_snapshot.prepare_conversation_snapshot(
+        request, reference, "actor", "tenant",
+    ) is compile_run.return_value
+    tree.assert_called_once_with(7, "tenant", 3)
+    permissions.assert_called_once_with(["kb-allowed", "kb-revoked"], user_id="actor", tenant_id="tenant")
+    options = compile_run.await_args.kwargs
+    assert options["prepared_conversation"].native_knowledge is True
+    assert options["override_version_no"] == 3
+    assert options["authorized_knowledge_tools"] == {(7, 3): {"knowledge_base_search": {"index_names": ["kb-allowed"]}}}
+    assert options["runtime_knowledge_context"]["scope"]["local_display_names"] == ["Allowed"]
 
 
 @pytest.mark.asyncio

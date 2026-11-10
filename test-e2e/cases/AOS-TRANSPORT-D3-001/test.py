@@ -1751,6 +1751,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     async def compile_agent(**kwargs):
         assert kwargs["portable_evaluation"] and kwargs["version_no"] == 3
         assert kwargs["allow_memory_search"] is True
+        assert kwargs["authorized_knowledge_tools"] == {(7, 3): {"knowledge_base_search": {"index_names": []}}}
         return AgentConfig(
             name="agent", description="", agent_id=7, version_no=3,
             model_name="test-model", prompt_templates={"system_prompt": "Answer"},
@@ -1764,12 +1765,22 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
     def read_conversation(conversation_id, *, user_id, tenant_id):
         if owns(conversation_id, user_id=user_id, tenant_id=tenant_id):
-            return {"runtime_metadata": {"project": "demo"}, "runtime_metadata_version": 4}
+            return {
+                "runtime_metadata": {"project": "demo"}, "runtime_metadata_version": 4,
+                "knowledge_scope": {"local": {"mode": "disabled"}, "aidp": {"mode": "disabled"}},
+            }
         return None
 
     monkeypatch.setattr(evaluation_snapshot, "run_blocking", control_io)
     monkeypatch.setattr(evaluation_snapshot, "get_conversation", read_conversation)
     monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda user: user == actor.user_id)
+    monkeypatch.setattr("management.services.knowledge_base.scope.snapshot_runtime_knowledge_tree", lambda *_: [{
+        "agent_id": 7, "version_no": 3, "agent_name": "agent",
+        "tools": [{
+            "class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "source": "local",
+            "params": [{"name": "index_names", "default": ["kb-excluded"]}],
+        }],
+    }])
 
     def read_history(conversation_id, boundary_id, user_id, tenant_id):
         assert (conversation_id, boundary_id, user_id, tenant_id) == (42, 23, actor.user_id, actor.tenant_id)
@@ -1800,6 +1811,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
+    assert request.native_knowledge is True and "kb-excluded" not in request.model_dump_json()
     assert request.resource.memory_search == search
     assert request.resource.tools[0].parameters == {}
     assert "synthetic-provider-secret" not in request.model_dump_json()
