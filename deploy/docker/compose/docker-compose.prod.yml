@@ -68,7 +68,7 @@ services:
       - nexent
 
   nexent-config:
-    image: ${NEXENT_IMAGE}
+    image: ${NEXENT_MANAGEMENT_IMAGE:-${NEXENT_IMAGE}}
     container_name: nexent-config
     restart: always
     volumes:
