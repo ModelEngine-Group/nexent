@@ -1,0 +1,33 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-RECOVERY-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_trj_recovery
+acceptance_bindings:
+  AC-01:
+  - test_trj_recovery_process_death_preserves_confirmed_prefix
+  - test_trj_recovery_active_fragments_and_abandoned_temporaries
+  - test_trj_recovery_publication_retries_after_repeated_metadata_failure
+  AC-02:
+  - test_trj_recovery_live_file_lock_and_corruption
+  - test_trj_recovery_active_fragments_and_abandoned_temporaries
+  - test_trj_recovery_process_death_preserves_confirmed_prefix
+  AC-03:
+  - test_trj_recovery_queue_and_disk_failures_keep_business_independent
+  AC-04:
+  - test_trj_recovery_publication_order_and_no_resurrection
+  - test_trj_recovery_publication_retries_after_repeated_metadata_failure
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained POSIX file durability proof with controlled trusted identities.
+  Each test provisions a private temporary root; subprocesses and pipes are
+  reaped in finally, ThreadManager services are stopped and checked for zero
+  active workers. Fault injection affects only owned files and is restored by
+  pytest fixtures. No PG, product deployment, providers, shared business assets
+  or asset factories are required. HTTP/PG authorization is covered separately
+  by CHAT-TRAJECTORY-ISOLATION-D5-001.

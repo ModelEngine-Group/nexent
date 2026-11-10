@@ -18,35 +18,35 @@ Installation:
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
 try:
-    from opentelemetry.trace.status import Status, StatusCode
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry import metrics, trace
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPSpanExporterGRPC
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPMetricExporterHTTP
-    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPMetricExporterGRPC
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as OTLPSpanExporterHTTP
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry import trace, metrics
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.trace.status import Status, StatusCode
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
 
+import functools
+import inspect
+import json
 import logging
 import os
 import threading
 import time
-import functools
-import json
-import inspect
 from collections import deque
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
 from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
@@ -54,6 +54,7 @@ from .span_filter_config import (
     normalize_span_exclusions,
 )
 from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
+
 
 logger = logging.getLogger(__name__)
 
@@ -423,6 +424,8 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
+    trace_sink: str = "otlp"
+    local_span_processor: Any = None
     excluded_elasticsearch_operations: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
     )
@@ -442,7 +445,12 @@ class MonitoringConfig:
             self.provider = "otlp"
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
+        self.trace_sink = str(self.trace_sink).strip().lower()
+        if self.trace_sink not in {"otlp", "local_file", "both"}:
+            raise ValueError("Unknown monitoring trace sink")
         self.export_traces = _as_bool(self.export_traces, True)
+        if self.enable_telemetry and self.export_traces and self.trace_sink != "otlp" and self.local_span_processor is None:
+            raise ValueError("Local monitoring requires an injected span processor")
         self.export_metrics = _as_bool(self.export_metrics, True)
         self.instrument_requests = _as_bool(self.instrument_requests, False)
         self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
@@ -594,9 +602,13 @@ class MonitoringManager:
 
             # Initialize TracerProvider with OTLP exporter
             self._tracer_provider = TracerProvider(resource=resource)
+            if self._config.export_traces and self._config.trace_sink != "otlp":
+                local = self._config.local_span_processor
+                self._tracer_provider.sampler = local.wrap_sampler(self._tracer_provider.sampler)
+                self._tracer_provider.add_span_processor(local)
             trace.set_tracer_provider(self._tracer_provider)
 
-            if self._config.export_traces:
+            if self._config.export_traces and self._config.trace_sink != "local_file":
                 # Choose exporter based on protocol
                 if self._config.otlp_protocol == "grpc":
                     span_exporter = OTLPSpanExporterGRPC(
@@ -969,7 +981,7 @@ class MonitoringManager:
         span_attrs = {
             OPENINFERENCE_SPAN_KIND: span_kind,
         }
-        
+
         # Process input.value and output.value through payload preview (same as trace_llm_request)
         input_value = attributes.pop(OPENINFERENCE_INPUT_VALUE, None)
         output_value = attributes.pop(OPENINFERENCE_OUTPUT_VALUE, None)
@@ -983,7 +995,7 @@ class MonitoringManager:
             if output_preview != "":
                 span_attrs[OPENINFERENCE_OUTPUT_VALUE] = output_preview
             span_attrs.update(self._trace_payload_attributes("output", output_value))
-        
+
         span_attrs.update(attributes)
 
         with self._tracer.start_as_current_span(
@@ -1298,6 +1310,16 @@ class MonitoringManager:
                 summary["keys"],
                 ensure_ascii=False,
             )
+        if self._config and self._config.export_traces and self._config.trace_sink != "otlp":
+            slot = "output" if prefix.endswith("output") else "input" if prefix.endswith("input") else None
+            if slot:
+                from .local_content import safe_local_content
+
+                try:
+                    attrs[f"nexent.local.{slot}.value"] = safe_local_content(value)
+                except (ValueError, TypeError, RecursionError):
+                    attrs["nexent.trajectory.gap"] = True
+                    attrs[f"nexent.availability.{slot}"] = "serialization_failed"
         return attrs
 
     def _trace_payload_preview(self, value: Any) -> str:
@@ -2762,8 +2784,8 @@ class MonitoringRecordBuffer:
 
     def _write_batch(self, batch: List[dict]) -> None:
         try:
-            import sys
             import os
+            import sys
 
             backend_path = os.path.join(os.getcwd(), "backend")
             if os.path.exists(backend_path) and backend_path not in sys.path:

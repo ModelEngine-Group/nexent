@@ -1,0 +1,478 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Managed local span processing; storage failures never rerun business calls."""
+
+from __future__ import annotations
+
+import logging
+import queue
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+from opentelemetry import trace
+from opentelemetry.sdk.trace import SpanProcessor
+
+from .trajectory_io import digest, json_chunks
+from .trajectory_otlp import span_request
+from .trajectory_store import CaptureIdentity
+
+logger = logging.getLogger(__name__)
+
+
+def _observed_time(nanoseconds):
+    seconds, nanos = divmod(int(nanoseconds), 1_000_000_000)
+    return datetime.fromtimestamp(seconds, UTC) + timedelta(microseconds=nanos // 1000)
+
+
+def _has_dropped_data(value):
+    if isinstance(value, dict):
+        return any(
+            bool(item) if key.startswith("dropped") and key.endswith("Count") else _has_dropped_data(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_has_dropped_data(item) for item in value)
+    return False
+
+
+class LocalTrajectoryProcessor(SpanProcessor):
+    """Use one ThreadManager service and byte-bounded, independent local queues."""
+
+    def __init__(
+        self,
+        store,
+        metadata_provider,
+        *,
+        flush_interval_ms=200,
+        flush_bytes=262144,
+        queue_max_bytes=268435456,
+        run_queue_max_bytes=16777216,
+        maintenance_store=None,
+        cleanup_enabled=False,
+        cleanup_interval_seconds=3600,
+    ):
+        if min(flush_interval_ms, flush_bytes, queue_max_bytes, run_queue_max_bytes) <= 0:
+            raise ValueError("Trajectory processor budgets must be positive")
+        if run_queue_max_bytes > queue_max_bytes:
+            raise ValueError("Trajectory per-run queue exceeds the process budget")
+        if cleanup_interval_seconds < 60:
+            raise ValueError("Trajectory cleanup interval must be at least 60 seconds")
+        self.store = store
+        self.metadata_provider = metadata_provider
+        self.flush_interval = flush_interval_ms / 1000
+        self.flush_bytes = flush_bytes
+        self.queue_max_bytes = queue_max_bytes
+        self.run_queue_max_bytes = run_queue_max_bytes
+        self._queue = queue.Queue(maxsize=10000)
+        self._lock = threading.RLock()
+        self._active = {}
+        self._bytes = 0
+        self._run_bytes = {}
+        self._gaps = set()
+        self._stop = threading.Event()
+        self._execution = None
+        self._accepting = False
+        self._writers = {}
+        self._offsets = {}
+        self._terminal = {}
+        self._last_snapshot = {}
+        self._pending = {}
+        self._pending_bytes = {}
+        self._maintenance_store = maintenance_store
+        self._cleanup_enabled = cleanup_enabled
+        self._cleanup_interval = cleanup_interval_seconds
+        self._maintenance_iterator = None
+        self._next_maintenance = 0
+
+    def start(self, manager, service_spec):
+        """Application lifespan supplies the process-local manager and task spec."""
+        if self._execution is not None:
+            raise RuntimeError("Trajectory processor is already started")
+        self._execution = manager.register_service(service_spec, self._work)
+        self._accepting = True
+        try:
+            manager.start_service(self._execution.execution_id)
+        except BaseException:
+            self._accepting = False
+            raise
+
+    @staticmethod
+    def wrap_sampler(delegate):
+        from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
+
+        class LocalRecordingSampler(Sampler):
+            def should_sample(self, *args, **kwargs):
+                result = delegate.should_sample(*args, **kwargs)
+                if result.decision == Decision.DROP:
+                    return SamplingResult(Decision.RECORD_ONLY, result.attributes, result.trace_state)
+                return result
+
+            def get_description(self):
+                return f"NexentLocalRecording({delegate.get_description()})"
+
+        return LocalRecordingSampler()
+
+    def request_stop(self):
+        self._accepting = False
+        self._stop.set()
+
+    def _enqueue(self, run_id, kind, data, size=0):
+        with self._lock:
+            if (
+                not self._accepting
+                or self._bytes + size > self.queue_max_bytes
+                or self._run_bytes.get(run_id, 0) + size > self.run_queue_max_bytes
+            ):
+                if run_id:
+                    self._gaps.add(run_id)
+                return False
+            try:
+                self._queue.put_nowait((run_id, kind, data, size))
+            except queue.Full:
+                self._gaps.add(run_id)
+                return False
+            self._bytes += size
+            self._run_bytes[run_id] = self._run_bytes.get(run_id, 0) + size
+            return True
+
+    def on_start(self, span, parent_context=None):
+        if not self._accepting:
+            return
+        try:
+            parent = trace.get_current_span(parent_context)
+            inherited = getattr(parent, "attributes", None) or {}
+            run_id = inherited.get("nexent.trajectory_id")
+            root = not run_id and span.name == "agent.run"
+            if root:
+                metadata = self.metadata_provider()
+                if not metadata or metadata.conversation_id is None or not metadata.tenant_id or not metadata.user_id:
+                    return
+                identity = CaptureIdentity(
+                    str(metadata.tenant_id),
+                    str(metadata.user_id),
+                    str(metadata.conversation_id),
+                    str(metadata.agent_id) if metadata.agent_id is not None else None,
+                )
+                run_id, turn_id = str(uuid4()), str(uuid4())
+                values = {
+                    "tenant.id": identity.tenant_id,
+                    "nexent.owner_user_id": identity.owner_user_id,
+                    "conversation.id": identity.conversation_id,
+                    "session.id": identity.conversation_id,
+                    "nexent.trace_id": identity.conversation_id,
+                    "nexent.trajectory_id": run_id,
+                    "nexent.turn_id": turn_id,
+                    "nexent.root_agent_id": identity.root_agent_id or "_unknown",
+                    "nexent.trajectory.root": True,
+                }
+                core = (metadata.extra_metadata or {}).get("core_type", "smolagents")
+                if not self._enqueue(run_id, "start", (identity, turn_id, core, _observed_time(span.start_time))):
+                    return
+            elif run_id:
+                values = {
+                    key: value
+                    for key, value in inherited.items()
+                    if key
+                    in {
+                        "tenant.id",
+                        "nexent.owner_user_id",
+                        "conversation.id",
+                        "session.id",
+                        "nexent.trace_id",
+                        "nexent.trajectory_id",
+                        "nexent.turn_id",
+                        "nexent.root_agent_id",
+                    }
+                }
+                if inherited.get("nexent.record_id"):
+                    values["nexent.parent_record_id"] = inherited["nexent.record_id"]
+            else:
+                return
+            values["nexent.record_id"] = str(uuid4())
+            span.set_attributes(values)
+            with self._lock:
+                if len(self._active) >= 10000:
+                    self._gaps.add(run_id)
+                    return
+                self._active[span.context.span_id] = span
+        except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+            logger.warning("trajectory.capture_start_failed", exc_info=False)
+
+    def on_end(self, span):
+        values = span.attributes or {}
+        run_id = values.get("nexent.trajectory_id")
+        if not run_id:
+            return
+        try:
+            request = span_request(span)
+            size = sum(len(chunk) for chunk in json_chunks(request)) + 1
+            with self._lock:
+                self._enqueue(run_id, "span", request, size)
+                self._active.pop(span.context.span_id, None)
+                if values.get("nexent.trajectory.root"):
+                    status = (
+                        "cancelled"
+                        if values.get("nexent.cancelled")
+                        else ("failed" if span.status.status_code.value == 2 else "completed")
+                    )
+                    self._terminal[run_id] = (status, _observed_time(span.end_time))
+        except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+            with self._lock:
+                self._gaps.add(run_id)
+                self._active.pop(span.context.span_id, None)
+                if values.get("nexent.trajectory.root"):
+                    self._terminal[run_id] = ("failed", _observed_time(span.end_time))
+            logger.warning("trajectory.capture_end_failed", exc_info=False)
+
+    def force_flush(self, timeout_millis=30000):
+        if not self._execution or not self._accepting:
+            return False
+        event = threading.Event()
+        return self._enqueue("", "barrier", event) and event.wait(timeout_millis / 1000)
+
+    def shutdown(self):
+        self.request_stop()
+        if self._execution and self._execution.future:
+            self._execution.future.result(timeout=30)
+
+    def _release_denied_writer(self, run_id):
+        """Stop capture on revocation; maintenance may seal only durable bytes."""
+        writer = self._writers.pop(run_id, None)
+        if writer is None:
+            return
+        writer.close()
+        self._gaps.add(run_id)
+        try:
+            (self._maintenance_store or self.store).recover(writer.identity, run_id)
+        except (OSError, RuntimeError, ValueError):
+            logger.warning("trajectory.revoked_archive_deferred", exc_info=False)
+        logger.warning("trajectory.capture_authorization_revoked", exc_info=False)
+
+    def _append(self, run_id, requests):
+        writer = self._writers.get(run_id)
+        if writer is None:
+            return
+        if run_id in self._gaps:
+            writer.mark_incomplete("capture_gap")
+        if any(
+            a["key"] == "nexent.trajectory.gap" and a["value"].get("boolValue")
+            for request in requests
+            for resource in request["resourceSpans"]
+            for scope in resource["scopeSpans"]
+            for body in scope["spans"]
+            for a in body["attributes"]
+        ):
+            writer.mark_incomplete("serialization_failed")
+        batch_id = str(uuid4())
+        run = self.store._run(self.store.manifest(writer.identity), run_id)
+        self._offsets[run_id] = run["confirmed_bytes"]
+        if any(_has_dropped_data(request) for request in requests):
+            writer.mark_incomplete("otel_dropped_data")
+        for attempt in range(2):
+            try:
+                receipt = writer.append(requests, batch_id=batch_id, expected_offset=self._offsets[run_id])
+                self._offsets[run_id] = receipt["confirmed_bytes"]
+                return
+            except OSError:
+                if attempt:
+                    raise
+
+    def _flush_pending(self):
+        for run_id in list(self._pending):
+            requests = self._pending.pop(run_id)
+            size = self._pending_bytes.pop(run_id)
+            try:
+                self._append(run_id, requests)
+            except PermissionError:
+                self._release_denied_writer(run_id)
+            except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                self._gaps.add(run_id)
+                logger.warning("trajectory.storage_batch_failed", exc_info=False)
+            finally:
+                with self._lock:
+                    self._bytes -= size
+                    remaining = self._run_bytes.get(run_id, 0) - size
+                    if remaining:
+                        self._run_bytes[run_id] = remaining
+                    else:
+                        self._run_bytes.pop(run_id, None)
+
+    def _snapshot_active(self):
+        with self._lock:
+            active = list(self._active.values())
+        for span in active:
+            values = span.attributes or {}
+            run_id = values["nexent.trajectory_id"]
+            if run_id not in self._writers:
+                continue
+            request = span_request(span)
+            if sum(len(chunk) for chunk in json_chunks(request)) > self.run_queue_max_bytes:
+                self._gaps.add(run_id)
+                self._writers[run_id].mark_incomplete("capture_gap")
+                continue
+            body = request["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+            body["endTimeUnixNano"] = body["startTimeUnixNano"]
+            key = (run_id, span.context.span_id)
+            fingerprint = digest(request)
+            if self._last_snapshot.get(key) == fingerprint:
+                continue
+            now = time.time_ns()
+            body["name"] = "nexent.trajectory.fragment"
+            body["spanId"] = uuid4().hex[:16]
+            body["startTimeUnixNano"] = body["endTimeUnixNano"] = str(now)
+            body["attributes"] = [
+                a
+                for a in body["attributes"]
+                if a["key"] not in {"nexent.trajectory.root", "input.value", "output.value", "nexent.reasoning.value"}
+            ]
+            body["attributes"].append(
+                {"key": "nexent.owner_span_id", "value": {"stringValue": f"{span.context.span_id:016x}"}}
+            )
+            body["events"] = [
+                {
+                    "name": "nexent.trajectory.snapshot",
+                    "timeUnixNano": str(now),
+                    "attributes": [
+                        {"key": "nexent.event_id", "value": {"stringValue": str(uuid4())}},
+                        {"key": "nexent.owner_span_id", "value": {"stringValue": f"{span.context.span_id:016x}"}},
+                        {"key": "nexent.snapshot_mode", "value": {"stringValue": "replace"}},
+                    ]
+                    + [
+                        a
+                        for a in span_request(span)["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+                        if a["key"] in {"input.value", "output.value", "nexent.reasoning.value"}
+                    ],
+                }
+            ]
+            try:
+                self._append(run_id, [request])
+            except PermissionError:
+                self._release_denied_writer(run_id)
+                continue
+            self._last_snapshot[key] = fingerprint
+
+    def _publish_completed(self):
+        with self._lock:
+            active_runs = {(span.attributes or {}).get("nexent.trajectory_id") for span in self._active.values()}
+        for run_id in list(self._terminal):
+            if run_id in active_runs or self._run_bytes.get(run_id, 0):
+                continue
+            writer = self._writers.get(run_id)
+            if writer:
+                try:
+                    if run_id in self._gaps:
+                        writer.mark_incomplete("capture_gap")
+                    status, finished_at = self._terminal[run_id]
+                    writer.finish(status, finished_at=finished_at)
+                    writer.close()
+                    self._writers.pop(run_id, None)
+                except PermissionError:
+                    self._release_denied_writer(run_id)
+            self._terminal.pop(run_id, None)
+            self._offsets.pop(run_id, None)
+            self._gaps.discard(run_id)
+            self._last_snapshot = {key: value for key, value in self._last_snapshot.items() if key[0] != run_id}
+
+    def _maintain(self):
+        store = self._maintenance_store
+        if store is None:
+            return
+        if self._maintenance_iterator is None:
+            if time.monotonic() < self._next_maintenance:
+                return
+            self._maintenance_iterator = store.identities()
+        started = time.monotonic()
+        for _ in range(20):
+            if not self._queue.empty() or time.monotonic() - started >= 0.05:
+                return
+            try:
+                identity = next(self._maintenance_iterator)
+            except StopIteration:
+                self._maintenance_iterator = None
+                self._next_maintenance = time.monotonic() + self._cleanup_interval
+                return
+            for run in store.manifest(identity)["runs"]:
+                if run["capture_state"] == "writing" and run["trajectory_id"] not in self._writers:
+                    try:
+                        store.recover(identity, run["trajectory_id"])
+                    except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                        # Another process can own the actual execution file lock.
+                        logger.debug("trajectory.maintenance_recovery_deferred", exc_info=False)
+            store.reconcile(identity)
+            if self._cleanup_enabled:
+                store.cleanup(identity)
+
+    def _work(self, cancel_event):
+        next_snapshot = time.monotonic()
+        try:
+            while not (self._stop.is_set() or cancel_event.is_set()) or not self._queue.empty():
+                try:
+                    run_id, kind, data, size = self._queue.get(timeout=min(self.flush_interval, 0.2))
+                except queue.Empty:
+                    kind = None
+                if kind:
+                    try:
+                        if kind == "start":
+                            identity, turn_id, core, started_at = data
+                            self._writers[run_id] = self.store.start(
+                                identity, run_id, turn_id, core_type=core, started_at=started_at
+                            )
+                            self._offsets[run_id] = 0
+                        elif kind == "span":
+                            self._pending.setdefault(run_id, []).append(data)
+                            self._pending_bytes[run_id] = self._pending_bytes.get(run_id, 0) + size
+                            body = data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+                            attrs = {a["key"]: next(iter(a["value"].values())) for a in body["attributes"]}
+                            if attrs.get("nexent.trajectory.root"):
+                                status = (
+                                    "cancelled"
+                                    if attrs.get("nexent.cancelled")
+                                    else ("failed" if body["status"]["code"] == 2 else "completed")
+                                )
+                                self._terminal[run_id] = (status, _observed_time(body["endTimeUnixNano"]))
+                        elif kind == "barrier":
+                            self._flush_pending()
+                            self._snapshot_active()
+                            self._publish_completed()
+                            data.set()
+                    except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                        self._gaps.add(run_id)
+                        logger.warning("trajectory.storage_failed", exc_info=False)
+                    finally:
+                        if kind != "span":
+                            with self._lock:
+                                self._bytes -= size
+                                remaining = self._run_bytes.get(run_id, 0) - size
+                                if remaining:
+                                    self._run_bytes[run_id] = remaining
+                                else:
+                                    self._run_bytes.pop(run_id, None)
+                        self._queue.task_done()
+                try:
+                    if time.monotonic() >= next_snapshot or sum(self._pending_bytes.values()) >= self.flush_bytes:
+                        self._flush_pending()
+                        self._snapshot_active()
+                        next_snapshot = time.monotonic() + self.flush_interval
+                    self._publish_completed()
+                    self._maintain()
+                except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                    logger.warning("trajectory.storage_flush_failed", exc_info=False)
+        finally:
+            try:
+                self._flush_pending()
+                self._publish_completed()
+            except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                logger.warning("trajectory.final_archive_failed", exc_info=False)
+            for writer in self._writers.values():
+                writer.close()
+                try:
+                    (self._maintenance_store or self.store).recover(writer.identity, writer.trajectory_id)
+                except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
+                    logger.warning("trajectory.interrupted_archive_failed", exc_info=False)
+            self._writers.clear()
+            self._active.clear()
+            self._last_snapshot.clear()
+            if self._maintenance_iterator is not None:
+                self._maintenance_iterator.close()
+                self._maintenance_iterator = None
