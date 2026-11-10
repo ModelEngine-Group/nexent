@@ -102,7 +102,8 @@ async def forward_conversation_run(
             if prepared.workbench is not None:
                 opening = {"type": "workbench_config_resolved", "content": {
                     "config_version": 0, "schema_version": prepared.workbench.schema_version,
-                    "mode": prepared.workbench.mode, "agent_mounts": [],
+                    "mode": prepared.workbench.mode,
+                    "agent_mounts": [mount.model_dump(mode="json") for mount in prepared.workbench.agent_mounts],
                 }}
             public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
             if public.status_code == 200 and request.conversation_id is not None:

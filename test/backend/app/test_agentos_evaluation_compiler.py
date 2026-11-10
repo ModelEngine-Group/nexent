@@ -2,6 +2,7 @@
 """Exercise the production evaluation compiler through its AgentOS boundary."""
 
 import json
+from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -11,6 +12,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import CompatibilityConversationRun, AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
+from contracts.errors.exceptions import WorkbenchError
 from contracts.model import WorkbenchGenerationConfig
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
@@ -26,20 +28,39 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-async def test_generic_workbench_debug_runs_through_agentos(mocker):
+@pytest.mark.parametrize("mode,child_ids", [
+    ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),
+])
+async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids):
+    mounts = [{"agent_id": child_id, "version_no": 5} for child_id in child_ids]
     request = AgentRequest(
         query="hello", is_debug=True, entrypoint="workbench",
-        workbench={"mode": "generic_chat", "generation_config": {"temperature": 0.4}},
+        workbench={"mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4}},
     )
     config = request.workbench
     root = workbench.RuntimeAgentIdentity("agent:7:v2", 7, 2, "workbench_main", "Workbench", "SYSTEM")
+    children = tuple(
+        workbench.RuntimeAgentIdentity(f"agent:{child_id}:v5", child_id, 5, f"agent_{child_id}_v5", "Child", "PERSISTED")
+        for child_id in child_ids
+    )
     plan = workbench.ResolvedAgentPlan(
         workbench.PublishedRootDescriptor(root, {}), workbench.RootRuntimeOverlay(None, None, (), None), (),
+        child_mounts=children,
     )
     resolve = mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
     raw = evaluation_payload()
     raw["resource"]["origin"] = "SYSTEM"
     raw["models"]["llm"]["root_generation"] = {"temperature": 0.4}
+    if children:
+        raw["models"]["additional_llms"] = [{"model_id": 11, "alias": "child_model", "revision": "revision-1"}]
+        raw["resource"]["subagents"] = [
+            {
+                "agent_id": child.agent_id, "version_no": child.version_no, "name": child.invocation_name,
+                "description": child.display_name, "invocation_name": child.invocation_name, "model_alias": "child_model",
+                "prompt_templates": {"system_prompt": "Answer the query"},
+            }
+            for child in children
+        ]
     compile_run = mocker.patch.object(run, "create_agent_run_info", return_value=PreparedEvaluationRun.model_validate(raw))
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model_record())
@@ -59,14 +80,38 @@ async def test_generic_workbench_debug_runs_through_agentos(mocker):
     options = compile_run.await_args.kwargs
     assert options["prepared_workbench"].plan == plan
     assert options["override_version_no"] == 2
+    assert options["runtime_sub_agent_mounts"] == [asdict(child) for child in children]
     snapshot = client.run_ephemeral.await_args.args[0]
     info = prepared_evaluation.prepare_run_snapshot(snapshot, ServicePrincipal("actor", "tenant-a"))
     assert info.conversation_id is None
     assert info.model_config_list[0].temperature == 0.4
+    assert [(child.agent_id, child.version_no, child.model_name) for child in info.agent_config.worker_agents] == [
+        (child_id, 5, "child_model") for child_id in child_ids
+    ]
     frames = [json.loads(frame.removeprefix(b"data: ")) async for frame in result.body_iterator]
     assert frames[0] == {"type": "workbench_config_resolved", "content": {
-        "config_version": 0, "schema_version": 3, "mode": "generic_chat", "agent_mounts": [],
+        "config_version": 0, "schema_version": 3, "mode": mode,
+        "agent_mounts": [mount.model_dump(mode="json") for mount in config.agent_mounts],
     }}
+
+
+@pytest.mark.asyncio
+async def test_workbench_debug_denies_mount_without_dispatch(mocker):
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch.object(workbench, "resolve_workbench_config", side_effect=WorkbenchError("AGENT_NOT_RUNNABLE", 403))
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    payload = CompatibilityConversationRun(request={
+        "query": "hello", "is_debug": True, "entrypoint": "workbench",
+        "workbench": {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 8, "version_no": 5}]},
+    })
+
+    with pytest.raises(HTTPException) as denied:
+        await runtime_client.forward_conversation_run(payload, "actor", "tenant-a")
+
+    assert denied.value.status_code == 403
+    assert denied.value.detail == {"code": "AGENT_NOT_RUNNABLE"}
+    client.run_ephemeral.assert_not_called()
+    client.run_conversation.assert_not_called()
 
 
 @pytest.mark.asyncio

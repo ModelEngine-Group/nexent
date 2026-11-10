@@ -180,7 +180,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
 
     config = request.workbench
-    if (config is None or config.mode != "generic_chat" or config.skill_mounts
+    if (config is None or config.mode in {"skill_create", "agent_create"} or config.skill_mounts
             or config.knowledge_scope is not None or request.knowledge_scope is not None
             or request.metadata is not None or request.reasoning_effort is not None
             or request.reasoning_budget_tokens is not None):
@@ -194,7 +194,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         "snapshot-debug-workbench", resolve_workbench_config, config, tenant_id=tenant_id,
         is_debug=True, user_id=user_id, lane="control-io", owner="management",
     )
-    if plan.root_skills or plan.child_mounts:
+    if plan.root_skills:
         return None
     root = plan.root.identity
     generation = config.generation_config.model_dump(mode="json")
@@ -218,6 +218,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
         export_evaluation=True, runtime_skill_snapshot=[],
         runtime_generation_config=generation,
+        runtime_sub_agent_mounts=[asdict(child) for child in plan.child_mounts],
         prepared_workbench=PreparedWorkbench(config, plan, 0, 0),
     )
     if snapshot is None:
