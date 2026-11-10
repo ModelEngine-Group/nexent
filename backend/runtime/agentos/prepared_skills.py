@@ -1,0 +1,78 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Verify evaluation skill bindings and stage the verified files for SDK tools."""
+
+from hmac import compare_digest
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import HTTPException
+
+from contracts.agentos import EvaluationSkillTool, FileToolDescription
+from infrastructure.rdb.skill_execution_records import read_bound_skills
+from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
+from nexent.core.agents.agent_model import ToolConfig
+
+SKILL_SNAPSHOT_DIR = ".evaluation-skills"
+
+
+def materialize_skill_tools(resource, actor, workspace_path: str) -> dict[str, ToolConfig]:
+    bindings = [binding for binding in resource.tools if binding.tool_id in set(EvaluationSkillTool)]
+    context_items = resource.evaluation_options.context_items if resource.evaluation_options is not None else None
+    refs = resource.skill_refs
+    if not refs and not bindings:
+        validate_skill_context(context_items, [])
+        return {}
+    ids = {ref.instance_id for ref in refs}
+    if not refs or len(ids) != len(refs) or {binding.tool_id for binding in bindings} != set(EvaluationSkillTool):
+        raise ValueError("Inconsistent evaluation skill bindings")
+    if len(bindings) != len(EvaluationSkillTool):
+        raise ValueError("Duplicate evaluation skill tool")
+
+    tenant = actor.tenant_id
+    rows = {
+        row["instance_id"]: row for row in read_bound_skills(resource.agent_id, resource.version_no, tenant)
+        if row["instance_id"] in ids
+    }
+    if rows.keys() != ids:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_SKILL_NOT_FOUND"})
+
+    stage = Path(workspace_path) / SKILL_SNAPSHOT_DIR / uuid4().hex
+    validate_skill_context(context_items, rows.values())
+    configs = {}
+    stage.mkdir(parents=True, mode=0o700)
+    for ref in refs:
+        row = rows[ref.instance_id]
+        name = row["name"]
+        if name in configs:
+            raise ValueError("Duplicate evaluation skill name")
+        try:
+            files = capture_skill_files(tenant, name)
+            revision = skill_execution_revision(tenant, resource.agent_id, resource.version_no, row, files)
+        except (OSError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
+        if not compare_digest(revision, ref.revision):
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"})
+        configs[name] = row["config"]
+        root = stage / skill_path_segment(tenant) / skill_path_segment(name)
+        for relative_path, contents in files.items():
+            path = root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            path.write_bytes(contents)
+
+    metadata = {"agent_id": resource.agent_id, "version_no": resource.version_no, "tenant_id": tenant}
+    params = {"local_skills_dir": str(stage), "isolated_skills_root": True, "authorized_skill_names": sorted(configs)}
+    tools = {}
+    for binding in bindings:
+        if binding.version != "1" or binding.credential_ref is not None:
+            raise ValueError("Unsupported evaluation skill tool binding")
+        builtin = EvaluationSkillTool(binding.tool_id)
+        builtin_params = dict(params)
+        if builtin is EvaluationSkillTool.SCRIPT:
+            builtin_params["workspace_path"] = workspace_path
+        if builtin is EvaluationSkillTool.CONFIG:
+            builtin_params["config_overrides"] = configs
+        tools[binding.tool_id] = ToolConfig(
+            class_name=builtin.class_name, name=builtin.value, source="builtin", usage="builtin",
+            params=builtin_params, metadata=metadata, **FileToolDescription.model_validate(binding.parameters).model_dump(),
+        )
+    return tools

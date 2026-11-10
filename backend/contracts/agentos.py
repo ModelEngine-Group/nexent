@@ -211,6 +211,25 @@ class EvaluationFileTool(str, Enum):
         }[self]
 
 
+class EvaluationSkillTool(str, Enum):
+    SCRIPT = "run_skill_script"
+    GUIDE = "read_skill_md"
+    CONFIG = "read_skill_config"
+
+    @property
+    def class_name(self) -> str:
+        return {
+            EvaluationSkillTool.SCRIPT: "RunSkillScriptTool",
+            EvaluationSkillTool.GUIDE: "ReadSkillMdTool",
+            EvaluationSkillTool.CONFIG: "ReadSkillConfigTool",
+        }[self]
+
+
+class SkillExecutionBinding(RunSpecModel):
+    instance_id: PositiveInt
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class FileToolDescription(RunSpecModel):
     description: str | None = None
     description_zh: str | None = None
@@ -266,7 +285,7 @@ class AgentResource(RunSpecModel):
     runtime_ref: str | None = Field(default=None, min_length=1)
     origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
     tools: list[ToolBinding] = Field(default_factory=list)
-    skill_refs: list[str] = Field(default_factory=list)
+    skill_refs: list[SkillExecutionBinding] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)
     knowledge_base_refs: list[str] = Field(default_factory=list)
     memory_ref: str | None = None

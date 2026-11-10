@@ -41,7 +41,7 @@ case:
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
-    expected: Runtime rebuilds scoped file, attachment, external A2A and MCP bindings and a child Agent with the expected model parameters. Events stay ordered. Out-of-scope attachment references and changed execution bindings are refused.
+    expected: Runtime rebuilds scoped file, attachment, skill, external A2A and MCP bindings and a child Agent with the expected model parameters. Events stay ordered. Out-of-scope attachments and changed execution bindings are refused. The runner reads the verified skill guide and effective configuration from its isolated workspace.
   - order: 6
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
@@ -62,7 +62,7 @@ case:
   - Invalid credentials, modified requests and unknown versions do not dispatch.
   - Evaluation returns exact ordered events without using a real conversation.
   - Background execution returns the assistant message ID and stops after the caller disconnects.
-  - Prepared evaluation returns ordered events and releases the run registration. Unauthorized requests cannot start the runner.
+  - Prepared evaluation returns ordered events and releases the run registration and staged skill files. Unauthorized requests cannot start the runner.
   - Resume returns only events after the supplied cursor and never opens a journal for an unauthorized actor.
   - Management relays the Runtime response and run ID while preserving the signed scope and request context.
   - The admission claim returns the original run identity on retry without starting a second execution.

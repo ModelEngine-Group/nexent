@@ -57,7 +57,7 @@ def serve(app):
 @pytest.mark.stage("D3")
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
 @pytest.mark.asyncio
-async def test_signed_agentos_transport(monkeypatch):
+async def test_signed_agentos_transport(monkeypatch, tmp_path):
     key = "synthetic-agentos-transport-fixture-secret"
     monkeypatch.setattr(environment, "JWT_SECRET", key)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
@@ -189,14 +189,14 @@ async def test_signed_agentos_transport(monkeypatch):
         ("inspect", 42, principal),
         ("background", 43, principal),
     ]
-    await _assert_prepared_evaluation_over_signed_http(monkeypatch)
+    await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
     await _assert_public_stop_and_background(monkeypatch)
 
 
-async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
+async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from types import SimpleNamespace
     from infrastructure import agent_attachments
     from infrastructure.object_storage.client import minio_client
@@ -206,7 +206,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from infrastructure.mcp_execution import build_mcp_tool
-    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_mcp
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_mcp, prepared_skills
     from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
@@ -272,6 +273,36 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         monkeypatch.setattr(module, "read_bound_mcp_tools", read_mcp_tools)
         monkeypatch.setattr(module, "read_mcp_execution_servers", lambda tenant_id: [mcp_server])
 
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "tenant-a" / "summarize"
+    (skill_dir / "config").mkdir(parents=True)
+    guide = skill_dir / "SKILL.md"
+    guide.write_text("---\nname: summarize\ndescription: Summarize\n---\nRuntime skill guide", encoding="utf-8")
+    (skill_dir / "config" / "config.yaml").write_text("keep: true\nvalue: default", encoding="utf-8")
+    skill = {"instance_id": 51, "name": "summarize", "description": "Summarize", "config": {"value": "local-secret"}}
+    skill_metadata = {"agent_id": 7, "version_no": 2, "tenant_id": "tenant-a"}
+    skill_tools = [
+        ToolConfig(
+            class_name=class_name, name=name, source="builtin", usage="builtin", metadata=skill_metadata,
+            params={"local_skills_dir": str(skill_root), **params},
+        )
+        for class_name, name, params in [
+            ("RunSkillScriptTool", "run_skill_script",
+             {"workspace_path": None, "isolated_skills_root": False, "authorized_skill_names": ["summarize"]}),
+            ("ReadSkillMdTool", "read_skill_md", {"isolated_skills_root": False}),
+            ("ReadSkillConfigTool", "read_skill_config", {"config_overrides": {"summarize": skill["config"]}}),
+        ]
+    ]
+
+    def read_skills(agent_id, version_no, tenant_id):
+        assert (agent_id, version_no) == (7, 2)
+        return [skill] if tenant_id == "tenant-a" else []
+
+    monkeypatch.setattr(environment, "CONTAINER_SKILLS_PATH", str(skill_root))
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "runs"))
+    monkeypatch.setattr(evaluation_snapshot, "read_bound_skills", read_skills)
+    monkeypatch.setattr(prepared_skills, "read_bound_skills", read_skills)
+
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.model_config_list[0].api_key == "only-in-runtime"
@@ -285,6 +316,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         assert peer.url == "https://external.example/private"
         assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
         assert info.agent_config.tools[1].params == {"scope": "private-tool-default"}
+        by_name = {tool.name: tool for tool in info.agent_config.tools}
+        reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
+        config_reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_config"])
+        assert "Runtime skill guide" in reader.forward("summarize")
+        assert json.loads(config_reader.forward("summarize")) == {"keep": True, "value": "local-secret"}
+        assert "not authorized" in config_reader.forward("other-skill").lower()
         host, = info.mcp_host
         assert host["headers"] == {"Authorization": "runtime-mcp-token"}
         assert host["allowed_tools"] == {"catalog_lookup": "catalog_lookup"}
@@ -321,7 +358,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool)],
+        ), build_mcp_tool(mcp_tool), *skill_tools],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -343,6 +380,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
+    assert "local-secret" not in prepared.model_dump_json()
+    assert "Runtime skill guide" not in prepared.model_dump_json()
 
     async def prepare(payload, user_id, tenant_id):
         assert (payload, user_id, tenant_id) == (case, "user-a", "tenant-a")
@@ -373,6 +412,13 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         assert changed_mcp.value.status_code == 409
         assert "AGENTOS_MCP_REVISION_MISMATCH" in changed_mcp.value.content.decode()
         mcp_server["authorization_token"] = "runtime-mcp-token"
+        original_guide = guide.read_bytes()
+        guide.write_text("file revision changed", encoding="utf-8")
+        with pytest.raises(RuntimeUpstreamError) as changed_skill:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_skill.value.status_code == 409
+        assert "AGENTOS_SKILL_REVISION_MISMATCH" in changed_skill.value.content.decode()
+        guide.write_bytes(original_guide)
         external_row["security_credentials"] = {"auth": "rotated-token"}
         with pytest.raises(RuntimeUpstreamError) as changed:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -389,6 +435,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-a", [19])]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None
+    assert not list((tmp_path / "runs").rglob(".evaluation-skills"))
 
 
 async def _assert_resume_over_signed_http(monkeypatch):

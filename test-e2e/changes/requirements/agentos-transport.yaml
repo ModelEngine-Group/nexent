@@ -41,6 +41,7 @@ change:
     - Prepared evaluation rechecks external A2A relations and configuration revisions and keeps endpoint credentials out of the signed request.
     - Prepared MCP evaluation pins enabled versioned tools and tenant connections without serializing transport or tool credentials.
     - Prepared evaluations retain historical attachment placement, recheck object scope in Runtime and regenerate only requested download URLs.
+    - Prepared evaluation rechecks versioned skill bindings, reads verified guide and configuration files, and refuses changed revisions.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -52,6 +53,8 @@ change:
     - test/backend/app/test_agent_app.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_prepared_attachments.py
+    - test/backend/app/test_agentos_prepared_skills.py
+    - test/sdk/core/tools/test_read_skill_config_tool.py
     - test/sdk/core/agents/test_managed_mcp.py
     - test/backend/agents/test_create_agent_info.py
     - test/backend/database/test_a2a_agent_db.py

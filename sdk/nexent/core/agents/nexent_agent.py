@@ -631,6 +631,8 @@ class NexentAgent:
             )
             if params.get("authorized_skill_names") is not None:
                 kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
             return ReadSkillConfigTool(**kwargs)
         elif class_name == "DownloadFromS3Tool":
             from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool

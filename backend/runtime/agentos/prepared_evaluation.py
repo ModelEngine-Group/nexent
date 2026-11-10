@@ -2,6 +2,10 @@
 """Materialize a prepared synthetic evaluation inside Runtime."""
 
 import asyncio
+import logging
+import shutil
+from contextlib import ExitStack
+from pathlib import Path
 from hmac import compare_digest
 from functools import partial
 from uuid import uuid4
@@ -33,8 +37,12 @@ from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_mcp import PreparedMCP
+from runtime.agentos.prepared_skills import SKILL_SNAPSHOT_DIR, materialize_skill_tools
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
+
+
+logger = logging.getLogger(__name__)
 
 
 def _materialize_file_tools(bindings, actor, workspace_path, workspace_run_id):
@@ -110,7 +118,7 @@ def _materialize_external_agents(resource, actor):
 
 def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp, *, root_alias=None):
     if any((
-        resource.skill_refs, resource.mcp_server_refs, resource.knowledge_base_refs,
+        resource.mcp_server_refs, resource.knowledge_base_refs,
         resource.memory_ref is not None, resource.sandbox_policy is not None,
     )):
         raise ValueError("Unsupported evaluation resource")
@@ -121,11 +129,16 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
 
+    skills = materialize_skill_tools(resource, actor, workspace_path)
     files = iter(_materialize_file_tools(
-        [binding for binding in resource.tools if binding.tool_id != "mcp"], actor, workspace_path, workspace_run_id,
+        [binding for binding in resource.tools if binding.tool_id not in skills and binding.tool_id != "mcp"],
+        actor, workspace_path, workspace_run_id,
     ))
     mcp_tools = iter(mcp.materialize(resource))
-    tools = [next(mcp_tools if binding.tool_id == "mcp" else files) for binding in resource.tools]
+    tools = [
+        skills[binding.tool_id] if binding.tool_id in skills else next(mcp_tools if binding.tool_id == "mcp" else files)
+        for binding in resource.tools
+    ]
     options = _agent_options(resource)
     legacy_root = root_alias is not None and resource.model_alias is None
     return AgentConfig(
@@ -159,6 +172,17 @@ def _materialize_model(binding, actor):
     return create_model_config_from_record(record).model_copy(update={"cite_name": binding.alias, **updates})
 
 
+def _remove_skill_files(workspace_path: str | None) -> None:
+    if workspace_path is None:
+        return
+    try:
+        shutil.rmtree(Path(workspace_path) / SKILL_SNAPSHOT_DIR)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Could not remove staged evaluation skill files", exc_info=True)
+
+
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     if any((
         NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local",
@@ -172,59 +196,75 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
     aliases = {binding.alias for binding in bindings}
     workspace_run_id = uuid4().hex
     workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
-    try:
-        if len(aliases) != len(bindings):
-            raise ValueError("Duplicate evaluation model binding")
-        used_aliases = set()
-        agent_config = _materialize_agent(
-            payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
-            root_alias=payload.models.llm.alias,
-        )
-        if used_aliases != aliases:
-            raise ValueError("Unused evaluation model binding")
-    except (ValidationError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
+    with ExitStack() as cleanup:
+        cleanup.callback(_remove_skill_files, workspace_path)
+        try:
+            if len(aliases) != len(bindings):
+                raise ValueError("Duplicate evaluation model binding")
+            used_aliases = set()
+            agent_config = _materialize_agent(
+                payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
+                root_alias=payload.models.llm.alias,
+            )
+            if used_aliases != aliases:
+                raise ValueError("Unused evaluation model binding")
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
-    models = [_materialize_model(binding, actor) for binding in bindings]
-    user_context = None
-    if mcp.hosts or payload.tool_caller is not None:
-        user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
-        user_context.update(user_id=actor.user_id, tenant_id=actor.tenant_id)
-    info = build_run_info(
-        mcp_host=list(mcp.hosts.values()) or None,
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
-        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-        user_context=user_context,
-        query=query,
-        history=history,
-        minio_files=files or None,
-        agent_config=agent_config,
-        workspace_path=workspace_path,
-        workspace_run_id=workspace_run_id,
-        capacity_snapshot=agent_config.capacity_snapshot,
-        context_budget_snapshot=agent_config.context_budget_snapshot,
-        tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
-        tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
-        model_config_list=models,
-        language=payload.language,
-        conversation_id=payload.conversation_id,
-        user_id=actor.user_id,
-        tenant_id=actor.tenant_id,
-    )
-    info.context_input = build_authorized_context_input(info)
+        models = [_materialize_model(binding, actor) for binding in bindings]
+        user_context = None
+        if mcp.hosts or payload.tool_caller is not None:
+            user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}
+            user_context.update(user_id=actor.user_id, tenant_id=actor.tenant_id)
+        info = build_run_info(
+            mcp_host=list(mcp.hosts.values()) or None,
+            mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+            mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+            mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+            user_context=user_context,
+            query=query,
+            history=history,
+            minio_files=files or None,
+            agent_config=agent_config,
+            workspace_path=workspace_path,
+            workspace_run_id=workspace_run_id,
+            capacity_snapshot=agent_config.capacity_snapshot,
+            context_budget_snapshot=agent_config.context_budget_snapshot,
+            tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
+            tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
+            model_config_list=models,
+            language=payload.language,
+            conversation_id=payload.conversation_id,
+            user_id=actor.user_id,
+            tenant_id=actor.tenant_id,
+        )
+        info.context_input = build_authorized_context_input(info)
+        cleanup.pop_all()
     return info
 
 
+def _remove_abandoned_skill_files(preparation: asyncio.Task) -> None:
+    if not preparation.cancelled() and preparation.exception() is None:
+        _remove_skill_files(preparation.result().workspace_path)
+
+
 async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
-    info = await run_blocking(
+    preparation = asyncio.create_task(run_blocking(
         "agentos-prepare-evaluation", prepare_evaluation_run, payload, actor,
         lane="control-io", owner="runtime",
-    )
+    ))
+    try:
+        info = await asyncio.shield(preparation)
+    except asyncio.CancelledError:
+        preparation.add_done_callback(_remove_abandoned_skill_files)
+        raise
     try:
         agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
-    except AgentRunAlreadyActiveError as exc:
-        raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
+    except Exception as exc:
+        _remove_skill_files(info.workspace_path)
+        if isinstance(exc, AgentRunAlreadyActiveError):
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_RUN_ALREADY_ACTIVE"}) from exc
+        raise
 
     status = "failed"
     try:
@@ -235,4 +275,11 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         status = "stopped"
         raise
     finally:
-        unregister_after_worker_exit(agent_run_manager, payload.conversation_id, actor.user_id, status, info)
+        try:
+            unregister_after_worker_exit(agent_run_manager, payload.conversation_id, actor.user_id, status, info)
+        finally:
+            future = info.thread_future
+            if future is not None and not future.done():
+                future.add_done_callback(lambda _: _remove_skill_files(info.workspace_path))
+            else:
+                _remove_skill_files(info.workspace_path)
