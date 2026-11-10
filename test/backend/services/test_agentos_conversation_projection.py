@@ -60,6 +60,10 @@ async def test_resumes_from_last_complete_frame_and_commits_one_projection(monke
 @pytest.mark.parametrize("frames", [
     [event(2, "agentos_terminal", '{"status":"completed"}')],
     [event(1, "agentos_observer", '{"type":"skill_artifact","content":{"artifacts":[]}}')],
+    [event(1, "agentos_observer",
+           '{"type":"file_artifact","content":{"artifacts":[{"object_name":"workspace/other/'
+           + REFERENCE.run_id + '/outputs/report.txt"}]}}')],
+
     [event(1, "agentos_observer", '{"type":"final_answer","content":"incomplete"}')],
 ])
 async def test_unsafe_or_incomplete_stream_is_never_committed(monkeypatch, frames):
@@ -75,9 +79,10 @@ async def test_unsafe_or_incomplete_stream_is_never_committed(monkeypatch, frame
 
 @pytest.mark.asyncio
 async def test_persists_uploaded_artifact_with_stable_fields_only(monkeypatch):
+    name = f"workspace/actor/{REFERENCE.run_id}/outputs/report.txt"
     artifact = dict(
-        object_name="artifacts/report.txt", file_name="report.txt", file_size=9,
-        url="s3://bucket/artifacts/report.txt", presigned_url="short-lived-url",
+        object_name=name, file_name="report.txt", file_size=9,
+        url=f"s3://bucket/{name}", presigned_url="short-lived-url",
     )
     raw = json.dumps({"type": "file_artifact", "content": {"artifacts": [artifact]}})
     resume = AsyncMock(return_value=response(
@@ -91,8 +96,8 @@ async def test_persists_uploaded_artifact_with_stable_fields_only(monkeypatch):
     )
     assert result.status == "stopped"
     files = persist.await_args.kwargs["skill_files"]
-    assert files == [dict(object_name="artifacts/report.txt", name="report.txt", type="file", size=9,
-                          url="s3://bucket/artifacts/report.txt", description="")]
+    assert files == [dict(object_name=name, name="report.txt", type="file", size=9,
+                          url=f"s3://bucket/{name}", description="")]
 
 
 @pytest.mark.asyncio

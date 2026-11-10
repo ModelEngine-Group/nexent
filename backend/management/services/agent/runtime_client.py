@@ -12,6 +12,7 @@ from contracts.agentos import (
 from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import ValidationError
 from management.clients.agentos import AgentOSClient
+from management.services.agent.agentos_events import present_public_resume
 
 
 def _agentos_client() -> AgentOSClient:
@@ -37,7 +38,8 @@ async def forward_conversation_run(payload: CompatibilityConversationRun, user_i
 
 
 async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
-    return await _agentos_client().resume(payload, user_id, tenant_id)
+    response = await _agentos_client().resume(payload, user_id, tenant_id)
+    return present_public_resume(response, payload, user_id)
 
 
 async def forward_agent_background(agent_request: AgentRequest, user_id: str, tenant_id: str) -> BackgroundAgentResult:

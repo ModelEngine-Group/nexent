@@ -1,0 +1,100 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""SSE framing and public presentation for signed AgentOS output."""
+
+import json
+import re
+from contextlib import aclosing
+
+from starlette.responses import StreamingResponse
+
+from contracts.agentos import EVENT_ID_PATTERN, AgentResume
+from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
+from nexent.core.concurrency import run_blocking
+
+_OBSERVER_LINE = b"event: agentos_observer"
+
+
+async def iter_sse_frames(response):
+    """Read complete frames even when HTTP chunks split a cursor or UTF-8 payload."""
+    async with aclosing(response.body_iterator) as chunks:
+        buffer = bytearray()
+        async for chunk in chunks:
+            buffer.extend(chunk.encode("utf-8") if isinstance(chunk, str) else chunk)
+            while (end := buffer.find(b"\n\n")) != -1:
+                frame = bytes(buffer[:end])
+                del buffer[:end + 2]
+                yield frame
+
+
+def _output_artifacts(content, user_id, run_id):
+    if isinstance(content, str):
+        content = json.loads(content)
+    raw = content.get("artifacts") if isinstance(content, dict) else None
+    if not isinstance(raw, list):
+        raise ValueError("Missing AgentOS output artifacts")
+    outputs = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("object_name")
+        if not is_run_output_object(name, user_id, run_id):
+            continue
+        file_name = item.get("file_name") or item.get("name")
+        if not isinstance(file_name, str) or not file_name or "/" in file_name or "\\" in file_name:
+            file_name = name.rsplit("/", 1)[-1]
+        entry = {"object_name": name, "file_name": file_name, "status": "success"}
+        file_size = item.get("file_size", item.get("file_size_bytes", item.get("size")))
+        if type(file_size) is int and file_size >= 0:
+            entry["file_size"] = file_size
+        if isinstance(item.get("mime_type"), str):
+            entry["mime_type"] = item["mime_type"]
+        outputs[name] = entry
+    return list(outputs.values())
+
+
+async def _present_observer(data, request, user_id):
+    if not data.startswith(b"data: "):
+        raise ValueError("Missing AgentOS observer data")
+    payload = json.loads(data[6:])
+    if not isinstance(payload, dict) or payload.get("type") == "skill_artifact":
+        raise ValueError("Unsupported AgentOS observer data")
+    if payload.get("type") != "file_artifact":
+        return data
+    artifacts = _output_artifacts(payload.get("content"), user_id, request.run_id)
+    if artifacts:
+        artifacts = await run_blocking(
+            "agentos-public-sign-outputs", enrich_file_uploads_with_presigned_urls, artifacts,
+            lane="control-io", owner="management",
+        )
+    public = {"type": "files", "content": json.dumps({"file_uploads": artifacts}, ensure_ascii=False)}
+    return b"data: " + json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def present_public_resume(response: StreamingResponse, request: AgentResume, user_id: str) -> StreamingResponse:
+    if response.status_code != 200:
+        return response
+
+    async def events():
+        async with aclosing(iter_sse_frames(response)) as frames:
+            async for frame in frames:
+                cursor, _, body = frame.partition(b"\n")
+                kind, _, data = body.partition(b"\n")
+                if kind != _OBSERVER_LINE:
+                    yield frame + b"\n\n"
+                    continue
+                cursor_id = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
+                if (not cursor.startswith(b"id: ") or not re.fullmatch(EVENT_ID_PATTERN, cursor_id)
+                        or not cursor_id.startswith(f"{request.run_id}:")):
+                    # Do not give the client a cursor it cannot safely resume.
+                    return
+                try:
+                    data = await _present_observer(data, request, user_id)
+                except (TypeError, ValueError):
+                    data = b"data: " + json.dumps({
+                        "type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE,
+                    }).encode("utf-8")
+                yield cursor + b"\n" + data + b"\n\n"
+
+    headers = {name: value for name, value in response.headers.items() if name != "content-length"}
+    return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)

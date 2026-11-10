@@ -5929,8 +5929,9 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            tool_preparation._inject_plan_tools(tools, True)
-            tool_preparation._inject_plan_tools(tools, True)
+            with patch("infrastructure.agent_tool_config.ToolConfig", mock_tool_config):
+                tool_preparation._inject_plan_tools(tools, True)
+                tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 
@@ -5948,11 +5949,12 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            tool_preparation._inject_plan_tools(tools, False)
-            assert tools == []
-            assert mock_tool_config.call_count == 0
+            with patch("infrastructure.agent_tool_config.ToolConfig", mock_tool_config):
+                tool_preparation._inject_plan_tools(tools, False)
+                assert tools == []
+                assert mock_tool_config.call_count == 0
 
-            tool_preparation._inject_plan_tools(tools, True)
+                tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 

@@ -17,6 +17,7 @@ from contracts.constants.environment import (
 )
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
+from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
 from infrastructure.object_storage.client import minio_client
@@ -304,40 +305,8 @@ def _get_skill_script_tools(
 
 def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
     """Inject plan tool configs into the given tools list if enable_planning is True."""
-    if not enable_planning:
-        return
-
-    plan_names = {"create_plan", "update_plan_step"}
-    if any(t.name in plan_names for t in tools):
-        return
-
-    # Protocol fields stay fixed while prose follows the run language at render time.
-    tool_prose_en = get_builtin_tool_descriptions("en")
-    tool_prose_zh = get_builtin_tool_descriptions("zh")
-    tools.extend(
-        [
-            ToolConfig(
-                class_name="CreatePlanTool",
-                name="create_plan",
-                description=tool_prose_en["create_plan"],
-                description_zh=tool_prose_zh["create_plan"],
-                inputs='{"title": "string", "steps": "array"}',
-                output_type="object",
-                params={},
-                source="builtin",
-            ),
-            ToolConfig(
-                class_name="UpdatePlanStepTool",
-                name="update_plan_step",
-                description=tool_prose_en["update_plan_step"],
-                description_zh=tool_prose_zh["update_plan_step"],
-                inputs='{"step_id": "string", "status": "string"}',
-                output_type="object",
-                params={},
-                source="builtin",
-            ),
-        ]
-    )
+    if enable_planning and not any(tool.name in PLAN_TOOL_NAMES for tool in tools):
+        tools.extend(build_plan_tool_configs())
 
 
 async def create_tool_config_list(

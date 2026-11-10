@@ -506,3 +506,40 @@ async def test_management_prepares_evaluation_with_nonlocal_deployment_setting(m
     assert await evaluation_snapshot.prepare_evaluation_snapshot(request, "user-a", "tenant-a") is compiler.return_value
     compiler.assert_awaited_once()
     assert compiler.call_args.kwargs["export_evaluation"] is True
+
+
+@pytest.mark.parametrize("scope", ["evaluation", "child", "missing", "duplicate", "parameters", "credential"])
+def test_runtime_rejects_invalid_prepared_planning_before_model_lookup(mocker, scope):
+    from fastapi import HTTPException
+
+    from contracts.agentos import PreparedAgentRun
+    from runtime.agentos import prepared_evaluation
+
+    payload = evaluation_payload()
+    create = {"tool_id": "create_plan", "version": "1"}
+    update = {"tool_id": "update_plan_step", "version": "1"}
+    tools = [create, update]
+    resource = payload["resource"]
+    if scope == "child":
+        resource["subagents"] = [{**resource, "agent_id": 8, "model_alias": "evaluation_llm", "tools": tools}]
+    else:
+        resource["tools"] = tools
+    if scope == "missing":
+        tools.pop()
+    if scope == "duplicate":
+        tools.append(create.copy())
+    if scope == "parameters":
+        create["parameters"] = {"extra": 1}
+    if scope == "credential":
+        create["credential_ref"] = "unexpected"
+    if scope == "evaluation":
+        prepared = PreparedEvaluationRun.model_validate(payload)
+    else:
+        prepared = PreparedAgentRun.model_validate({**payload, "conversation_id": 42, "run_id": "a" * 32})
+    read = mocker.patch.object(prepared_evaluation, "get_model_by_model_id")
+
+    with pytest.raises(HTTPException) as error:
+        prepared_evaluation.prepare_run_snapshot(prepared, ServicePrincipal("user-a", "tenant-a"))
+
+    assert error.value.status_code == 422
+    read.assert_not_called()

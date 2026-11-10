@@ -26,12 +26,15 @@ from infrastructure.a2a_execution import (
 from infrastructure.agent_attachments import validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
 from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
-from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+from infrastructure.agent_tool_config import (
+    PLAN_TOOL_NAMES, build_parallel_executor_tool_config, build_plan_tool_configs,
+)
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
 from infrastructure.rdb.agent_model_overrides import read_agent_model_overrides
 from infrastructure.rdb.model_records import get_model_by_model_id
+from infrastructure.redis.client import get_redis_client
 from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
 from nexent.core.agents.context import ContextManagerConfig
@@ -153,7 +156,7 @@ def _materialize_external_agents(resource, actor):
 
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
-    *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False,
+    *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, allow_planning=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -166,10 +169,20 @@ def _materialize_agent(
     if alias not in model_aliases:
         raise ValueError("Missing evaluation model binding")
     used_aliases.add(alias)
+    plan_bindings = [binding for binding in resource.tools if binding.tool_id in PLAN_TOOL_NAMES]
+    if plan_bindings and (
+        not allow_planning or len(plan_bindings) != len(PLAN_TOOL_NAMES)
+        or {binding.tool_id for binding in plan_bindings} != PLAN_TOOL_NAMES
+        or any(binding.version != "1" or binding.parameters or binding.credential_ref is not None
+               for binding in plan_bindings)
+    ):
+        raise ValueError("Unsupported prepared planning bindings")
 
     local_tools = materialize_skill_tools(
         resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
     )
+    if plan_bindings:
+        local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
     local_tools.update(materialize_local_tools(resource, actor, language))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
@@ -198,7 +211,7 @@ def _materialize_agent(
     return AgentConfig(
         name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
         agent_id=resource.agent_id, version_no=resource.version_no, tools=tools, model_name=alias,
-        max_steps=resource.max_steps, origin=resource.origin,
+        max_steps=resource.max_steps, origin=resource.origin, enable_planning=bool(plan_bindings),
         invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}" if legacy_root else resource.invocation_name,
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
         external_a2a_agents=_materialize_external_agents(resource, actor),
@@ -296,6 +309,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, PreparedAgentRun),
+                allow_planning=isinstance(payload, PreparedAgentRun),
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")
@@ -330,6 +344,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
             conversation_id=payload.conversation_id,
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
+            redis_client=get_redis_client() if agent_config.enable_planning else None,
         )
         if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata = payload.runtime_metadata

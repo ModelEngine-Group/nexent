@@ -66,6 +66,16 @@ def transform_skill_files_to_standard_format(upload_results: list[dict]) -> list
     return attachments
 
 
+def is_run_output_object(object_name: str | None, user_id: str, run_id: str) -> bool:
+    """Match a canonical object produced in this signed run's output prefix."""
+    if not isinstance(object_name, str) or "\\" in object_name:
+        return False
+    parts = object_name.split("/")
+    return len(parts) > 4 and parts[:4] == ["workspace", user_id.strip(), run_id, "outputs"] and all(
+        part not in ("", ".", "..") for part in parts
+    )
+
+
 def enrich_file_uploads_with_presigned_urls(
     upload_results: list[dict],
     expires: int = 86400,

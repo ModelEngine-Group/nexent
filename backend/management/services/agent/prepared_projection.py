@@ -12,7 +12,8 @@ from contracts.agentos import AgentResume, AgentRunReference, HistoryCheckpointC
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.db.conversation.repository import persist_prepared_assistant_projection
-from management.services.agent.artifacts import transform_skill_files_to_standard_format
+from management.services.agent.agentos_events import iter_sse_frames
+from management.services.agent.artifacts import is_run_output_object, transform_skill_files_to_standard_format
 from management.services.agent.persistence import canonicalize_assistant_units
 from management.services.agent.stream import AssistantMessageProjection
 from nexent.core.concurrency import run_blocking
@@ -29,18 +30,14 @@ class ProjectedRun:
 
 
 async def _frames(response):
-    async with aclosing(response.body_iterator) as chunks:
-        if response.status_code != 200:
+    if response.status_code != 200:
+        async with aclosing(response.body_iterator) as chunks:
             content = b"".join([chunk async for chunk in chunks])
             raise RuntimeUpstreamError(response.status_code, content, dict(response.headers))
-        buffer = bytearray()
-        async for chunk in chunks:
-            buffer.extend(chunk)
-            while (end := buffer.find(b"\n\n")) != -1:
-                frame = bytes(buffer[:end])
-                del buffer[:end + 2]
-                if frame and not frame.startswith(b":"):
-                    yield frame
+    async with aclosing(iter_sse_frames(response)) as frames:
+        async for frame in frames:
+            if frame and not frame.startswith(b":"):
+                yield frame
 
 
 def _parse_frame(frame: bytes, expected: str):
@@ -72,7 +69,7 @@ async def _consume_projection(resume, reference, user_id, tenant_id, projection,
                         return payload["status"], index - 1
                     if kind != "agentos_observer":
                         raise RuntimeServiceUnavailableError("Unexpected AgentOS projection event")
-                    _project_event(projection, files, checkpoints, data, payload)
+                    _project_event(projection, files, checkpoints, data, payload, reference.run_id, user_id)
                     cursor = next_id
         except httpx.TransportError:
             # The last full frame is safe to retain; an incomplete frame is read again.
@@ -95,7 +92,7 @@ def _collect_checkpoint(checkpoints, content):
         logger.warning("Ignoring invalid AgentOS history checkpoint")
 
 
-def _project_event(projection, files, checkpoints, data, payload):
+def _project_event(projection, files, checkpoints, data, payload, run_id, user_id):
     if payload.get("type") == "history_summary":
         _collect_checkpoint(checkpoints, payload.get("content"))
     if payload.get("type") == "skill_artifact":
@@ -109,8 +106,8 @@ def _project_event(projection, files, checkpoints, data, payload):
         content = json.loads(content) if isinstance(content, str) else content
         for artifact in content["artifacts"]:
             name = artifact["object_name"]
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError("Missing artifact object reference")
+            if not is_run_output_object(name, user_id, run_id):
+                raise ValueError("Artifact object reference is outside the run's output scope")
             # Replays must compare the stable object metadata, without expiring signatures.
             files[name] = {key: value for key, value in artifact.items() if key != "presigned_url"}
     except (KeyError, TypeError, ValueError) as exc:

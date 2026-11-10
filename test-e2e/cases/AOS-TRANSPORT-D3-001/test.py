@@ -230,6 +230,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
     with monkeypatch.context() as run_patches:
         await _assert_prepared_run_over_signed_http(run_patches, tmp_path)
+    with monkeypatch.context() as planning_patches:
+        await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
@@ -1435,7 +1437,8 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
-    from management.services.agent import prepared_projection
+    from management.api.agent import conversation_run
+    from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
@@ -1667,6 +1670,38 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         )
         assert body.endswith(f'id: {reference.run_id}:5\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
         assert "absolute_path" not in body and '"type":"file_artifact"' in body
+
+        def sign_outputs(artifacts):
+            assert [item["object_name"] for item in artifacts] == [
+                f"workspace/{actor.user_id}/{reference.run_id}/outputs/report.txt",
+            ]
+            return [{**artifacts[0], "presigned_url": "https://synthetic.test/ready"}]
+
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        monkeypatch.setattr(agentos_events, "enrich_file_uploads_with_presigned_urls", sign_outputs)
+        monkeypatch.setattr(agentos_events, "run_blocking", control_io)
+        monkeypatch.setattr(conversation_run, "get_current_user_id", lambda token: (actor.user_id, token))
+        management = FastAPI()
+        management.include_router(conversation_run.router)
+        params = {"resume": "true", "run_id": reference.run_id, "after_event_id": cursor.after_event_id}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
+                                     base_url="http://management") as browser:
+            public = await browser.post("/agent/run", params=params, json={"query": "", "conversation_id": 42},
+                                        headers={"Authorization": actor.tenant_id})
+            foreign_public = await browser.post(
+                "/agent/run", params=params, json={"query": "", "conversation_id": 42},
+                headers={"Authorization": "tenant-b"},
+            )
+        assert public.status_code == 200 and public.headers["X-AgentOS-Run-ID"] == reference.run_id
+        assert public.text.startswith(
+            f'id: {reference.run_id}:2\ndata: {{"type":"final_answer","content":"answer"}}\n\n'
+        )
+        assert f"id: {reference.run_id}:3\ndata: " in public.text
+        assert '"type":"files"' in public.text and "https://synthetic.test/ready" in public.text
+        assert all(label not in public.text for label in ("agentos_observer", "file_artifact", "absolute_path"))
+        assert public.text.endswith(f'id: {reference.run_id}:5\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
+        assert foreign_public.status_code == 404 and foreign_public.json()["detail"]["code"] == "AGENTOS_RUN_NOT_FOUND"
+
         def persist(**fields):
             persisted.append(fields)
             return 77
@@ -1714,3 +1749,77 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
     assert len(admissions) == 1 and calls == ["started"]
     assert registry.get_agent_run_info(reference.conversation_id, actor.user_id) is None
+
+
+async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from infrastructure.agent_model_config import model_record_revision
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.agents.plan_repo import PlanRepo
+    from runtime.agentos import prepared_run
+
+    principal = ServicePrincipal("planning-user", "planning-tenant")
+    reference = AgentRunReference(conversation_id=47, run_id="a" * 32)
+    model = {
+        "model_id": 11, "tenant_id": principal.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "demo", "model_name": "demo", "model_repo": None,
+        "base_url": "http://provider.invalid/v1", "api_key": "synthetic", "update_time": "2026-11-10T00:00:00",
+    }
+    payload = PreparedAgentRun.model_validate({
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "plan a test"}, "language": "en",
+        "resource": {
+            "agent_id": 7, "version_no": 3, "name": "planning_agent", "description": "planning",
+            "prompt_templates": {"system_prompt": "Plan before acting"},
+            "tools": [{"tool_id": name, "version": "1"} for name in ("create_plan", "update_plan_step")],
+        },
+        "models": {"llm": {"model_id": 11, "alias": "demo", "revision": model_record_revision(model)}},
+    })
+    redis = Mock()
+    events = Mock()
+
+    class State:
+        current_plan = None
+
+        def created(self, plan):
+            self.current_plan = plan
+
+        def updated(self, plan, _step_id, _status):
+            self.current_plan = plan
+
+    async def execute(signed, actor):
+        assert signed == payload and actor == principal
+        info = prepared_evaluation.prepare_run_snapshot(signed, actor)
+        assert info.redis_client is redis and info.agent_config.enable_planning
+        executor = SimpleNamespace(observer=info.observer)
+        create, update = [NexentAgent.create_local_tool(executor, tool) for tool in info.agent_config.tools]
+        state = State()
+        repo = PlanRepo(redis_client=info.redis_client)
+        for tool in (create, update):
+            tool.plan_repo = repo
+            tool.observer = events
+            tool._get_conversation_id = lambda: info.conversation_id
+            tool._get_user_id = lambda: info.user_id
+        create._on_plan_created = state.created
+        update._on_step_updated = state.updated
+        result = create.forward("Test", [{"id": str(i), "title": str(i)} for i in range(3)])
+        assert result["step_count"] == 3
+        assert update.forward("0", "completed")["status"] == "completed"
+        return reference
+
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_: model)
+    monkeypatch.setattr(prepared_evaluation, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr(prepared_run, "start_prepared_run", execute)
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(prepared_run.create_prepared_run_router())
+    with serve(runtime) as runtime_url:
+        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        assert await client.start_prepared_run(payload, principal.user_id, principal.tenant_id) == reference
+
+    assert [call.args[0] for call in redis.setex.call_args_list] == ["plan:47:planning-user"] * 2
+    assert json.loads(redis.setex.call_args.args[2])["steps"][0]["status"] == "completed"
+    assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]

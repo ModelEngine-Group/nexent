@@ -63,6 +63,12 @@ case:
   - order: 12
     action: Drop the prepared automation acknowledgement after Runtime accepts the run, then recover from the persisted Automation record.
     expected: Management retains the exact execution ID and pending projection, inspects and replays the signed journal, and finalizes one assistant message without starting the run again.
+  - order: 13
+    action: Reconnect to a prepared journal through Management's public conversation route and repeat with a foreign tenant.
+    expected: The response keeps the original event IDs and terminal state, presents observer events in the public format, signs only scoped output references, and rejects the foreign tenant.
+  - order: 14
+    action: Deliver a prepared planning snapshot through the signed Agent.run operation.
+    expected: Runtime rebuilds the built-in plan tools and injects its own Redis client. Creating a plan and completing a step emit the original SDK events and update the conversation-scoped plan.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -76,6 +82,8 @@ case:
   - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
   - Prepared conversation execution starts once and is resumable independently of the submit connection.
   - The prepared automation runner recovers the same scoped run and commits its assistant message after the lost acknowledgement.
+  - The public route retains the signed cursor and presents the prepared output without exposing internal artifact paths.
+  - Planning runs use built-in tool bindings and Runtime-managed plan storage.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -198,4 +206,14 @@ case:
     description: Prepared automation recovers a dropped start acknowledgement through inspect and replay of the original execution.
     steps: [12]
     expected_results: [12]
+    forbidden_side_effects: [2]
+  - id: AC-21
+    description: The public cursor route adapts prepared observer events and scoped attachments while preserving exact cursor and tenant authorization.
+    steps: [13]
+    expected_results: [13]
+    forbidden_side_effects: [1, 2]
+  - id: AC-22
+    description: Signed prepared planning reconstructs the SDK tools, retains observer events, and persists under the conversation and user scope.
+    steps: [14]
+    expected_results: [14]
     forbidden_side_effects: [2]

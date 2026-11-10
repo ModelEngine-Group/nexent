@@ -20,9 +20,12 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("ordinary", [False, True])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning"])
 @pytest.mark.parametrize("persisted_body", [False, True])
-async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, ordinary):
+async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
+    planning = kind == "planning"
+    redis = object()
+    get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
     model = create_model_config_from_record(record)
 
@@ -64,7 +67,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     user, tenant = "user-a", "tenant-a"
-    if ordinary:
+    if kind != "evaluation":
         mocker.patch.object(run, "query_current_version_no", return_value=2)
         mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
             "runtime_metadata": {"project": "test"},
@@ -78,7 +81,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         })
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
-            AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False),
+            AgentRequest(query="hello", agent_id=7, conversation_id=42,
+                         enable_automation_tool=False, enable_plan=planning),
             reference, user, tenant, language="en", timezone="Asia/Shanghai", current_user_message_id=23,
         )
         assert isinstance(prepared, PreparedAgentRun)
@@ -101,6 +105,15 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
 
     assert [call.kwargs["portable_evaluation"] for call in compile_tools.await_args_list] == [True, True]
     assert prepared.resource.subagents[0].version_no == 5
+    assert info.agent_config.enable_planning is planning
+    if planning:
+        get_redis.assert_called_once_with()
+        assert info.redis_client is redis
+        bindings = [tool for tool in prepared.resource.tools if tool.tool_id in ("create_plan", "update_plan_step")]
+        assert [tool.tool_id for tool in bindings] == ["create_plan", "update_plan_step"]
+        assert all(tool.version == "1" and not tool.parameters and tool.credential_ref is None for tool in bindings)
+    else:
+        get_redis.assert_not_called()
     encoded = prepared.model_dump_json()
     assert "fixture-private-option" not in encoded
     assert ("provider_body_revision" in encoded) is persisted_body
@@ -123,7 +136,13 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     manager.start()
     try:
         for agent in [info.agent_config, *info.agent_config.worker_agents]:
-            assert [tool.name for tool in agent.tools] == ["parallel_executor", "download_from_s3", "upload_to_s3"]
+            expected = ["parallel_executor", "download_from_s3", "upload_to_s3"]
+            if planning and agent is info.agent_config:
+                expected.extend(["create_plan", "update_plan_step"])
+                executor = SimpleNamespace(observer=info.observer)
+                tools = [NexentAgent.create_local_tool(executor, item) for item in agent.tools[-2:]]
+                assert [tool.name for tool in tools] == expected[-2:]
+            assert [tool.name for tool in agent.tools] == expected
             config = agent.tools[0]
             tool = NexentAgent.create_local_tool(None, config)
             assert tool.default_timeout_seconds == 37
