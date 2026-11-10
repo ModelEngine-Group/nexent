@@ -102,6 +102,7 @@ from runtime.thread_management import (
     external_memory_ingest_tasks as _external_memory_ingest_tasks,
     fa_extraction_tasks as _fa_extraction_tasks,
     runtime_thread_manager,
+    unregister_after_worker_exit,
     shutdown_agent_stream_tasks as shutdown_agent_stream_tasks,
 )
 from management.services.configuration.tenant.settings import (
@@ -111,36 +112,8 @@ from management.services.configuration.tenant.settings import (
 logger = logging.getLogger(__name__)
 
 
-def _unregister_agent_run_after_execution(
-    conversation_id: int | str,
-    user_id: str,
-    status: str,
-    agent_run_info=None,
-) -> bool:
-    """Keep the conversation reserved until its worker Future really finishes."""
-    future = getattr(agent_run_info, "thread_future", None)
-    if future is not None and not future.done():
-        future.add_done_callback(
-            lambda _future: agent_run_manager.unregister_agent_run(
-                conversation_id,
-                user_id,
-                status=status,
-                agent_run_info=agent_run_info,
-            )
-        )
-        logger.info(
-            "Deferred agent run unregister until worker exit conversation=%s "
-            "execution_id=%s",
-            conversation_id,
-            getattr(agent_run_info, "thread_execution_id", ""),
-        )
-        return False
-    return agent_run_manager.unregister_agent_run(
-        conversation_id,
-        user_id,
-        status=status,
-        agent_run_info=agent_run_info,
-    )
+def _unregister_agent_run_after_execution(conversation_id, user_id, status, agent_run_info=None) -> bool:
+    return unregister_after_worker_exit(agent_run_manager, conversation_id, user_id, status, agent_run_info)
 
 
 async def _cleanup_channel_later(

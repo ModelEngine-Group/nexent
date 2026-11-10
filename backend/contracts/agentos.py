@@ -57,6 +57,76 @@ class EvaluationAgentRun(BaseModel):
     conversation_id: Annotated[int, Field(le=0)] = 0
 
 
+class AgentOperation(str, Enum):
+    EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
+
+
+class RunSpecModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ToolBinding(RunSpecModel):
+    tool_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    credential_ref: str | None = None
+
+
+class RunModelBinding(RunSpecModel):
+    model_id: PositiveInt
+    alias: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+
+
+class ModelBindings(RunSpecModel):
+    llm: RunModelBinding
+    summary: RunModelBinding | None = None
+    verifier: RunModelBinding | None = None
+    embedding: RunModelBinding | None = None
+    rerank: RunModelBinding | None = None
+
+
+class RunHistoryMessage(RunSpecModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class RunInput(RunSpecModel):
+    query: str
+    history: list[RunHistoryMessage] = Field(default_factory=list)
+    attachment_refs: list[str] = Field(default_factory=list)
+
+
+class AgentResource(RunSpecModel):
+    agent_id: PositiveInt
+    version_no: Annotated[int, Field(ge=0)]
+    name: str = Field(min_length=1)
+    description: str
+    prompt_templates: dict[str, JsonValue]
+    max_steps: PositiveInt = 15
+    tools: list[ToolBinding] = Field(default_factory=list)
+    skill_refs: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    knowledge_base_refs: list[str] = Field(default_factory=list)
+    memory_ref: str | None = None
+    subagents: list["AgentResource"] = Field(default_factory=list)
+    sandbox_policy: dict[str, JsonValue] | None = None
+
+
+class AgentRunSpec(RunSpecModel):
+    mode: Literal["nexent"]
+    resource: AgentResource
+    models: ModelBindings
+    input: RunInput
+    language: Literal["zh", "en"] = "zh"
+
+
+class PreparedEvaluationRun(AgentRunSpec):
+    """Execute an authorized resource snapshot under a synthetic evaluation key."""
+
+    conversation_id: Annotated[int, Field(le=0)] = 0
+
+
 class EvaluationAgentResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     answer: str
@@ -81,10 +151,10 @@ class ModelAdministrationOperation(str, Enum):
     PROBE = NAMESPACE + "v1/model/probe"
 
 
-AgentOSOperation = CompatibilityOperation | ModelOperation | ModelAdministrationOperation
+AgentOSOperation = CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
-    for operations in (CompatibilityOperation, ModelOperation, ModelAdministrationOperation)
+    for operations in (CompatibilityOperation, AgentOperation, ModelOperation, ModelAdministrationOperation)
     for operation in operations
 }
 

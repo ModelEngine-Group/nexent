@@ -6,10 +6,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
 from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.context_input import ContextInput
 from nexent.core.agents.prompt.user_context import (
     CURRENT_TIME_MARKER,
     has_current_time_marker,
@@ -18,61 +16,10 @@ from nexent.core.agents.prompt.user_context import (
 from nexent.monitor import AgentRunMetadata
 
 
-def build_authorized_context_input(
-    agent_run_info,
-    historical_context=None,
-) -> ContextInput:
-    """Freeze configured context and authorized history into one item snapshot."""
-    if historical_context is None:
-        fallback_turns = []
-        pending_user = None
-        for index, entry in enumerate(agent_run_info.history or ()):
-            if entry.role == MESSAGE_ROLE["USER"]:
-                pending_user = (index, entry)
-            elif entry.role == MESSAGE_ROLE["ASSISTANT"] and pending_user is not None:
-                user_index, user_entry = pending_user
-                fallback_turns.append(
-                    {
-                        "user_message": user_entry.content,
-                        "assistant_final_answer": entry.content,
-                        "attachments": [],
-                        "user_message_id": -(user_index + 1),
-                        "assistant_message_id": -(index + 1),
-                    }
-                )
-                pending_user = None
-        historical_context = {"conversation_turns": fallback_turns}
+def build_authorized_context_input(agent_run_info, historical_context=None):
+    from nexent.core.agents.context_input import build_authorized_context_input as build_context
 
-    history_items = []
-    summary = historical_context.get("history_summary")
-    if summary:
-        history_items.append(
-            ContextItemInput(
-                id=f"history_summary:{summary['unit_id']}",
-                type="history_summary",
-                content=summary,
-                source=("conversation_history",),
-            )
-        )
-    for order, turn in enumerate(historical_context.get("conversation_turns", ())):
-        history_items.append(
-            ContextItemInput(
-                id=(
-                    f"conversation_turn:{turn['user_message_id']}:"
-                    f"{turn['assistant_message_id']}"
-                ),
-                type="conversation_turn",
-                content=turn,
-                source=("conversation_history",),
-                metadata={"layout_order": order},
-            )
-        )
-    return ContextInput(
-        items=(
-            tuple(agent_run_info.agent_config.context_items or ())
-            + tuple(history_items)
-        ),
-    )
+    return build_context(agent_run_info, historical_context)
 
 
 def _composer(language: str, is_manager: bool, prompt_bundle):

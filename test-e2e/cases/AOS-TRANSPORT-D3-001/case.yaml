@@ -39,11 +39,15 @@ case:
   - order: 4
     action: Submit signed background and inspect calls and disconnect a background client.
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
+  - order: 5
+    action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
+    expected: Runtime builds the SDK request from a tenant model reference, preserves event order, and rejects both unauthorized requests.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
   - Evaluation returns exact ordered events without using a real conversation.
   - Background execution returns the assistant message ID and stops after the caller disconnects.
+  - Prepared evaluation returns ordered events and releases the run registration. Unauthorized requests cannot start the runner.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -87,3 +91,8 @@ case:
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [2]
+  - id: AC-05
+    description: Prepared evaluation hydrates its own tenant model under signed AgentOS and cleans up execution.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]

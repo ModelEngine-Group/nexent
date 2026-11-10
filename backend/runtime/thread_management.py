@@ -112,3 +112,36 @@ async def shutdown_agent_stream_tasks(timeout: float) -> tuple[str, ...]:
         len(pending),
     )
     return tuple(task.get_name() for task in pending)
+
+
+def unregister_after_worker_exit(
+    registry,
+    conversation_id: int | str,
+    user_id: str,
+    status: str,
+    agent_run_info=None,
+) -> bool:
+    """Keep the conversation reserved until its worker Future really finishes."""
+    future = getattr(agent_run_info, "thread_future", None)
+    if future is not None and not future.done():
+        future.add_done_callback(
+            lambda _future: registry.unregister_agent_run(
+                conversation_id,
+                user_id,
+                status=status,
+                agent_run_info=agent_run_info,
+            )
+        )
+        logger.info(
+            "Deferred agent run unregister until worker exit conversation=%s "
+            "execution_id=%s",
+            conversation_id,
+            getattr(agent_run_info, "thread_execution_id", ""),
+        )
+        return False
+    return registry.unregister_agent_run(
+        conversation_id,
+        user_id,
+        status=status,
+        agent_run_info=agent_run_info,
+    )

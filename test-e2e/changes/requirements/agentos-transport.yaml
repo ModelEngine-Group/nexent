@@ -28,6 +28,7 @@ change:
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
     - Automation schedules run and inspect through AgentOS, and Runtime cancels an abandoned background request.
+    - Prepared evaluation resolves an exact tenant model revision and constructs SDK objects inside Runtime.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -37,5 +38,6 @@ change:
     - test/backend/services/test_evaluation_dispatch.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
+    - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/gateway/test_exposure.py
   requirement_id: AOS-REQ-001

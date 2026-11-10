@@ -16,9 +16,11 @@ from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
-    AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun, EvaluationAgentResult, EvaluationAgentRun,
+    AgentOperation, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
+    EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants import environment
+from contracts.errors.exceptions import RuntimeUpstreamError
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from gateway.security.context import trusted_identity
 from infrastructure import agentos_identity
@@ -187,3 +189,75 @@ async def test_signed_agentos_transport(monkeypatch):
         ("inspect", 42, principal),
         ("background", 43, principal),
     ]
+    await _assert_prepared_evaluation_over_signed_http(monkeypatch)
+
+
+async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
+    from runtime.agentos import prepared_evaluation
+    from runtime.executions import LocalExecutionRegistry
+
+    key = "synthetic-prepared-evaluation-fixture-secret"
+    monkeypatch.setattr(environment, "JWT_SECRET", key)
+    monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
+    monkeypatch.setattr(prepared_evaluation, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+
+    lookups = []
+    invocations = []
+    registry = LocalExecutionRegistry()
+    monkeypatch.setattr(prepared_evaluation, "agent_run_manager", registry)
+
+    def lookup(model_id, tenant_id):
+        lookups.append((model_id, tenant_id))
+        return {
+            "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm", "model_name": "provider-model",
+            "model_repo": None, "display_name": "Evaluation model", "api_key": "only-in-runtime",
+            "base_url": "https://provider.example/v1", "update_time": "revision-1",
+        }
+
+    async def run(info, thread_manager):
+        assert registry.get_agent_run_info(-42, "user-a") is info
+        assert info.model_config_list[0].api_key == "only-in-runtime"
+        assert info.agent_config.model_name == "evaluation_llm"
+        invocations.append((info.user_id, info.tenant_id, info.conversation_id))
+        yield json.dumps({"type": "thought", "content": "step"})
+        yield json.dumps({"type": "final_answer", "content": "answer"})
+
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lookup)
+    monkeypatch.setattr(prepared_evaluation, "agent_run", run)
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_evaluation_router())
+
+    prepared = PreparedEvaluationRun.model_validate({
+        "mode": "nexent",
+        "resource": {
+            "agent_id": 7, "version_no": 2, "name": "evaluation_agent",
+            "description": "Prepared evaluation", "prompt_templates": {"system_prompt": "Answer the query"},
+        },
+        "models": {"llm": {"model_id": 11, "alias": "evaluation_llm", "revision": "revision-1"}},
+        "input": {"query": "question"},
+        "conversation_id": -42,
+    })
+    with serve(runtime) as runtime_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        result = await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert result.answer == "answer"
+        assert result.events == [
+            {"type": "thought", "content": "step"}, {"type": "final_answer", "content": "answer"},
+        ]
+        assert "only-in-runtime" not in result.model_dump_json()
+        with pytest.raises(RuntimeUpstreamError) as refused:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
+        assert refused.value.status_code == 404
+
+        async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
+            response = await client.post(
+                f"{runtime_url}/api{AgentOperation.EVALUATION_CASE.value}", content=prepared.model_dump_json(),
+            )
+            assert response.status_code == 401
+
+    assert lookups == [(11, "tenant-a"), (11, "tenant-b")]
+    assert invocations == [("user-a", "tenant-a", -42)]
+    assert registry.get_agent_run_info(-42, "user-a") is None

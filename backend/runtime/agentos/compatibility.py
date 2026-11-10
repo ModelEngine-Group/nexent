@@ -51,22 +51,7 @@ def create_background_router(run, inspect) -> APIRouter:
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
 
-        async def wait_for_disconnect():
-            while (await request.receive())["type"] != "http.disconnect":
-                pass
-
-        execution = asyncio.create_task(run(payload.request, principal))
-        disconnected = asyncio.create_task(wait_for_disconnect())
-        try:
-            completed, _ = await asyncio.wait((execution, disconnected), return_when=asyncio.FIRST_COMPLETED)
-            if execution in completed:
-                return execution.result()
-            return JSONResponse({"code": "AGENTOS_CLIENT_DISCONNECTED"}, status_code=499)
-        finally:
-            disconnected.cancel()
-            if not execution.done():
-                execution.cancel()
-            await asyncio.gather(disconnected, execution, return_exceptions=True)
+        return await run_until_disconnect(request, run(payload.request, principal))
 
     @router.post(CompatibilityOperation.INSPECT.value, include_in_schema=False)
     async def inspect_agent(request: Request):
@@ -80,3 +65,22 @@ def create_background_router(run, inspect) -> APIRouter:
         return await inspect(payload.conversation_id, principal)
 
     return router
+
+
+async def run_until_disconnect(request: Request, run):
+    async def wait_for_disconnect():
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    execution = asyncio.create_task(run)
+    disconnected = asyncio.create_task(wait_for_disconnect())
+    try:
+        completed, _ = await asyncio.wait((execution, disconnected), return_when=asyncio.FIRST_COMPLETED)
+        if execution in completed:
+            return execution.result()
+        return JSONResponse({"code": "AGENTOS_CLIENT_DISCONNECTED"}, status_code=499)
+    finally:
+        disconnected.cancel()
+        if not execution.done():
+            execution.cancel()
+        await asyncio.gather(disconnected, execution, return_exceptions=True)

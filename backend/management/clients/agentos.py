@@ -7,6 +7,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
+    AgentOperation,
     AgentRunningState,
     BackgroundAgentResult,
     CompatibilityOperation,
@@ -19,6 +20,7 @@ from contracts.agentos import (
     ModelOperation,
     ModelReference,
     ModelResult,
+    PreparedEvaluationRun,
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
@@ -89,6 +91,12 @@ class AgentOSClient:
     async def run_evaluation_case(self, payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
         result = await self._post_json(
             CompatibilityOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
+        )
+        return self._validate_result(EvaluationAgentResult, result)
+
+    async def run_prepared_evaluation(self, payload: PreparedEvaluationRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
+        result = await self._post_json(
+            AgentOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
         )
         return self._validate_result(EvaluationAgentResult, result)
 

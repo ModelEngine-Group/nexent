@@ -4,16 +4,11 @@
 
 import logging
 import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
     MCP_REQUEST_TIMEOUT_SECONDS,
-    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
-    NEXENT_SANDBOX_FAILURE_POLICY,
-    NEXENT_SANDBOX_WORKSPACE_MODE,
-    NEXENT_SANDBOX_WORKSPACE_VOLUME,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
@@ -44,7 +39,7 @@ from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
 from management.services.model.run_budget import _OPERATOR_OVERRIDE_FIELDS
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
-from runtime.adapters.nexent.factory import build_run_info
+from runtime.adapters.nexent.factory import materialize_legacy_run
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -410,49 +405,13 @@ async def create_agent_run_info(
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)
 
-    # Resolve sandbox config: DB policy overrides env-var defaults.
-    # build_sandbox_policy returns None when level=local (backward-compatible).
-    # Import inside function body to avoid circular dependency.
-    from management.services.agent.policy import (
-        build_sandbox_policy,
-        get_sandbox_minio_client,
-    )
-    from runtime.adapters.nexent.sandbox import resolve_sandbox_config
+    # The compatibility path still invokes the materializer in-process.
+    from management.services.agent.policy import build_sandbox_policy, get_sandbox_minio_client
 
-    sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
-    agent_db_policy = getattr(agent_config, "sandbox_policy", None)
-    sandbox_config = resolve_sandbox_config(
-        agent_db_policy,
-        sandbox_policy,
-        workspace_mode=NEXENT_SANDBOX_WORKSPACE_MODE,
-        container_workspace_root=NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
-        failure_policy=NEXENT_SANDBOX_FAILURE_POLICY,
-    )
-    sandbox_minio_client = (
-        get_sandbox_minio_client()
-        if sandbox_config and sandbox_config.auto_sync_outputs
-        else None
-    )
-    if sandbox_config is not None:
-        sandbox_config.output_dir = str(Path(workspace_path) / "outputs")
-        sandbox_config.extra_kwargs = {
-            **sandbox_config.extra_kwargs,
-            "workspace_root": str(Path(AGENT_WORKSPACE_ROOT).resolve()),
-            "workspace_path": workspace_path,
-        }
-        if (
-            getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
-            and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
-            and sandbox_config.workspace_mode == "legacy"
-        ):
-            sandbox_config.extra_kwargs.update(
-                {
-                    "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
-                    "shared_workspace": True,
-                }
-            )
-
-    agent_run_info = build_run_info(
+    return materialize_legacy_run(
+        workspace_root=AGENT_WORKSPACE_ROOT,
+        sandbox_policy=build_sandbox_policy(tenant_id=tenant_id, agent_type=""),
+        sandbox_minio_client_factory=get_sandbox_minio_client,
         query=final_query,
         model_config_list=model_list,
         language=language,
@@ -468,10 +427,8 @@ async def create_agent_run_info(
             "context_budget_snapshot",
             None,
         ),
-        sandbox_config=sandbox_config,
         tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
         tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
-        minio_client=sandbox_minio_client,
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,
         tenant_id=tenant_id,
@@ -479,4 +436,3 @@ async def create_agent_run_info(
         redis_client=get_redis_client(),
         user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
-    return agent_run_info
