@@ -1004,7 +1004,8 @@ class TestLLMTokenTracker:
         """Test completion uses OpenInference attribute names."""
         self.manager.is_enabled = True
 
-        with patch('time.time', side_effect=[123.456, 123.956, 125.456]):
+        with patch('time.time', side_effect=[123.456, 123.956]), \
+                patch('time.perf_counter', side_effect=[100, 100.5, 102]):
             tracker = LLMTokenTracker(self.manager, self.model_name, self.span)
             tracker.record_first_token()
             tracker.token_count = 10
@@ -1017,10 +1018,13 @@ class TestLLMTokenTracker:
                 "llm.token_count.total": 50,
                 "llm.usage_details": '{"input": 20, "output": 30, "total": 50}',
                 "llm.generation_rate": 5.0,
-                "llm.duration.total": 2.0,
-                "llm.time_to_first_token": 0.5
+                "llm.duration.total": 2.0
             }
-            self.span.set_attributes.assert_called_once_with(expected_attrs)
+            self.span.set_attributes.assert_any_call({
+                "llm.time_to_first_token": 0.5, "llm.ttft_ms": 500, "llm.ttft_basis": "content",
+            })
+            assert self.span.set_attributes.call_count == 2
+            self.span.set_attributes.assert_called_with(expected_attrs)
 
     def test_record_metrics_openinference_labels(self):
         """Test metrics recording uses OpenInference labels."""

@@ -7,6 +7,8 @@ import base64
 import math
 from collections.abc import Mapping, Sequence
 
+from nexent.monitor.local_content import local_content_value
+
 LOCAL_PREFIX = "nexent.local."
 
 
@@ -34,12 +36,17 @@ def attributes(values):
     return [{"key": key, "value": any_value(value)} for key, value in sorted(values.items()) if value is not None]
 
 
-def span_request(span):
+def span_request(span, *, local_attributes=None):
     """Retain actual IDs, events, links and dropped counts, never invent metrics."""
-    values = dict(span.attributes or {})
+    values = {**(local_attributes or {}), **(span.attributes or {})}
     for key in list(values):
         if key.startswith(LOCAL_PREFIX):
             values[key.removeprefix(LOCAL_PREFIX)] = values.pop(key)
+    logical_model = values.get("openinference.span.kind") == "CHAIN" and (
+        span.attributes or {}
+    ).get("nexent.local.openinference.span.kind") == "CHAIN"
+    if logical_model:
+        values = {key: value for key, value in values.items() if not key.startswith("llm.")}
     context = span.context
     body = {
         "traceId": f"{context.trace_id:032x}",
@@ -61,6 +68,7 @@ def span_request(span):
                 "droppedAttributesCount": event.dropped_attributes,
             }
             for event in span.events
+            if not (logical_model and event.name in {"first_token_received", "token_generated", "model_usage"})
         ],
         "droppedEventsCount": span.dropped_events,
         "links": [
@@ -82,7 +90,7 @@ def span_request(span):
         body["status"]["message"] = span.status.description
     scope = span.instrumentation_scope
     resource = span.resource
-    return {
+    return local_content_value({
         "resourceSpans": [
             {
                 "resource": {"attributes": attributes(resource.attributes)},
@@ -100,4 +108,4 @@ def span_request(span):
                 ],
             }
         ]
-    }
+    })

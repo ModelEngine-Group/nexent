@@ -10,7 +10,8 @@ import logging
 import os
 import re
 import threading
-from contextlib import ExitStack, contextmanager
+import time
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,12 @@ from .trajectory_io import (
     json_chunks,
     prefix_hash,
     write_all,
+)
+from .trajectory_sources import (
+    initial_sources,
+    register_source,
+    unverified_sources,
+    verified_sources,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,10 +93,15 @@ class CaptureIdentity:
 class TrajectoryFileStore:
     """Blocking storage boundary, called from a managed I/O worker."""
 
-    def __init__(self, root, storage_root_id: str, *, authorize, retention_days: int = 30, clock=None):
+    def __init__(
+        self, root, storage_root_id: str, *, authorize, retention_days: int = 30, clock=None, source_query=None,
+        storage_mode="single_node",
+    ):
         self.root = Path(root)
         self.storage_root_id = uuid_string(storage_root_id)
+        self.storage_mode = self._mode(storage_mode)
         self.authorize = authorize
+        self.source_query = source_query
         self.retention_days = self._days(retention_days)
         self.clock = clock or (lambda: datetime.now(UTC))
         if not callable(authorize):
@@ -104,25 +116,36 @@ class TrajectoryFileStore:
         return days
 
     @classmethod
-    def provision(cls, root, storage_root_id: str):
+    def provision(cls, root, storage_root_id: str, *, storage_mode="single_node"):
         """Explicitly register a persistent root; normal startup never invents one."""
         storage_root_id = uuid_string(storage_root_id)
+        storage_mode = cls._mode(storage_mode)
         with Directory.root(Path(root), create=True) as directory, directory.lock(".storage-root.lock"):
             try:
                 marker = directory.read_json(".storage-root.json")
             except FileNotFoundError:
-                directory.atomic_json(".storage-root.json", {"schema_version": 1, "storage_root_id": storage_root_id})
+                directory.atomic_json(".storage-root.json", {
+                    "schema_version": 1, "storage_root_id": storage_root_id, "storage_mode": storage_mode,
+                })
             else:
-                if marker != {"schema_version": 1, "storage_root_id": storage_root_id}:
+                if not cls._registered(marker, storage_root_id, storage_mode):
                     raise TrajectoryConflict("Trajectory storage root identity differs")
+
+    @staticmethod
+    def _mode(value):
+        if value not in ("single_node", "shared_directory"):
+            raise ValueError("Trajectory storage mode must be single_node or shared_directory")
+        return value
+
+    @staticmethod
+    def _registered(marker, root_id, mode):
+        legacy = {"schema_version": 1, "storage_root_id": root_id}
+        return marker == {**legacy, "storage_mode": mode} or (mode == "single_node" and marker == legacy)
 
     @contextmanager
     def _root(self):
         with Directory.root(self.root) as directory:
-            if directory.read_json(".storage-root.json") != {
-                "schema_version": 1,
-                "storage_root_id": self.storage_root_id,
-            }:
+            if not self._registered(directory.read_json(".storage-root.json"), self.storage_root_id, self.storage_mode):
                 raise TrajectoryConflict("Trajectory storage root identity differs")
             yield directory
 
@@ -202,13 +225,13 @@ class TrajectoryFileStore:
                 raise TrajectoryCorrupt("Trajectory execution metadata is invalid") from error
 
     @contextmanager
-    def _session(self, identity, *, create=False):
+    def _session(self, identity, *, create=False, blocking=True):
         self.authorize(identity)
         with ExitStack() as stack:
             root = stack.enter_context(self._root())
             locks = stack.enter_context(root.child(".locks", create=True))
             owner = stack.enter_context(locks.child(component(identity.owner_user_id), create=True))
-            stack.enter_context(owner.lock(f"{identity.conversation_id}.lock"))
+            stack.enter_context(owner.lock(f"{identity.conversation_id}.lock", blocking=blocking))
             path = self._locate(root, identity)
             if path is None:
                 if not create:
@@ -263,9 +286,12 @@ class TrajectoryFileStore:
                                         except (OSError, ValueError, KeyError, TrajectoryCorrupt, TrajectoryConflict):
                                             logger.warning("trajectory.maintenance_identity_invalid", exc_info=False)
 
-    def start(self, identity, trajectory_id: str, turn_id: str, *, core_type: str, ingress_ref=None, started_at=None):
+    def start(self, identity, trajectory_id: str, turn_id: str, *, core_type: str, ingress_ref=None,
+              started_at=None, source_message_id=None):
         uuid_string(trajectory_id)
         uuid_string(turn_id)
+        if source_message_id is not None:
+            business_id(source_message_id)
         if core_type not in {"smolagents", "jiuwen"}:
             raise ValueError("Unsupported trajectory Agent Core")
         with self._session(identity, create=True) as directory:
@@ -295,6 +321,7 @@ class TrajectoryFileStore:
                     "earliest_expired_at": None,
                     "latest_expired_at": None,
                     "had_manual_cleanup": False,
+                    **initial_sources(),
                     "runs": [],
                 }
                 self._save_manifest(directory, meta)
@@ -316,6 +343,7 @@ class TrajectoryFileStore:
                         "root_agent_id": identity.root_agent_id,
                         "core_type": core_type,
                         "ingress_ref": ingress_ref,
+                        "source_message_id": source_message_id,
                         "started_at": now,
                         "finished_at": None,
                         "expires_at": None,
@@ -337,6 +365,16 @@ class TrajectoryFileStore:
                 )
                 meta["next_turn_no"] += 1
                 meta["last_captured_at"] = now
+                register_source(meta, source_message_id)
+                if source_message_id is not None and self.source_query is not None:
+                    try:
+                        observed = self.source_query(identity, source_message_id)
+                        meta.update(verified_sources(meta, observed, source_message_id))
+                    except Exception as error:  # noqa: BLE001 - Keep source outages separate from business capture.
+                        meta.update(unverified_sources(meta))
+                        logger.warning("trajectory.source_verification_failed exception_type=%s", type(error).__name__)
+                else:
+                    meta.update(unverified_sources(meta))
                 self._save_manifest(directory, meta)
                 return RunWriter(self, identity, trajectory_id, fd)
             except BaseException:
@@ -433,22 +471,54 @@ class TrajectoryFileStore:
         meta["publication_no"] += 1
         run["publication_no"] = meta["publication_no"]
 
-    def cleanup(self, identity, *, before_days=None, now=None):
+    def cleanup(
+        self,
+        identity,
+        *,
+        before_days=None,
+        now=None,
+        cutoff_at=None,
+        after_turn=0,
+        scan_limit=1000,
+        delete_limit=100,
+        lock_held=False,
+        deadline=None,
+        force_reason=None,
+    ):
         """Clean one authorized conversation; the scheduler supplies bounded batches."""
         days = self._days(before_days if before_days is not None else self.retention_days)
         now = now or self.clock()
-        cutoff = now - timedelta(days=days)
-        result = {"deleted_runs": 0, "deleted_bytes": 0, "skipped_active": 0, "pending_runs": 0, "failed_runs": 0}
+        cutoff = cutoff_at or now - timedelta(days=days)
+        scan_limit, delete_limit = min(1000, scan_limit), min(100, delete_limit)
+        result = {
+            "deleted_runs": 0,
+            "deleted_bytes": 0,
+            "skipped_active": 0,
+            "pending_runs": 0,
+            "failed_runs": 0,
+            "scanned_runs": 0,
+            "next_turn": None,
+        }
         with (
             self._root() as root,
             root.child(".locks", create=True) as locks,
-            locks.lock("cleanup.lock", blocking=False),
+            nullcontext() if lock_held else locks.lock("cleanup.lock", blocking=False),
         ):
             with self._session(identity) as directory:
                 meta = directory.read_json("meta.json")
                 targets = []
                 changed = False
-                for run in meta["runs"]:
+                remaining = sorted(
+                    (r for r in meta["runs"] if r["turn_no"] > after_turn),
+                    key=lambda r: r["turn_no"],
+                )
+                last_turn = after_turn
+                for run in remaining:
+                    if result["scanned_runs"] >= scan_limit or (deadline and time.monotonic() >= deadline):
+                        result["next_turn"] = last_turn
+                        break
+                    result["scanned_runs"] += 1
+                    last_turn = run["turn_no"]
                     if not run["finished_at"] or run["publication_no"] is None:
                         result["skipped_active"] += 1
                         continue
@@ -459,11 +529,15 @@ class TrajectoryFileStore:
                     if timestamp(expires) != run["expires_at"]:
                         run["expires_at"] = timestamp(expires)
                         changed = True
-                    eligible = expires <= now or (before_days is not None and parse_time(run["finished_at"]) <= cutoff)
+                    eligible = (
+                        bool(force_reason)
+                        or expires <= now
+                        or (before_days is not None and parse_time(run["finished_at"]) <= cutoff)
+                    )
                     if not run["cleanup_reason"] and eligible:
                         run.update(
                             capture_state="expired",
-                            cleanup_reason="manual" if before_days is not None else "retention",
+                            cleanup_reason=force_reason or ("manual" if before_days is not None else "retention"),
                             cleanup_marked_at=timestamp(now),
                         )
                         meta["cleanup_version"] += 1
@@ -478,7 +552,10 @@ class TrajectoryFileStore:
                 if changed:
                     self._save_manifest(directory, meta)
             # Releasing the session lock before taking a run lock avoids lock inversion.
-            for trajectory_id, size in targets[:100]:
+            for position, (trajectory_id, size) in enumerate(targets[:delete_limit]):
+                if deadline and time.monotonic() >= deadline:
+                    result["pending_runs"] += len(targets[:delete_limit]) - position
+                    break
                 try:
                     with self._session(identity) as directory:
                         fd = directory.open(f"{trajectory_id}.otlp.jsonl", os.O_RDWR)
@@ -508,7 +585,7 @@ class TrajectoryFileStore:
                         self._save_manifest(directory, meta)
                 except OSError:
                     result["failed_runs"] += 1
-            result["pending_runs"] += max(0, len(targets) - 100)
+            result["pending_runs"] += max(0, len(targets) - delete_limit)
             with self._session(identity) as directory:
                 meta = directory.read_json("meta.json")
                 retained = [
@@ -706,7 +783,7 @@ class RunWriter:
             return copy.deepcopy(receipt)
 
     def finish(self, status: str, *, finished_at=None):
-        if status not in {"completed", "failed", "cancelled"}:
+        if status not in {"completed", "failed", "cancelled", "interrupted"}:
             raise ValueError("Invalid trajectory terminal status")
         with self._lock, self._state() as (directory, meta, run):
             if run["publication_no"] is not None:

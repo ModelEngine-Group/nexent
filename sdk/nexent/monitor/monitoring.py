@@ -48,6 +48,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
+from .first_token import stream_token_basis, valid_ttft
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
     DEFAULT_EXCLUDED_SPAN_NAMES,
@@ -1961,6 +1962,8 @@ class LLMTokenTracker:
         self.model_name = model_name
         self.span = span
         self.start_time = time.time()
+        self._start_monotonic = time.perf_counter()
+        self.ttft_seconds: Optional[float] = None
         self.first_token_time: Optional[float] = None
         self.token_count = 0
         self.input_tokens = 0
@@ -1969,32 +1972,32 @@ class LLMTokenTracker:
         # downstream code running in a different thread can still access it.
         self._context_snapshot: Dict[str, Any] = get_monitoring_context()
 
-    def record_first_token(self) -> None:
-        """Record the time when first token is received."""
-        if not getattr(self.manager, "is_enabled", False):
+    def record_first_token(self, basis: str = "content") -> None:
+        """Publish the first nonempty output immediately, including partial failures."""
+        if not getattr(self.manager, "is_enabled", False) or self.first_token_time is not None:
             return
-
-        if self.first_token_time is None:
-            self.first_token_time = time.time()
-            ttft = self.first_token_time - self.start_time
-
-            if self.span:
-                self.span.add_event("first_token_received",
-                                    {"llm.time_to_first_token": ttft})
-
-            self.manager.record_llm_metrics(
-                "ttft", ttft, {"llm.model_name": self.model_name})
+        ttft = valid_ttft(time.perf_counter() - self._start_monotonic)
+        if ttft is None:
+            return
+        self.ttft_seconds = ttft
+        self.first_token_time = time.time()
+        attributes = {
+            "llm.time_to_first_token": ttft,
+            "llm.ttft_ms": ttft * 1000,
+            "llm.ttft_basis": basis,
+        }
+        if self.span:
+            self.span.set_attributes(attributes)
+            self.span.add_event("first_token_received", attributes)
+        self.manager.record_llm_metrics("ttft", ttft, {"llm.model_name": self.model_name})
 
     def record_token(self, token: str) -> None:
-        """Record a new token generated."""
-        if not getattr(self.manager, "is_enabled", False):
+        """Record a nonempty content increment without estimating token usage."""
+        if not getattr(self.manager, "is_enabled", False) or not token:
             return
-
         if self.first_token_time is None:
             self.record_first_token()
-
         self.token_count += 1
-
         if self.span:
             self.span.add_event("token_generated", {
                 "token_count": self.token_count,
@@ -2008,7 +2011,7 @@ class LLMTokenTracker:
 
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
-        total_duration = time.time() - self.start_time
+        total_duration = time.perf_counter() - self._start_monotonic
         generation_rate = 0.0
 
         # Calculate token generation rate (tokens per second)
@@ -2039,8 +2042,7 @@ class LLMTokenTracker:
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
-                "llm.duration.total": total_duration,
-                "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
+                "llm.duration.total": total_duration
             }
             if total is not None:
                 attributes["llm.token_count.total"] = total
@@ -2227,7 +2229,7 @@ class RecordModelCallContext:
                 "model_name": self.model_name,
                 "operation": f"{self.model_type}_call",
                 "request_duration_ms": request_duration_ms,
-                "ttft_ms": 0,
+                "ttft_ms": None,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
@@ -2280,9 +2282,11 @@ class RecordModelCallContext:
 
 class _MonitoredStreamIterator:
 
-    def __init__(self, stream, start_time: float, model_name: str, model_type: str):
+    def __init__(self, stream, start_time: float, model_name: str, model_type: str, *, start_monotonic=None):
         self._stream = stream
         self._start_time = start_time
+        self._start_monotonic = time.perf_counter() if start_monotonic is None else start_monotonic
+        self._ttft_seconds: Optional[float] = None
         self._model_name = model_name
         self._model_type = model_type
         self._error: Optional[Exception] = None
@@ -2291,6 +2295,7 @@ class _MonitoredStreamIterator:
         self._output_tokens: int = 0
         self._state_lock = threading.Lock()
         self._closed = False
+        self._aborted = False
         self._finalized = False
 
     def __iter__(self):
@@ -2304,6 +2309,28 @@ class _MonitoredStreamIterator:
             self._error = exc_value
         self.close()
         return False
+
+    def abort(self):
+        """Wake a blocked HTTP read before closing a cancelled stream."""
+        import socket
+
+        import httpx
+
+        with self._state_lock:
+            if self._closed or self._aborted:
+                return
+            self._aborted = True
+        try:
+            response = getattr(self._stream, "response", None)
+            if isinstance(response, httpx.Response):
+                network = response.extensions.get("network_stream")
+                connection = network.get_extra_info("socket") if network is not None else None
+                if connection is not None:
+                    connection.shutdown(socket.SHUT_RDWR)
+        except (OSError, AttributeError, ValueError):
+            pass
+        finally:
+            self.close()
 
     def close(self):
         with self._state_lock:
@@ -2323,8 +2350,11 @@ class _MonitoredStreamIterator:
     def __next__(self):
         try:
             chunk = next(self._stream)
-            if self._first_chunk_time is None:
-                self._first_chunk_time = time.time()
+            if self._first_chunk_time is None and stream_token_basis(chunk) is not None:
+                elapsed = valid_ttft(time.perf_counter() - self._start_monotonic)
+                if elapsed is not None:
+                    self._ttft_seconds = elapsed
+                    self._first_chunk_time = time.time()
             if hasattr(chunk, "usage") and chunk.usage is not None:
                 self._input_tokens = getattr(
                     chunk.usage, "prompt_tokens", 0) or 0
@@ -2345,13 +2375,10 @@ class _MonitoredStreamIterator:
                 return
             self._finalized = True
         try:
-            request_duration_ms = int((time.time() - self._start_time) * 1000)
-
-            if self._first_chunk_time is not None:
-                ttft_ms = int(
-                    (self._first_chunk_time - self._start_time) * 1000)
-            else:
-                ttft_ms = 0
+            duration = time.perf_counter() - self._start_monotonic
+            request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+            ttft = valid_ttft(self._ttft_seconds, duration)
+            ttft_ms = int(ttft * 1000) if ttft is not None else None
 
             duration_seconds = request_duration_ms / 1000.0
             if duration_seconds > 0 and self._output_tokens > 0:
@@ -2387,6 +2414,7 @@ class _MonitoredChatCompletions:
     def create(self, **kwargs):
         stream = kwargs.get("stream", False)
         start_time = time.time()
+        start_monotonic = time.perf_counter()
         try:
             response = self._original.create(**kwargs)
         except Exception as exc:
@@ -2394,7 +2422,9 @@ class _MonitoredChatCompletions:
             raise
 
         if stream:
-            return _MonitoredStreamIterator(response, start_time, self._model_name, self._model_type)
+            return _MonitoredStreamIterator(
+                response, start_time, self._model_name, self._model_type, start_monotonic=start_monotonic
+            )
         else:
             self._record_non_streaming(start_time, response=response)
             return response
@@ -2413,7 +2443,7 @@ class _MonitoredChatCompletions:
                 model_name=self._model_name,
                 model_type=self._model_type,
                 request_duration_ms=request_duration_ms,
-                ttft_ms=0,
+                ttft_ms=None,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=input_tokens + output_tokens,
@@ -2472,7 +2502,7 @@ def _enqueue_client_monitoring_record(
     model_name: str,
     model_type: str,
     request_duration_ms: int,
-    ttft_ms: int,
+    ttft_ms: Optional[int],
     input_tokens: int,
     output_tokens: int,
     total_tokens: int,
@@ -2541,18 +2571,22 @@ def _enqueue_client_monitoring_record(
 def _extract_tracker_metrics(tracker):
     """Extract timing and token metrics from an LLMTokenTracker."""
     request_duration_ms = 0
-    ttft_ms = 0
+    ttft_ms = None
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
     generation_rate = 0.0
 
     if tracker is not None:
-        request_duration_ms = int(
-            (time.time() - tracker.start_time) * 1000)
-        if tracker.first_token_time is not None:
-            ttft_ms = int((tracker.first_token_time -
-                          tracker.start_time) * 1000)
+        monotonic_start = getattr(tracker, "_start_monotonic", None)
+        duration = (
+            time.perf_counter() - monotonic_start
+            if type(monotonic_start) in (int, float) else time.time() - tracker.start_time
+        )
+        request_duration_ms = int(duration * 1000) if valid_ttft(duration) is not None else 0
+        ttft = valid_ttft(getattr(tracker, "ttft_seconds", None), duration)
+        if ttft is not None:
+            ttft_ms = int(ttft * 1000)
         input_tokens = tracker.input_tokens
         output_tokens = tracker.output_tokens
         total_tokens = input_tokens + output_tokens

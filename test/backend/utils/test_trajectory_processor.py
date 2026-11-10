@@ -45,8 +45,10 @@ def capture(tmp_path):
         provider=provider,
         tracer=provider.get_tracer("test"),
         identity=CaptureIdentity("tenant", "user", "123", "42"),
+        metadata=metadata,
     )
     processor.shutdown()
+    assert not processor._active and not processor._started
     provider.shutdown()
     asyncio.run(manager.shutdown(timeout=2))
     assert manager.snapshot().active_count == 0
@@ -108,6 +110,157 @@ def test_active_snapshot_is_durable_but_not_published(capture):
         fragments = [span for span in bodies(capture) if span["name"] == "nexent.trajectory.fragment"]
         assert fragments and fragments[0]["events"]
     assert capture.processor.force_flush(2000)
+
+
+def test_server_message_identity_reaches_root_and_manifest(capture):
+    capture.metadata.extra_metadata["trajectory_source_message_id"] = "11"
+    capture.store.source_query = lambda identity, upper: ["11"]
+    with capture.tracer.start_as_current_span("agent.run"):
+        pass
+    assert capture.processor.force_flush(2000)
+    meta = capture.store.manifest(capture.identity)
+    assert meta["source_message_ids"] == ["11"]
+    assert meta["captured_from_start"] and not meta["has_uncaptured_history"]
+    assert meta["runs"][0]["source_message_id"] == "11"
+    root = next(body for body in bodies(capture) if body["name"] == "agent.run")
+    assert attrs(root)["nexent.source_message_id"] == "11"
+
+
+def test_local_span_duration_is_monotonic_and_does_not_change_remote_span(capture, monkeypatch):
+    clock = SimpleNamespace(value=10.0)
+    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    remote = InMemorySpanExporter()
+    capture.provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(remote)))
+    with capture.tracer.start_as_current_span("agent.run"):
+        clock.value = 10.2
+        with capture.tracer.start_as_current_span("tool", attributes={"openinference.span.kind": "TOOL"}):
+            clock.value = 10.5
+        clock.value = 11.0
+    assert capture.processor.force_flush(2000)
+    spans = {body["name"]: attrs(body) for body in bodies(capture) if body["name"] != "nexent.trajectory.fragment"}
+    assert spans["agent.run"]["nexent.duration_ms"] == pytest.approx(1000)
+    assert spans["tool"]["nexent.duration_ms"] == pytest.approx(300)
+    assert all("nexent.duration_ms" not in body.attributes for body in remote.get_finished_spans())
+    assert not capture.processor._started
+
+
+@pytest.mark.parametrize("elapsed", [-1.0, float("nan"), float("inf")])
+def test_invalid_local_clock_keeps_completed_business_and_unknown_duration(capture, monkeypatch, elapsed):
+    clock = SimpleNamespace(value=10.0)
+    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    with capture.tracer.start_as_current_span("agent.run"):
+        clock.value += elapsed
+    assert capture.processor.force_flush(2000)
+    root = next(body for body in bodies(capture) if body["name"] == "agent.run")
+    assert "nexent.duration_ms" not in attrs(root)
+    assert attrs(root)["nexent.availability.duration_ms"] == "not_captured"
+    assert capture.store.manifest(capture.identity)["runs"][0]["business_status"] == "completed"
+
+
+@pytest.mark.parametrize("duration", [0, 7])
+def test_sdk_reported_duration_takes_priority_over_local_observer(capture, monkeypatch, duration):
+    clock = SimpleNamespace(value=10.0)
+    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    with capture.tracer.start_as_current_span("agent.run", attributes={"nexent.duration_ms": duration}):
+        clock.value = 11.0
+    assert capture.processor.force_flush(2000)
+    root = next(body for body in bodies(capture) if body["name"] == "agent.run")
+    assert float(attrs(root)["nexent.duration_ms"]) == duration
+
+
+@pytest.mark.parametrize("prefix", ["", "nexent.local."])
+def test_sdk_unavailable_duration_prevents_local_fallback(capture, monkeypatch, prefix):
+    clock = SimpleNamespace(value=10.0)
+    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.perf_counter", lambda: clock.value)
+    with capture.tracer.start_as_current_span(
+        "agent.run", attributes={f"{prefix}nexent.availability.duration_ms": "not_captured"},
+    ):
+        clock.value = 11.0
+    assert capture.processor.force_flush(2000)
+    root = next(body for body in bodies(capture) if body["name"] == "agent.run")
+    assert attrs(root)["nexent.availability.duration_ms"] == "not_captured"
+    assert "nexent.duration_ms" not in attrs(root)
+    assert not capture.processor._started
+
+
+@pytest.mark.parametrize("technical_parent", [False, True])
+def test_invocation_ownership_survives_technical_spans_and_remote_projection(capture, technical_parent):
+    from contextlib import nullcontext
+
+    remote = InMemorySpanExporter()
+    capture.provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(remote)))
+    child_id = uuid4().hex
+    grandchild_id = uuid4().hex
+    with capture.tracer.start_as_current_span("agent.run") as root:
+        parent_scope = (
+            capture.tracer.start_as_current_span("agent.run.loop", attributes={"openinference.span.kind": "CHAIN"})
+            if technical_parent else nullcontext()
+        )
+        with parent_scope:
+            with capture.tracer.start_as_current_span("root.model", attributes={"openinference.span.kind": "LLM"}):
+                pass
+            with (
+                capture.tracer.start_as_current_span(
+                    "agent.subagent.child",
+                    attributes={"openinference.span.kind": "AGENT", "subagent.invocation_id": child_id},
+                ),
+                capture.tracer.start_as_current_span("child.context", attributes={"openinference.span.kind": "CHAIN"}),
+            ):
+                with capture.tracer.start_as_current_span("child.tool", attributes={"openinference.span.kind": "TOOL"}):
+                    pass
+                with (
+                    capture.tracer.start_as_current_span(
+                        "agent.subagent.grandchild",
+                        attributes={"openinference.span.kind": "AGENT", "subagent.invocation_id": grandchild_id},
+                    ),
+                    capture.tracer.start_as_current_span("grandchild.model", attributes={"openinference.span.kind": "LLM"}),
+                ):
+                    pass
+            with capture.tracer.start_as_current_span("agent.subagent.sibling", attributes={"openinference.span.kind": "AGENT"}):
+                pass
+        root_record = root.attributes["nexent.record_id"]
+    assert capture.processor.force_flush(2000)
+    spans = {span["name"]: attrs(span) for span in bodies(capture) if span["name"] != "nexent.trajectory.fragment"}
+    assert spans["agent.run"]["nexent.invocation_id"] == root_record
+    assert "nexent.parent_invocation_id" not in spans["agent.run"]
+    assert spans["root.model"]["nexent.invocation_id"] == root_record
+    assert spans["agent.subagent.child"]["nexent.invocation_id"] == child_id
+    assert spans["agent.subagent.child"]["nexent.parent_invocation_id"] == root_record
+    assert spans["child.context"]["nexent.invocation_id"] == child_id
+    assert spans["child.tool"]["nexent.invocation_id"] == child_id
+    assert spans["agent.subagent.grandchild"]["nexent.invocation_id"] == grandchild_id
+    assert spans["agent.subagent.grandchild"]["nexent.parent_invocation_id"] == child_id
+    assert spans["grandchild.model"]["nexent.invocation_id"] == grandchild_id
+    sibling = spans["agent.subagent.sibling"]
+    assert sibling["nexent.invocation_id"] == sibling["nexent.record_id"]
+    assert sibling["nexent.parent_invocation_id"] == root_record
+    assert sibling["nexent.invocation_id"] not in {root_record, child_id}
+    assert all("nexent.invocation_id" not in body.attributes for body in remote.get_finished_spans())
+    assert all("nexent.parent_invocation_id" not in body.attributes for body in remote.get_finished_spans())
+    remote_child = next(body for body in remote.get_finished_spans() if body.name == "agent.subagent.child")
+    assert remote_child.attributes["subagent.invocation_id"] == child_id
+    assert all(not any(key.startswith("nexent.local.") for key in body.attributes) for body in remote.get_finished_spans())
+
+
+@pytest.mark.parametrize("business_status", ["completed", "failed", "cancelled", "interrupted"])
+@pytest.mark.parametrize("serialization_failed", [False, True])
+def test_root_capture_preserves_business_outcome(capture, monkeypatch, business_status, serialization_failed):
+    from infrastructure.observability import trajectory_processor as module
+
+    def fail_serialization(span, **kwargs):
+        raise ValueError("Controlled invalid URL or unsupported local payload")
+
+    if serialization_failed:
+        monkeypatch.setattr(module, "span_request", fail_serialization)
+    with capture.tracer.start_as_current_span("agent.run") as root:
+        root.set_attribute("nexent.business_status", business_status)
+        if business_status == "failed":
+            root.set_status(Status(StatusCode.ERROR, "Controlled business error"))
+    assert capture.processor.force_flush(2000)
+    run = capture.store.manifest(capture.identity)["runs"][0]
+    assert run["business_status"] == business_status
+    assert run["capture_state"] == ("incomplete" if serialization_failed else "ready")
+    assert not capture.processor._active and not capture.processor._started
 
 
 def test_revoked_capture_releases_writer_and_seals_only_confirmed_content(capture):

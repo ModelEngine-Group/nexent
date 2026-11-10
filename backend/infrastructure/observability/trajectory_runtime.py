@@ -32,6 +32,8 @@ def create_local_processor(config, metadata_provider):
         config.TRAJECTORY_STORAGE_ROOT_ID,
         authorize=authorize_capture,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
+        source_query=capture_sources,
+        storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
     )
     # Maintenance identities come only from manifests under the verified storage root.
     maintenance = TrajectoryFileStore(
@@ -39,6 +41,7 @@ def create_local_processor(config, metadata_provider):
         config.TRAJECTORY_STORAGE_ROOT_ID,
         authorize=lambda identity: None,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
+        storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
     )
     return LocalTrajectoryProcessor(
         store,
@@ -53,6 +56,15 @@ def create_local_processor(config, metadata_provider):
     )
 
 
+def capture_sources(identity, upper=None):
+    """Read only scalar IDs from the same currently authorized conversation."""
+    from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+
+    return TrajectoryCatalog().source_messages(
+        identity.tenant_id, identity.owner_user_id, identity.conversation_id, upper=upper,
+    )
+
+
 def main():
     import argparse
 
@@ -61,9 +73,17 @@ def main():
     parser = argparse.ArgumentParser(description="Register a persistent local trajectory root")
     parser.add_argument("--root", required=True)
     parser.add_argument("--storage-root-id", required=True)
+    parser.add_argument("--storage-mode", choices=("single_node", "shared_directory"), default="single_node")
     args = parser.parse_args()
-    TrajectoryFileStore.provision(args.root, args.storage_root_id)
+    TrajectoryFileStore.provision(args.root, args.storage_root_id, storage_mode=args.storage_mode)
 
 
 if __name__ == "__main__":
     main()
+
+
+def conversation_deleted(identity):
+    """Only a confirmed PG absence permits maintenance to reclaim an orphan."""
+    from management.db.conversation.trajectory_catalog import TrajectoryCatalog
+
+    return TrajectoryCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)

@@ -10,12 +10,15 @@ import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from nexent.monitor.duration import duration_attributes
 from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor
 
+from .trajectory_audit import cleanup_audit
+from .trajectory_identity import invocation_attributes
 from .trajectory_io import digest, json_chunks
 from .trajectory_otlp import span_request
-from .trajectory_store import CaptureIdentity
+from .trajectory_store import CaptureIdentity, business_id, timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,16 @@ def _has_dropped_data(value):
     if isinstance(value, list):
         return any(_has_dropped_data(item) for item in value)
     return False
+
+
+def _business_status(attributes, failed):
+    """Keep the worker outcome independent of telemetry serialization or I/O."""
+    outcome = attributes.get("nexent.business_status")
+    if outcome in {"completed", "failed", "cancelled", "interrupted"}:
+        return outcome
+    if attributes.get("nexent.cancelled"):
+        return "cancelled"
+    return "failed" if failed else "completed"
 
 
 class LocalTrajectoryProcessor(SpanProcessor):
@@ -67,6 +80,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
         self._queue = queue.Queue(maxsize=10000)
         self._lock = threading.RLock()
         self._active = {}
+        self._started = {}
         self._bytes = 0
         self._run_bytes = {}
         self._gaps = set()
@@ -81,8 +95,10 @@ class LocalTrajectoryProcessor(SpanProcessor):
         self._pending_bytes = {}
         self._maintenance_store = maintenance_store
         self._cleanup_enabled = cleanup_enabled
+        self.deleted_conversation_check = None
         self._cleanup_interval = cleanup_interval_seconds
         self._maintenance_iterator = None
+        self._maintenance_pending = None
         self._next_maintenance = 0
 
     def start(self, manager, service_spec):
@@ -140,6 +156,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
         if not self._accepting:
             return
         try:
+            started = time.perf_counter()
             parent = trace.get_current_span(parent_context)
             inherited = getattr(parent, "attributes", None) or {}
             run_id = inherited.get("nexent.trajectory_id")
@@ -167,7 +184,16 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     "nexent.trajectory.root": True,
                 }
                 core = (metadata.extra_metadata or {}).get("core_type", "smolagents")
-                if not self._enqueue(run_id, "start", (identity, turn_id, core, _observed_time(span.start_time))):
+                source = (metadata.extra_metadata or {}).get("trajectory_source_message_id")
+                try:
+                    source = business_id(source) if source is not None else None
+                except ValueError:
+                    source = None
+                if source is not None:
+                    values["nexent.source_message_id"] = source
+                else:
+                    values["nexent.availability.source_message_id"] = "not_captured"
+                if not self._enqueue(run_id, "start", (identity, turn_id, core, _observed_time(span.start_time), source)):
                     return
             elif run_id:
                 values = {
@@ -190,12 +216,14 @@ class LocalTrajectoryProcessor(SpanProcessor):
             else:
                 return
             values["nexent.record_id"] = str(uuid4())
+            values.update(invocation_attributes(span.attributes or {}, inherited, values["nexent.record_id"], root=root))
             span.set_attributes(values)
             with self._lock:
                 if len(self._active) >= 10000:
                     self._gaps.add(run_id)
                     return
                 self._active[span.context.span_id] = span
+                self._started[span.context.span_id] = started
         except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
             logger.warning("trajectory.capture_start_failed", exc_info=False)
 
@@ -205,24 +233,33 @@ class LocalTrajectoryProcessor(SpanProcessor):
         if not run_id:
             return
         try:
-            request = span_request(span)
+            observed_duration = {}
+            if not any(key in values for key in (
+                "nexent.duration_ms", "nexent.local.nexent.duration_ms", "nexent.availability.duration_ms",
+                "nexent.local.nexent.availability.duration_ms",
+            )):
+                with self._lock:
+                    started = self._started.get(span.context.span_id)
+                observed_duration = duration_attributes(started, time.perf_counter())
+            request = span_request(span, local_attributes=observed_duration)
             size = sum(len(chunk) for chunk in json_chunks(request)) + 1
             with self._lock:
                 self._enqueue(run_id, "span", request, size)
                 self._active.pop(span.context.span_id, None)
+                self._started.pop(span.context.span_id, None)
                 if values.get("nexent.trajectory.root"):
-                    status = (
-                        "cancelled"
-                        if values.get("nexent.cancelled")
-                        else ("failed" if span.status.status_code.value == 2 else "completed")
-                    )
+                    status = _business_status(values, span.status.status_code.value == 2)
                     self._terminal[run_id] = (status, _observed_time(span.end_time))
         except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
             with self._lock:
                 self._gaps.add(run_id)
                 self._active.pop(span.context.span_id, None)
+                self._started.pop(span.context.span_id, None)
                 if values.get("nexent.trajectory.root"):
-                    self._terminal[run_id] = ("failed", _observed_time(span.end_time))
+                    self._terminal[run_id] = (
+                        _business_status(values, span.status.status_code.value == 2),
+                        _observed_time(span.end_time),
+                    )
             logger.warning("trajectory.capture_end_failed", exc_info=False)
 
     def force_flush(self, timeout_millis=30000):
@@ -324,7 +361,9 @@ class LocalTrajectoryProcessor(SpanProcessor):
             body["attributes"] = [
                 a
                 for a in body["attributes"]
-                if a["key"] not in {"nexent.trajectory.root", "input.value", "output.value", "nexent.reasoning.value"}
+                if a["key"] not in {
+                    "nexent.trajectory.root", "input.value", "output.value", "nexent.reasoning.value", "nexent.raw.value"
+                }
             ]
             body["attributes"].append(
                 {"key": "nexent.owner_span_id", "value": {"stringValue": f"{span.context.span_id:016x}"}}
@@ -341,7 +380,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     + [
                         a
                         for a in span_request(span)["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
-                        if a["key"] in {"input.value", "output.value", "nexent.reasoning.value"}
+                        if a["key"] in {"input.value", "output.value", "nexent.reasoning.value", "nexent.raw.value"}
                     ],
                 }
             ]
@@ -386,22 +425,53 @@ class LocalTrajectoryProcessor(SpanProcessor):
         for _ in range(20):
             if not self._queue.empty() or time.monotonic() - started >= 0.05:
                 return
-            try:
-                identity = next(self._maintenance_iterator)
-            except StopIteration:
-                self._maintenance_iterator = None
-                self._next_maintenance = time.monotonic() + self._cleanup_interval
-                return
+            if self._maintenance_pending:
+                identity, after_turn = self._maintenance_pending
+            else:
+                try:
+                    identity = next(self._maintenance_iterator)
+                except StopIteration:
+                    self._maintenance_iterator = None
+                    self._next_maintenance = time.monotonic() + self._cleanup_interval
+                    return
+                after_turn = 0
+            inspected = 0
+            last_turn = after_turn
+            has_more = False
             for run in store.manifest(identity)["runs"]:
+                if run["turn_no"] <= after_turn:
+                    continue
+                if inspected >= 1000:
+                    has_more = True
+                    break
+                inspected += 1
+                last_turn = run["turn_no"]
                 if run["capture_state"] == "writing" and run["trajectory_id"] not in self._writers:
                     try:
                         store.recover(identity, run["trajectory_id"])
-                    except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
-                        # Another process can own the actual execution file lock.
+                    except Exception:  # noqa: BLE001 - Another process can own the actual execution file lock.
                         logger.debug("trajectory.maintenance_recovery_deferred", exc_info=False)
             store.reconcile(identity)
             if self._cleanup_enabled:
-                store.cleanup(identity)
+                now = store.clock()
+                cutoff = now - timedelta(days=store.retention_days)
+                result = {}
+                with cleanup_audit(
+                    source="scheduled", tenant_id=identity.tenant_id, conversation_id=identity.conversation_id,
+                    before_days=store.retention_days, cutoff_at=timestamp(cutoff), counts=result, emit_empty=False,
+                ):
+                    deleted = self.deleted_conversation_check(identity) if self.deleted_conversation_check else False
+                    result.update(store.cleanup(
+                        identity,
+                        after_turn=after_turn,
+                        force_reason="conversation_deleted" if deleted else None,
+                        now=now,
+                        cutoff_at=cutoff,
+                        deadline=time.monotonic() + 2,
+                    ))
+                has_more = result["next_turn"] is not None
+                last_turn = result["next_turn"] if has_more else last_turn
+            self._maintenance_pending = (identity, last_turn) if has_more else None
 
     def _work(self, cancel_event):
         next_snapshot = time.monotonic()
@@ -414,9 +484,10 @@ class LocalTrajectoryProcessor(SpanProcessor):
                 if kind:
                     try:
                         if kind == "start":
-                            identity, turn_id, core, started_at = data
+                            identity, turn_id, core, started_at, source = data
                             self._writers[run_id] = self.store.start(
-                                identity, run_id, turn_id, core_type=core, started_at=started_at
+                                identity, run_id, turn_id, core_type=core, started_at=started_at,
+                                source_message_id=source,
                             )
                             self._offsets[run_id] = 0
                         elif kind == "span":
@@ -425,11 +496,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                             body = data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
                             attrs = {a["key"]: next(iter(a["value"].values())) for a in body["attributes"]}
                             if attrs.get("nexent.trajectory.root"):
-                                status = (
-                                    "cancelled"
-                                    if attrs.get("nexent.cancelled")
-                                    else ("failed" if body["status"]["code"] == 2 else "completed")
-                                )
+                                status = _business_status(attrs, body["status"]["code"] == 2)
                                 self._terminal[run_id] = (status, _observed_time(body["endTimeUnixNano"]))
                         elif kind == "barrier":
                             self._flush_pending()
@@ -472,6 +539,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     logger.warning("trajectory.interrupted_archive_failed", exc_info=False)
             self._writers.clear()
             self._active.clear()
+            self._started.clear()
             self._last_snapshot.clear()
             if self._maintenance_iterator is not None:
                 self._maintenance_iterator.close()

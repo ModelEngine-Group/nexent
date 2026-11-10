@@ -402,8 +402,23 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
         query=current.query if current.query is not None else agent_run_info.query,
     )
-    with get_monitoring_manager().start_agent_run(metadata):
-        _agent_run_thread(agent_run_info)
+    from nexent.monitor.local_content import local_capture_enabled
+    from nexent.monitor.run_capture import capture_run_input, capture_run_result
+
+    manager = get_monitoring_manager()
+    with manager.start_agent_run(metadata) as span:
+        if local_capture_enabled(manager):
+            capture_run_input(
+                manager, span, query=agent_run_info.query, agent_config=agent_run_info.agent_config,
+                model_configs=agent_run_info.model_config_list, history=_get_authorized_history(agent_run_info),
+                context_items=_get_authorized_context_items(agent_run_info),
+                attachments=getattr(agent_run_info, "minio_files", None),
+                app_version=(metadata.extra_metadata or {}).get("app_version"),
+            )
+        try:
+            _agent_run_thread(agent_run_info)
+        finally:
+            capture_run_result(manager, span, outcome=getattr(agent_run_info, "attempt_outcome", None))
 
 
 def _agent_run_thread(agent_run_info: AgentRunInfo):

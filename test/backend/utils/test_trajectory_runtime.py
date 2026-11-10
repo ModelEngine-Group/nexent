@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backend configuration, maintenance and trusted authorization boundaries."""
 
+import json
+import logging
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -40,7 +43,8 @@ def test_default_configuration_has_no_filesystem_side_effects():
     assert create_local_processor(configuration(), lambda: None) is None
 
 
-def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path):
+def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
     root_id = str(uuid4())
     TrajectoryFileStore.provision(tmp_path, root_id)
     processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
@@ -58,6 +62,14 @@ def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path):
         assert meta["runs"][0]["capture_state"] == "expired"
         assert meta["runs"][0]["file_deleted_at"] is not None
         assert meta["runs"][1]["capture_state"] == "writing"
+        events = [json.loads(record.getMessage().removeprefix("trajectory.cleanup "))
+                  for record in caplog.records if record.getMessage().startswith("trajectory.cleanup ")]
+        event, = events
+        assert event["source"] == "scheduled" and event["actor_id"] is None
+        assert event["tenant_id"] == "tenant" and event["conversation_id"] == "1"
+        assert event["before_days"] == 30 and event["cutoff_at"] == "2026-11-01T00:00:00Z"
+        assert event["deleted_runs"] == 1 and event["skipped_active"] == 1
+        assert event["status"] == "success" and event["counts_complete"]
     finally:
         active.close()
 
@@ -122,9 +134,15 @@ def test_capture_authorization_requires_active_membership_and_actual_owner(monke
     membership = Mock(return_value=member)
     lookup = Mock(return_value=conversation)
     monkeypatch.setitem(
-        sys.modules, "management.db.identity.user_tenant", SimpleNamespace(get_user_tenant_in_tenant=membership)
+        sys.modules,
+        "management.db.identity.user_tenant",
+        SimpleNamespace(get_user_tenant_in_tenant=membership),
     )
-    monkeypatch.setitem(sys.modules, "management.db.conversation.repository", SimpleNamespace(get_conversation=lookup))
+    monkeypatch.setitem(
+        sys.modules,
+        "management.db.conversation.repository",
+        SimpleNamespace(get_conversation=lookup),
+    )
     identity = CaptureIdentity("tenant", "owner", "123", "42")
     if allowed:
         authorize_capture(identity)
@@ -136,3 +154,78 @@ def test_capture_authorization_requires_active_membership_and_actual_owner(monke
         lookup.assert_called_once_with(123, user_id="owner", tenant_id="tenant")
     else:
         lookup.assert_not_called()
+
+
+def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, caplog):
+    root_id = str(uuid4())
+    TrajectoryFileStore.provision(tmp_path, root_id)
+    processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
+    maintenance = processor._maintenance_store
+    identity = CaptureIdentity("tenant", "owner", "1", "42")
+    with maintenance.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
+        writer.finish("completed")
+    processor.deleted_conversation_check = Mock(side_effect=ConnectionError("PG unavailable"))
+    with pytest.raises(ConnectionError):
+        processor._maintain()
+    event, = [json.loads(record.getMessage().removeprefix("trajectory.cleanup "))
+              for record in caplog.records if record.getMessage().startswith("trajectory.cleanup ")]
+    assert event["source"] == "scheduled" and event["status"] == "failed"
+    assert event["error_code"] == "storage_unavailable" and not event["counts_complete"]
+    assert "PG unavailable" not in caplog.text
+    assert maintenance.manifest(identity)["runs"][0]["cleanup_reason"] is None
+    processor._maintenance_iterator = None
+    processor.deleted_conversation_check = Mock(return_value=True)
+    processor._maintain()
+    run = maintenance.manifest(identity)["runs"][0]
+    assert run["cleanup_reason"] == "conversation_deleted" and run["file_deleted_at"] is not None
+
+
+@pytest.mark.parametrize("elapsed", [2.0, 2.1])
+def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
+    tmp_path, monkeypatch, caplog, elapsed,
+):
+    caplog.set_level(logging.INFO)
+    root_id = str(uuid4())
+    TrajectoryFileStore.provision(tmp_path, root_id)
+    processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
+    store = processor._maintenance_store
+    identity = CaptureIdentity("tenant", "owner", "1", "42")
+    now = datetime(2026, 11, 1, tzinfo=UTC)
+    store.clock = lambda: now
+    expired = []
+    for _ in range(3):
+        with store.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
+            writer.finish("completed")
+            expired.append(writer.trajectory_id)
+    now += timedelta(days=30)
+    with store.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
+        writer.finish("completed")
+        fresh = writer.trajectory_id
+    directory = tmp_path / "tenant/owner/42/1"
+    ticker = [10000.0]
+    unlink = os.unlink
+
+    def slow_unlink(path, **kwargs):
+        unlink(path, **kwargs)
+        if str(path).endswith(".otlp.jsonl"):
+            ticker[0] += elapsed
+
+    monkeypatch.setattr("infrastructure.observability.trajectory_processor.time.monotonic", lambda: ticker[0])
+    monkeypatch.setattr("infrastructure.observability.trajectory_store.os.unlink", slow_unlink)
+    processor._maintain()
+    assert sum((directory / f"{run}.otlp.jsonl").exists() for run in expired) == 2
+    pending = [run for run in store.manifest(identity)["runs"] if run["trajectory_id"] in expired]
+    assert all(run["cleanup_reason"] == "retention" for run in pending)
+    assert sum(run["file_deleted_at"] is None for run in pending) == 2
+    assert (directory / f"{fresh}.otlp.jsonl").exists()
+    for _ in range(2):
+        processor._maintain()
+        ticker[0] += 3601
+        processor._maintain()
+    assert not any((directory / f"{run}.otlp.jsonl").exists() for run in expired)
+    assert (directory / f"{fresh}.otlp.jsonl").exists()
+    events = [json.loads(record.getMessage().removeprefix("trajectory.cleanup "))
+              for record in caplog.records if record.getMessage().startswith("trajectory.cleanup ")]
+    assert [event["deleted_runs"] for event in events] == [1, 1, 1]
+    assert [event["pending_runs"] for event in events] == [2, 1, 0]
+    assert all(event["failed_runs"] == 0 and event["counts_complete"] for event in events)

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from threading import RLock
 
 from opentelemetry import trace
 from opentelemetry.attributes import BoundedAttributes
@@ -39,8 +40,25 @@ class MonitoringSpanProcessor(SpanProcessor):
             normalize_span_exclusions(excluded_elasticsearch_operations)
         )
         self._excluded_span_names = frozenset(normalize_span_exclusions(excluded_span_names))
+        self._parent_lock = RLock()
+        self._local_parents = {}
+        self._public_parents = {}
+
+    @staticmethod
+    def _identity(context):
+        return (context.trace_id, context.span_id) if context is not None else None
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
+        identity = self._identity(span.get_span_context())
+        parent_key = self._identity(span.parent)
+        with self._parent_lock:
+            parent = self._local_parents.get(parent_key, span.parent)
+            if (span.attributes or {}).get("nexent.local_only"):
+                self._local_parents[identity] = parent
+            elif parent_key in self._local_parents:
+                self._public_parents[identity] = parent
+        if (span.attributes or {}).get("nexent.local_only"):
+            return
         if span.kind == SpanKind.SERVER:
             remember_server_span(span)
         name = inherited_trace_name(span.get_span_context().trace_id, trace.get_current_span(parent_context))
@@ -49,6 +67,13 @@ class MonitoringSpanProcessor(SpanProcessor):
         self._delegate.on_start(span, parent_context=parent_context)
 
     def on_end(self, span: ReadableSpan) -> None:
+        identity = self._identity(span.context)
+        with self._parent_lock:
+            self._local_parents.pop(identity, None)
+            reparent = identity in self._public_parents
+            parent = self._public_parents.pop(identity, span.parent)
+        if (span.attributes or {}).get("nexent.local_only"):
+            return
         if span.kind == SpanKind.SERVER:
             forget_server_span(span.context.span_id)
         if span.name in self._excluded_span_names:
@@ -71,7 +96,8 @@ class MonitoringSpanProcessor(SpanProcessor):
             return public
 
         if (
-            any(private(key) for key in attributes)
+            reparent
+            or any(private(key) for key in attributes)
             or any(private(key) for event in span.events for key in (event.attributes or {}))
             or any(private(key) for link in span.links for key in (link.attributes or {}))
         ):
@@ -101,7 +127,7 @@ class MonitoringSpanProcessor(SpanProcessor):
             span = ReadableSpan(
                 name=span.name,
                 context=span.context,
-                parent=span.parent,
+                parent=parent,
                 resource=span.resource,
                 attributes=public_attributes(attributes, span.dropped_attributes),
                 events=events,

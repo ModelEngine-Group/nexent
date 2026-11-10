@@ -255,6 +255,7 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
     """Persist readable user text and any structured clarification response atomically."""
+    request.__dict__.pop("_trajectory_message_receipt", None)
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
@@ -272,10 +273,17 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         **({'clarification_response': request.clarification_response}
            if getattr(request, 'clarification_response', None) is not None else {}),
     )
-    save_message(
+    message_id = save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id,
         message_source=MessageSource(getattr(request, "_message_source", MessageSource.CHAT)),
     )
+    if type(message_id) is int and 0 < message_id <= 2147483647:
+        request.__dict__["_trajectory_message_receipt"] = {
+            "message_id": str(message_id),
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "conversation_id": str(request.conversation_id),
+        }
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):

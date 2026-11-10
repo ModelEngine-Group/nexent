@@ -832,6 +832,7 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/agent/stop",
     "/api/agent/automations",
     "/api/conversation/",
+    "/api/trajectory/",
     "/api/share/",
     "/api/file/preprocess",
   ];

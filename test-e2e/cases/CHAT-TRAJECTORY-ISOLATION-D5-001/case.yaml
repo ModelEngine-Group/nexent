@@ -94,7 +94,7 @@ case:
     - AC-007
     - AC-013
     - AC-008
-    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+    blocked_reason: Backend administrator authorization, current tenant/owner checks, signed references and file identity checks are implemented. This Case still lacks its fixed risk script and binding; actual PG-backed isolation acceptance is deferred by the user.
   execution:
     profiles:
     - name: mock

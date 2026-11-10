@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-TRAJECTORY-TTFT-D3-001
+  feature_id: CHAT-TRAJECTORY
+  requirement_ids:
+  - CHAT-TRAJECTORY-TTFT-20261110
+  - CHAT-TRAJECTORY-BACKEND-20261110
+  business_rule_ids:
+  - TRJ-RULE-001
+  - TRJ-RULE-004
+  - TRJ-RULE-007
+  title: 首非空模型增量的TTFT经真实HTTP采集并保存到本地OTLP
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证真实模型协议运行到本地OTLP文件的首输出计时及未知语义。
+  preconditions:
+  - 独占临时目录和回环HTTP Provider，使用真实模型解析器、MonitoringManager、OTel和本地处理器。
+  - 固定脚本实施后执行；无需外部模型服务、PG或共享业务资产。
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: 通过同步/异步ModelService与OpenAIModel接收role、空块和usage，再分别接收回答、思考和工具参数。
+    expected: 实际同步/异步ModelService及OpenAIModel忽略role/空/usage/工具名与ID，首个非空回答、思考或工具参数只计一次；最终回答及请求次数保持。
+  - order: 2
+    action: 在Agent父Span下采集模型并插入工具Span；刷盘后读取OTLP JSONL并核对Span、事件和时间。
+    expected: 模型Span、首Token事件与本地OTLP保留相同有限非负TTFT，且不超过调用总耗时；父Agent和工具没有TTFT。
+  - order: 3
+    action: 执行无输出、非流式、首输出前及之后失败，关闭全部自建资源并检查。
+    expected: 无首输出、非流式或输出前失败保持未知；输出后失败保留已测值；关闭客户端/HTTP服务/写线程并确认资源释放。
+  - order: 4
+    action: 让首个物理请求返回思考后空回答触发重试，并让旧入口首个请求拒绝采样参数后回退；逐一核对持久化attempt与Histogram。
+    expected: 每个物理请求独立保存安全最终请求、输出及失败关联；各attempt首输出只计一次，逻辑包装Span不重复计算TTFT，采样回退的无输出请求保持未知，Provider调用数与实际attempt相等。
+  expected_results:
+  - 实际同步/异步ModelService及OpenAIModel忽略role/空/usage/工具名与ID，首个非空回答、思考或工具参数只计一次；最终回答及请求次数保持。
+  - 模型Span、首Token事件与本地OTLP保留相同有限非负TTFT，且不超过调用总耗时；父Agent和工具没有TTFT。
+  - 无首输出、非流式或输出前失败保持未知；输出后失败保留已测值；关闭客户端/HTTP服务/写线程并确认资源释放。
+  - 每个物理请求独立保存安全最终请求、输出及失败关联；各attempt首输出只计一次，逻辑包装Span不重复计算TTFT，采样回退的无输出请求保持未知，Provider调用数与实际attempt相等。
+  forbidden_side_effects:
+  - 不因采集增加模型请求或执行工具。
+  - 不保留HTTP服务、客户端或写线程，不改动范围外文件。
+  acceptance:
+  - id: AC-01
+    description: 实际同步/异步ModelService及OpenAIModel忽略role/空/usage/工具名与ID，首个非空回答、思考或工具参数只计一次；最终回答及请求次数保持。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: 模型Span、首Token事件与本地OTLP保留相同有限非负TTFT，且不超过调用总耗时；父Agent和工具没有TTFT。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects: []
+  - id: AC-03
+    description: 无首输出、非流式或输出前失败保持未知；输出后失败保留已测值；关闭客户端/HTTP服务/写线程并确认资源释放。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 2
+  - id: AC-04
+    description: 每个物理请求独立保存安全最终请求、输出及失败关联；各attempt首输出只计一次，逻辑包装Span不重复计算TTFT，采样回退的无输出请求保持未知，Provider调用数与实际attempt相等。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  source:
+    spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/ttft.md
+    acceptance_criteria:
+    - AC-TTFT-01
+    - AC-TTFT-02
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  integration_boundary:
+  - 真实HTTP/SSE Provider到ModelService/OpenAIModel及LLMTokenTracker
+  - OTel模型Span到LocalTrajectoryProcessor和本地OTLP JSONL
+  observations:
+  - Provider请求数与原回答
+  - 模型TTFT、首输出来源、事件、父子Span和持久化值
+  - 未知值及资源清理
+  cleanup:
+  - 关闭自建客户端、HTTP服务并join线程；停止写线程并删除独占临时目录。

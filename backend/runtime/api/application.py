@@ -4,20 +4,24 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from management.utils.app_factory import create_app
-from runtime.api.agent.execution import agent_runtime_router as agent_router
+from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from infrastructure.concurrency import runtime_thread_manager
 from management.api.automation.agent_automation import (
     conversation_automation_router,
+)
+from management.api.automation.agent_automation import (
     router as agent_automation_router,
 )
-from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
-from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from management.api.conversation.conversation_management import router as conversation_management_router
+from management.api.conversation.conversation_management import (
+    router as conversation_management_router,
+)
+from management.api.conversation.conversation_share import (
+    router as conversation_share_router,
+)
 from management.api.conversation.workbench_pins import router as workbench_pins_router
-from management.api.conversation.conversation_share import router as conversation_share_router
-from runtime.api.file.upload import file_management_runtime_router as file_management_router
-from runtime.api.skill.creation import skill_creator_router
-from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from management.api.observability.trajectory import router as trajectory_router
+from management.services.agent.run_state import runtime_state_service
+from management.utils.app_factory import create_app
 from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,
@@ -26,15 +30,20 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from infrastructure.concurrency import runtime_thread_manager
-from management.services.agent.run_state import runtime_state_service
+from runtime.api.agent.execution import agent_runtime_router as agent_router
+from runtime.api.evaluation.execution import router as agent_evaluation_runtime_router
+from runtime.api.file.upload import (
+    file_management_runtime_router as file_management_router,
+)
+from runtime.api.skill.creation import skill_creator_router
+from runtime.api.voice.streaming import voice_runtime_router as voice_router
 
 logger = logging.getLogger("runtime_app")
 
 
 async def start_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
     from management.recovery import recover_runtime_tasks
+    from management.services.automation.scheduler import agent_automation_scheduler
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
@@ -65,10 +74,19 @@ async def runtime_lifespan(_app):
 
     try:
         if local_trajectory_processor is not None:
-            local_trajectory_processor.start(runtime_thread_manager, ManagedThreadSpec(
-                task_name="trajectory-file-writer", owner="infrastructure.observability.trajectory_runtime",
-                close_hook=local_trajectory_processor.request_stop,
-            ))
+            from infrastructure.observability.trajectory_runtime import (
+                conversation_deleted,
+            )
+
+            local_trajectory_processor.deleted_conversation_check = conversation_deleted
+            local_trajectory_processor.start(
+                runtime_thread_manager,
+                ManagedThreadSpec(
+                    task_name="trajectory-file-writer",
+                    owner="infrastructure.observability.trajectory_runtime",
+                    close_hook=local_trajectory_processor.request_stop,
+                ),
+            )
         await start_agent_automation_scheduler()
         yield
     finally:
@@ -90,7 +108,8 @@ async def runtime_lifespan(_app):
                 if local_trajectory_processor is not None:
                     local_trajectory_processor.request_stop()
                     await runtime_thread_manager.run(
-                        "control-io", ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
+                        "control-io",
+                        ManagedTaskSpec("trajectory-file-shutdown", "runtime.api.application"),
                         local_trajectory_processor.shutdown,
                     )
             finally:
@@ -122,6 +141,7 @@ app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
+app.include_router(trajectory_router)
 app.include_router(conversation_management_router)
 app.include_router(conversation_share_router)
 app.include_router(file_management_router)

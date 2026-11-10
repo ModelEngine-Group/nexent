@@ -72,7 +72,7 @@ case:
     - AC-003
     - AC-005
     - AC-011
-    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+    blocked_reason: The smolagents backend capture and local archive path are implemented. This Case still lacks its fixed real-provider script and binding; real-model acceptance is deferred by the user and no provider result is claimed.
   execution:
     profiles:
     - name: real_smoke

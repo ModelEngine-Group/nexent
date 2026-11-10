@@ -115,7 +115,7 @@ case:
     - AC-010
     - AC-011
     - AC-013
-    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+    blocked_reason: Backend historical query and cleanup APIs are implemented. The production administrator page/viewer and this Case's fixed browser script and binding are not implemented; the interaction Demo is a design reference and does not prove the product journey.
   execution:
     profiles:
     - name: mock

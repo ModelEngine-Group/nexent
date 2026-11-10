@@ -14,14 +14,14 @@ case:
   - TRJ-RULE-007
   - TRJ-RULE-008
   - TRJ-RULE-003
-  title: 两个 Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
+  title: smolagents Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
   type: AGENT-IT
   priority: P0
   status: blocked
   automation: automated
-  objective: 两个 Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
+  objective: smolagents Agent Core 保留失败尝试和并行调用，冷读不改变聊天结果
   preconditions:
-  - 设计阶段；轨迹产品接口、固定脚本和 case-local execution.yaml 尚未实现，本 Case 不可计为通过。
+  - 后端接口与固定 Agent-IT 脚本/绑定已实现；当前脚本使用真实Core/HTTP/文件与独立进程冷读，PG身份/目录仍为受控边界。用户暂缓集成验收，真实PG与部署配置启动证据待补齐。
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
   - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
@@ -32,7 +32,7 @@ case:
     profile: mock
   steps:
   - order: 1
-    action: 分别用两个受支持 Core 启动隔离普通会话，经真实产品入口访问受控 Provider HTTP fixture；首次物理请求输出固定片段后断开，第二次成功。
+    action: 使用smolagents Core 启动隔离普通会话，经真实产品入口访问受控 Provider HTTP fixture；首次物理请求输出固定片段后断开，第二次成功。
     expected: 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
   - order: 2
     action: 驱动两个并行子调用、一个嵌套工具、一次受控取消和一个大于监控预览上限的结果，记录实际工具次数。
@@ -46,7 +46,7 @@ case:
     action: 目标切回otlp后再次运行，再关闭ENABLE_TELEMETRY；保持历史读取，核对聊天、已有文件和canary。
     expected: 两种配置均停止新本地轨迹写入，旧归档仍按读取开关访问；otlp目标保留原远端行为，监控关闭时原聊天结果和canary不变。
   - order: 5
-    action: 重新选择local_file或both，在两个Core同会话切换根Agent增加第二轮，核对OTLP属性、文件及DTO中的业务trace、原生Trace/Span、根Agent和UUID，最后清理。 核对tenant/user/首次根Agent/conversation目录与meta.storage_agent_id，覆盖首次根Agent未知后变为已知。
+    action: 重新选择local_file或both，在smolagents Core的同一会话切换根Agent增加第二轮，核对OTLP属性、文件及DTO中的业务trace、原生Trace/Span、根Agent和UUID，最后清理。 核对tenant/user/首次根Agent/conversation目录与meta.storage_agent_id，覆盖首次根Agent未知后变为已知。
     expected: 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
       物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
   expected_results:
@@ -106,14 +106,14 @@ case:
     - AC-009
     - AC-011
     - AC-013
-    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+    blocked_reason: The fixed script covers actual smolagents retries, parallel and nested tools, cancellation, real HTTP exporter faults, SDK configuration setup and independent-process cold HTTP reads. Live PG schema/sequence and committed chat reconciliation, plus backend environment bootstrap across processes remain unverified. The user has deferred integration acceptance; controlled PG identities and in-process provider configuration do not prove the remaining obligations.
   execution:
     profiles:
     - name: mock
       required_services:
       - model-provider
   integration_boundary:
-  - 真实 Agent 入口与两种 Core 到 Provider HTTP 协议 Mock
+  - 真实 Agent 入口与smolagents Core 到 Provider HTTP 协议 Mock
   - MonitoringManager到本地受管处理器/Exporter，真实OTLP及meta.json原子提交，再到查询API
   observations:
   - 物理请求与工具次数

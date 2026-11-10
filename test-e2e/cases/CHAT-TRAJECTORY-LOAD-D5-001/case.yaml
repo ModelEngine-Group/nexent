@@ -73,7 +73,7 @@ case:
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     acceptance_criteria:
     - AC-010
-    blocked_reason: Product and fixed automation are not implemented; this is a design contract.
+    blocked_reason: Backend bounded capture queues, static query budgets and managed lifecycle are implemented. This Case still lacks its fixed enterprise-load script and binding; the earlier local synthetic storage baseline does not establish full concurrent capture/query performance. Load acceptance is deferred by the user.
   execution:
     profiles:
     - name: mock

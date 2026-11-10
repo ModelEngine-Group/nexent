@@ -1,8 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.constants.environment import (
+    NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE,
+    NORTHBOUND_CONTROL_THREAD_MAX_WORKERS,
+    NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS,
+    RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+    RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE,
+    RUNTIME_AGENT_THREAD_MAX_WORKERS,
+    RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+    RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+)
 from nexent.core.concurrency import LanePolicy, ThreadManager
-
-from contracts.constants.environment import NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE, NORTHBOUND_CONTROL_THREAD_MAX_WORKERS, NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS, RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS, RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-
 
 runtime_thread_manager = ThreadManager(
     service_name="runtime",
@@ -13,6 +21,22 @@ runtime_thread_manager = ThreadManager(
             max_queue_size=RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE,
             queue_timeout_seconds=RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
             cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
+        "trajectory-read": LanePolicy(
+            name="trajectory-read",
+            max_workers=4,
+            max_queue_size=8,
+            queue_timeout_seconds=2,
+            cancel_grace_seconds=2,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
+        "trajectory-cleanup": LanePolicy(
+            name="trajectory-cleanup",
+            max_workers=1,
+            max_queue_size=0,
+            queue_timeout_seconds=0,
+            cancel_grace_seconds=2,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
         "control-io": LanePolicy(

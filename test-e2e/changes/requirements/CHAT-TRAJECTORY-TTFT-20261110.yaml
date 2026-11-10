@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-TTFT-20261110
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-TTFT-20261110
+  title: 依据轨迹设计补全模型TTFT采集
+  description: 统一首非空回答/思考/工具参数增量、单调计时和未知语义，保留模型Span与本地OTLP指标。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - CHAT-TRAJECTORY-TTFT-D3-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 首非空回答/思考/工具参数，空role/usage及工具身份排除，一次计数。
+    - 有效零值、缺失null、非法时钟、非流式、错误前后与模型Span即时属性。
+    - 既有usage、监控上下文、客户端关闭和模型重试回归。
+    reason: 现有UT未覆盖语义空块和持久化TTFT；新增单位边界测试，真实HTTP到文件由独立D3证明。
+    test_selectors:
+    - test/sdk/monitor/test_monitoring_ttft.py
+    - test/sdk/monitor/test_monitoring.py
+    - test/sdk/monitor/test_monitoring_local_sink.py
+    - test/sdk/core/model_service/test_model_service_ttft.py
+    - test/sdk/core/model_service/test_model_service_observation.py
+    - test/sdk/core/models/test_openai_llm.py
+  notes: Ownership runtime via CHAT-TRAJECTORY. D1 is unnecessary beyond unit proof; no new HTTP API, UI or storage mode, so D2/D4/D5 remain in
+    the owning trajectory plan. Self-contained D3 owns its HTTP server, client, temporary root and writer threads; shared preparation families
+    are empty with explicit teardown.

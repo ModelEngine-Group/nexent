@@ -731,6 +731,11 @@ class MessageObserver:
             },
         )
 
+    @property
+    def current_tool_call_id(self) -> str | None:
+        """Return the actual invocation in this execution context."""
+        return self._tool_call_id.get()
+
     @contextmanager
     def tool_call_context(self, tool_call_id: str):
         """Associate observer output with one executing tool invocation."""

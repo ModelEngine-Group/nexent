@@ -1,0 +1,42 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-CAPTURE-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_capture
+acceptance_bindings:
+  AC-01:
+  - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
+  AC-02:
+  - test_capture_parallel_tools_nested_output_and_full_local_body
+  - test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry
+  - test_capture_actual_worker_cancel_preserves_partial_output
+  - test_capture_rejected_protocol_retains_output_without_executing_code
+  AC-03:
+  - test_capture_actual_configuration_sinks_and_full_safety
+  - test_capture_dual_sink_faults_do_not_retry_business
+  - test_capture_root_switch_keeps_directory_and_native_context
+  - test_capture_parallel_tools_nested_output_and_full_local_body
+  - test_capture_independent_process_reads_published_facts_without_runtime_caches
+  AC-04:
+  - test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read
+  AC-05:
+  - test_capture_root_switch_keeps_directory_and_native_context
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Current assertions own private loopback Provider/OTLP HTTP servers, real smolagents
+  workers and sandbox executor, private local OTLP roots, real cold FastAPI readers
+  including an independent Uvicorn process with asserted shutdown,
+  and bounded ThreadManager lanes. Tool implementations and PG identities/catalog are
+  controlled boundaries. SDK configuration/exporters are real; repeated startup provider
+  registration is isolated inside this process. All created model clients close, private
+  sandbox pool shuts down on its owning manager, HTTP server threads join and managed
+  active_count is asserted zero. No shared preparation family or shared service is used.
+  Bindings describe implemented assertion locations only. This Case remains blocked:
+  live PG schema/sequence/committed-chat reconciliation, backend environment bootstrap
+  across processes remain unverified; integration acceptance is deferred by the user. A direct
+  script pass is not complete acceptance of AC-01/03/05 or this full Case.

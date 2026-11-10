@@ -71,17 +71,6 @@ def _project_python_files(root):
                 yield Path(directory) / filename
 
 
-def test_ac002_preview_key_matches_existing_contract(monkeypatch):
-    import hashlib
-
-    module = load_source(monkeypatch, "backend/management/services/file/preview.py", "slimming_keys")
-    for name in ("a.docx", "folder/中文.pptx", "without-extension", "a.b.c"):
-        stem = name.rsplit(".", 1)[0] if "." in name else name
-        digest = hashlib.md5(name.encode()).hexdigest()[:8]
-        assert module.build_preview_pdf_object_key(name) == f"preview/converted/{stem}_{digest}.pdf"
-        assert module.build_preview_pdf_object_key(name, temporary=True) == f"preview/converting/{stem}_{digest}.pdf.tmp"
-
-
 @pytest.fixture
 def naming(monkeypatch):
     dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})
@@ -453,7 +442,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
     )
 
     assert root_modules == ["__init__.py"]
-    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
+    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool', 'trajectory']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 
 

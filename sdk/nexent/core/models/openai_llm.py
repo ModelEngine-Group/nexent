@@ -1,64 +1,70 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from ...monitor import get_monitoring_manager
-from ...monitor.monitoring import (
-    _MonitoredClient,
-    _monitoring_operation,
-    _monitoring_display_name,
-    _detect_model_type,
-    OPENINFERENCE_INPUT_VALUE,
-)
-from ..utils.token_estimation import estimate_tokens_text
-from .response_diagnostics import ResponseDiagnostics
-from ..concurrency import RunCancellationScope, run_blocking
+import importlib
+import json
 import logging
 import threading
-import importlib
 import time
-import json
-import httpx
 import uuid
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
+import httpx
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
-from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
+from smolagents.models import ChatMessage, MessageRole, OpenAIServerModel
 
+from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
+
+from ...monitor import get_monitoring_manager
+from ...monitor.first_token import stream_token_basis
+from ...monitor.model_attempt import ModelAttemptSession
+from ...monitor.monitoring import (
+    OPENINFERENCE_INPUT_VALUE,
+    _detect_model_type,
+    _MonitoredClient,
+    _monitoring_display_name,
+    _monitoring_operation,
+)
+from ..concurrency import RunCancellationScope, run_blocking
+from ..utils.observer import MessageObserver, ProcessType
+from ..utils.token_estimation import estimate_tokens_text
 from .capacity_budget import (
     CallerMaxTokensOverrideForbidden,
-    ContextBudgetCapacityMismatch as ContextBudgetCapacityMismatch,
     ContextBudgetSnapshot,
     parse_context_budget_snapshot,
     verify_context_budget_capacity,
 )
-from ..utils.observer import MessageObserver, ProcessType
-from .prompt_cache import (
-    apply_cache_directives,
-    cache_directive_advice,
-    extract_prompt_cache_usage,
-    resolve_prompt_cache_profile,
-)
-from .message_utils import (
-    content_has_multimodal_blocks,
-    merge_system_messages,
-    prepare_messages_for_smolagents_text_flattening,
+from .capacity_budget import (
+    ContextBudgetCapacityMismatch as ContextBudgetCapacityMismatch,
 )
 from .context_overflow import (
     ProviderContextOverflowRetryExhausted,
     ProviderContextOverflowRetryUnsafe,
     is_provider_context_overflow,
 )
-from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
-from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
+from .message_utils import (
+    content_has_multimodal_blocks,
+    merge_system_messages,
+    prepare_messages_for_smolagents_text_flattening,
+)
+from .prompt_cache import (
+    apply_cache_directives,
+    cache_directive_advice,
+    extract_prompt_cache_usage,
+    resolve_prompt_cache_profile,
+)
+from .response_diagnostics import ResponseDiagnostics
 from .retry import (
     DEFAULT_MODEL_RETRY,
-    ModelRetryConfig,
     ModelErrorCode,
     ModelInvocationTerminalError,
+    ModelRetryConfig,
     classify_model_error,
     get_retry_after_seconds,
 )
+from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
+
 
 logger = logging.getLogger("openai_llm")
 
@@ -369,6 +375,7 @@ class OpenAIModel(OpenAIServerModel):
                  _suppress_attempt_stream: bool = False,
                  _retry_empty_response: bool = True,
                  _empty_response_retries_used: int = 0,
+                 _trajectory_capture=None,
                  **kwargs, ) -> ChatMessage:
         messages = merge_system_messages(messages or [])
         _monitoring_operation.set("chat_completion")
@@ -403,22 +410,30 @@ class OpenAIModel(OpenAIServerModel):
             ) as span:
                 token_tracker = self._monitoring.create_token_tracker(
                     self.model_id, span)
-                return self.__call__(
-                    messages=messages,
-                    stop_sequences=stop_sequences,
-                    response_format=response_format,
-                    tools_to_call_from=tools_to_call_from,
-                    _token_tracker=token_tracker,
-                    context_budget_snapshot=context_budget_snapshot,
-                    context_rebuild=context_rebuild,
-                    _overflow_recovery_ordinal=_overflow_recovery_ordinal,
-                    _model_attempts_used=_model_attempts_used,
-                    _defer_attempt_commit=_defer_attempt_commit,
-                    _suppress_attempt_stream=_suppress_attempt_stream,
-                    _retry_empty_response=_retry_empty_response,
-                    _empty_response_retries_used=_empty_response_retries_used,
-                    **kwargs,
+                capture = ModelAttemptSession(
+                    self._monitoring, self.model_id, span, uuid.uuid4().hex, self.retry_config.max_attempts * 2,
                 )
+                try:
+                    return self.__call__(
+                        messages=messages,
+                        stop_sequences=stop_sequences,
+                        response_format=response_format,
+                        tools_to_call_from=tools_to_call_from,
+                        _token_tracker=token_tracker,
+                        context_budget_snapshot=context_budget_snapshot,
+                        context_rebuild=context_rebuild,
+                        _overflow_recovery_ordinal=_overflow_recovery_ordinal,
+                        _model_attempts_used=_model_attempts_used,
+                        _defer_attempt_commit=_defer_attempt_commit,
+                        _suppress_attempt_stream=_suppress_attempt_stream,
+                        _retry_empty_response=_retry_empty_response,
+                        _empty_response_retries_used=_empty_response_retries_used,
+                        _trajectory_capture=capture,
+                        **kwargs,
+                    )
+                finally:
+                    if capture.enabled:
+                        capture.end(cancelled=self.stop_event.is_set() or self.cancellation_scope.cancelled)
 
         token_tracker = _token_tracker or self._monitoring.create_token_tracker(
             self.model_id)
@@ -595,9 +610,12 @@ class OpenAIModel(OpenAIServerModel):
                 current_request = self._dispatch_chat_completion(
                     context_budget_snapshot=trusted_budget_snapshot,
                     capacity_snapshot=self.capacity_snapshot,
+                    _trajectory_capture=_trajectory_capture,
                     stream=True,
                     **dispatch_kwargs,
                 )
+                if _trajectory_capture is not None and _trajectory_capture.tracker is not None:
+                    token_tracker = _trajectory_capture.tracker
 
                 # Validate response type: ensure we got a proper iterator, not error strings or dicts
                 # Some APIs return error strings like "error: rate limit" or JSON dicts on failure
@@ -618,7 +636,10 @@ class OpenAIModel(OpenAIServerModel):
                             if stream_closed:
                                 return
                             stream_closed = True
-                        close_stream()
+                        if callable(getattr(type(current_request), "abort", None)) and self.stop_event.is_set():
+                            current_request.abort()
+                        else:
+                            close_stream()
 
                     close_stream_once = _close_stream_once
                     stream_token = self.cancellation_scope.register_closer(close_stream_once)
@@ -645,6 +666,8 @@ class OpenAIModel(OpenAIServerModel):
                 try:
                     for chunk in current_request:
                         received_chunk_count += 1
+                        if _trajectory_capture is not None:
+                            _trajectory_capture.legacy_chunk(chunk)
                         diagnostics.add(chunk)
                         # Safety check: skip non-standard chunks that lack expected attributes
                         # This handles edge cases where API returns error responses as chunks
@@ -676,6 +699,11 @@ class OpenAIModel(OpenAIServerModel):
                             if isinstance(tool_calls, (list, tuple)):
                                 tool_call_count += len(tool_calls)
 
+                        basis = stream_token_basis(chunk)
+                        if token_tracker and not first_token_received and basis is not None:
+                            token_tracker.record_first_token(basis=basis)
+                            first_token_received = True
+
                         # Handle reasoning_content if it exists and is not null
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
@@ -683,19 +711,11 @@ class OpenAIModel(OpenAIServerModel):
                             if not _suppress_attempt_stream:
                                 self.observer.add_model_reasoning_content(
                                     reasoning_content)
-                            if token_tracker and not first_token_received:
-                                token_tracker.record_first_token()
-                                first_token_received = True
 
                         if new_token is not None:
                             content_chunk_count += 1
-                            # Record first token timing
-                            if token_tracker and not first_token_received:
-                                token_tracker.record_first_token()
-                                first_token_received = True
-
-                            # Track each token
-                            if token_tracker:
+                            # Track each nonempty content increment
+                            if token_tracker and new_token:
                                 token_tracker.record_token(new_token)
 
                             if not _suppress_attempt_stream:
@@ -774,7 +794,11 @@ class OpenAIModel(OpenAIServerModel):
 
                     # Record completion metrics
                     if token_tracker:
-                        token_tracker.record_completion(
+                        completion_tracker = (
+                            _token_tracker if _trajectory_capture is not None
+                            and _trajectory_capture.enabled and usage is None else token_tracker
+                        )
+                        completion_tracker.record_completion(
                             input_tokens, output_tokens)
 
                     response_diagnostics = {
@@ -893,6 +917,9 @@ class OpenAIModel(OpenAIServerModel):
                         "attempt_id": attempt_id,
                         "attempt": attempt,
                     })
+                    if _trajectory_capture is not None:
+                        _trajectory_capture.legacy_complete(model_output, finish_reason)
+                        _trajectory_capture.end()
                     return message
 
                 except Exception as e:
@@ -920,12 +947,18 @@ class OpenAIModel(OpenAIServerModel):
                     or _empty_response_retries_used >= 1
                     or attempt >= self.retry_config.max_attempts
                 ):
+                    if _trajectory_capture is not None:
+                        _trajectory_capture.legacy_failure(empty_error, category="MODEL_EMPTY_RESPONSE")
                     raise ModelInvocationTerminalError(
                         ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
                         attempt,
                         cause=empty_error,
                     ) from empty_error
                 _empty_response_retries_used += 1
+                if _trajectory_capture is not None:
+                    _trajectory_capture.legacy_failure(
+                        empty_error, category="MODEL_EMPTY_RESPONSE", retryable=True, will_retry=True,
+                    )
                 backoff = self.retry_config.calculate_backoff(attempt)
                 logger.warning(
                     "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
@@ -951,6 +984,8 @@ class OpenAIModel(OpenAIServerModel):
                     "error_type": type(e).__name__,
                 })
                 if self.stop_event.is_set() or self.cancellation_scope.cancelled:
+                    if _trajectory_capture is not None:
+                        _trajectory_capture.end(cancelled=True)
                     raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE) from e
                 if isinstance(e, ModelConcurrencyExceeded):
                     raise
@@ -960,6 +995,12 @@ class OpenAIModel(OpenAIServerModel):
                         "error_message": str(e),
                     })
                 if is_provider_context_overflow(e):
+                    if _trajectory_capture is not None:
+                        _trajectory_capture.legacy_failure(
+                            e, category="MODEL_CONTEXT_EXCEEDED", retryable=True,
+                            will_retry=(not first_token_received and context_rebuild is not None
+                                        and attempt < self.retry_config.max_attempts and _overflow_recovery_ordinal < 2),
+                        )
                     if first_token_received or context_rebuild is None:
                         overflow_error = ProviderContextOverflowRetryUnsafe(
                             "Provider context overflow cannot be safely rebuilt: "
@@ -1017,6 +1058,7 @@ class OpenAIModel(OpenAIServerModel):
                         _suppress_attempt_stream=_suppress_attempt_stream,
                         _retry_empty_response=_retry_empty_response,
                         _empty_response_retries_used=_empty_response_retries_used,
+                        _trajectory_capture=_trajectory_capture,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
@@ -1035,6 +1077,11 @@ class OpenAIModel(OpenAIServerModel):
                         type(e).__name__,
                     )
                 classification = classify_model_error(e)
+                if _trajectory_capture is not None:
+                    _trajectory_capture.legacy_failure(
+                        e, category=classification.error_code.value, retryable=classification.retryable,
+                        will_retry=classification.retryable and attempt < self.retry_config.max_attempts,
+                    )
                 if not classification.retryable:
                     raise ModelInvocationTerminalError(
                         classification.error_code,
@@ -1109,6 +1156,7 @@ class OpenAIModel(OpenAIServerModel):
         *,
         context_budget_snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]] = None,
         capacity_snapshot: Optional[Dict[str, Any]] = None,
+        _trajectory_capture=None,
         **completion_kwargs: Any,
     ) -> Any:
         """Dispatch the OpenAI chat completion request.
@@ -1155,8 +1203,19 @@ class OpenAIModel(OpenAIServerModel):
                 default=str,
             ),
         )
+        def dispatch(parameters):
+            if _trajectory_capture is not None:
+                wire_body = {key: value for key, value in parameters.items()
+                             if key not in {"extra_headers", "extra_query", "extra_body", "timeout"}}
+                wire_body.update(parameters.get("extra_body") or {})
+                _trajectory_capture.begin(wire_body, provider=self.model_factory, config={
+                    "adapter_ref": {"ref": "legacy_openai_chat", "version": 1},
+                    "parameters": {key: value for key, value in wire_body.items() if key not in {"messages", "tools"}},
+                })
+            return self.client.chat.completions.create(**parameters)
+
         try:
-            return self.client.chat.completions.create(**completion_kwargs)
+            return dispatch(completion_kwargs)
         except Exception as exc:
             if _is_reasoning_parameter_error(exc, completion_kwargs):
                 raise ReasoningConfigurationError(
@@ -1173,12 +1232,16 @@ class OpenAIModel(OpenAIServerModel):
             retry_kwargs = self._sampling_fallback_kwargs(exc, completion_kwargs)
             if retry_kwargs is None:
                 raise
+            if _trajectory_capture is not None:
+                _trajectory_capture.legacy_failure(
+                    exc, category="MODEL_SAMPLING_FALLBACK", retryable=True, will_retry=True,
+                )
             logger.warning(
                 "event=chat_completion_sampling_fallback model_id=%s error=%s",
                 self.model_id,
                 exc,
             )
-            return self.client.chat.completions.create(**retry_kwargs)
+            return dispatch(retry_kwargs)
 
     def _reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
         """Honor an explicit toggle transport without replacing other wire controls."""

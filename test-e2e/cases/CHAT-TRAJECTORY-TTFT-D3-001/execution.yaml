@@ -1,0 +1,28 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-TTFT-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_ttft
+acceptance_bindings:
+  AC-01:
+  - test_ttft_semantic_output_reaches_file
+  AC-02:
+  - test_ttft_semantic_output_reaches_file
+  AC-03:
+  - test_ttft_unknown_and_partial_failure
+  - test_ttft_semantic_output_reaches_file
+  - test_ttft_legacy_unknown_and_partial_failure
+  AC-04:
+  - test_ttft_each_physical_retry_preserves_safe_facts
+  - test_ttft_sampling_fallback_is_a_separate_physical_attempt
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Self-contained real loopback HTTP/SSE provider, actual model clients and parser,
+  real OTel and local writer. Private temporary root per test; clients close in finally,
+  server shutdown/server_close/join is asserted, processor and ThreadManager shutdown
+  asserts zero active workers. No PG, shared provider, shared business asset, factory
+  or deployment is required. Mock profile denotes the controlled HTTP provider.

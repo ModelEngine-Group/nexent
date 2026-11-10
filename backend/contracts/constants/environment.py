@@ -1,8 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
+
+from ..configuration import (
+    _build_otlp_headers,
+    _require_positive,
+    _resolve_app_version,
+    parse_port,
+    parse_positive_float,
+    parse_positive_int,
+)
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -394,8 +403,17 @@ MONITORING_TRACE_CONTENT_MODE = os.getenv('MONITORING_TRACE_CONTENT_MODE', 'summ
 MONITORING_TRACE_MAX_CHARS = os.getenv('MONITORING_TRACE_MAX_CHARS', '4000')
 MONITORING_TRACE_MAX_ITEMS = os.getenv('MONITORING_TRACE_MAX_ITEMS', '20')
 MONITORING_TRACE_SINK = os.getenv('MONITORING_TRACE_SINK', 'otlp').strip().lower()
+TRAJECTORY_READ_ENABLED = os.getenv('TRAJECTORY_READ_ENABLED', 'false').lower() == 'true'
+# Persistent trajectory references use a dedicated key, independent of JWT rotation.
+TRAJECTORY_SIGNING_KEY = os.getenv('TRAJECTORY_CURSOR_SECRET') or os.getenv('TRAJECTORY_SIGNING_KEY', '')
+TRAJECTORY_QUERY_MAX_BYTES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_BYTES'), 'TRAJECTORY_QUERY_MAX_BYTES', 268435456)
+TRAJECTORY_QUERY_MAX_CANDIDATES = parse_positive_int(os.getenv('TRAJECTORY_QUERY_MAX_CANDIDATES'), 'TRAJECTORY_QUERY_MAX_CANDIDATES', 10000)
+TRAJECTORY_QUERY_TIMEOUT_SECONDS = parse_positive_float(os.getenv('TRAJECTORY_QUERY_TIMEOUT_SECONDS'), 'TRAJECTORY_QUERY_TIMEOUT_SECONDS', 8)
 TRAJECTORY_ROOT_DIR = os.getenv('TRAJECTORY_ROOT_DIR', '')
 TRAJECTORY_STORAGE_ROOT_ID = os.getenv('TRAJECTORY_STORAGE_ROOT_ID', '')
+TRAJECTORY_STORAGE_MODE = os.getenv('TRAJECTORY_STORAGE_MODE', 'single_node').strip().lower()
+if TRAJECTORY_STORAGE_MODE not in ('single_node', 'shared_directory'):
+    raise ValueError('TRAJECTORY_STORAGE_MODE must be single_node or shared_directory')
 TRAJECTORY_RETENTION_DAYS = parse_positive_int(os.getenv('TRAJECTORY_RETENTION_DAYS'), 'TRAJECTORY_RETENTION_DAYS', 30)
 TRAJECTORY_FLUSH_INTERVAL_MS = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_INTERVAL_MS'), 'TRAJECTORY_FLUSH_INTERVAL_MS', 200)
 TRAJECTORY_FLUSH_BYTES = parse_positive_int(os.getenv('TRAJECTORY_FLUSH_BYTES'), 'TRAJECTORY_FLUSH_BYTES', 262144)
@@ -424,7 +442,7 @@ APP_VERSION = _resolve_app_version(version_file=os.getenv("APP_VERSION_FILE"))
 # Agent Sandbox Configuration
 # =============================================================================
 NEXENT_TOOL_FASTPATH_ENABLED = os.getenv('NEXENT_TOOL_FASTPATH_ENABLED', 'true').strip().lower() == 'true'
-NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys((item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip())))
+NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(item.strip() for item in os.getenv('NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS', 'KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool').split(',') if item.strip()))
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv('NEXENT_SANDBOX_DEFAULT_LEVEL', 'local').lower()
 # Default sandbox isolation level: local / docker / wasm.
 #    Default 'local' preserves backward-compatibility for existing deployments.

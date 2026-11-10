@@ -31,19 +31,39 @@ from management.services.conversation.agent_history import (
 )
 from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
-router = APIRouter(prefix="/conversation")
+from management.api.observability.trajectory import PrivateRoute
+
+router = APIRouter(prefix="/conversation", route_class=PrivateRoute)
 
 
 @router.get("/agent_groups", response_model=ConversationResponse)
 async def list_agent_groups_endpoint(
+    request: Request,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
     include_agent_id: list[int] = Query(default=[]),
     include_other: bool = False,
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return paginated Agent-chat groups and pinned groups outside the page."""
+    if view == "trajectory":
+        if "include_agent_id" in request.query_params and (
+            len(include_agent_id) > 100 or any(value <= 0 for value in include_agent_id)
+        ):
+            raise HTTPException(status_code=422, detail={"code": "invalid_included_agents"})
+        from management.api.observability.trajectory import dispatch
+        from management.services.trajectory.directory import directory
+
+        return await dispatch(request, authorization, lambda service, actor: directory(
+            service, actor, target_user_id=target_user_id, tenant_id=tenant_id, category=category,
+            group_key=None, limit=limit if "limit" in request.query_params else 20, cursor=cursor, search=search))
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         if len(include_agent_id) > 100 or any(agent_id <= 0 for agent_id in include_agent_id):
@@ -75,13 +95,27 @@ async def list_agent_groups_endpoint(
 
 @router.get("/agent_groups/{group_key}/conversations", response_model=ConversationResponse)
 async def list_agent_group_conversations_endpoint(
+    request: Request,
     group_key: str,
     authorization: Optional[str] = Header(None),
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    cursor: Annotated[Optional[str], Query(max_length=2048)] = None,
     search: Annotated[str, Query(max_length=200)] = "",
+    view: Optional[str] = None,
+    target_user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    category: Literal["agent_chat", "workbench"] = "agent_chat",
 ):
     """Return a paginated Agent-chat history group without message bodies."""
+    if view == "trajectory":
+        from management.api.observability.trajectory import dispatch
+        from management.services.trajectory.directory import directory
+
+        return await dispatch(request, authorization, lambda service, actor: directory(
+            service, actor, target_user_id=target_user_id, tenant_id=tenant_id, category=category,
+            group_key=group_key, limit=limit if "limit" in request.query_params else 20, cursor=cursor, search=search))
+    if view is not None or target_user_id is not None or tenant_id is not None or (cursor and len(cursor) > 512):
+        raise HTTPException(status_code=422, detail="Invalid conversation directory parameters")
     try:
         user_id, _ = get_current_user_id(authorization)
         data = list_agent_group_conversations(user_id, group_key, limit, cursor, search)

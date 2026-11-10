@@ -153,7 +153,7 @@ def test_ut_sdk_trace_022_processor_preserves_lifecycle(mocker):
     delegate = mocker.Mock()
     delegate.force_flush.return_value = True
     processor = MonitoringSpanProcessor(delegate)
-    span = mocker.Mock(attributes={})
+    span = mocker.Mock(attributes={}, events=(), links=())
     context = Context()
     processor.on_start(span, parent_context=context)
     processor.on_end(span)
