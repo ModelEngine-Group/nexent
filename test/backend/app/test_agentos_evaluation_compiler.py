@@ -27,7 +27,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
     (kind, persisted_body)
     for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
                  "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
-                 "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope",
+                 "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope", "workbench_mixed_controls",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
     for persisted_body in (False, True)
 ] + [("a2a_default_model", False)])
@@ -134,6 +134,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 mode="single_agent_chat", agent_mounts=[{"agent_id": 8, "version_no": 5}],
                 generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
             )
+            if kind == "workbench_mixed_controls":
+                from management.services.model import run_controls
+
+                config.model_id = 11
+                request.generation_config = WorkbenchGenerationConfig(temperature=1.7, top_p=0.8)
+                mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
+                mocker.patch.object(run, "get_model_by_model_id", return_value=record)
+                preflight_overlay = mocker.spy(run_controls, "overlay_root_model")
             if knowledge_scope is not None:
                 knowledge = ResolvedKnowledgeScope(
                     desired_scope=config.knowledge_scope.model_dump(mode="json"), tool_params=ToolParamsRequest(),
@@ -215,6 +223,11 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert info.model_config_list[0].temperature == 0.4
             assert info.model_config_list[0].explicit_sampling == ["temperature"]
             assert info.model_config_list[1].temperature == model.temperature
+            if kind == "workbench_mixed_controls":
+                preflight = next(call.args[1] for call in preflight_overlay.call_args_list if call.args[2] == "preflight_root")
+                assert preflight == config.generation_config.model_dump(mode="json")
+                assert info.model_config_list[0].top_p == model.top_p
+                assert request.generation_config.temperature == 1.7
         if metadata is not None and not use_workbench:
             if kind == "northbound_metadata":
                 permission.assert_not_called()

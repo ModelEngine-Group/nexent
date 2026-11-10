@@ -308,9 +308,8 @@ async def prepare_conversation_snapshot(
         )
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
-    if any((
-        workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
-        request.is_debug or (workbench is not None and request.generation_config is not None),
+    if request.is_debug or (workbench is None and (
+        request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None
     )):
         return None
     if workbench is None and native_knowledge is None and (
@@ -330,16 +329,18 @@ async def prepare_conversation_snapshot(
 
         root = workbench.plan.root.identity
         config = workbench.config
+        generation = config.generation_config.model_dump(mode="json")
         request = request.model_copy(update={
             "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
             "model_id": config.model_id or request.model_id,
             "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
             "knowledge_scope": config.knowledge_scope,
+            "_runtime_generation_config": generation,
         })
         compile_options = {
             "runtime_sub_agent_mounts": [asdict(child) for child in workbench.plan.child_mounts],
             "runtime_skill_snapshot": runtime_skill_snapshot(workbench.plan),
-            "runtime_generation_config": config.generation_config.model_dump(mode="json"),
+            "runtime_generation_config": generation,
             "prepared_workbench": workbench,
         }
         if workbench.knowledge is not None:
