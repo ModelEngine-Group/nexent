@@ -162,9 +162,8 @@ export function findMessageElement(messageId: string): HTMLElement | null {
 /**
  * Scrolls the thread viewport to the message with the given id.
  *
- * The target is located through the DOM and scrolled natively. The target
- * flashes briefly so the landing point is obvious after the smooth scroll
- * settles.
+ * The target is located through the DOM and scrolled natively without adding
+ * a visual highlight to the message.
  */
 export function scrollThreadToMessage(messageId: string): boolean {
   const element = findMessageElement(messageId);
@@ -174,13 +173,6 @@ export function scrollThreadToMessage(messageId: string): boolean {
   element.style.scrollMarginTop = "16px";
   element.scrollIntoView({ behavior: "smooth", block: "start" });
 
-  // Brief highlight so the jump target is visible after scrolling.
-  element.style.transition = "box-shadow 0.4s ease-out";
-  element.style.boxShadow = "0 0 0 3px rgba(59, 130, 246, 0.45)";
-  window.setTimeout(() => {
-    element.style.boxShadow = "";
-    element.style.transition = "";
-  }, 1600);
   return true;
 }
 

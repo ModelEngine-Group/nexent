@@ -298,7 +298,7 @@ test("collectQuestionDirectory attaches and caps the assistant reply excerpt", (
   expect(questions[1]?.replyText).toBe("");
 });
 
-test("scrollThreadToMessage scrolls to and highlights the target message", () => {
+test("scrollThreadToMessage scrolls to the target without a highlight frame", () => {
   const element = document.createElement("div");
   element.setAttribute("data-message-id", "msg-42");
   const scrollIntoView = vi.fn();
@@ -312,7 +312,8 @@ test("scrollThreadToMessage scrolls to and highlights the target message", () =>
     behavior: "smooth",
     block: "start",
   });
-  expect(element.style.boxShadow).not.toBe("");
+  expect(element.style.boxShadow).toBe("");
+  expect(element.style.transition).toBe("");
 });
 
 test("scrollThreadToMessage reports missing targets", () => {
