@@ -1711,7 +1711,6 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             generation_config={"temperature": 0.45},
         ),
         reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
-        allow_prepared_memory=True,
     )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
@@ -1860,14 +1859,15 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             "started_at": datetime.now(timezone.utc),
         }
         task = {**stored_run, "status": "ACTIVE", "agent_id": 7, "instruction": "question"}
-        def record(run_id, values, user_id, *, expected_statuses):
-            assert (run_id, user_id, expected_statuses) == (51, actor.user_id, ["RUNNING"])
+        def record(run_id, values, user_id, *, expected_statuses, tenant_id):
+            assert (run_id, user_id, tenant_id, expected_statuses) == (51, actor.user_id, actor.tenant_id, ["RUNNING"])
             stored_run.update(values)
             return stored_run.copy()
 
         real_start = agentos.start_prepared_run
         async def start_then_drop_ack(payload, user_id, tenant_id):
             assert stored_run["projection_message_index"] == 1 and stored_run["user_message_id"] == 23
+            assert stored_run["projection_memory_agent_id"] == 7
             assert await real_start(payload, user_id, tenant_id) == reference
             raise RuntimeServiceUnavailableError("Synthetic dropped acknowledgement")
 
@@ -1956,12 +1956,15 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             "conversation_id": cid, "status": "completed", "cancellation_requested": False,
         } if (run_id, user, tenant, cid) == (reference.run_id, actor.user_id, actor.tenant_id, 42) else None)
         monkeypatch.setattr(Journal, "run_state", lambda self: (journal_events[-1][0], "completed", False), raising=False)
+        task["agent_id"] = 99
         await automation.AgentAutomationRunner().recover_prepared_run(stored_run.copy())
         assert stored_run["assistant_message_id"] == 77 and stored_run["status"] == "SUCCEEDED"
         assert stored_run["projection_message_index"] is None
+        assert stored_run["projection_memory_agent_id"] is None
         assert len(persisted) == 1
         assert persisted[0]["message_source"] is MessageSource.AUTOMATION
         batch = persisted[0]
+        assert (batch["memory_agent_id"], batch["memory_source_message_id"]) == (7, 23)
         assert (batch["projection_run_id"], batch["conversation_id"]) == (reference.run_id, 42)
         assert batch["message_content"] == "answer"
         assert batch["history_checkpoints"] == [{
@@ -2240,7 +2243,6 @@ async def _assert_public_prepared_turn_over_signed_http(
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
-        assert kwargs["allow_prepared_memory"] is True
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata

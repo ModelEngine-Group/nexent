@@ -40,21 +40,25 @@ def automation(mocker):
 
 
 @pytest.mark.asyncio
-async def test_automation_records_projection_before_dispatch_and_keeps_uncertain_start(automation, mocker):
+@pytest.mark.parametrize("memory_enabled", [False, True])
+async def test_automation_records_projection_before_dispatch_and_keeps_uncertain_start(automation, mocker, memory_enabled):
     executor, run, task, client = automation
-    snapshot = object()
+    snapshot = SimpleNamespace(memory_enabled=memory_enabled, resource=SimpleNamespace(agent_id=2))
     compile_snapshot = mocker.patch.object(runner, "prepare_conversation_snapshot", return_value=snapshot)
     legacy = mocker.patch.object(runner, "forward_tracked_background")
     writes = []
 
-    def persist(run_id, values, user_id, *, expected_statuses):
-        assert run_id == run["run_id"] and user_id == ACTOR[0] and expected_statuses == ["RUNNING"]
+    def persist(run_id, values, user_id, *, expected_statuses, tenant_id):
+        assert (run_id, user_id, tenant_id, expected_statuses) == (run["run_id"], *ACTOR, ["RUNNING"])
         writes.append(values)
         return {**run, **values}
 
     async def lose_ack(payload, user_id, tenant_id):
         assert payload is snapshot and (user_id, tenant_id) == ACTOR
-        assert writes == [{"generated_prompt": "question", "user_message_id": 31, "projection_message_index": 9}]
+        assert writes == [{
+            "generated_prompt": "question", "user_message_id": 31, "projection_message_index": 9,
+            "projection_memory_agent_id": 2 if memory_enabled else None,
+        }]
         raise RuntimeServiceUnavailableError("lost response")
 
     mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=persist)
@@ -98,6 +102,20 @@ async def test_recovery_reuses_a_committed_receipt_after_journal_expiry(automati
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("agent_id", [None, 2])
+async def test_automation_projects_only_the_durable_memory_scope(automation, mocker, agent_id):
+    executor, run, _, client = automation
+    run.update(projection_message_index=9, projection_memory_agent_id=agent_id, user_message_id=31)
+    client.resume = AsyncMock()
+    mocker.patch.object(runner, "get_prepared_projection_receipt", return_value=None)
+    project = mocker.patch.object(runner, "resume_assistant_projection")
+    await executor._project_prepared_run(client, REFERENCE, run)
+    options = project.await_args.kwargs
+    assert options.get("memory_agent_id") == agent_id
+    assert options.get("memory_source_message_id") == (31 if agent_id is not None else None)
+
+
+@pytest.mark.asyncio
 async def test_recovery_fences_missing_expired_run_before_advancing(automation, mocker):
     executor, run, task, client = automation
     run["projection_message_index"] = 9
@@ -129,4 +147,5 @@ def test_canceled_projection_preserves_status_and_advances_the_occurrence(automa
     _, run_values, task_values = finish.call_args.args
     assert run_values["status"] == "CANCELED" and run_values["finished_at"] == run["finished_at"]
     assert run_values["assistant_message_id"] == 55 and run_values["projection_message_index"] is None
+    assert run_values["projection_memory_agent_id"] is None
     assert task_values["last_run_status"] == "CANCELED" and task_values["fire_count"] == 1

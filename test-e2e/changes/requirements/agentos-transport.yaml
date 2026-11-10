@@ -28,6 +28,7 @@ change:
     - Prepared runs accept typed Memory only in a persistent conversation and bind writes to the local signed Agent and owner.
     - Prepared Memory notifies Management through a signed reverse callback and retains local success when external ingestion is unavailable.
     - Memory completion jobs commit with the projection and keep selection and writes safe across lease recovery.
+    - Automated Memory runs retain the prepared Agent and owned prompt through an uncertain admission and subsequent recovery.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
@@ -119,6 +120,7 @@ change:
     - test/backend/app/test_agentos_memory_store.py
     - test/backend/services/test_agentos_memory_callback.py
     - test/backend/services/test_prepared_memory_completion.py
+    - test/backend/services/test_agent_automation_prepared.py
     - test/backend/app/test_agentos_tracked_background.py
     - test/backend/services/test_startup_recovery_service.py
     - test/backend/services/test_agent_subscription_lifecycle.py

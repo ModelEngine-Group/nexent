@@ -305,8 +305,7 @@ def test_parallel_executor_rejects_nonpositive_or_coerced_timeout(mocker, value)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("allow_prepared_memory", [False, True])
-async def test_prepared_conversation_scope_is_checked_before_compilation(mocker, allow_prepared_memory):
+async def test_prepared_conversation_scope_is_checked_before_compilation(mocker):
     from contracts.errors.exceptions import ForbiddenError
 
     read = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value=None)
@@ -315,9 +314,7 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker,
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
 
     with pytest.raises(ForbiddenError):
-        await evaluation_snapshot.prepare_conversation_snapshot(
-            request, reference, "actor", "foreign", allow_prepared_memory=allow_prepared_memory,
-        )
+        await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "foreign")
     read.assert_called_once_with(42, user_id="actor", tenant_id="foreign")
     compile_run.assert_not_called()
 
@@ -331,10 +328,15 @@ async def test_prepared_conversation_does_not_drop_memory_or_scope(mocker):
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
 
     assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
-    get_conversation.return_value = {}
-    assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
-    memory.assert_called_once_with("actor")
+    memory.assert_not_called()
     compile_run.assert_not_called()
+    get_conversation.return_value = {}
+    assert await evaluation_snapshot.prepare_conversation_snapshot(
+        request, reference, "actor", "tenant",
+    ) is compile_run.return_value
+    memory.assert_called_once_with("actor")
+    assert compile_run.await_args.kwargs["allow_memory_search"] is True
+    assert compile_run.await_args.kwargs["prepared_conversation"].memory_enabled is True
 
 
 @pytest.mark.asyncio

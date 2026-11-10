@@ -155,8 +155,7 @@ async def start_turn(
             options["native_knowledge"] = native_knowledge
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
-            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
-            allow_prepared_memory=True, **options,
+            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
         )
         if snapshot is None:
             return None

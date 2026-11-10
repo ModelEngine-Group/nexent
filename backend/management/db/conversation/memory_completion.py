@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import Column, Integer, String, TIMESTAMP, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 
+from contracts.conversation import MessageSource
 from infrastructure.rdb.base import SCHEMA, TableBase
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
@@ -28,6 +29,7 @@ class MemoryCompletion(TableBase):
     run_id = Column(String(32), nullable=False)
     job_type = Column(String(20), nullable=False)
     agent_id = Column(Integer, nullable=False)
+    source_message_id = Column(Integer)
     attempts = Column(Integer, nullable=False, server_default="0")
     next_attempt_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     lease_token = Column(String(32))
@@ -43,6 +45,7 @@ class MemoryJob:
     token: str
     attempts: int
     selected_items: list[str] | None
+    source_message_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,12 +62,13 @@ def _job_id(run_id: str, job_type: str) -> str:
     return f"{run_id}:{job_type}"
 
 
-def enqueue(session, run_id: str, agent_id: int, actor: str, status: str, answer: str) -> None:
+def enqueue(session, run_id: str, agent_id: int, actor: str, status: str, answer: str, *,
+            source_message_id: int | None = None) -> None:
     types = ([TURN_COMPLETED] if status == "completed" else []) + ([FINAL_ANSWER] if answer.strip() else [])
     if types:
         session.execute(insert(MemoryCompletion).values([
             {"job_id": _job_id(run_id, job_type), "run_id": run_id, "job_type": job_type, "agent_id": agent_id,
-             "created_by": actor, "updated_by": actor, "delete_flag": "N"}
+             "source_message_id": source_message_id, "created_by": actor, "updated_by": actor, "delete_flag": "N"}
             for job_type in types
         ]).on_conflict_do_nothing(index_elements=[MemoryCompletion.job_id]))
 
@@ -85,7 +89,9 @@ def claim() -> MemoryJob | None:
         row.lease_token = uuid4().hex
         row.attempts += 1
         row.next_attempt_at = func.now() + _LEASE
-        return MemoryJob(row.run_id, row.job_type, row.agent_id, row.lease_token, row.attempts, row.selected_items)
+        return MemoryJob(
+            row.run_id, row.job_type, row.agent_id, row.lease_token, row.attempts, row.selected_items, row.source_message_id,
+        )
 
 
 def _leased(job):
@@ -106,7 +112,8 @@ def read_source(job: MemoryJob) -> MemorySource | None:
         ).join(conversation, conversation.conversation_id == message.conversation_id).where(
             receipt.run_id == job.run_id, receipt.delete_flag == "N",
             message.created_by == receipt.created_by, message.delete_flag == "N",
-            message.message_role == "assistant", message.message_source == "CHAT",
+            message.message_role == "assistant",
+            message.message_source.in_((MessageSource.CHAT.value, MessageSource.AUTOMATION.value)),
             conversation.created_by == receipt.created_by, conversation.delete_flag == "N",
             select(MemoryCompletion.run_id).where(*_leased(job)).exists(),
         )).one_or_none()
@@ -115,11 +122,16 @@ def read_source(job: MemoryJob) -> MemorySource | None:
         assistant = row[2]
         if job.job_type == TURN_COMPLETED and assistant.status != "completed":
             return None
-        query = session.scalar(select(message.message_content).where(
+        prompt = select(message.message_content).where(
             message.conversation_id == assistant.conversation_id, message.created_by == row.created_by,
             message.message_index == assistant.message_index - 1, message.delete_flag == "N",
-            message.message_role == "user", message.message_source == "CHAT",
-        ).limit(1))
+            message.message_role == "user", message.message_source == assistant.message_source,
+        )
+        if assistant.message_source == MessageSource.AUTOMATION.value:
+            if job.source_message_id is None:
+                return None
+            prompt = prompt.where(message.message_id == job.source_message_id)
+        query = session.scalar(prompt.limit(1))
         if query is None:
             return None
         return MemorySource(

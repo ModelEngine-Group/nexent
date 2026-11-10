@@ -260,7 +260,6 @@ async def prepare_conversation_snapshot(
     before_message_index: int | None = None, new_conversation: bool = False,
     allow_metadata_update: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
-    allow_prepared_memory: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -289,9 +288,6 @@ async def prepare_conversation_snapshot(
     memory_enabled = await run_blocking(
         "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
     )
-    if memory_enabled and not allow_prepared_memory:
-        return None
-
     compile_options = {}
     if workbench is not None:
         root = workbench.plan.root.identity

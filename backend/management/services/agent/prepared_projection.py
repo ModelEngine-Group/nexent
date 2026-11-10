@@ -118,6 +118,7 @@ async def resume_assistant_projection(
     resume, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     message_index: int, message_source: MessageSource, assistant_message_id: int | None = None,
     memory_agent_id: int | None = None,
+    memory_source_message_id: int | None = None,
 ) -> ProjectedRun:
     """Commit only a complete projection and let duplicate replays reuse its receipt."""
     projection = AssistantMessageProjection(persist_units=True)
@@ -127,6 +128,8 @@ async def resume_assistant_projection(
     target = {"assistant_message_id": assistant_message_id} if assistant_message_id is not None else {}
     if memory_agent_id is not None:
         target["memory_agent_id"] = memory_agent_id
+    if memory_source_message_id is not None:
+        target["memory_source_message_id"] = memory_source_message_id
     message_id = await run_blocking(
         "persist-prepared-assistant-projection", persist_prepared_assistant_projection,
         lane="control-io", owner="management", projection_run_id=reference.run_id,

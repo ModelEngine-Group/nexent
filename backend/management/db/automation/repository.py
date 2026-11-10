@@ -370,6 +370,8 @@ def update_run(
     values: Dict[str, Any],
     user_id: Optional[str] = None,
     expected_statuses: Optional[List[str]] = None,
+    *,
+    tenant_id: str | None = None,
 ) -> Optional[Dict[str, Any]]:
     data = {
         **values,
@@ -384,6 +386,8 @@ def update_run(
         ]
         if expected_statuses:
             conditions.append(AgentAutomationRun.status.in_(expected_statuses))
+        if tenant_id is not None:
+            conditions.extend((AgentAutomationRun.tenant_id == tenant_id, AgentAutomationRun.user_id == user_id))
         run = session.execute(
             update(AgentAutomationRun).where(*conditions).values(**data).returning(AgentAutomationRun)
         ).scalar_one_or_none()

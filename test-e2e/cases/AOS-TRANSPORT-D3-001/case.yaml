@@ -120,6 +120,9 @@ case:
   - order: 31
     action: Submit an owned Memory-enabled public conversation through Management and replay its Runtime output.
     expected: Management selects the prepared route and forwards the pinned Agent to the durable projection once.
+  - order: 32
+    action: Start a Memory-enabled automation run, lose its admission acknowledgement, and recover after the task Agent changes.
+    expected: Management projects the original signed run under the persisted Agent and prompt message without another dispatch.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -153,6 +156,7 @@ case:
   - Prepared Memory preserves retrieved context, search event order and the signed scope of a local store.
   - Prepared Memory notifies Management after local persistence. A notification cannot supply stored content or cross owner boundaries.
   - Memory-enabled public turns use signed prepared admission and record completion work with the owned assistant projection.
+  - Automation recovery uses the original Memory Agent and prompt message under the owned automation projection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -375,4 +379,9 @@ case:
     description: A Memory-enabled public turn persists the completion work scope through its signed Runtime run and Management projection.
     steps: [31]
     expected_results: [32]
+    forbidden_side_effects: [1, 2]
+  - id: AC-41
+    description: An automation run retains its Memory scope when Runtime accepts the run and its acknowledgement is lost.
+    steps: [32]
+    expected_results: [33]
     forbidden_side_effects: [1, 2]

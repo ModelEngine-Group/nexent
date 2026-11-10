@@ -79,7 +79,6 @@ async def test_public_memory_pins_the_snapshot_agent(flow):
     compile_snapshot.return_value.memory_enabled = True
     compile_snapshot.return_value.resource = SimpleNamespace(agent_id=7)
     await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
-    assert compile_snapshot.await_args.kwargs["allow_prepared_memory"]
     assert prepared_turn.store.stage_turn.call_args.args[5]["memory_agent_id"] == 7
 
 

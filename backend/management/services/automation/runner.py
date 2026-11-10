@@ -203,7 +203,8 @@ class AgentAutomationRunner:
                     "generated_prompt": generated_prompt,
                     "user_message_id": turn["user_message_id"],
                     "projection_message_index": message_index,
-                }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value])
+                    "projection_memory_agent_id": snapshot.resource.agent_id if snapshot.memory_enabled else None,
+                }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value], tenant_id=run["tenant_id"])
                 if pending is None:
                     return agent_automation_db.get_run(run["run_id"], run["tenant_id"], run["user_id"]) or run
                 run.update(pending)
@@ -241,9 +242,14 @@ class AgentAutomationRunner:
         )
         if receipt is not None:
             return ProjectedRun(receipt[0], receipt[1], 0)
+        memory_scope = {}
+        if run.get("projection_memory_agent_id") is not None:
+            memory_scope = {
+                "memory_agent_id": run["projection_memory_agent_id"], "memory_source_message_id": run["user_message_id"],
+            }
         return await resume_assistant_projection(
             client.resume, reference, run["user_id"], run["tenant_id"],
-            message_index=run["projection_message_index"], message_source=MessageSource.AUTOMATION,
+            message_index=run["projection_message_index"], message_source=MessageSource.AUTOMATION, **memory_scope,
         )
 
     async def recover_prepared_run(self, run: dict) -> None:
@@ -301,7 +307,7 @@ class AgentAutomationRunner:
         )
 
     def _finish_prepared_projection(self, run, task, projected: ProjectedRun | None):
-        extra = {"projection_message_index": None}
+        extra = {"projection_message_index": None, "projection_memory_agent_id": None}
         if projected is not None:
             extra["assistant_message_id"] = projected.assistant_message_id
         if run["status"] == AutomationRunStatus.CANCELED.value:

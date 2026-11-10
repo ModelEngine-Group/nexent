@@ -122,6 +122,7 @@ class AgentAutomationRun(TableBase):
     generated_prompt = Column(Text, nullable=True, doc="Prompt appended to the conversation")
     user_message_id = Column(BigInteger, nullable=True, doc="Automation user message ID")
     projection_message_index = Column(Integer, doc="Assistant message index while AgentOS projection is pending")
+    projection_memory_agent_id = Column(Integer, doc="Authorized Memory Agent for the pending AgentOS projection")
     assistant_message_id = Column(BigInteger, nullable=True, doc="Assistant message ID")
     started_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run start time")
     finished_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run finish time")
