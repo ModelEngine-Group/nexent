@@ -390,6 +390,7 @@ async def create_agent_run_info(
                 root_generation=prepared_workbench.config.generation_config,
                 source_model_alias=source_model_alias,
                 workbench_skills=prepared_workbench.plan.root_skills,
+                workbench_knowledge_tools=prepared_workbench.knowledge_tools,
             )
             if reasoning_effort is not None or reasoning_budget_tokens is not None:
                 export_options["turn_generation"] = TurnModelGeneration(

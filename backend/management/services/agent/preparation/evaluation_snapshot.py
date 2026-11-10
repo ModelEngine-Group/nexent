@@ -208,6 +208,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     if request.metadata is not None:
         await _authorize_prepared_metadata(request, tenant_id)
     knowledge = None
+    tools = None
     compile_options = {}
     if config.knowledge_scope is not None:
         from management.services.knowledge_base.scope import build_runtime_knowledge_resources
@@ -233,7 +234,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         export_evaluation=True, runtime_skill_snapshot=runtime_skill_snapshot(plan),
         runtime_generation_config=generation,
         runtime_sub_agent_mounts=[asdict(child) for child in plan.child_mounts],
-        prepared_workbench=PreparedWorkbench(config, plan, 0, 0),
+        prepared_workbench=PreparedWorkbench(config, plan, 0, 0, knowledge, tools),
         **compile_options,
     )
     if snapshot is None:
@@ -635,7 +636,7 @@ def _export_memory_search(agent, allow_memory):
 
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
-    allow_debug_planning=False, workbench_skills=(),
+    allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None,
 ):
     if agent.sandbox_policy is not None:
         raise ValueError("Unsupported prepared resource")
@@ -671,6 +672,16 @@ def _export_resource(
         ) if workbench_skills else []
     except ValidationError as exc:
         raise ValueError("Workbench Skill tool configuration changed") from exc
+    if workbench_knowledge_tools is not None:
+        from management.services.knowledge_base.mount import MANAGED_CLASSES
+
+        selected = {
+            (row["source"], row["name"]) for row in workbench_knowledge_tools if row.get("class_name") in MANAGED_CLASSES
+        }
+        mounted_tools = [
+            row for row in mounted_tools
+            if row["class_name"] not in MANAGED_CLASSES or (row["source"], row["name"]) in selected
+        ]
     compiled_tools = {(tool.source, tool.name) for tool in agent.tools}
     if any((row["source"], row["name"]) not in compiled_tools for row in mounted_tools):
         raise ValueError("Workbench Skill tool was omitted by the compiled scope")
@@ -827,7 +838,7 @@ def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
-    allow_debug_planning=False,
+    allow_debug_planning=False, workbench_knowledge_tools=None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -839,6 +850,7 @@ def export_snapshot(
             allow_memory=prepared_conversation is not None,
             allow_debug_planning=allow_debug_planning,
             workbench_skills=workbench_skills,
+            workbench_knowledge_tools=workbench_knowledge_tools,
         )
         bindings = [
             _export_model(

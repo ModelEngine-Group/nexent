@@ -346,3 +346,36 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
         ordinary.assert_not_called()
     finally:
         prepared_evaluation._remove_skill_files(workspace)
+
+
+@pytest.mark.parametrize(("class_name", "selected", "allowed"), [
+    ("AidpSearchTool", None, False),
+    ("AidpSearchTool", [], True),
+    ("AidpSearchTool", [{"source": "local", "name": "catalog_search", "class_name": "AidpSearchTool"}], False),
+    ("OtherTool", [], False),
+])
+def test_workbench_snapshot_allows_only_knowledge_tools_omitted_by_authorized_scope(
+    skill_snapshot, mocker, class_name, selected, allowed,
+):
+    from infrastructure.skill_execution import capture_skill_files
+    from management.services.agent.workbench import ResolvedSkillMount
+
+    agent, _, _, row, _ = skill_snapshot
+    for tool in agent.tools:
+        tool.params["authorized_skill_names"] = ["summarize"]
+    skill = ResolvedSkillMount(
+        53, row["name"], row["description"], (91,), row["config"],
+        files=tuple(capture_skill_files("tenant-a", row["name"]).items()),
+    )
+    mocker.patch.object(evaluation_snapshot, "read_workbench_derived_tools", return_value=[
+        {"source": "local", "name": "catalog_search", "class_name": class_name},
+    ])
+    options = {"workbench_skills": (skill,), "workbench_knowledge_tools": selected}
+    if not allowed:
+        with pytest.raises(ValueError, match="omitted by the compiled scope"):
+            evaluation_snapshot._export_resource(agent, {}, "tenant-a", "en", None, {}, **options)
+        return
+
+    resource = evaluation_snapshot._export_resource(agent, {}, "tenant-a", "en", None, {}, **options)
+    assert [ref.skill_id for ref in resource.workbench_skill_refs] == [53]
+    assert all(tool.tool_id != "catalog_search" for tool in resource.tools)
