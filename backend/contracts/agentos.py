@@ -503,6 +503,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 
 class PreparedConversationScope(AgentRunReference):
+    memory_enabled: Literal[True] | None = None
     workbench_config_version: PositiveInt | None = None
     native_knowledge: Literal[True] | None = None
     historical_context: PreparedConversationHistory | None = None

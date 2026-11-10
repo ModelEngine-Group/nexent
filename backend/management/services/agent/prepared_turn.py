@@ -155,7 +155,8 @@ async def start_turn(
             options["native_knowledge"] = native_knowledge
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
-            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
+            request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
+            allow_prepared_memory=True, **options,
         )
         if snapshot is None:
             return None
@@ -184,6 +185,8 @@ async def start_turn(
             "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if snapshot.memory_enabled:
+            user_turn["memory_agent_id"] = snapshot.resource.agent_id
         if request.clarification_response is not None:
             user_turn["clarification_response"] = request.clarification_response.model_dump(mode="json")
         if workbench is not None:
@@ -329,9 +332,10 @@ async def _finish_projection(turn, client):
     if receipt is not None and receipt[0] != turn.assistant_message_id:
         raise RuntimeServiceUnavailableError("Prepared conversation receipt does not match the reserved message")
     if receipt is None:
+        memory_scope = {"memory_agent_id": turn.memory_agent_id} if turn.memory_agent_id is not None else {}
         await resume_assistant_projection(
             client.resume, reference, turn.user_id, turn.tenant_id, message_index=turn.message_index,
-            message_source=MessageSource.CHAT, assistant_message_id=turn.assistant_message_id,
+            message_source=MessageSource.CHAT, assistant_message_id=turn.assistant_message_id, **memory_scope,
         )
     await _io("prepared-turn-finished", store.close_turn, turn)
 
@@ -413,9 +417,13 @@ async def _recover_pending_turns():
 
 @asynccontextmanager
 async def prepared_turn_lifespan():
+    from management.services.memory.prepared_completion import recover_memory_jobs
+
     recovery = asyncio.create_task(_recover_pending_turns(), name="prepared-public-turn-recovery")
+    memory = asyncio.create_task(recover_memory_jobs(), name="prepared-memory-recovery")
     try:
         yield
     finally:
         recovery.cancel()
-        await asyncio.gather(recovery, return_exceptions=True)
+        memory.cancel()
+        await asyncio.gather(recovery, memory, return_exceptions=True)

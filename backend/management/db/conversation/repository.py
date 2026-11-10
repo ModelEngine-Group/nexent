@@ -486,7 +486,7 @@ def get_prepared_projection_receipt(
 
 def persist_prepared_assistant_projection(
     *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
-    user_id: str, tenant_id: str, assistant_message_id: int | None = None, **batch,
+    user_id: str, tenant_id: str, assistant_message_id: int | None = None, memory_agent_id: int | None = None, **batch,
 ) -> int:
     """Create or replay a remote projection in the same transaction as its receipt."""
     from infrastructure.rdb.conversation_state import tenant_membership_matches
@@ -534,6 +534,11 @@ def persist_prepared_assistant_projection(
             message_id, conversation_id, user_id=user_id, tenant_id=tenant_id,
             projection_run_id=projection_run_id, db_session=session, **batch,
         )
+        if memory_agent_id is not None and source == MessageSource.CHAT.value:
+            from management.db.conversation.memory_completion import enqueue
+
+            enqueue(session, projection_run_id, memory_agent_id, user_id,
+                    batch["terminal_status"], batch["message_content"] or "")
         return message_id
 
 

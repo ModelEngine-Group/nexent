@@ -33,6 +33,7 @@ class PreparedTurn:
     message_index: int
     assistant_message_id: int | None
     staged_at: datetime
+    memory_agent_id: int | None = None
 
 
 def _owned(session, conversation_id, user_id, tenant_id, *, lock=False):
@@ -73,6 +74,7 @@ def _view(row, *, message_index=None):
         row.created_by, row.tenant_id,
         row.prepared_message_index if message_index is None else message_index, row.prepared_assistant_id,
         row.update_time.replace(tzinfo=timezone.utc) if row.update_time.tzinfo is None else row.update_time,
+        (row.prepared_user_turn or {}).get("memory_agent_id"),
     )
 
 
@@ -249,7 +251,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             conversation.chat_mode = user_turn["chat_mode"]
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]
-            row.prepared_user_turn = None
+            memory_agent_id = user_turn.get("memory_agent_id")
+            row.prepared_user_turn = {"memory_agent_id": memory_agent_id} if memory_agent_id is not None else None
             if row.prepared_automation_context is not None:
                 row.prepared_automation_context = {
                     **row.prepared_automation_context, "source_message_id": source_message_id,

@@ -117,6 +117,9 @@ case:
   - order: 30
     action: Execute a prepared Memory write and observe the signed Management notification. Retry with missing or modified credentials and foreign ownership.
     expected: Management ingests only the committed record for the signed owner and refuses untrusted notifications.
+  - order: 31
+    action: Submit an owned Memory-enabled public conversation through Management and replay its Runtime output.
+    expected: Management selects the prepared route and forwards the pinned Agent to the durable projection once.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -149,6 +152,7 @@ case:
   - Agent Memory store preserves the receipt on replay and does not dispatch untrusted or out-of-scope writes.
   - Prepared Memory preserves retrieved context, search event order and the signed scope of a local store.
   - Prepared Memory notifies Management after local persistence. A notification cannot supply stored content or cross owner boundaries.
+  - Memory-enabled public turns use signed prepared admission and record completion work with the owned assistant projection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -366,4 +370,9 @@ case:
     description: Runtime's Memory store tool uses a signed reverse callback for scoped external ingestion.
     steps: [30]
     expected_results: [31]
+    forbidden_side_effects: [1, 2]
+  - id: AC-40
+    description: A Memory-enabled public turn persists the completion work scope through its signed Runtime run and Management projection.
+    steps: [31]
+    expected_results: [32]
     forbidden_side_effects: [1, 2]

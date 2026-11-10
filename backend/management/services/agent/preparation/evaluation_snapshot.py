@@ -351,6 +351,7 @@ async def prepare_conversation_snapshot(
         metadata_version += 1
     scope = PreparedConversationScope(
         **reference.model_dump(),
+        memory_enabled=True if memory_enabled else None,
         historical_context=historical_context,
         workbench_config_version=workbench.version if workbench is not None else None,
         native_knowledge=True if native_knowledge is not None else None,

@@ -233,7 +233,7 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     with monkeypatch.context() as planning_patches:
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
     with monkeypatch.context() as turn_patches:
-        await _assert_public_prepared_turn_over_signed_http(turn_patches)
+        await _assert_public_prepared_turn_over_signed_http(turn_patches, use_memory=True)
     with monkeypatch.context() as clarification_patches:
         await _assert_public_prepared_turn_over_signed_http(clarification_patches, clarification=True)
     with monkeypatch.context() as new_turn_patches:
@@ -2064,7 +2064,7 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
-    use_knowledge_scope=False, clarification=False,
+    use_knowledge_scope=False, clarification=False, use_memory=False,
 ):
     from contracts.agent import WorkbenchSessionConfig
     from contracts.clarification import ClarificationResponse
@@ -2101,6 +2101,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         llm["root_generation"] = config.generation_config.model_dump(mode="json")
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
+        **({"memory_enabled": True} if use_memory else {}),
         **({"runtime_metadata": metadata, "runtime_metadata_version": 6} if metadata is not None else {}),
         **({"workbench_config_version": 4} if use_workbench else {}),
         **({"native_knowledge": True} if native_scope else {}),
@@ -2116,7 +2117,8 @@ async def _assert_public_prepared_turn_over_signed_http(
     state = {"status": "pending"}
     calls = []
     pending = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
-                              message_index=boundary + 1, assistant_message_id=None)
+                              message_index=boundary + 1, assistant_message_id=None,
+                              memory_agent_id=7 if use_memory else None)
     confirmed = SimpleNamespace(**{**vars(pending), "assistant_message_id": 81})
 
     def claim(_scope, _fingerprint, user_id, tenant_id):
@@ -2131,6 +2133,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
         assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
         assert turn["query"] == "test"
+        assert turn.get("memory_agent_id") == pending.memory_agent_id
         assert turn.get("clarification_response") == (response.model_dump(mode="json") if response else None)
         if use_workbench:
             assert turn["workbench_update"] == {
@@ -2167,6 +2170,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert calls == ["stage", "start", "confirm"]
         assert fields["assistant_message_id"] == 81 and fields["projection_run_id"] == reference.run_id
         assert fields["message_content"] == "answer"
+        assert fields.get("memory_agent_id") == pending.memory_agent_id
         calls.append("project")
         return 81
 
@@ -2236,6 +2240,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        assert kwargs["allow_prepared_memory"] is True
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata

@@ -28,10 +28,11 @@ def flow(mocker):
     identity = {
         "reference": REFERENCE, "user_id": ACTOR[0], "tenant_id": ACTOR[1], "message_index": 9,
         "staged_at": datetime.now(timezone.utc) - timedelta(minutes=2),
+        "memory_agent_id": None,
     }
     staged = SimpleNamespace(**identity, assistant_message_id=None)
     confirmed = SimpleNamespace(**identity, assistant_message_id=61)
-    snapshot = SimpleNamespace(runtime_metadata_version=2)
+    snapshot = SimpleNamespace(runtime_metadata_version=2, memory_enabled=None)
 
     async def inline(_name, fn, *args, lane, owner, **kwargs):
         return fn(*args, **kwargs)
@@ -70,6 +71,16 @@ async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
     assert result.headers["run_id"] == REFERENCE.run_id and result.headers["conversation_id"] == "42"
     assert result.headers["X-Runtime-Metadata-Version"] == "2"
     assert b"".join([chunk async for chunk in result.body_iterator]) == b"data: answer\n\n"
+
+
+@pytest.mark.asyncio
+async def test_public_memory_pins_the_snapshot_agent(flow):
+    _, compile_snapshot, client, _ = flow
+    compile_snapshot.return_value.memory_enabled = True
+    compile_snapshot.return_value.resource = SimpleNamespace(agent_id=7)
+    await prepared_turn.start_turn(PAYLOAD, AgentRequest.model_validate(PAYLOAD.request), *ACTOR, client)
+    assert compile_snapshot.await_args.kwargs["allow_prepared_memory"]
+    assert prepared_turn.store.stage_turn.call_args.args[5]["memory_agent_id"] == 7
 
 
 @pytest.mark.asyncio
