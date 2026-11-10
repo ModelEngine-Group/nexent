@@ -247,7 +247,7 @@ async def create_nl2agent_stream(
             raise
         except Exception as exc:
             logger.exception("NL2Agent execution failed")
-            from management.services.agent.stream import sampling_configuration_error_payload
+            from contracts.errors.exceptions import sampling_configuration_error_payload
             sampling_error = sampling_configuration_error_payload(exc)
             error_payload = json.dumps(
                 sampling_error or {

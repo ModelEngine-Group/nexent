@@ -3,15 +3,12 @@
 """Regression tests for Skill observer routing, fragments and retries."""
 
 import json
-import threading
-from types import SimpleNamespace
 
 import pytest
 
 from nexent.core.utils.observer import MessageObserver
 
-from contracts.agent import NL2SkillRunRequest
-import services.nl2skill_service as service
+from management.services.skill.nl2skill import project_creation_events
 
 
 SKILL = "---\nname: demo\ndescription: Demo skill\ntags: [demo]\n---\n# Demo\n"
@@ -31,22 +28,16 @@ def control(phase, attempt="a1"):
 
 
 @pytest.fixture
-def collect(mocker):
+def collect():
     async def run(chunks, *, failure=None):
-        stop = threading.Event()
-        mocker.patch.object(service, "build_nl2skill_run_info", return_value=SimpleNamespace(stop_event=stop))
-
-        async def agent_run(_run_info, *, thread_manager):
-            assert thread_manager is not None
+        async def events():
             for chunk in chunks:
                 yield json.dumps(chunk)
             if failure:
                 raise failure
 
-        mocker.patch.object(service, "agent_run", agent_run)
-        stream = await service.create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
+        stream = project_creation_events(events(), [])
         result = [json.loads(item.removeprefix("data: ")) async for item in stream]
-        assert stop.is_set()
         assert [item["sequence"] for item in result] == list(range(1, len(result) + 1))
         return result
 

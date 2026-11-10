@@ -14,7 +14,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
-from contracts.agent import NL2SkillRunRequest
 from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
 from permissions.depends import require
 from permissions.models import CurrentUser

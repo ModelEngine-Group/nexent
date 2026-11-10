@@ -4,28 +4,24 @@
 
 import asyncio
 import json
-import threading
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from contracts.agent import NL2SkillRunRequest
-from services import nl2skill_service as nl2skill_service
+from management.services.skill import creation as skill_service
 from management.services.skill.nl2skill import (
     _assemble_draft_content,
     _decorate_event,
     _extract_target_files,
     _normalize_draft_snapshot,
     _normalize_relative_path,
+    project_creation_events,
 )
-from services.nl2skill_service import (
-    _convert_history,
-    _resolve_model_for_nl2skill,
-    build_nl2skill_run_info,
-    create_nl2skill_stream,
-)
-from management.services.skill.creation import NL2SKILL_NAME, create_nl2skill_agent_config
+from contracts.agentos import PreparedSkillCreatorRun
+from infrastructure.agentos_identity import ServicePrincipal
+from runtime.agentos import prepared_skill_creator as runtime
+from runtime.agentos.prepared_skill_creator import NL2SKILL_NAME, create_nl2skill_agent_config
 
 
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
@@ -60,16 +56,6 @@ def test_assemble_draft_content_handles_invalid_files_and_skill_fallback():
     assert _assemble_draft_content({"content": "fallback", "files": [{"path": "notes.txt", "content": "note"}]}) == (
         "<skill>\nfallback\n</skill>\n\n<file path=\"notes.txt\">\nnote\n</file>"
     )
-
-
-def test_convert_history_filters_non_chat_roles():
-    history = _convert_history([
-        SimpleNamespace(role="user", content="question"),
-        SimpleNamespace(role="tool", content="ignored"),
-        SimpleNamespace(role="assistant", content="answer"),
-    ])
-    assert [(item.role, item.content) for item in history] == [("user", "question"), ("assistant", "answer")]
-    assert _convert_history(None) == []
 
 
 def test_decorate_event_adds_sequence_and_block_ids():
@@ -137,132 +123,60 @@ def test_extract_target_files_requires_a_draft_snapshot():
     assert _extract_target_files('<use_script path="scripts/run.py" />', None) == []
 
 
-@pytest.mark.parametrize(
-    ("model_id", "configured", "model_list", "expected"),
-    [
-        (7, None, [], ("chosen", "chosen", {"display_name": "chosen"})),
-        (None, {"model_name": "fallback"}, [SimpleNamespace(cite_name="main_model", model_name="primary")], ("main_model", "primary", {"model_name": "fallback"})),
-        (None, {"model_name": "fallback", "model_repo": "fallback"}, [], ("main_model", "fallback/fallback", {"model_name": "fallback", "model_repo": "fallback"})),
-        (None, None, [SimpleNamespace(cite_name="secondary", model_name="backup")], ("secondary", "backup", {})),
-    ],
-)
-def test_resolve_model_for_nl2skill_selects_requested_configured_or_fallback(
-    mocker, model_id, configured, model_list, expected
-):
-    mocker.patch.object(nl2skill_service, "get_model_by_model_id", return_value={"display_name": "chosen"})
-    mocker.patch.object(nl2skill_service.tenant_config_manager, "get_model_config", return_value=configured)
+@pytest.mark.parametrize(("model_id", "configured", "expected"), [
+    (7, None, 7), (None, 8, 8), (None, None, 9),
+])
+def test_snapshot_model_selection(mocker, model_id, configured, expected):
+    def record(model_id):
+        return {"model_id": model_id, "display_name": str(model_id), "update_time": "v1", "model_type": "llm"}
 
-    assert _resolve_model_for_nl2skill("tenant", model_id, model_list) == expected
+    mocker.patch.object(skill_service, "preflight_turn_controls")
+    mocker.patch.object(skill_service, "get_model_by_model_id", return_value=record(7))
+    mocker.patch.object(skill_service.tenant_config_manager, "get_model_config",
+                        return_value=record(configured) if configured else None)
+    mocker.patch.object(skill_service, "get_model_records", return_value=[record(9)])
+    mocker.patch.object(skill_service, "_resolve_input_budget", return_value=(8192, {}, None))
+    mocker.patch.object(skill_service, "_resolve_context_budget", return_value=None)
+    request = NL2SkillRunRequest(query="Create", model_id=model_id, history=[
+        {"role": "user", "content": "old"}, {"role": "system", "content": "ignored"},
+    ])
+    snapshot = skill_service.prepare_nl2skill_snapshot(request, "owner", "tenant", "unknown")
+    assert snapshot.model.model_id == expected and snapshot.language == "zh"
+    assert [(item.role, item.content) for item in snapshot.input.history] == [("user", "old")]
 
 
-def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocker):
-    mocker.patch.object(nl2skill_service, "get_model_by_model_id", return_value=None)
-    with pytest.raises(ValueError, match="model_not_available"):
-        _resolve_model_for_nl2skill("tenant", 9, [])
-
-    mocker.patch.object(nl2skill_service.tenant_config_manager, "get_model_config", return_value=None)
+def test_snapshot_requires_a_model(mocker):
+    mocker.patch.object(skill_service.tenant_config_manager, "get_model_config", return_value={})
+    mocker.patch.object(skill_service, "get_model_records", return_value=[])
     with pytest.raises(ValueError, match="No LLM model"):
-        _resolve_model_for_nl2skill("tenant", None, [])
+        skill_service.prepare_nl2skill_snapshot(NL2SkillRunRequest(query="Create"), "owner", "tenant", "en")
 
 
-@pytest.mark.asyncio
-async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker):
-    model_config = {"cite_name": "main_model", "model_name": "primary"}
-    prompt_loader = mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={
-        "system_prompt": "system", "user_prompt": "rendered query"
+def test_runtime_renders_authorized_attachment_in_prompt(mocker):
+    from nexent.core.agents.agent_model import ModelConfig
+    from runtime.agentos import prepared_attachments
+
+    mocker.patch.object(runtime, "_materialize_model", return_value=ModelConfig(
+        cite_name="model", model_name="provider-model", api_key="test", url="https://provider.invalid",
+    ))
+    authorized = mocker.patch.object(prepared_attachments, "validate_attachment_references")
+    payload = PreparedSkillCreatorRun.model_validate({
+        "mode": "nl2skill", "run_id": "c" * 32, "language": "en",
+        "input": {"query": "Create a parser", "attachment_refs": [{"name": "sample.csv", "url": "s3://bucket/sample.csv"}]},
+        "model": {"model_id": 5, "alias": "model", "revision": "v1"},
+        "input_budget": 8192, "context_window_tokens": 16000,
     })
-    mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[model_config])
-    mocker.patch.object(nl2skill_service, "_resolve_model_for_nl2skill", return_value=("main_model", "primary", {}))
-    agent_config = MagicMock()
-    mocker.patch.object(nl2skill_service, "create_nl2skill_agent_config", return_value=agent_config)
-    mocker.patch.object(nl2skill_service, "AgentRunInfo", side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
-
-    result = await build_nl2skill_run_info(
-        NL2SkillRunRequest(query="Update <use_script path=\"scripts/run.py\" />", history=[{"role": "user", "content": "old"}]),
-        tenant_id="tenant",
-        language="en",
-    )
-
-    assert result.query == "rendered query"
-    prompt_loader.assert_called_once()
-    assert "complexity" not in prompt_loader.call_args.kwargs
-    assert result.agent_config is agent_config
-    assert [(item.role, item.content) for item in result.history] == [("user", "old")]
-    assert result.enable_planning is False
+    info = runtime.prepare_skill_creator_run(payload, ServicePrincipal("owner", "tenant"))
+    authorized.assert_called_once_with(["s3://bucket/sample.csv"], "owner", "tenant")
+    assert "sample.csv" in info.query and "s3://bucket/sample.csv" in info.query
+    assert info.enable_planning is False and info.sandbox_config is None
+    assert info.agent_config.context_manager_config.context_window_tokens == 16000
 
 
 @pytest.mark.asyncio
-async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
-    captured: dict = {}
-
-    def fake_template(**kwargs):
-        captured.update(kwargs)
-        return {"system_prompt": "system", "user_prompt": kwargs["user_request"]}
-
-    mocker.patch.object(
-        nl2skill_service,
-        "get_nl2skill_prompt_template",
-        side_effect=fake_template,
-    )
-    mocker.patch.object(
-        nl2skill_service,
-        "create_model_config_list",
-        new_callable=AsyncMock,
-        return_value=[SimpleNamespace(cite_name="main_model", model_name="primary")],
-    )
-    mocker.patch.object(
-        nl2skill_service,
-        "_resolve_model_for_nl2skill",
-        return_value=("main_model", "primary", {}),
-    )
-    mocker.patch.object(
-        nl2skill_service,
-        "AgentRunInfo",
-        side_effect=lambda **kwargs: SimpleNamespace(**kwargs),
-    )
-
-    result = await build_nl2skill_run_info(
-        NL2SkillRunRequest(
-            query="Create a parser for this file",
-            minio_files=[
-                {
-                    "name": "sample.csv",
-                    "url": "s3://bucket/sample.csv",
-                    "presigned_url": "https://example.test/sample.csv",
-                }
-            ],
-        ),
-        tenant_id="tenant",
-        language="en",
-    )
-
-    assert "sample.csv" in captured["user_request"]
-    assert "s3://bucket/sample.csv" in captured["user_request"]
-    assert result.query == captured["user_request"]
-
-
-@pytest.mark.asyncio
-async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
-    mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={})
-    mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[])
-
-    with pytest.raises(ValueError, match="No LLM model"):
-        await build_nl2skill_run_info(NL2SkillRunRequest(query="Create"), "tenant", "zh")
-
-
-@pytest.mark.asyncio
-async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
+async def test_stream_preserves_raw_types_and_emits_semantic_events():
     """UT-BE-NCR-016: preserve Skill event semantics."""
-    stop_event = threading.Event()
-    run_info = SimpleNamespace(stop_event=stop_event)
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=run_info,
-    )
-
-    async def fake_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+    async def fake_agent_run():
         chunks = [
             {"type": "model_thinking_output", "content": "Preparing.\n<final_"},
             {"type": "model_output_thinking", "content": "answer>\n<sk"},
@@ -277,12 +191,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for chunk in chunks:
             yield json.dumps(chunk)
 
-    mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
-    stream = await create_nl2skill_stream(
-        NL2SkillRunRequest(query="Create a demo skill"),
-        tenant_id="tenant",
-        language="en",
-    )
+    stream = project_creation_events(fake_agent_run(), [])
     payloads = []
     async for item in stream:
         payloads.append(json.loads(item.removeprefix("data: ").strip()))
@@ -297,21 +206,11 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
     assert not any("</final_answer>" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
-    assert stop_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker):
-    stop_event = threading.Event()
-    run_info = SimpleNamespace(stop_event=stop_event)
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=run_info,
-    )
-
-    async def fake_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+async def test_stream_parses_skill_start_after_reasoning_without_newline():
+    async def fake_agent_run():
         yield json.dumps(
             {
                 "type": "model_output_deep_thinking",
@@ -331,12 +230,7 @@ async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker)
             }
         )
 
-    mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
-    stream = await create_nl2skill_stream(
-        NL2SkillRunRequest(query="Create a demo skill"),
-        tenant_id="tenant",
-        language="en",
-    )
+    stream = project_creation_events(fake_agent_run(), [])
     payloads = [
         json.loads(item.removeprefix("data: ").strip())
         async for item in stream
@@ -351,17 +245,11 @@ async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker)
         for item in payloads
     )
     assert payloads[-1]["type"] == "done"
-    assert stop_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
-    stop_event = threading.Event()
-    run_info = SimpleNamespace(stop_event=stop_event)
-    mocker.patch.object(nl2skill_service, "build_nl2skill_run_info", return_value=run_info)
-
-    async def fake_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+async def test_stream_emits_targets_and_filters_non_target_file_updates():
+    async def fake_agent_run():
         yield json.dumps(
             {
                 "type": "model_output_code",
@@ -374,7 +262,6 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
             }
         )
 
-    mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
     request = NL2SkillRunRequest(
         query='Improve <use_script path="scripts/run.py" />',
         draft_snapshot={
@@ -385,7 +272,7 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
             ]
         },
     )
-    stream = await create_nl2skill_stream(request, tenant_id="tenant", language="en")
+    stream = project_creation_events(fake_agent_run(), _extract_target_files(request.query, request.draft_snapshot))
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert payloads[0]["type"] == "target_files"
@@ -401,97 +288,56 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
 
 
 @pytest.mark.asyncio
-async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure(mocker):
+async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure():
     """UT-BE-NCR-018: runtime failure produces one safe terminal error."""
-    stop_event = threading.Event()
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=SimpleNamespace(stop_event=stop_event),
-    )
-
-    async def failing_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+    async def failing_agent_run():
         yield "not json"
         yield ["not a mapping"]
         raise RuntimeError("provider failed")
 
-    mocker.patch.object(nl2skill_service, "agent_run", failing_agent_run)
-    stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
+    stream = project_creation_events(failing_agent_run(), [])
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert payloads == [
         {"type": "error", "content": "NL2Skill execution failed.", "sequence": 1}
     ]
-    assert stop_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_stream_classifies_final_answer_deltas_including_later_tail(mocker):
-    stop_event = threading.Event()
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=SimpleNamespace(stop_event=stop_event),
-    )
-
-    async def fake_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+async def test_stream_classifies_final_answer_deltas_including_later_tail():
+    async def fake_agent_run():
         yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo", "answer_phase": "delta"})
         yield json.dumps({"type": "final_answer", "content": "tail\n</skill>", "answer_phase": "delta"})
 
-    mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
-    stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
+    stream = project_creation_events(fake_agent_run(), [])
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert any(item["type"] == "skill_body" and "# Demo" in item["content"] for item in payloads)
     assert "".join(item["content"] for item in payloads if item["type"] == "skill_body") == "# Demotail\n"
     assert payloads[-1]["type"] == "done"
-    assert stop_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_stream_preserves_final_answer_without_control_content(mocker):
-    stop_event = threading.Event()
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=SimpleNamespace(stop_event=stop_event),
-    )
-
-    async def fake_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+async def test_stream_preserves_final_answer_without_control_content():
+    async def fake_agent_run():
         yield json.dumps({"type": "final_answer", "content": "Done."})
 
-    mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
-    stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
+    stream = project_creation_events(fake_agent_run(), [])
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert payloads == [
         {"type": "final_answer", "content": "Done.", "sequence": 1},
         {"type": "done", "content": "", "sequence": 2},
     ]
-    assert stop_event.is_set()
 
 
 @pytest.mark.asyncio
-async def test_stream_propagates_cancellation_and_stops_run_info(mocker):
+async def test_stream_propagates_cancellation_without_success_terminal():
     """UT-BE-NCR-019: cancellation stops without duplicate terminal output."""
-    stop_event = threading.Event()
-    mocker.patch.object(
-        nl2skill_service,
-        "build_nl2skill_run_info",
-        return_value=SimpleNamespace(stop_event=stop_event),
-    )
-
-    async def cancelled_agent_run(_run_info, *, thread_manager):
-        assert thread_manager is not None
+    async def cancelled_agent_run():
         raise asyncio.CancelledError()
         yield None
 
-    mocker.patch.object(nl2skill_service, "agent_run", cancelled_agent_run)
-    stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
-
+    stream = project_creation_events(cancelled_agent_run(), [])
     with pytest.raises(asyncio.CancelledError):
         await anext(stream)
-    assert stop_event.is_set()

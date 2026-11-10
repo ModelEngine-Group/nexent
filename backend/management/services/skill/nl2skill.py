@@ -7,9 +7,10 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
-from management.services.agent.stream import sampling_configuration_error_payload
+from contracts.errors.exceptions import sampling_configuration_error_payload
 from management.services.skill.stream_parser import SkillStreamParser
 
 logger = logging.getLogger(__name__)
@@ -141,18 +142,21 @@ def project_creation_events(
                         "paths": target_files,
                     }
                 )
-            async for raw_chunk in events:
-                try:
-                    chunk = json.loads(raw_chunk) if isinstance(raw_chunk, str) else raw_chunk
-                except json.JSONDecodeError:
-                    logger.warning("Ignoring malformed NL2Skill observer chunk")
-                    continue
-                if not isinstance(chunk, dict):
-                    continue
-
-                for event in parser.process(chunk):
-                    if is_allowed_write(event):
-                        yield serialize(event)
+            async with aclosing(events):
+                async for raw_chunk in events:
+                    try:
+                        chunk = json.loads(raw_chunk) if isinstance(raw_chunk, str) else raw_chunk
+                    except json.JSONDecodeError:
+                        logger.warning("Ignoring malformed NL2Skill observer chunk")
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("type") == "agentos_execution_error":
+                        yield serialize(json.loads(chunk["payload"]))
+                        return
+                    for event in parser.process(chunk):
+                        if is_allowed_write(event):
+                            yield serialize(event)
 
             for event in parser.flush():
                 if is_allowed_write(event):

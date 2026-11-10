@@ -30,7 +30,6 @@ from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.ephemeral import create_ephemeral_run_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
 from runtime.api.identity_routes import is_runtime_service_request
@@ -135,4 +134,3 @@ app.include_router(create_run_lifecycle_router())
 app.include_router(create_prepared_run_router())
 app.include_router(create_ephemeral_run_router())
 app.include_router(voice_router)
-app.include_router(skill_creator_router)

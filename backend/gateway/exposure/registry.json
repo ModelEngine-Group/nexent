@@ -4256,8 +4256,8 @@
       "method": "POST",
       "path": "/api/skills/nl2skill/run",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/skill/creation.py",
+      "target": "management",
+      "source": "backend/management/api/skill/creation.py",
       "route_id": "route-769b40d11003b69f",
       "credential_kinds": [
         "session"

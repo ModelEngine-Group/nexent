@@ -9,22 +9,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contracts.agent import NL2AgentRunRequest, NL2SkillRunRequest
+from contracts.agent import NL2AgentRunRequest
 from services import nl2agent_service
-from services import nl2skill_service as nl2skill_service
 
 
-@pytest.mark.parametrize("kind", ["nl2agent", "nl2skill"])
 @pytest.mark.asyncio
-async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, kind):
-    module = nl2agent_service if kind == "nl2agent" else nl2skill_service
-    request = (
-        NL2AgentRunRequest(query="Create an Agent", agent_id=9)
-        if kind == "nl2agent" else NL2SkillRunRequest(query="Create a skill")
-    )
+async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker):
+    module = nl2agent_service
+    request = NL2AgentRunRequest(query="Create an Agent", agent_id=9)
     stop_event = MagicMock()
     run_info = SimpleNamespace(stop_event=stop_event)
-    builder = mocker.patch.object(module, f"build_{kind}_run_info", return_value=run_info)
+    builder = mocker.patch.object(module, "build_nl2agent_run_info", return_value=run_info)
 
     async def execute(info, **kwargs):
         assert info is run_info
@@ -33,16 +28,12 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
 
     mocker.patch.object(module, "agent_run", execute)
     arguments = dict(request=request, tenant_id="tenant-a", language="en")
-    if kind == "nl2agent":
-        arguments["authorization"] = "Bearer token"
-        arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
+    arguments["authorization"] = "Bearer token"
+    arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
 
-    stream = await getattr(module, f"create_{kind}_stream")(**arguments)
+    stream = await getattr(module, "create_nl2agent_stream")(**arguments)
     assert hasattr(stream, "__aiter__")
-    if kind == "nl2agent":
-        builder.assert_awaited_once_with(**arguments)
-    else:
-        builder.assert_awaited_once_with(request, "tenant-a", "en")
+    builder.assert_awaited_once_with(**arguments)
     chunks = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert chunks[0]["type"] == "tool"
@@ -50,25 +41,20 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
     stop_event.set.assert_called_once_with()
 
 
-@pytest.mark.parametrize("kind", ["nl2agent", "nl2skill"])
 @pytest.mark.asyncio
-async def test_active_factory_propagates_preparation_failure(mocker, kind):
-    module = nl2agent_service if kind == "nl2agent" else nl2skill_service
-    request = (
-        NL2AgentRunRequest(query="Create", agent_id=9)
-        if kind == "nl2agent" else NL2SkillRunRequest(query="Create")
-    )
+async def test_active_factory_propagates_preparation_failure(mocker):
+    module = nl2agent_service
+    request = NL2AgentRunRequest(query="Create", agent_id=9)
     builder = mocker.patch.object(
-        module, f"build_{kind}_run_info", side_effect=ValueError("unauthorized input"),
+        module, "build_nl2agent_run_info", side_effect=ValueError("unauthorized input"),
     )
     execute = mocker.patch.object(module, "agent_run")
     arguments = dict(request=request, tenant_id="tenant-a", language="en")
-    if kind == "nl2agent":
-        arguments["authorization"] = None
-        arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
+    arguments["authorization"] = None
+    arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
 
     with pytest.raises(ValueError, match="unauthorized input"):
-        await getattr(module, f"create_{kind}_stream")(**arguments)
+        await getattr(module, "create_nl2agent_stream")(**arguments)
 
     builder.assert_awaited_once()
     execute.assert_not_called()

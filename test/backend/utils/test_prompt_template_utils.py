@@ -3,7 +3,7 @@
 import pytest
 from jinja2 import Environment, meta
 from nexent.core.prompts import load_prompt
-from management.services.skill.prompt import (
+from runtime.agentos.prepared_skill_creator import (
     get_nl2skill_prompt_template,
 )
 

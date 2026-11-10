@@ -12,6 +12,7 @@ from management.api.automation.agent_automation import (
     conversation_automation_router,
     router as agent_automation_router,
 )
+from management.api.skill.creation import skill_creator_router
 from management.api.automation.agentos_callback import router as automation_callback_router
 from management.api.memory.agentos_callback import router as memory_callback_router
 from management.api.conversation.conversation_management import router as conversation_router
@@ -205,6 +206,7 @@ app.include_router(cas_router)
 
 app.include_router(summary_router)
 app.include_router(skill_router)
+app.include_router(skill_creator_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)
 app.include_router(remote_mcp_router)

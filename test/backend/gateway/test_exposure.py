@@ -63,6 +63,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
 
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"), ("POST", "/api/users/list", "management"),
+    ("POST", "/api/skills/nl2skill/run", "management"),
     ("POST", "/api/agent/run", "management"), ("GET", "/api/conversation/list", "management"),
     ("GET", "/api/agent/stop/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "management"),
     ("GET", "/api/conversation/workbench_pins", "management"),

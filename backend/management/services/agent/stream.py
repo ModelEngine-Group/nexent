@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from contracts.errors.exceptions import sampling_configuration_error_payload
 
 try:
     from contracts.constants.constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
@@ -113,18 +114,6 @@ def safe_agent_stream_error_chunk(exception: Optional[BaseException] = None) -> 
     if _is_reasoning_configuration_error(exception):
         return _reasoning_configuration_error_chunk()
     return _generic_agent_stream_error_chunk()
-
-
-def sampling_configuration_error_payload(exception: Optional[BaseException]) -> Optional[dict]:
-    """Expose only actionable sampling intent errors, never raw provider details."""
-    seen = set()
-    while exception is not None and id(exception) not in seen:
-        seen.add(id(exception))
-        if getattr(exception, "is_sampling_configuration_error", False):
-            return {"type": "error", "code": "MODEL_SAMPLING_CONFIG_INVALID",
-                    "content": "The model provider rejected temperature or Top P. Restore defaults or change these settings."}
-        exception = exception.__cause__ or exception.__context__
-    return None
 
 
 def resolve_answer_completion(

@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-44:
+  - test_nl2skill_creation_over_signed_agentos
   AC-43:
   - test_signed_agentos_transport
   AC-42:

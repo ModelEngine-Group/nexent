@@ -34,6 +34,7 @@ from contracts.agentos import (
     PreparedAgentRun,
     PreparedEphemeralRun,
     PreparedEvaluationRun,
+    PreparedSkillCreatorRun,
     TrackedBackgroundResult,
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
@@ -91,7 +92,9 @@ class AgentOSClient:
         result = await self._post_json(MemoryOperation.STORE, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
         return self._validate_result(AgentMemoryReceipt, result)
 
-    async def run_ephemeral(self, payload: PreparedEphemeralRun, user_id: str, tenant_id: str) -> StreamingResponse:
+    async def run_ephemeral(
+        self, payload: PreparedEphemeralRun | PreparedSkillCreatorRun, user_id: str, tenant_id: str,
+    ) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RUN_EPHEMERAL, payload, user_id, tenant_id)
 
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:

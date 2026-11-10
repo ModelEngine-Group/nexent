@@ -554,6 +554,29 @@ class PreparedEphemeralRun(AgentRunSpec):
         return validate_runtime_metadata(value)
 
 
+class SkillCreatorDraft(RunSpecModel):
+    name: str
+    description: str
+    tags: list[JsonValue]
+    content: str
+
+
+class PreparedSkillCreatorRun(RunSpecModel):
+    """Request-owned Skill creator dispatched through AgentOS Agent.run."""
+
+    mode: Literal["nl2skill"]
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    input: RunInput
+    model: RunModelBinding
+    language: Literal["zh", "en"] = "zh"
+    draft: SkillCreatorDraft | None = None
+    target_files: list[str] = Field(default_factory=list)
+    input_budget: PositiveInt
+    context_window_tokens: PositiveInt
+    capacity_snapshot: dict[str, JsonValue] | None = None
+    context_budget_snapshot: dict[str, JsonValue] | None = None
+
+
 class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 

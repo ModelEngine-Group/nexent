@@ -3,16 +3,20 @@
 import logging
 from http import HTTPStatus
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from starlette.responses import StreamingResponse
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+
 from contracts.agent import NL2SkillRunRequest
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.errors.exceptions import RunModelControlsError
+from infrastructure.rdb.conversation_state import conversation_belongs_to
+from management.services.conversation.creation_history import persist_creation_stream, prepare_creation_history
+from management.services.permission.identity.session import get_current_user_info
+from management.services.skill.creation import create_nl2skill_stream, prepare_nl2skill_snapshot
+from nexent.core.concurrency import run_blocking
 from permissions.depends import require
 from permissions.models import CurrentUser
-from contracts.errors.exceptions import RunModelControlsError
-from services.nl2skill_service import create_nl2skill_stream
-from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +37,25 @@ async def nl2skill_run_api(
     if (request.persist_history or request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
-        _, tenant_id, user_language = get_current_user_info(authorization)
-    except Exception as e:
-        logger.error(f"Unauthorized access attempt: {e}")
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        user_id, tenant_id, user_language = get_current_user_info(authorization)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
 
     try:
-        stream = await create_nl2skill_stream(
-            request=request,
-            tenant_id=tenant_id,
-            language=request.language or user_language or "zh",
+        if request.persist_history and request.conversation_id is not None:
+            if not await run_blocking(
+                "nl2skill-conversation-scope", conversation_belongs_to, request.conversation_id,
+                user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
+            ):
+                raise ValueError("Conversation is not an accessible creation session")
+        payload = await run_blocking(
+            "nl2skill-snapshot", prepare_nl2skill_snapshot, request, user_id, tenant_id,
+            request.language or user_language or "zh", lane="control-io", owner="management",
         )
+        stream = create_nl2skill_stream(payload, user_id, tenant_id)
         if request.persist_history:
-            user_id, _ = get_current_user_id(authorization)
-            conversation_id, assistant_index = prepare_creation_history(
+            conversation_id, assistant_index = await run_blocking(
+                "nl2skill-history", prepare_creation_history, lane="control-io", owner="management",
                 conversation_id=request.conversation_id,
                 mode="skill_create",
                 query=request.query,
@@ -74,6 +83,8 @@ async def nl2skill_run_api(
     except RunModelControlsError as exc:
         status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
         raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Attachment access denied.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:

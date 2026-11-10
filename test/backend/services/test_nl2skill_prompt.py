@@ -7,10 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 from smolagents import CodeAgent
 
-import services.nl2skill_service as nl2skill_service
-from management.services.skill.creation import create_nl2skill_agent_config
-from contracts.agent import NL2SkillRunRequest
-from management.services.skill.prompt import get_nl2skill_prompt_template
+from contracts.agentos import PreparedSkillCreatorRun
+from infrastructure.agentos_identity import ServicePrincipal
+from nexent.core.agents.agent_model import ModelConfig
+from runtime.agentos import prepared_skill_creator as runtime
+from runtime.agentos.prepared_skill_creator import create_nl2skill_agent_config
+from runtime.agentos.prepared_skill_creator import get_nl2skill_prompt_template
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 
 
@@ -100,22 +102,20 @@ def test_skill_creator_context_and_templates_are_request_scoped():
     assert second.context_items[0].content["text"] == "second system"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("language", "expected_language"), [("zh", "zh"), ("en", "en"), ("unknown", "zh")])
-async def test_skill_run_info_keeps_selected_language_system_prompt(mocker, language, expected_language):
-    mocker.patch.object(
-        nl2skill_service, "create_model_config_list",
-        return_value=[{"cite_name": "main_model", "model_name": "primary", "url": "https://model.test/v1"}],
-    )
-    mocker.patch.object(
-        nl2skill_service, "_resolve_model_for_nl2skill", return_value=("main_model", "primary", {}),
-    )
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_skill_run_info_keeps_selected_language_system_prompt(mocker, language):
+    mocker.patch.object(runtime, "_materialize_model", return_value=ModelConfig(
+        cite_name="model", model_name="primary", api_key="test", url="https://provider.invalid",
+    ))
     query = "Create a report skill"
-    result = await nl2skill_service.build_nl2skill_run_info(
-        NL2SkillRunRequest(query=query), "tenant", language,
-    )
-    expected = get_nl2skill_prompt_template(expected_language, user_request=query)
+    payload = PreparedSkillCreatorRun.model_validate({
+        "mode": "nl2skill", "run_id": "a" * 32, "language": language,
+        "input": {"query": query}, "model": {"model_id": 5, "alias": "model", "revision": "v1"},
+        "input_budget": 8192, "context_window_tokens": 8192,
+    })
+    result = runtime.prepare_skill_creator_run(payload, ServicePrincipal("owner", "tenant"))
+    expected = get_nl2skill_prompt_template(language, user_request=query)
 
-    assert result.observer.lang == expected_language
+    assert result.observer.lang == language
     assert result.query == expected["user_prompt"]
     assert result.agent_config.context_items[0].content["text"] == expected["system_prompt"]

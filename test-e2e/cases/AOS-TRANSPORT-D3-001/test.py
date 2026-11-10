@@ -2908,3 +2908,125 @@ async def _assert_automation_proposal_callback(monkeypatch):
         assert forbidden.status_code == 404
     assert sources == [92]
     confirm.assert_called_once_with(turn)
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.asyncio
+async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
+    from management.api.skill import creation
+    from management.services.agent import runtime_client
+    from management.services.conversation import creation_history
+    from management.services.skill import creation as skill_service
+    from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+    from nexent.core.utils.observer import ProcessType
+    from runtime.agentos import ephemeral
+
+    actor = ServicePrincipal("skill-owner", "skill-tenant")
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-skill-transport-secret")
+    monkeypatch.setattr(creation, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(creation, "get_current_user_info", lambda _: (actor.user_id, actor.tenant_id, "en"))
+
+    def owns(conversation_id, *, user_id, tenant_id):
+        return (conversation_id, user_id, tenant_id) == (42, actor.user_id, actor.tenant_id)
+
+    monkeypatch.setattr(creation, "conversation_belongs_to", owns)
+    monkeypatch.setattr(creation, "prepare_creation_history", lambda **kwargs: (42, 1))
+    writes = []
+
+    def save(request, **scope):
+        writes.append((request, scope))
+        return 43
+
+    monkeypatch.setattr(creation_history, "save_message", save)
+    monkeypatch.setattr(creation_history, "save_message_unit", lambda **_: None)
+    record = {
+        "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "creator", "model_name": "demo", "model_repo": None,
+        "base_url": "http://provider.invalid/v1", "api_key": "synthetic-private-model-key", "update_time": "2026-11-10T00:00:00",
+    }
+
+    def read_model(model_id, tenant_id):
+        return record if (model_id, tenant_id) == (11, actor.tenant_id) else None
+
+    monkeypatch.setattr(skill_service, "get_model_by_model_id", read_model)
+    monkeypatch.setattr(skill_service, "preflight_turn_controls", lambda *_: None)
+    monkeypatch.setattr(skill_service, "_resolve_input_budget", lambda _: (8192, {}, None))
+    monkeypatch.setattr(skill_service, "_resolve_context_budget", lambda **_: None)
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", read_model)
+    calls = []
+    stopped = threading.Event()
+
+    def worker(info):
+        calls.append(info)
+        assert info.agent_config.output_protocol == "final_envelope" and not info.agent_config.tools
+        assert info.conversation_id is None and info.sandbox_config is None
+        assert info.model_config_list[0].temperature == 0.3
+        assert info.model_config_list[0].api_key == record["api_key"]
+        if "failing request" in info.query:
+            info.observer.add_message("", ProcessType.FINAL_ANSWER, "private provider details")
+            raise RuntimeError("private provider details")
+        output = '<file path="scripts/run.py">\nprint(1)\n</file>\n<summary>Updated</summary>'
+        info.observer.add_message(info.agent_config.name, ProcessType.FINAL_ANSWER, output)
+        if "wait for disconnect" in info.query and info.stop_event.wait(5):
+            stopped.set()
+
+    monkeypatch.setattr(sdk_runner, "agent_run_thread", worker)
+    manager = ThreadManager("skill-transport", {
+        "agent-run": LanePolicy(name="agent-run", max_workers=1, max_queue_size=0, queue_timeout_seconds=2),
+    })
+    monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
+
+    async def blocking(_name, function, *args, lane=None, owner=None, **kwargs):
+        return await asyncio.to_thread(function, *args, **kwargs)
+
+    monkeypatch.setattr(creation, "run_blocking", blocking)
+    monkeypatch.setattr(prepared_evaluation, "run_blocking", blocking)
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(ephemeral.create_ephemeral_run_router())
+    management = FastAPI()
+    management.include_router(creation.skill_creator_router, prefix="/api")
+    management.dependency_overrides[creation.require_skill_create_permission] = lambda: None
+
+    body = {"query": 'Update <use_script path="scripts/run.py" />', "model_id": 11,
+            "generation_config": {"temperature": 0.3}, "conversation_id": 42, "persist_history": True,
+            "draft_snapshot": {"files": [{"path": "scripts/run.py", "content": "old"}]}}
+    path = "/api/skills/nl2skill/run"
+    manager.start()
+    try:
+        with serve(runtime) as upstream, serve(management) as public:
+            client = AgentOSClient(upstream, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+            async with httpx.AsyncClient(trust_env=False, timeout=8) as http:
+                rejected = await http.post(f"{upstream}/api{AgentOperation.RUN_EPHEMERAL.value}", json={})
+                assert rejected.status_code == 401
+                snapshot = skill_service.prepare_nl2skill_snapshot(
+                    creation.NL2SkillRunRequest.model_validate(body), actor.user_id, actor.tenant_id, "en",
+                )
+                foreign_model = await client.run_ephemeral(snapshot, actor.user_id, "foreign-tenant")
+                assert foreign_model.status_code == 404
+                _ = [chunk async for chunk in foreign_model.body_iterator]
+                assert not calls
+                foreign = await http.post(public + path, json={**body, "conversation_id": 99})
+                assert foreign.status_code == 400 and not calls and not writes
+                response = await http.post(public + path, json=body)
+                assert response.status_code == 200 and response.headers["conversation_id"] == "42", response.text
+                events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+                assert events[0]["paths"] == ["scripts/run.py"] and events[-1]["type"] == "done"
+                assert any(item["type"] == "file_content" and item["path"] == "scripts/run.py" for item in events)
+                assert writes[0][0].conversation_id == 42 and writes[0][0].role == "assistant"
+                assert writes[0][1] == {"user_id": actor.user_id, "tenant_id": actor.tenant_id, "status": "completed"}
+                failure = await http.post(public + path, json={**body, "query": "failing request"})
+                assert "NL2Skill execution failed." in failure.text and "private provider details" not in failure.text
+                assert '"type": "done"' not in failure.text and writes[-1][1]["status"] == "failed"
+                async with http.stream("POST", public + path, json={
+                    **body, "query": "wait for disconnect", "persist_history": False,
+                }) as streaming:
+                    async for line in streaming.aiter_lines():
+                        if line.startswith("data: "):
+                            break
+                assert await asyncio.to_thread(stopped.wait, 4)
+    finally:
+        await manager.shutdown(timeout=5)
