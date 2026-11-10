@@ -140,3 +140,103 @@ async def test_unknown_outcome_does_not_reacquire_or_launch_another_run(claim_st
     assert json.loads(retry.body)["status"] == "pending"
     assert retry.headers["X-AgentOS-Run-ID"] == RUN_ID
     execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("acknowledged", [True, False])
+async def test_management_owns_claim_and_retries_never_dispatch(monkeypatch, acknowledged):
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError
+    from management.services.agent import conversation_submission as submission
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    state = {}
+    sent = payload()
+
+    def claim(scope, fingerprint, user_id, tenant_id):
+        assert (user_id, tenant_id) == (ACTOR.user_id, ACTOR.tenant_id)
+        if not state:
+            state.update(scope=scope, fingerprint=fingerprint)
+            return AdmissionClaim(RUN_ID, "pending", None, False, True)
+        assert scope == state["scope"]
+        if fingerprint != state["fingerprint"]:
+            raise AdmissionRequestConflict
+        conversation_id = state.get("conversation_id")
+        return AdmissionClaim(RUN_ID, "admitted" if conversation_id else "pending", conversation_id, bool(conversation_id), False)
+
+    async def dispatch(command, user_id, tenant_id):
+        assert command.claimed_run_id == RUN_ID
+        assert command.idempotency_key == sent.idempotency_key
+        assert (user_id, tenant_id) == (ACTOR.user_id, ACTOR.tenant_id)
+        if acknowledged:
+            state["conversation_id"] = 42
+            return Response(headers={"conversation_id": "42"})
+        raise RuntimeServiceTimeoutError("response lost")
+
+    transport = AsyncMock(side_effect=dispatch)
+    monkeypatch.setattr(submission, "_control_io", control_io)
+    monkeypatch.setattr(submission, "claim_conversation_run", claim)
+    monkeypatch.setattr(submission, "conversation_belongs_to", lambda *args, **kwargs: True)
+
+    if acknowledged:
+        response = await submission.submit_conversation(sent, ACTOR.user_id, ACTOR.tenant_id, transport)
+        assert response.headers["X-AgentOS-Run-ID"] == RUN_ID
+    else:
+        with pytest.raises(RuntimeServiceTimeoutError):
+            await submission.submit_conversation(sent, ACTOR.user_id, ACTOR.tenant_id, transport)
+
+    replay = await submission.submit_conversation(sent, ACTOR.user_id, ACTOR.tenant_id, transport)
+    assert replay.status_code == 202
+    assert json.loads(replay.body)["status"] == ("admitted" if acknowledged else "pending")
+    assert replay.headers["X-AgentOS-Run-ID"] == RUN_ID
+    transport.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_management_rejects_unowned_conversation_before_claiming(monkeypatch):
+    from management.services.agent import conversation_submission as submission
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(submission, "_control_io", control_io)
+    monkeypatch.setattr(submission, "conversation_belongs_to", lambda *args, **kwargs: False)
+    claim = AsyncMock()
+    monkeypatch.setattr(submission, "claim_conversation_run", claim)
+    dispatch = AsyncMock()
+    with pytest.raises(HTTPException) as error:
+        await submission.submit_conversation(payload(conversation_id=42), ACTOR.user_id, ACTOR.tenant_id, dispatch)
+    assert error.value.status_code == 404
+    claim.assert_not_called()
+    dispatch.assert_not_called()
+
+
+def test_claimed_run_id_does_not_change_legacy_request_fingerprint():
+    from infrastructure.rdb.agent_admission import conversation_claim_scope, conversation_request_fingerprint
+
+    sent = payload()
+    assert "claimed_run_id" not in sent.model_dump_json()
+    normalized = sent.model_dump(mode="json", exclude={"idempotency_key"})
+    assert normalized == {"request": {"query": "question"}, "resume": False, "language": "zh", "timezone": None}
+    claimed = sent.model_copy(update={"claimed_run_id": RUN_ID})
+    assert CompatibilityConversationRun.model_validate_json(claimed.model_dump_json()) == claimed
+    assert conversation_request_fingerprint(normalized) == conversation_request_fingerprint(
+        claimed.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id"}),
+    )
+    assert conversation_claim_scope("actor", "tenant", "client-123") != conversation_claim_scope("actor", "other", "client-123")
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_claimed_handoff_before_side_effects_if_fence_denies(claim_store, mocker):
+    sent = payload().model_copy(update={"claimed_run_id": RUN_ID})
+    consume = mocker.patch.object(admission, "authorize_conversation_dispatch", return_value=False)
+    execute = AsyncMock()
+    request = AgentRequest(query="question")
+    with pytest.raises(HTTPException) as error:
+        await admission.admit_conversation_run(sent, request, ACTOR, execute)
+    assert error.value.status_code == 409
+    assert consume.call_args.args[2:] == (RUN_ID, ACTOR.user_id, ACTOR.tenant_id)
+    assert request._projection_run_id is None
+    admission.claim_conversation_run.assert_not_called()
+    execute.assert_not_called()

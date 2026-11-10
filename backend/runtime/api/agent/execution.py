@@ -95,7 +95,7 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
             request, context, principal, payload.resume,
         )
 
-    if payload.idempotency_key is not None:
+    if payload.idempotency_key is not None or payload.claimed_run_id is not None:
         from runtime.agentos.admission import admit_conversation_run
 
         return await admit_conversation_run(payload, request, principal, execute)

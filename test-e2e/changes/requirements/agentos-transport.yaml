@@ -36,7 +36,7 @@ change:
     - Ordinary conversation admission uses the signed AgentOS compatibility transport and preserves request and SSE context.
     - Management projects serialized observer events independently of the Runtime worker.
     - Ordinary assistant projections replay by run ID and payload digest after committing their receipt in the same transaction.
-    - Signed ordinary submissions bind a stable run ID to the actor, key and normalized request before execution.
+    - Management claims a stable run ID for signed ordinary submissions and handles retry before contacting Runtime.
     - Signed inspect and stop enforce actor ownership and scope cancellation to the exact run journal.
     - Durable runtime state fences a stopped automation admission and preserves a committed assistant outcome after an expired Runtime lease.
     - Public and automation cancellation use only their captured run identity and keep user and tenant authorization.

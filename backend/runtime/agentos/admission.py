@@ -1,8 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Claim a signed ordinary conversation submission before starting its execution."""
 
-import hashlib
-import json
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -14,18 +12,15 @@ from contracts.agent import AgentRequest
 from contracts.agentos import CompatibilityConversationRun
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_admission import (
-    AdmissionRequestConflict, AdmissionScopeError, claim_conversation_run, set_conversation_admission,
+    AdmissionRequestConflict, AdmissionScopeError, authorize_conversation_dispatch, claim_conversation_run,
+    conversation_claim_scope,
+    conversation_request_fingerprint, set_conversation_admission,
 )
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from nexent.core.concurrency import run_blocking
 
 
 logger = logging.getLogger(__name__)
-
-
-def _digest(value) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 async def _control_io(task, function, *args, **kwargs):
@@ -47,13 +42,29 @@ async def admit_conversation_run(
     execute: Callable[[], Awaitable[Response]],
 ) -> Response:
     conversation_id = request.conversation_id
-    if payload.resume or request.is_debug or (conversation_id is not None and conversation_id <= 0):
+    if payload.idempotency_key is None or payload.resume or request.is_debug or (
+        conversation_id is not None and conversation_id <= 0
+    ):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_IDEMPOTENCY_REQUEST"})
     if conversation_id is not None:
         await _require_conversation_owner(conversation_id, actor)
 
-    scope = _digest(["conversation-admission-v1", actor.tenant_id, actor.user_id, payload.idempotency_key])
-    fingerprint = _digest(payload.model_dump(mode="json", exclude={"idempotency_key"}))
+    scope = conversation_claim_scope(actor.user_id, actor.tenant_id, payload.idempotency_key)
+    fingerprint = conversation_request_fingerprint(
+        payload.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id"}),
+    )
+    if payload.claimed_run_id is not None:
+        try:
+            dispatch = await _control_io(
+                "agentos-authorize-claimed-run", authorize_conversation_dispatch,
+                scope, fingerprint, payload.claimed_run_id, actor.user_id, actor.tenant_id,
+            )
+        except (SQLAlchemyError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail={"code": "AGENTOS_ADMISSION_UNAVAILABLE"}) from exc
+        if not dispatch:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_ADMISSION_NOT_PENDING"})
+        return await _execute_claimed(request, actor, scope, payload.claimed_run_id, execute)
+
     try:
         claim = await _control_io(
             "agentos-claim-conversation", claim_conversation_run, scope, fingerprint, actor.user_id, actor.tenant_id,
@@ -83,17 +94,22 @@ async def admit_conversation_run(
             status_code=409 if claim.status == "rejected" else 202, headers=headers,
         )
 
-    request._projection_run_id = claim.run_id
+    return await _execute_claimed(request, actor, scope, claim.run_id, execute)
+
+
+async def _execute_claimed(request, actor, scope, run_id, execute):
+    headers = {"X-AgentOS-Run-ID": run_id, "Cache-Control": "no-store"}
+    request._projection_run_id = run_id
     request._run_admission_scope = scope
 
     async def reject():
         try:
             await _control_io(
-                "agentos-reject-conversation", set_conversation_admission, scope, claim.run_id, actor.user_id,
+                "agentos-reject-conversation", set_conversation_admission, scope, run_id, actor.user_id,
                 actor.tenant_id, conversation_id=None, journal_available=False,
             )
         except (SQLAlchemyError, RuntimeError):
-            logger.warning("Could not record rejected AgentOS admission run_id=%s", claim.run_id)
+            logger.warning("Could not record rejected AgentOS admission run_id=%s", run_id)
 
     try:
         response = await execute()

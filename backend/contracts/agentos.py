@@ -10,6 +10,7 @@ NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 PRINCIPAL_KEY = "nexent.agentos.principal"
 BODY_KEY = "nexent.agentos.body"
+RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
 IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 
 
@@ -35,6 +36,14 @@ class CompatibilityConversationRun(CompatibilityRun):
     language: Literal["zh", "en"] = "zh"
     timezone: str | None = Field(default=None, max_length=128)
     idempotency_key: str | None = Field(default=None, pattern=IDEMPOTENCY_KEY_PATTERN)
+    claimed_run_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+
+    @model_serializer(mode="wrap")
+    def omit_unclaimed_run_id(self, serialize):
+        payload = serialize(self)
+        if self.claimed_run_id is None:
+            payload.pop("claimed_run_id", None)
+        return payload
 
 
 class CompatibilityStop(BaseModel):
@@ -81,7 +90,6 @@ class RunSpecModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
 EVENT_ID_PATTERN = r"^[0-9a-f]{32}:[1-9][0-9]{0,18}$"
 
 

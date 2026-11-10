@@ -50,7 +50,7 @@ case:
     expected: Management signs the actor and forwards locale, timezone and legacy resume fields; Runtime streams unchanged SSE.
   - order: 8
     action: Submit a signed conversation twice with one idempotency key and then change the request under that key.
-    expected: Both original requests identify the same run; the changed request returns 409, and execution starts once.
+    expected: Management returns the original run ID on retry and 409 on changed input. Runtime receives one signed submission carrying the claimed ID and rejects a replay of that handoff before starting again.
   - order: 9
     action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.

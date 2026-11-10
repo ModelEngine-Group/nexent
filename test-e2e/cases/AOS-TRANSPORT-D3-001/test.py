@@ -223,7 +223,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_shared_aidp_over_signed_http(aidp_patches, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
-    await _assert_public_conversation_over_signed_http(monkeypatch)
+    with monkeypatch.context() as submission_patches:
+        await _assert_public_conversation_over_signed_http(submission_patches)
     with monkeypatch.context() as lifecycle_patches:
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
@@ -1078,11 +1079,11 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
 
 async def _assert_public_conversation_over_signed_http(monkeypatch):
-    from contracts.agent import AgentRequest
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
     from management.api.agent import conversation_run
-    from management.services.agent import runtime_client
+    from management.services.agent import conversation_submission, runtime_client
     from runtime.agentos import admission
+    from runtime.api.agent import execution
 
     received = []
     executions = []
@@ -1102,38 +1103,44 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             raise AdmissionRequestConflict
         return AdmissionClaim(run_id, status, 42, True, False)
 
-    monkeypatch.setattr(admission, "_control_io", control_io)
-    monkeypatch.setattr(admission, "claim_conversation_run", claim)
+    monkeypatch.setattr(conversation_submission, "_control_io", control_io)
+    monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(
-        admission, "conversation_belongs_to",
+        conversation_submission, "conversation_belongs_to",
         lambda conversation_id, *, user_id, tenant_id: (conversation_id, user_id, tenant_id) == (42, "user-a", "tenant-a"),
     )
 
+    def authorize(scope, fingerprint, claimed_run_id, user_id, tenant_id):
+        assert (claimed_run_id, user_id, tenant_id) == (run_id, "user-a", "tenant-a")
+        if claims.get(scope) != (fingerprint, "pending"):
+            return False
+        claims[scope] = (fingerprint, "dispatching")
+        return True
+
+    monkeypatch.setattr(admission, "_control_io", control_io)
+    monkeypatch.setattr(admission, "authorize_conversation_dispatch", authorize)
+
     async def run_conversation(payload, actor):
         received.append((payload, actor))
+        return await execution.run_agentos_conversation(payload, actor)
 
-        async def body():
-            yield _EVENTS
-
-        def stream():
-            return StreamingResponse(
-                body(), media_type="text/event-stream",
-                headers={"X-AgentOS-Run-ID": run_id, "conversation_id": "42"},
-            )
-
-        if payload.idempotency_key is None:
-            return stream()
-        request = AgentRequest.model_validate(payload.request)
-
-        async def execute():
+    async def run_public(request, _context, actor, resume):
+        assert actor == ServicePrincipal("user-a", "tenant-a")
+        if not resume:
             assert request._projection_run_id == run_id
             scope = request._run_admission_scope
             claims[scope] = (claims[scope][0], "admitted")
             executions.append(run_id)
-            return stream()
 
-        return await admission.admit_conversation_run(payload, request, actor, execute)
+        async def body():
+            yield _EVENTS
 
+        return StreamingResponse(
+            body(), media_type="text/event-stream",
+            headers={"X-AgentOS-Run-ID": run_id, "conversation_id": "42"},
+        )
+
+    monkeypatch.setattr(execution, "_run_public_conversation", run_public)
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
@@ -1169,7 +1176,13 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             assert retry.json() == {"run_id": run_id, "status": "admitted", "conversation_id": 42, "journal_available": True}
             assert changed.status_code == 409 and changed.json()["detail"]["code"] == "AGENTOS_IDEMPOTENCY_CONFLICT"
 
-    assert len(received) == 4
+        assert len(received) == 2
+        submitted, actor = received[1]
+        assert submitted.claimed_run_id == run_id
+        replay = await agentos.run_conversation(submitted, actor.user_id, actor.tenant_id)
+        assert replay.status_code == 409
+        error = b"".join([chunk async for chunk in replay.body_iterator])
+        assert b"AGENTOS_ADMISSION_NOT_PENDING" in error
     assert executions == [run_id]
 
 

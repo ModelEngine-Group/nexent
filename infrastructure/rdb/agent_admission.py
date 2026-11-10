@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Durable AgentOS submission claims, scoped by the signed actor."""
 
+import hashlib
+import json
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -42,6 +44,19 @@ class AdmissionClaim:
     acquired: bool
 
 
+def _digest(value) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def conversation_claim_scope(user_id: str, tenant_id: str, key: str) -> str:
+    return _digest(["conversation-admission-v1", tenant_id, user_id, key])
+
+
+def conversation_request_fingerprint(request: dict) -> str:
+    return _digest(request)
+
+
 def claim_conversation_run(scope: str, fingerprint: str, user_id: str, tenant_id: str) -> AdmissionClaim:
     admission = ConversationRunAdmission
     with get_db_session() as session:
@@ -64,7 +79,28 @@ def claim_conversation_run(scope: str, fingerprint: str, user_id: str, tenant_id
             raise AdmissionScopeError
         if existing.request_sha256 != fingerprint:
             raise AdmissionRequestConflict
-        return AdmissionClaim(existing.run_id, existing.status, existing.conversation_id, existing.journal_available, False)
+        status = "pending" if existing.status == "dispatching" else existing.status
+        return AdmissionClaim(existing.run_id, status, existing.conversation_id, existing.journal_available, False)
+
+
+def authorize_conversation_dispatch(scope: str, fingerprint: str, run_id: str, user_id: str, tenant_id: str) -> bool:
+    """Consume the signed compatibility handoff before any Runtime side effects."""
+    admission = ConversationRunAdmission
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return False
+        result = session.execute(
+            update(admission).where(
+                admission.scope_sha256 == scope,
+                admission.run_id == run_id,
+                admission.request_sha256 == fingerprint,
+                admission.created_by == user_id,
+                admission.tenant_id == tenant_id,
+                admission.status == "pending",
+                admission.delete_flag == "N",
+            ).values(status="dispatching", updated_by=user_id, update_time=func.current_timestamp())
+        )
+        return result.rowcount == 1
 
 
 def set_conversation_admission(
@@ -80,7 +116,7 @@ def set_conversation_admission(
                 admission.run_id == run_id,
                 admission.created_by == user_id,
                 admission.tenant_id == tenant_id,
-                admission.status == "pending",
+                admission.status.in_(("pending", "dispatching")),
                 admission.delete_flag == "N",
             ).values(
                 status="admitted" if conversation_id is not None else "rejected",

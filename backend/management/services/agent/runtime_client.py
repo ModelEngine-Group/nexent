@@ -28,7 +28,12 @@ async def forward_agent_run(
 
 
 async def forward_conversation_run(payload: CompatibilityConversationRun, user_id: str, tenant_id: str):
-    return await _agentos_client().run_conversation(payload, user_id, tenant_id)
+    client = _agentos_client()
+    if payload.idempotency_key is not None:
+        from management.services.agent.conversation_submission import submit_conversation
+
+        return await submit_conversation(payload, user_id, tenant_id, client.run_conversation)
+    return await client.run_conversation(payload, user_id, tenant_id)
 
 
 async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
