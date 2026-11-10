@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -184,3 +185,41 @@ def test_skill_derived_local_tool_is_pinned_to_authorized_contributors(mocker, s
 
     explicit.assert_not_called()
     derived.assert_called_once_with(7, 3, "tenant-a", ["dify_search"])
+
+
+@pytest.mark.parametrize(("name", "class_name"), [
+    ("create_file", "CreateFileTool"), ("read_file", "ReadFileTool"), ("delete_file", "DeleteFileTool"),
+    ("create_directory", "CreateDirectoryTool"), ("delete_directory", "DeleteDirectoryTool"),
+    ("list_directory", "ListDirectoryTool"), ("move_item", "MoveItemTool"), ("terminal", "TerminalTool"),
+])
+def test_workspace_and_ssh_tools_restore_persisted_parameters_without_exposing_them(
+    mocker, stored_tool, tmp_path, name, class_name,
+):
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import local_tool
+    from runtime.agentos import prepared_local_tool
+
+    params = {"init_path": str(tmp_path)}
+    if name == "terminal":
+        params.update(ssh_host="runtime-ssh.invalid", ssh_user="runner", password="private-ssh-key")
+    row = {
+        **stored_tool, "name": name, "class_name": class_name, "instance_params": {},
+        "params": [{"name": key, "default": value} for key, value in params.items()],
+    }
+    config = build_local_tool(row, "en", None, None)
+    binding = local_tool.export_local_tool(config, [row], 7, 3, "tenant-a", "en")
+    encoded = binding.model_dump_json()
+    for value in params.values():
+        assert json.dumps(value)[1:-1] not in encoded
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
+    resource = SimpleNamespace(agent_id=7, version_no=3, tools=[binding])
+    rebound = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "en")[name]
+    tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+
+    assert type(tool).__name__ == class_name
+    assert tool.init_path == str(tmp_path)
+    if name == "create_file":
+        tool.forward("prepared.txt", "AgentOS file")
+        assert (tmp_path / "prepared.txt").read_text(encoding="utf-8") == "AgentOS file"
+    elif name == "terminal":
+        assert (tool.ssh_host, tool.ssh_user, tool.password) == ("runtime-ssh.invalid", "runner", "private-ssh-key")

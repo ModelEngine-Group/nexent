@@ -174,6 +174,14 @@ class RunModelBinding(RunSpecModel):
     alias: str = Field(min_length=1)
     revision: str = Field(min_length=1)
     overrides: RunModelOverrides | None = None
+    provider_body_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_body_revision(self, handler):
+        data = handler(self)
+        if data.get("provider_body_revision") is None:
+            data.pop("provider_body_revision", None)
+        return data
 
 
 class ModelBindings(RunSpecModel):

@@ -17,6 +17,7 @@ from contracts.constants.environment import (
 )
 from contracts.tool import ToolParamsRequest
 from backend.http.client import create_httpx_client
+from infrastructure.agent_model_overrides import merge_provider_body
 from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
@@ -285,7 +286,6 @@ async def create_agent_run_info(
                             setattr(mc, field, override_entry[field])
                     override_extra = override_entry.get("extra_params")
                     if override_extra and isinstance(override_extra, dict):
-                        merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
                             if k == "enable_thinking":
                                 if isinstance(v, bool):
@@ -306,19 +306,7 @@ async def create_agent_run_info(
                                 ):
                                     mc.reasoning_budget_tokens = v
                                 continue
-                            if k == "__custom__" and isinstance(v, dict):
-                                for custom_key, custom_value in v.items():
-                                    # A null custom value is an explicit
-                                    # removal marker: the agent opts out of a
-                                    # model-level custom param instead of
-                                    # inheriting it.
-                                    if custom_value is None:
-                                        merged.pop(custom_key, None)
-                                    else:
-                                        merged[custom_key] = custom_value
-                            else:
-                                merged[k] = v
-                        mc.extra_body = merged if merged else None
+                        mc.extra_body = merge_provider_body(mc.extra_body, override_extra)
                     if override_entry.get("reasoning_effort") is not None:
                         mc.reasoning_effort = override_entry["reasoning_effort"]
                     if override_entry.get("reasoning_budget_tokens") is not None:
@@ -365,6 +353,7 @@ async def create_agent_run_info(
         return export_snapshot(
             agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
+            agent_model_overrides=model_params_override,
         )
 
     if resource_versions is not None:

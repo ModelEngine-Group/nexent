@@ -16,6 +16,7 @@ from contracts.constants import environment
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
+from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
@@ -265,7 +266,7 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
     )
 
 
-def _export_model(alias, models, tenant_id):
+def _export_model(alias, models, tenant_id, resource, agent_model_overrides):
     candidates = get_model_records({"display_name": alias, "model_type": "llm"}, tenant_id)
     effective = [model for model in models if model.cite_name == alias]
     if len(candidates) != 1 or len(effective) != 1:
@@ -277,22 +278,35 @@ def _export_model(alias, models, tenant_id):
         name: getattr(selected, name) for name in RunModelOverrides.model_fields
         if getattr(selected, name) != getattr(base, name)
     }
-    # Every difference must be representable without endpoint, credential or arbitrary body overrides.
-    if base.model_copy(update=changes) != selected:
+    model_id = record["model_id"]
+    body_revision = None
+    if base.extra_body != selected.extra_body:
+        patch = get_provider_body_patch(agent_model_overrides, model_id)
+        if patch is None or merge_provider_body(base.extra_body, patch) != selected.extra_body:
+            raise ValueError("Unsupported evaluation provider body")
+        body_revision = provider_body_revision(
+            (tenant_id, resource.agent_id, resource.version_no, model_id), selected.extra_body,
+        )
+    if base.model_copy(update={**changes, "extra_body": selected.extra_body}) != selected:
         raise ValueError("Unsupported evaluation model override")
     return RunModelBinding(
-        model_id=record["model_id"], alias=alias, revision=model_record_revision(record),
-        overrides=RunModelOverrides(**changes) if changes else None,
+        model_id=model_id, alias=alias, revision=model_record_revision(record),
+        overrides=RunModelOverrides(**changes) if changes else None, provider_body_revision=body_revision,
     )
 
 
-def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None):
+def export_snapshot(
+    agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
+    agent_model_overrides=None,
+):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
     try:
         aliases = {}
         resource = _export_resource(agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {})
-        bindings = [_export_model(alias, models, tenant_id) for alias in aliases]
+        bindings = [
+            _export_model(alias, models, tenant_id, resource, agent_model_overrides) for alias in aliases
+        ]
         identity = resolve_tool_user_context(agent, user_id, tenant_id) if user_id is not None else None
         tool_caller = ToolCallerContext(**{
             key: identity[key] for key in ToolCallerContext.model_fields if key in identity

@@ -23,10 +23,12 @@ from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
+from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
+from infrastructure.rdb.agent_model_overrides import read_agent_model_overrides
 from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
@@ -207,7 +209,7 @@ def _materialize_agent(
     )
 
 
-def _materialize_model(binding, actor):
+def _materialize_model(binding, actor, resource):
     record = get_model_by_model_id(binding.model_id, actor.tenant_id)
     if not record or record.get("tenant_id") != actor.tenant_id or record.get("delete_flag") != "N":
         raise HTTPException(status_code=404, detail={"code": "MODEL_NOT_FOUND"})
@@ -216,8 +218,17 @@ def _materialize_model(binding, actor):
     if model_record_revision(record) != normalize_model_revision(binding.revision):
         raise HTTPException(status_code=409, detail={"code": "MODEL_REVISION_MISMATCH"})
 
+    model = create_model_config_from_record(record)
     updates = binding.overrides.model_dump(exclude_unset=True) if binding.overrides is not None else {}
-    return create_model_config_from_record(record).model_copy(update={"cite_name": binding.alias, **updates})
+    if binding.provider_body_revision is not None:
+        scope = (actor.tenant_id, resource.agent_id, resource.version_no, binding.model_id)
+        overrides = read_agent_model_overrides(resource.agent_id, resource.version_no, actor.tenant_id)
+        patch = get_provider_body_patch(overrides, binding.model_id)
+        body = merge_provider_body(model.extra_body, patch) if patch else model.extra_body
+        if patch is None or not compare_digest(provider_body_revision(scope, body), binding.provider_body_revision):
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_MODEL_BODY_REVISION_MISMATCH"})
+        updates["extra_body"] = body
+    return model.model_copy(update={"cite_name": binding.alias, **updates})
 
 
 def _remove_skill_files(workspace_path: str | None) -> None:
@@ -263,7 +274,7 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         except (ValidationError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
 
-        models = [_materialize_model(binding, actor) for binding in bindings]
+        models = [_materialize_model(binding, actor, payload.resource) for binding in bindings]
         user_context = None
         if mcp.hosts or payload.tool_caller is not None:
             user_context = payload.tool_caller.model_dump() if payload.tool_caller is not None else {}

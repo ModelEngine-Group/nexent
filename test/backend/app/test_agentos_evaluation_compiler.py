@@ -19,12 +19,18 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker):
+@pytest.mark.parametrize("persisted_body", [False, True])
+async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body):
     record = model_record(model_id=11, connect_status="available")
     model = create_model_config_from_record(record)
 
+    agent_model_overrides = {"11": {"extra_params": {"__custom__": {"provider_option": "fixture-private-option"}}}}
+
     def read_agent(agent_id, **kwargs):
-        return {"name": f"agent_{agent_id}", "description": "Test agent", "model_ids": [11]}
+        agent = {"name": f"agent_{agent_id}", "description": "Test agent", "model_ids": [11]}
+        if persisted_body and agent_id == 7:
+            agent["model_params_override"] = agent_model_overrides
+        return agent
 
     mocker.patch.object(compiler, "search_agent_info_by_agent_id", side_effect=read_agent)
     mocker.patch.object(run, "search_agent_info_by_agent_id", side_effect=read_agent)
@@ -44,10 +50,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(compiler, "RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS", 37)
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
     mocker.patch.object(run, "create_model_config_list", return_value=[model])
+    if persisted_body:
+        mocker.patch.object(run, "get_model_by_model_id", return_value=record)
     mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
     mocker.patch("management.services.agent.tool_identity.resolve_tool_user_context", return_value=None)
     mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
+    lookup_override = mocker.patch.object(prepared_evaluation, "read_agent_model_overrides", return_value=agent_model_overrides)
     mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-compiler-signing-key")
     client = mocker.AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
@@ -61,8 +71,16 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     assert (user, tenant) == ("user-a", "tenant-a")
     assert prepared.resource.subagents[0].version_no == 5
 
-    payload = PreparedEvaluationRun.model_validate_json(prepared.model_dump_json())
+    encoded = prepared.model_dump_json()
+    assert "fixture-private-option" not in encoded
+    assert ("provider_body_revision" in encoded) is persisted_body
+    payload = PreparedEvaluationRun.model_validate_json(encoded)
     info = prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal(user, tenant))
+    if persisted_body:
+        lookup_override.assert_called_once_with(7, 2, "tenant-a")
+        assert info.model_config_list[0].extra_body == {"provider_option": "fixture-private-option"}
+    else:
+        lookup_override.assert_not_called()
     manager = ThreadManager(
         service_name="evaluation-test",
         lane_policies={"model-tool-io": LanePolicy(

@@ -52,6 +52,7 @@ change:
     - Prepared independent AIDP tools use the stored provider scope and generate signed references accepted by the existing Management image proxy.
     - Prepared shared AIDP tools recheck tenant and group permissions before retrieving from configured knowledge bases.
     - Prepared LangChain tools pin their persisted binding and deployed plugin revision without transporting code.
+    - Prepared workspace and SSH tools pin local configuration, and provider bodies are rebuilt from the signed Agent version without serializing the body.
     - Runtime compatibility ingress requires a signed Gateway session, and compatibility inspect and stop use the Runtime registry with user and tenant ownership checks.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
@@ -70,6 +71,7 @@ change:
     - test/backend/app/test_agentos_prepared_independent_aidp.py
     - test/backend/app/test_agentos_prepared_shared_aidp.py
     - test/backend/app/test_agentos_prepared_langchain.py
+    - test/backend/app/test_agentos_prepared_model_body.py
     - test/backend/services/test_ind_aidp_service.py
     - test/sdk/core/tools/test_parallel_executor.py
     - test/backend/agents/test_sandbox_config.py

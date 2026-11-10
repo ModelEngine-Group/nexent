@@ -25,6 +25,14 @@ LOCAL_SDK_TOOL_CLASSES = {
     "postgres_database": "PostgreSqlTool",
     "mysql_database": "MySqlTool",
     "mssql_database": "MsSqlTool",
+    "create_file": "CreateFileTool",
+    "read_file": "ReadFileTool",
+    "delete_file": "DeleteFileTool",
+    "create_directory": "CreateDirectoryTool",
+    "delete_directory": "DeleteDirectoryTool",
+    "list_directory": "ListDirectoryTool",
+    "move_item": "MoveItemTool",
+    "terminal": "TerminalTool",
 }
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 

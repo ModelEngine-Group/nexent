@@ -372,12 +372,24 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     )
     original_plugin = plugin.read_bytes()
     monkeypatch.setattr(langchain_plugins, "LANGCHAIN_PLUGIN_DIRECTORY", plugin_dir)
+    tool_workspace = tmp_path / "configured-file-tool"
+    model_overrides = {"18": {"extra_params": {"__custom__": {"provider_setting": "local-private-model-body"}}}}
+
+    def read_model_override(agent_id, version_no, tenant_id):
+        assert (agent_id, version_no, tenant_id) == (8, 4, "tenant-a")
+        return model_overrides
+
+    monkeypatch.setattr(prepared_evaluation, "read_agent_model_overrides", read_model_override)
 
     async def run(info, thread_manager):
-        dify_config, plugin_config, aidp_config = info.agent_config.tools
-        assert (dify_config.name, plugin_config.name, aidp_config.name) == (
-            "dify_search", "fixture_double", "ind_aidp_search",
+        dify_config, plugin_config, aidp_config, workspace_config = info.agent_config.tools
+        assert (dify_config.name, plugin_config.name, aidp_config.name, workspace_config.name) == (
+            "dify_search", "fixture_double", "ind_aidp_search", "create_file",
         )
+        assert info.model_config_list[0].extra_body == {"provider_setting": "local-private-model-body"}
+        create_file = NexentAgent.create_local_tool(SimpleNamespace(observer=None), workspace_config)
+        create_file.forward("agentos.txt", "workspace tool")
+        assert (tool_workspace / "agentos.txt").read_text(encoding="utf-8") == "workspace tool"
         assert NexentAgent.create_langchain_tool(None, plugin_config).forward(value=7) == 14
         tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), dify_config)
         answer = await asyncio.to_thread(tool.forward, "fixture query")
@@ -419,7 +431,12 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             "class_name": "IndependentAidpSearchTool", "instance_params": aidp_params,
             "params": [{"name": name, "default": None} for name in aidp_params],
         }
-        enabled = [row, aidp_row]
+        file_row = {
+            **row, "tool_instance_id": 26, "tool_id": 8, "name": "create_file",
+            "class_name": "CreateFileTool", "description": "Create a file",
+            "instance_params": {}, "params": [{"name": "init_path", "default": str(tool_workspace)}],
+        }
+        enabled = [row, aidp_row, file_row]
         plugin_row = {
             **row, "tool_instance_id": 25, "tool_id": 7, "name": "fixture_double",
             "class_name": "fixture_double", "source": "langchain", "description": "Double the input",
@@ -441,27 +458,31 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(independent_aidp_proxy, "query_tools_by_ids", lambda ids: [aidp_row] if ids == [6] else [])
 
         def read_tools(agent_id, version_no, tenant_id, names):
-            assert (agent_id, version_no, names) == (8, 4, ["dify_search", "ind_aidp_search"])
+            assert (agent_id, version_no, names) == (8, 4, ["dify_search", "ind_aidp_search", "create_file"])
             return enabled if tenant_id == "tenant-a" else []
 
         for module in (evaluation_snapshot, prepared_local_tool):
             monkeypatch.setattr(module, "read_bound_local_tools", read_tools)
-        model = create_model_config_from_record(model_record)
+        model = create_model_config_from_record(model_record).model_copy(update={
+            "extra_body": {"provider_setting": "local-private-model-body"},
+        })
         agent = AgentConfig(
             agent_id=8, version_no=4, name="eval", description="Scoped tool",
             prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
             tools=[
                 build_local_tool(row, "en", None, None), langchain_plugins.build_langchain_tool(plugin_row),
-                build_local_tool(aidp_row, "en", None, None),
+                build_local_tool(aidp_row, "en", None, None), build_local_tool(file_row, "en", None, None),
             ],
         )
         prepared = evaluation_snapshot.export_snapshot(
             agent, [model], "question", None, tenant_id="tenant-a", conversation_id=-60, language="en",
+            agent_model_overrides=model_overrides,
         )
         assert isinstance(prepared, PreparedEvaluationRun)
         for secret in (
             provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset",
             "synthetic-private-aidp-key", "private-aidp-kb", "provider-fixture", "return value * 2",
+            "local-private-model-body", "configured-file-tool",
         ):
             assert secret not in prepared.model_dump_json()
 
@@ -481,6 +502,19 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert changed_plugin.value.status_code == 409
         assert "AGENTOS_LANGCHAIN_REVISION_MISMATCH" in changed_plugin.value.content.decode()
         plugin.write_bytes(original_plugin)
+        file_row["instance_params"]["init_path"] = str(tmp_path / "different-path")
+        with pytest.raises(RuntimeUpstreamError) as changed_workspace:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_workspace.value.status_code == 409
+        assert "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH" in changed_workspace.value.content.decode()
+        file_row["instance_params"].clear()
+        body = model_overrides["18"]["extra_params"]["__custom__"]
+        body["provider_setting"] = "changed-provider-body"
+        with pytest.raises(RuntimeUpstreamError) as changed_body:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_body.value.status_code == 409
+        assert "AGENTOS_MODEL_BODY_REVISION_MISMATCH" in changed_body.value.content.decode()
+        body["provider_setting"] = "local-private-model-body"
         row["instance_params"]["top_k"] = 4
         with pytest.raises(RuntimeUpstreamError) as changed:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")

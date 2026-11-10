@@ -41,7 +41,7 @@ case:
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
-    expected: Runtime rebuilds scoped file, attachment, skill, external A2A and direct or skill-derived MCP bindings and a child Agent with the expected model parameters. The system parallel executor retains its timeout and tool order; an invalid timeout is rejected before execution. Events stay ordered. Out-of-scope attachments and changed execution bindings are refused. The runner reads the verified skill guide and effective configuration from its isolated workspace. A changed MCP skill contributor cannot start the runner. Knowledge search respects the index and document scope; group revocation denies the run before search. The runner uses the Runtime Docker policy and regenerated sandbox context even when Management compiled local Python guidance. Image analysis binds the signed tenant model, rejects unauthorized storage aliases and refuses a stale model before execution. A configured Dify tool uses its Runtime credentials and configured dataset without exposing them over AgentOS. A skill-derived local tool keeps its order and refuses a changed contributor. Independent AIDP retrieval uses the pinned tenant binding, and the Management proxy accepts the image reference signed by Runtime. Shared AIDP retrieves only from the current authorized scope, and revocation prevents another upstream search. A deployed LangChain plugin runs in tool order, and changed plugin bytes are rejected before execution.
+    expected: Runtime rebuilds scoped file, attachment, skill, external A2A and direct or skill-derived MCP bindings and a child Agent with the expected model parameters. The system parallel executor retains its timeout and tool order; an invalid timeout is rejected before execution. Events stay ordered. Out-of-scope attachments and changed execution bindings are refused. The runner reads the verified skill guide and effective configuration from its isolated workspace. A changed MCP skill contributor cannot start the runner. Knowledge search respects the index and document scope; group revocation denies the run before search. The runner uses the Runtime Docker policy and regenerated sandbox context even when Management compiled local Python guidance. Image analysis binds the signed tenant model, rejects unauthorized storage aliases and refuses a stale model before execution. A configured Dify tool uses its Runtime credentials and configured dataset without exposing them over AgentOS. A skill-derived local tool keeps its order and refuses a changed contributor. Independent AIDP retrieval uses the pinned tenant binding, and the Management proxy accepts the image reference signed by Runtime. Shared AIDP retrieves only from the current authorized scope, and revocation prevents another upstream search. A deployed LangChain plugin runs in tool order, and changed plugin bytes are rejected before execution. A pinned workspace tool writes in its configured Runtime path and the model body is restored from the bound Agent version; either revision changing prevents execution.
   - order: 6
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
@@ -143,6 +143,11 @@ case:
     forbidden_side_effects: [1, 2]
   - id: AC-16
     description: A prepared LangChain plugin runs with its pinned catalog instance and module revision; changed code cannot execute.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-17
+    description: Configured workspace tools and the model provider body run from the pinned bindings and cannot execute after either binding changes.
     steps: [5]
     expected_results: [5]
     forbidden_side_effects: [1, 2]
