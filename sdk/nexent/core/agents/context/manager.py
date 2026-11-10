@@ -14,17 +14,28 @@ from enum import Enum
 from typing import Any, Dict, Optional, Sequence
 
 from smolagents.memory import ActionStep, AgentMemory, TaskStep
-from smolagents.models import ChatMessage, MessageRole
+from smolagents.models import ChatMessage
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
-from ...context_runtime.usage import InputUsageObservation, context_model_key, normalized_chars_per_token, request_characters
+from ...context_runtime.usage import (
+    InputUsageObservation,
+    context_model_key,
+    normalized_chars_per_token,
+    request_characters,
+)
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
 from .long_term_memory_selector import select_long_term_memory
-from .models import ContextItem, ContextItemInput, ContextItemType, normalize_context_inputs
+from .models import (
+    ContextItem,
+    ContextItemInput,
+    ContextItemType,
+    has_native_action_messages,
+    normalize_context_inputs,
+)
 from .policy import ContextProcessingMode, resolve_policy
 from .run_context import ManagedRunContext
 from .selection import select_context_items
@@ -473,7 +484,7 @@ class ContextManager:
         key = item.content.get("execution_key")
         record = history.get(key) if history is not None and key else None
         if record is None:
-            if "messages" in item.content:
+            if has_native_action_messages(item.content):
                 # Native protocol records require an owned, bound original before offloading.
                 return None
             if "execution_fields" not in item.content:

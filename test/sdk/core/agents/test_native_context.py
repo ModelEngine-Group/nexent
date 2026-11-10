@@ -46,6 +46,25 @@ def test_native_call_record_cannot_be_deterministically_truncated():
     assert ContextItemRenderer().render([item.compact()]) == messages
 
 
+def test_legacy_export_compacts_while_unbound_native_protocol_stays_intact():
+    manager = ContextManager(ContextManagerConfig(effective_input_limit_tokens=1000))
+    legacy = ContextItem.from_input(ContextItemInput(id="legacy", type="current_action", content={
+        "tool_calls": [{"name": "search", "arguments": {"q": "x"}}],
+        "observations": "observed " * 1000,
+        "model_output": "private process",
+        "messages": [{"role": "assistant", "content": "raw process"}],
+    }))
+    compact = manager._compact_execution(legacy, None)
+    assert compact.content["tool_calls"] == legacy.content["tool_calls"]
+    assert len(compact.content["observations"]) < len(legacy.content["observations"])
+    assert "messages" not in compact.content and "model_output" not in compact.content
+    native = ContextItem.from_input(ContextItemInput(id="native:0", type="current_action", content={
+        "messages": [{"role": "assistant", "content": "progress", "tool_calls": [call("one")]}],
+    }))
+    assert manager._compact_execution(native, None) is None
+    assert ContextItemRenderer().render([native.compact()]) == native.content["messages"]
+
+
 def test_native_originals_are_bound_to_messages_even_if_provider_reuses_call_id():
     from nexent.core.agents.native_context import native_context_items
 

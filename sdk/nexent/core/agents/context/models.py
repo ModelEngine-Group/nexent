@@ -353,9 +353,15 @@ def _compact_text(content: dict[str, Any]) -> dict[str, Any]:
     return {**content, "text": _limit_text(content.get("text"))}
 
 
+def has_native_action_messages(content: dict[str, Any]) -> bool:
+    """Distinguish native transcript items from legacy action exports with raw messages."""
+    legacy_fields = ("step_number", "tool_calls", "observations", "error", "result", "model_output")
+    return "messages" in content and not any(name in content for name in legacy_fields)
+
+
 def _compact_action(content: dict[str, Any]) -> dict[str, Any]:
     """Keep the action/result boundary and remove verbose reasoning/process fields."""
-    if "execution_fields" in content or "messages" in content:
+    if "execution_fields" in content or has_native_action_messages(content):
         # Only the manager may commit a recoverable execution representation.
         return deepcopy(content)
     allowed = ("step_number", "tool_calls", "observations", "error", "result")
