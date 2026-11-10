@@ -33,6 +33,8 @@ acceptance_bindings:
   - test_signed_agentos_transport
   AC-13:
   - test_signed_agentos_transport
+  AC-14:
+  - test_signed_agentos_transport
 preparation:
   families: []
   anchors: false

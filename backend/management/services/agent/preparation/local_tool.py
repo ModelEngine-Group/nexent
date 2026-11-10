@@ -27,6 +27,8 @@ def export_local_tool(
         "default_reranker": default,
     }
     if "skill_instance_ids" in row:
+        if persisted.name == "ind_aidp_search":
+            raise ValueError("Independent AIDP image proxy requires an explicit tool instance")
         binding = SkillDerivedLocalToolBinding(tool_id=row["tool_id"], **options)
         version = "2"
     else:

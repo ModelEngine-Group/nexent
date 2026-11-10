@@ -17,6 +17,7 @@ from contracts.constants.environment import (
 )
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
+from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
 from infrastructure.object_storage.client import minio_client
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -25,9 +26,6 @@ from management.db.knowledge_base.repository import (
 )
 from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from management.services.file.service import validate_urls_access
-from management.services.knowledge_base.providers.aidp import (
-    create_ind_aidp_image_url_builder,
-)
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_embedding_model_by_index_name,
@@ -539,7 +537,7 @@ async def create_tool_config_list(
                     }
                     break
 
-        if tool.get("class_name") == "IndependentAidpSearchTool":
+        if tool.get("class_name") == "IndependentAidpSearchTool" and not portable_evaluation:
             existing = (
                 tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
             )

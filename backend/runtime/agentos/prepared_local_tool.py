@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from contracts.agentos import AgentResource, SkillDerivedLocalToolBinding, StoredLocalToolBinding
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import (
     LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
 )
@@ -24,6 +25,8 @@ def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, la
             continue
         if binding.version not in schemas or binding.credential_ref is not None or binding.tool_id in references:
             raise ValueError("Unsupported local SDK tool binding")
+        if binding.tool_id == "ind_aidp_search" and binding.version != "1":
+            raise ValueError("Independent AIDP image proxy requires an explicit tool instance")
         references[binding.tool_id] = schemas[binding.version].model_validate(binding.parameters)
     if not references:
         return {}
@@ -61,5 +64,10 @@ def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, la
             raise ValueError("Unexpected local SDK tool reranker binding")
         if tool.class_name in LOCAL_RERANK_TOOL_CLASSES:
             tool.metadata = {"rerank_model": _reranker(reference, actor.tenant_id) if rerank_name else None}
+        elif name == "ind_aidp_search":
+            tool.metadata = {"image_url_builder": create_ind_aidp_image_url_builder(
+                agent_id=resource.agent_id, version_no=resource.version_no, tenant_id=actor.tenant_id,
+                tool_id=row["tool_id"], aidp_tenant_id=tool.params.get("tenant_id") or "aidp",
+            )}
         tools[name] = tool
     return tools

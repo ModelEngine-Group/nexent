@@ -13,6 +13,7 @@ LOCAL_SDK_TOOL_CLASSES = {
     "ragflow_search": "RAGFlowSearchTool",
     "haotian_search": "HaotianSearchTool",
     "idata_search": "IdataSearchTool",
+    "ind_aidp_search": "IndependentAidpSearchTool",
     "deepseek_search": "DeepSeekSearchTool",
     "exa_search": "ExaSearchTool",
     "linkup_search": "LinkupSearchTool",

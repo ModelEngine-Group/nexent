@@ -201,13 +201,16 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
 
 
 async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
-    from fastapi import Request
+    from fastapi import Request, Response
 
+    from infrastructure import ind_aidp_images
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
     from management.services.agent.preparation import evaluation_snapshot
+    from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.utils.observer import ProcessType
     from runtime.agentos import prepared_evaluation, prepared_local_tool
     from runtime.executions import LocalExecutionRegistry
 
@@ -218,6 +221,8 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     }
     provider = FastAPI()
     calls = []
+    aidp_calls = []
+    image_refs = []
 
     @provider.post("/v1/datasets/fixture-private-dataset/retrieve")
     async def retrieve(request: Request):
@@ -225,12 +230,34 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         calls.append((request.headers.get("authorization"), payload["query"], payload["retrieval_model"]["top_k"]))
         return {"records": [{"score": 0.8, "segment": {"content": "scoped Dify result"}}]}
 
+    @provider.post("/KnowledgeBase/Tenants/provider-fixture/Retrieval/FusionSearch")
+    async def retrieve_aidp(request: Request):
+        payload = await request.json()
+        aidp_calls.append(("search", request.headers.get("authorization"), payload["kds_list"]))
+        return {"result": [{
+            "id": "image-fixture", "chunk_type": "image", "title": "diagram",
+            "text": "scoped AIDP result", "file_url": "private-aidp-kb/p.png", "score": 0.9,
+        }]}
+
+    @provider.get("/KnowledgeBase/Tenants/provider-fixture/KnowledgeBases/private-aidp-kb/p.png")
+    async def get_aidp_image(request: Request):
+        aidp_calls.append(("image", request.headers.get("authorization")))
+        return Response(content=b"fixture-png", media_type="image/png")
+
+    def capture_picture(_name, kind, content):
+        if kind == ProcessType.PICTURE_WEB:
+            image_refs.extend(json.loads(content)["images_url"])
+
     async def run(info, thread_manager):
-        tool_config, = info.agent_config.tools
-        assert tool_config.name == "dify_search"
-        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tool_config)
+        dify_config, aidp_config = info.agent_config.tools
+        assert (dify_config.name, aidp_config.name) == ("dify_search", "ind_aidp_search")
+        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), dify_config)
         answer = await asyncio.to_thread(tool.forward, "fixture query")
         assert "scoped Dify result" in answer
+        observer = SimpleNamespace(add_message=capture_picture)
+        aidp = NexentAgent.create_local_tool(SimpleNamespace(observer=observer), aidp_config)
+        aidp_answer = await asyncio.to_thread(aidp.forward, "fixture query")
+        assert "scoped AIDP result" in aidp_answer and "/__aidp_image__/" in aidp_answer
         yield json.dumps({"type": "thought", "content": "lookup"})
         yield json.dumps({"type": "final_answer", "content": "scoped Dify result"})
 
@@ -242,6 +269,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda model_id, tenant_id: model_record)
     monkeypatch.setattr(prepared_evaluation, "agent_run", run)
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [model_record])
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "synthetic-aidp-image-signing")
 
     with serve(provider) as provider_url, serve(runtime) as runtime_url:
         row = {
@@ -254,10 +282,26 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
                 "search_method": "semantic_search", "rerank": False, "rerank_model_name": "",
             }.items()],
         }
-        enabled = [row]
+        aidp_params = {
+            "server_url": provider_url, "api_key": "synthetic-private-aidp-key",
+            "tenant_id": "provider-fixture", "kds_list": ["private-aidp-kb"],
+        }
+        aidp_row = {
+            **row, "tool_instance_id": 24, "tool_id": 6, "name": "ind_aidp_search",
+            "class_name": "IndependentAidpSearchTool", "instance_params": aidp_params,
+            "params": [{"name": name, "default": None} for name in aidp_params],
+        }
+        enabled = [row, aidp_row]
+
+        def read_image_tool(**scope):
+            assert scope == {"agent_id": 8, "tool_id": 6, "tenant_id": "tenant-a", "version_no": 4}
+            return {"params": aidp_params}
+
+        monkeypatch.setattr(independent_aidp_proxy, "query_tool_instances_by_id", read_image_tool)
+        monkeypatch.setattr(independent_aidp_proxy, "query_tools_by_ids", lambda ids: [aidp_row] if ids == [6] else [])
 
         def read_tools(agent_id, version_no, tenant_id, names):
-            assert (agent_id, version_no, names) == (8, 4, ["dify_search"])
+            assert (agent_id, version_no, names) == (8, 4, ["dify_search", "ind_aidp_search"])
             return enabled if tenant_id == "tenant-a" else []
 
         for module in (evaluation_snapshot, prepared_local_tool):
@@ -266,13 +310,16 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         agent = AgentConfig(
             agent_id=8, version_no=4, name="eval", description="Scoped tool",
             prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
-            tools=[build_local_tool(row, "en", None, None)],
+            tools=[build_local_tool(tool, "en", None, None) for tool in enabled],
         )
         prepared = evaluation_snapshot.export_snapshot(
             agent, [model], "question", None, tenant_id="tenant-a", conversation_id=-60, language="en",
         )
         assert isinstance(prepared, PreparedEvaluationRun)
-        for secret in (provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset"):
+        for secret in (
+            provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset",
+            "synthetic-private-aidp-key", "private-aidp-kb", "provider-fixture",
+        ):
             assert secret not in prepared.model_dump_json()
 
         client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
@@ -280,6 +327,10 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert result.events == [
             {"type": "thought", "content": "lookup"}, {"type": "final_answer", "content": "scoped Dify result"},
         ]
+        image_url, = image_refs
+        assert image_url.startswith("/api/ind-aidp/images/")
+        image = await independent_aidp_proxy.fetch_ind_aidp_image_impl(image_url.rsplit("/", 1)[-1])
+        assert image == (b"fixture-png", "image/png")
         row["instance_params"]["top_k"] = 4
         with pytest.raises(RuntimeUpstreamError) as changed:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -295,6 +346,10 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert "AGENTOS_LOCAL_TOOL_NOT_FOUND" in disabled.value.content.decode()
 
     assert calls == [("Bearer synthetic-runtime-dify-key", "fixture query", 2)]
+    assert aidp_calls == [
+        ("search", "Bearer synthetic-private-aidp-key", ["private-aidp-kb"]),
+        ("image", "Bearer synthetic-private-aidp-key"),
+    ]
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
