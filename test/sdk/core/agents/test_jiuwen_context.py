@@ -101,6 +101,49 @@ def test_cancelled_context_does_not_assemble_or_call_model():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["deadline", "cancel"])
+async def test_context_wait_reclaims_only_its_execution_on_deadline_or_cancellation(ending):
+    import asyncio
+    import time
+    from concurrent.futures import Future
+
+    bridge, info = make_bridge()
+    pending = Future()
+    execution = SimpleNamespace(execution_id="owned-context", future=pending)
+    bridge.manager.submit.return_value = execution
+    info.model_deadline = time.monotonic() - 1 if ending == "deadline" else None
+    if ending == "deadline":
+        with pytest.raises(TimeoutError):
+            await bridge.prepare_messages([], [])
+        assert bridge.scope.cancelled
+    else:
+        task = asyncio.create_task(bridge.prepare_messages([], []))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not bridge.scope.cancelled
+    bridge.manager.cancel.assert_called_once()
+    assert bridge.manager.cancel.call_args.args[0] == "owned-context"
+    assert bridge.manager.cancel.call_args.kwargs["mark_stuck_on_timeout"] is False
+    assert bridge.executions == [execution]
+
+
+def test_context_close_cancels_pending_owners_and_retains_completed_results():
+    from concurrent.futures import Future
+
+    bridge, info = make_bridge()
+    pending, completed = Future(), Future()
+    completed.set_result("preserved")
+    bridge.executions = [SimpleNamespace(execution_id="pending", future=pending),
+                         SimpleNamespace(execution_id="done", future=completed)]
+    bridge.close()
+    bridge.manager.cancel.assert_called_once_with("pending", reason="Jiuwen context cleanup",
+        wait_timeout=info.mcp_close_timeout_seconds, mark_stuck_on_timeout=True)
+    assert completed.result() == "preserved"
+
+
+@pytest.mark.asyncio
 async def test_context_queue_deadline_cancels_before_work_can_start():
     from concurrent.futures import Future
 

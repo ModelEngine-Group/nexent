@@ -46,14 +46,14 @@ def test_management_snapshot_uses_canonical_codec_without_credentials(saved):
 
 
 def test_unchanged_management_write_and_runtime_do_not_recompose(saved, mocker):
-    mocker.patch("management.services.model.profile.get_model_profile_catalog", side_effect=AssertionError)
+    mocker.patch("management.services.model.profiles.get_model_profile_catalog", side_effect=AssertionError)
     assert build_runtime_outlet_snapshot(saved) == saved["runtime_outlet_snapshot"]
     assert restore_runtime_model_snapshot(saved, "tenant").config_revision == 1
 
 
 def test_changed_settings_create_next_revision_without_mutating_prior_snapshot(saved, mocker):
     before = deepcopy(saved)
-    mocker.patch("management.services.model.profile.get_model_profile_catalog", side_effect=AssertionError)
+    mocker.patch("management.services.model.profiles.get_model_profile_catalog", side_effect=AssertionError)
     changed = {**saved, "temperature": .2}
     changed["runtime_outlet_snapshot"] = build_runtime_outlet_snapshot(changed)
     assert restore_runtime_model_snapshot(changed, "tenant").config_revision == 2
@@ -240,3 +240,48 @@ def test_explicit_effort_without_saved_rule_remains_rejected(saved, effort):
     with pytest.raises(ValueError, match="MODEL_OUTLET_OVERRIDE_UNDECLARED"):
         compile_model_runtime_profile(model, SimpleNamespace(
             context_budget_snapshot=None, requested_output_tokens=None))
+
+
+@pytest.mark.parametrize("sibling", [False, True])
+def test_nested_thinking_binding_preserves_unrelated_empty_and_null_parameters(saved, sibling):
+    profile = restore_runtime_model_snapshot(saved, "tenant")
+    data = profile.model_dump()
+    rule = next(rule for rule in data["parameter_rules"] if rule["key"] == "enable_thinking")
+    rule["api_binding"].update(path="/thinking/type", transform_ref="thinking_toggle_v1")
+    profile = type(profile).model_validate(data)
+    extra = {"thinking": {"type": "enabled"}, "custom": {"a/b~x": None}}
+    if sibling:
+        extra["thinking"]["extra"] = {}
+    original = deepcopy(extra)
+    model = ModelConfig(cite_name="outlet", model_name=profile.identity.request_model_id,
+        url=profile.connection.base_url, resolved_profile=profile, temperature=.7, extra_body=extra)
+    result = compile_model_runtime_profile(model, SimpleNamespace(
+        context_budget_snapshot=None, requested_output_tokens=None))
+    assert result.parameter_values["enable_thinking"] is True
+    assert {item["path"]: item["value"] for item in result.extra_api_parameters} == (
+        {"/thinking/extra": {}, "/custom/a~1b~0x": None} if sibling else {"/custom/a~1b~0x": None})
+    assert extra == original and model.extra_body == original
+    assert profile.parameter_values["enable_thinking"] is False
+    model.extra_body["thinking"]["type"] = "invalid"
+    with pytest.raises(ValueError, match="MODEL_OUTLET_THINKING_FORMAT_INVALID"):
+        compile_model_runtime_profile(model, SimpleNamespace(context_budget_snapshot=None, requested_output_tokens=None))
+
+
+def test_unbound_parameter_cannot_override_saved_value_and_bound_profile_is_required(saved):
+    from management.services.model.runtime_options import compile_bound_model_profile
+
+    profile = restore_runtime_model_snapshot(saved, "tenant")
+    data = profile.model_dump()
+    rule = next(rule for rule in data["parameter_rules"] if rule["key"] == "enable_thinking")
+    rule.pop("api_binding")
+    rule["editable"] = False
+    rule["visible"] = False
+    profile = type(profile).model_validate(data)
+    model = ModelConfig(cite_name="outlet", model_name=profile.identity.request_model_id,
+        url=profile.connection.base_url, resolved_profile=profile, temperature=.7, enable_thinking=True)
+    config = SimpleNamespace(context_budget_snapshot=None, requested_output_tokens=None)
+    with pytest.raises(ValueError, match="MODEL_OUTLET_OVERRIDE_UNBOUND"):
+        compile_model_runtime_profile(model, config)
+    model.resolved_profile = None
+    with pytest.raises(ValueError, match="MODEL_OUTLET_PROVISIONING_REQUIRED"):
+        compile_bound_model_profile(model, config)

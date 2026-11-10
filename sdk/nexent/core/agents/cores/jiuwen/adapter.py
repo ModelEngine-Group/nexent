@@ -695,14 +695,17 @@ class JiuwenAdapter(AgentCoreAdapter):
             return events.final_answer
         finally:
             watcher.cancel()
-            await asyncio.gather(watcher, return_exceptions=True)
-            self.scope.unregister_closer(token)
             try:
-                await Runner.release(self.session_id)
+                await asyncio.gather(watcher, return_exceptions=True)
             finally:
-                if self.native_agent is not None:
-                    for card in self.native_agent.ability_manager.list():
-                        Runner.resource_mgr.remove_tool(card.id)
+                # A queued cancellation must not bypass native session cleanup.
+                self.scope.unregister_closer(token)
+                try:
+                    await Runner.release(self.session_id)
+                finally:
+                    if self.native_agent is not None:
+                        for card in self.native_agent.ability_manager.list():
+                            Runner.resource_mgr.remove_tool(card.id)
 
     def close(self):
         if self._closed:

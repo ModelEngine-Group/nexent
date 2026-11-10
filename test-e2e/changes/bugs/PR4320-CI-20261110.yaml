@@ -44,6 +44,7 @@ change:
     - JIUWEN-OUTPUT-D5-001
     - JIUWEN-RELEASE-D3-001
     - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-RESOURCES-D5-002
     added: []
     retired: []
   traditional_ut:
@@ -55,6 +56,8 @@ change:
       invalid values fail before metrics or tracker mutations.
     - Authorized Skills alone enable Skill tool guidance; initial outlet snapshots retain
       the runtime outlet-only token-length policy across later sampling edits.
+    - Native Runner cancellation cannot bypass session or owned-tool cleanup; preflight,
+      resource registration, timeout ownership and model snapshot boundaries retain assertions.
     - Deployment Core defaults and rejection remain strict; package, prompt and model
       snapshot contracts use canonical owners in per-file isolated execution.
     reason: Strengthen local security and boundary assertions without duplicating
@@ -66,6 +69,11 @@ change:
     - test/backend/services/test_model_runtime_provisioning_service.py
     - test/backend/utils/test_agent_prompt_bundle.py
     - test/sdk/core/agents/test_jiuwen_native_files.py
+    - test/sdk/core/agents/test_jiuwen_adapter_preflight.py
+    - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/backend/database/test_model_runtime_profile_batch.py
+    - test/sdk/core/agents/test_jiuwen_context.py
   notes: SPEC runtime-agent-core-factory PR4320 CI section. Header-only formal script
     changes retain all acceptance contracts/bindings and need static validation, not
     artificial journey reruns. Existing D3 owns HTTP/process cleanup with self-contained
@@ -76,3 +84,8 @@ change:
     activity/source copy is superseded by the documented v2.8.0 simplification.
     The unmerged runtime_outlet_snapshot column and its migration remain required
     by the current ORM and legacy write bridge, independently of global Core policy.
+    Additional patch coverage reuses existing suites and the actual profile catalog
+    sentinel in JIUWEN-RESOURCES-D5-002. Three unreferenced duplicate modules are
+    removed in favor of existing owners; models sources and coverage thresholds stay
+    unchanged. PostgreSQL lifecycle, resource fault and HTTP Cases retain their owned
+    loopback/Docker setup and finally cleanup; no shared preparation assets are added.

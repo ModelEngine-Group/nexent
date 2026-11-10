@@ -112,7 +112,7 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         current = restore_runtime_model_snapshot(after, "tenant")
         assert current.config_revision == 2 and current.parameter_values["temperature"] == .2
         assert captured.config_revision == 1 and captured.parameter_values["temperature"] is None
-        monkeypatch.setattr("management.services.model.profile.get_model_profile_catalog",
+        monkeypatch.setattr("management.services.model.profiles.get_model_profile_catalog",
                             lambda: pytest.fail("Saved outlet was reinterpreted against catalog"))
         from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 
