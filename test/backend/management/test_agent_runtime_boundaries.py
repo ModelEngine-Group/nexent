@@ -121,6 +121,23 @@ def test_management_compiler_and_legacy_streams_do_not_import_runtime_factory_or
             ), (path, node.lineno)
 
 
+def test_management_run_and_subscription_do_not_import_runtime_thread_manager():
+    for name in ("run.py", "subscription.py"):
+        path = ROOT / "backend" / "management" / "services" / "agent" / name
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert not any(
+                module.removeprefix("backend.").split(".")[:2] == ["runtime", "thread_management"]
+                for module in modules
+            ), (path, node.lineno)
+
+
 def test_ut_be_arb_002_factory_preserves_prepared_values(monkeypatch):
     factory = load_file("backend/runtime/adapters/nexent/factory.py", "arb_factory")
     constructor = Mock(side_effect=lambda **values: SimpleNamespace(**values))

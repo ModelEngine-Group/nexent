@@ -215,8 +215,8 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     monkeypatch.setattr(agent_subscription.agent_run_manager, 'reserve_agent_capacity', MagicMock(return_value='cap'))
     monkeypatch.setattr(agent_subscription.agent_run_manager, 'reserve_agent_run', MagicMock(return_value='run'))
     monkeypatch.setattr(agent_subscription.agent_run_manager, 'release_agent_run_reservation', MagicMock())
-    monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'submit', MagicMock(return_value=execution))
-    monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'wait_until_started', AsyncMock())
+    monkeypatch.setattr(legacy.legacy_thread_manager, 'submit', MagicMock(return_value=execution))
+    monkeypatch.setattr(legacy.legacy_thread_manager, 'wait_until_started', AsyncMock())
     monkeypatch.setattr(agent_subscription.runtime_state_service, 'reset_stream_async', AsyncMock())
     monkeypatch.setattr(agent_subscription.streaming_channel_manager, 'get_or_create_channel', AsyncMock(return_value=None))
 

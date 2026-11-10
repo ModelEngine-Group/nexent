@@ -177,6 +177,7 @@ _thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
     future=MagicMock(done=MagicMock(return_value=True)),
 )
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
+legacy_thread_manager = _thread_lifecycle_module.runtime_thread_manager
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["runtime.thread_management"] = _thread_lifecycle_module
 sys.modules["management.thread_management"] = _thread_lifecycle_module
@@ -439,6 +440,9 @@ for _method in (
 ):
     setattr(_agent_run_manager_mock, _method, MagicMock())
 agent_run_manager_module.agent_run_manager = _agent_run_manager_mock
+agent_run_manager_module.require_legacy_thread_manager = (
+    lambda manager: legacy_thread_manager if manager is None else manager
+)
 sys.modules["management.services.agent.lifecycle"] = agent_run_manager_module
 sys.modules["management.services.agent.preprocessing"] = MagicMock()
 
@@ -5039,10 +5043,10 @@ async def test_ut_be_tlm_027_runtime_overload_precedes_run_side_effects(monkeypa
     monkeypatch.setattr(agent_subscription.streaming_channel_manager, 'get_or_create_channel', create_channel)
     execution = MagicMock(execution_id='execution-overload')
     if wait_error is None:
-        monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'submit', MagicMock(side_effect=_ThreadCapacityExceeded()))
+        monkeypatch.setattr(legacy_thread_manager, 'submit', MagicMock(side_effect=_ThreadCapacityExceeded()))
     else:
-        monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'submit', MagicMock(return_value=execution))
-        monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'wait_until_started', AsyncMock(side_effect=wait_error))
+        monkeypatch.setattr(legacy_thread_manager, 'submit', MagicMock(return_value=execution))
+        monkeypatch.setattr(legacy_thread_manager, 'wait_until_started', AsyncMock(side_effect=wait_error))
     with pytest.raises(expected_error):
         await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     save_user_message.assert_not_called()
@@ -5057,7 +5061,7 @@ async def test_ut_be_tlm_033_agent_id_capacity_rejects_before_managed_execution(
     reserve_capacity = MagicMock(side_effect=agent_subscription.AgentRunConcurrencyExceededError())
     submit = MagicMock()
     monkeypatch.setattr(agent_subscription.agent_run_manager, 'reserve_agent_capacity', reserve_capacity)
-    monkeypatch.setattr(agent_subscription.runtime_thread_manager, 'submit', submit)
+    monkeypatch.setattr(legacy_thread_manager, 'submit', submit)
     with pytest.raises(agent_subscription.RuntimeCapacityExceededError):
         await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     reserve_capacity.assert_called_once_with(mock_agent_request.agent_id, agent_subscription.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
@@ -5075,7 +5079,7 @@ async def test_run_agent_stream(mock_generate_stream, mock_save_messages, mock_b
     capacity_manager.reserve_agent_capacity.reset_mock()
     capacity_manager.release_agent_capacity.reset_mock()
     capacity_manager.reserve_agent_capacity.return_value = 'agent-capacity-test'
-    execution_future = agent_subscription.runtime_thread_manager.submit.return_value.future
+    execution_future = legacy_thread_manager.submit.return_value.future
     execution_future.add_done_callback.reset_mock()
 
     async def mock_streamer():
@@ -5086,7 +5090,11 @@ async def test_run_agent_stream(mock_generate_stream, mock_save_messages, mock_b
     response = await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     assert isinstance(response, StreamingResponse)
     mock_save_messages.assert_called_once_with(mock_agent_request, target='user', user_id=None, tenant_id=None)
-    mock_generate_stream.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
+    mock_generate_stream.assert_called_once_with(
+        mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False,
+        reservation_token=ANY, execution=ANY, deferred_run=ANY, thread_manager=legacy_thread_manager,
+        channel=streaming_channel_manager_mock._latest_channel,
+    )
     completion_callback = execution_future.add_done_callback.call_args.args[0]
     completion_callback(execution_future)
     capacity_manager.release_agent_capacity.assert_called_once_with('agent-capacity-test')
@@ -5236,7 +5244,10 @@ async def test_non_debug_producer_survives_sse_disconnect(mock_save_messages, mo
     assert channel._history == ['data: first\n\n', 'data: second\n\n']
     assert producer_tasks.isdisjoint(agent_subscription._agent_stream_producer_tasks)
     complete_channel_mock.assert_awaited_once_with(conversation_id=mock_agent_request.conversation_id, user_id='u', status='completed')
-    generate_stream_mock.assert_called_once_with(mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=channel)
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=False,
+        reservation_token=ANY, execution=ANY, deferred_run=ANY, thread_manager=legacy_thread_manager, channel=channel,
+    )
 
 
 @pytest.mark.asyncio
@@ -5311,7 +5322,10 @@ async def test_debug_stream_keeps_direct_execution_path(mock_save_messages, mock
     assert chunks == ['data: debug\n\n']
     get_channel.assert_not_awaited()
     mock_save_messages.assert_not_called()
-    generate_stream_mock.assert_called_once_with(mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY)
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request, user_id='u', tenant_id='t', language='en', enable_memory=False,
+        reservation_token=ANY, execution=ANY, deferred_run=ANY, thread_manager=legacy_thread_manager,
+    )
 
 
 @patch("management.services.agent.run.agent_run_manager")
@@ -6399,7 +6413,11 @@ async def test_run_agent_stream_no_memory(mock_gen_no_mem, mock_save_messages, m
     mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=False))
     resp = await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     assert isinstance(resp, StreamingResponse)
-    mock_gen_no_mem.assert_called_once_with(mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False, reservation_token=ANY, execution=ANY, deferred_run=ANY, channel=streaming_channel_manager_mock._latest_channel)
+    mock_gen_no_mem.assert_called_once_with(
+        mock_agent_request, user_id=None, tenant_id=None, language='en', enable_memory=False,
+        reservation_token=ANY, execution=ANY, deferred_run=ANY, thread_manager=legacy_thread_manager,
+        channel=streaming_channel_manager_mock._latest_channel,
+    )
 
 
 @pytest.mark.asyncio
@@ -6479,6 +6497,7 @@ async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monke
 async def test_generate_stream_fallback_on_failure(monkeypatch):
     """Fallback output does not claim a pre-loop memory search occurred."""
     materializer = MagicMock()
+    pool = MagicMock()
     agent_request = AgentRequest(
         agent_id=8,
         conversation_id=888,
@@ -6510,6 +6529,7 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
     # Fallback generator
     async def fallback_gen(*_, **kwargs):
         assert kwargs["legacy_materializer"] is materializer
+        assert kwargs["thread_manager"] is pool
         yield "data: fb1\n\n"
 
     monkeypatch.setattr(
@@ -6520,7 +6540,8 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
     out = []
     async for d in agent_run_service.generate_stream(
-        agent_request, user_id="u", tenant_id="t", enable_memory=True, legacy_materializer=materializer,
+        agent_request, user_id="u", tenant_id="t", enable_memory=True,
+        legacy_materializer=materializer, thread_manager=pool,
     ):
         out.append(d)
 
@@ -15272,7 +15293,7 @@ async def test_stream_agent_chunks_client_close_persists_partial_output(monkeypa
     async def run_managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(legacy_thread_manager, "run", run_managed)
 
     stream = agent_run_service._stream_agent_chunks(
         agent_request,
@@ -15336,7 +15357,7 @@ async def test_stream_agent_chunks_task_cancellation_persists_partial_output(
     async def run_managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(legacy_thread_manager, "run", run_managed)
 
     async def consume_stream():
         async for _ in agent_run_service._stream_agent_chunks(

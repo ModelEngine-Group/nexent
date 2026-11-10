@@ -23,6 +23,7 @@ from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execut
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
 from runtime.executions import stop_registered_run
+from runtime.thread_management import runtime_thread_manager
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -33,7 +34,9 @@ logger = logging.getLogger("agent_app")
 
 
 async def run_agent_stream(**options):
-    return await run_legacy_agent_stream(**options, legacy_materializer=materialize_legacy_run)
+    return await run_legacy_agent_stream(
+        **options, legacy_materializer=materialize_legacy_run, thread_manager=runtime_thread_manager,
+    )
 
 
 def _execution_conflict_response() -> JSONResponse:

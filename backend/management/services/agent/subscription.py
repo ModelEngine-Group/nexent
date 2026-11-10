@@ -23,6 +23,7 @@ from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     agent_run_manager,
+    require_legacy_thread_manager,
 )
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
@@ -63,6 +64,7 @@ from nexent.core.agents.run_agent import DeferredAgentRun
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ThreadCapacityExceeded,
+    ThreadManager,
     ThreadQueueTimedOut,
     run_blocking,
 )
@@ -92,7 +94,6 @@ from infrastructure.redis.run_state import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from runtime.thread_management import runtime_thread_manager
 from management.utils.request_context import get_user_language
 from contracts.runtime_metadata import (
     validate_runtime_metadata,
@@ -195,6 +196,7 @@ async def run_agent_stream(
     resume: bool = False,
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
+    thread_manager: ThreadManager | None = None,
 ):
     """
     Start an agent run and stream responses.
@@ -212,6 +214,7 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
     if not resume:
+        thread_manager = require_legacy_thread_manager(thread_manager)
         from management.services.model import run_controls
 
         run_controls.validate_agent_model_selection(
@@ -763,7 +766,7 @@ async def run_agent_stream(
             agent_request.agent_id,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
-        execution = runtime_thread_manager.submit(
+        execution = thread_manager.submit(
             "agent-run",
             ManagedTaskSpec(
                 task_name="agent-run",
@@ -779,7 +782,7 @@ async def run_agent_stream(
                 agent_capacity_token
             )
         )
-        await runtime_thread_manager.wait_until_started(execution)
+        await thread_manager.wait_until_started(execution)
     except AgentRunConcurrencyExceededError as exc:
         raise RuntimeCapacityExceededError() from exc
     except ThreadCapacityExceeded as exc:
@@ -792,7 +795,7 @@ async def run_agent_stream(
     except BaseException:
         deferred_run.cancel()
         if execution is not None:
-            runtime_thread_manager.cancel(
+            thread_manager.cancel(
                 execution.execution_id,
                 reason="agent admission failed",
                 wait_timeout=0,
@@ -809,7 +812,7 @@ async def run_agent_stream(
         )
     except AgentRunAlreadyActiveError:
         deferred_run.cancel()
-        runtime_thread_manager.cancel(
+        thread_manager.cancel(
             execution.execution_id,
             reason="agent run already active",
             wait_timeout=0,
@@ -889,7 +892,7 @@ async def run_agent_stream(
                     raise RuntimeError("Conversation run claim is no longer pending")
     except (Exception, asyncio.CancelledError):
         deferred_run.cancel()
-        runtime_thread_manager.cancel(
+        thread_manager.cancel(
             execution.execution_id,
             reason="agent stream setup failed",
             wait_timeout=0,
@@ -922,6 +925,7 @@ async def run_agent_stream(
         "reservation_token": reservation_token,
         "execution": execution,
         "deferred_run": deferred_run,
+        "thread_manager": thread_manager,
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
@@ -1001,7 +1005,7 @@ async def run_agent_stream(
         finally:
             if channel is None and not execution.future.done():
                 deferred_run.cancel()
-                runtime_thread_manager.cancel(
+                thread_manager.cancel(
                     execution.execution_id,
                     reason="agent response stream closed",
                     wait_timeout=0,
@@ -1062,7 +1066,7 @@ async def run_agent_stream(
             # let its bound worker finish its own cleanup.
             if reservation_released and not execution.future.done():
                 deferred_run.cancel()
-                runtime_thread_manager.cancel(
+                thread_manager.cancel(
                     execution.execution_id,
                     reason="agent stream producer finished",
                     wait_timeout=0,

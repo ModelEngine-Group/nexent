@@ -13,6 +13,7 @@ from typing import (
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
+    require_legacy_thread_manager,
 )
 from management.services.agent.preparation.run import LegacyRunMaterializer, create_agent_run_info
 from management.services.agent.preprocessing import (
@@ -42,6 +43,7 @@ from nexent.core.agents.run_agent import DeferredAgentRun
 from infrastructure.rdb.agent_execution import RunIdentity, mark_running
 from nexent.core.concurrency import (
     ManagedExecution,
+    ThreadManager,
     run_blocking,
 )
 from management.services.conversation.service import (
@@ -56,7 +58,6 @@ from management.services.configuration.user.memory import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from runtime.thread_management import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +297,7 @@ async def generate_stream(
     deferred_run: Optional[DeferredAgentRun] = None,
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
+    thread_manager: ThreadManager | None = None,
 ):
     """Unified streaming entry point.
 
@@ -311,6 +313,8 @@ async def generate_stream(
         channel: Optional streaming channel; when ``None`` a fresh channel
             is created lazily when memory is enabled.
     """
+    thread_manager = require_legacy_thread_manager(thread_manager)
+
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
     _outer_task = asyncio.current_task()
@@ -401,6 +405,7 @@ async def generate_stream(
             channel=channel,
             execution=execution,
             deferred_run=deferred_run,
+            thread_manager=thread_manager,
         ):
             yield data_chunk
 
@@ -447,6 +452,7 @@ async def generate_stream(
                 execution=execution,
                 deferred_run=deferred_run,
                 legacy_materializer=legacy_materializer,
+                thread_manager=thread_manager,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -483,7 +489,7 @@ async def generate_stream(
             and not execution.future.done()
         ):
             deferred_run.cancel()
-            runtime_thread_manager.cancel(
+            thread_manager.cancel(
                 execution.execution_id,
                 reason="agent preparation ended before worker binding",
                 wait_timeout=0,

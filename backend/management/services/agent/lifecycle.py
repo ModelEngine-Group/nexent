@@ -2,6 +2,7 @@
 
 """Compatibility imports for the legacy Agent execution callers."""
 
+from nexent.core.concurrency import ThreadManager, get_default_thread_manager
 from runtime.executions import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
@@ -15,3 +16,12 @@ __all__ = [
     "AgentRunManager",
     "agent_run_manager",
 ]
+
+
+def require_legacy_thread_manager(thread_manager: ThreadManager | None) -> ThreadManager:
+    """Resolve the explicitly bound pool or the process's installed SDK pool."""
+    if thread_manager is None:
+        thread_manager = get_default_thread_manager()
+    if thread_manager is None:
+        raise RuntimeError("Legacy Agent execution requires a thread manager")
+    return thread_manager

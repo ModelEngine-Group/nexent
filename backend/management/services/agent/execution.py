@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from management.services.agent.lifecycle import (
     agent_run_manager,
+    require_legacy_thread_manager,
 )
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
@@ -48,6 +49,7 @@ from nexent.core.concurrency import (
     ManagedExecution,
     ManagedTaskSpec,
     RunCancellationScope,
+    ThreadManager,
     run_blocking,
 )
 from nexent.core.utils.observer import (
@@ -84,7 +86,6 @@ from runtime.thread_management import (
     channel_cleanup_tasks as _channel_cleanup_tasks,
     external_memory_ingest_tasks as _external_memory_ingest_tasks,
     fa_extraction_tasks as _fa_extraction_tasks,
-    runtime_thread_manager,
     unregister_after_worker_exit,
     shutdown_agent_stream_tasks as shutdown_agent_stream_tasks,
 )
@@ -306,6 +307,8 @@ async def _stream_agent_chunks(
     channel: Optional[Any] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    *,
+    thread_manager: ThreadManager | None = None,
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -317,6 +320,8 @@ async def _stream_agent_chunks(
                           (instead of creating a new one).
         channel: Optional StreamingChannel for multi-subscriber support.
     """
+
+    thread_manager = require_legacy_thread_manager(thread_manager)
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
@@ -412,7 +417,7 @@ async def _stream_agent_chunks(
             yield json.dumps(event, ensure_ascii=False)
         source = agent_run(
             agent_run_info,
-            thread_manager=runtime_thread_manager,
+            thread_manager=thread_manager,
             execution=execution,
             deferred_run=deferred_run,
         )
@@ -549,7 +554,7 @@ async def _stream_agent_chunks(
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
-                skill_file_uploads = await runtime_thread_manager.run(
+                skill_file_uploads = await thread_manager.run(
                     "control-io",
                     ManagedTaskSpec(
                         task_name="enrich-skill-file-urls",
@@ -590,7 +595,7 @@ async def _stream_agent_chunks(
             logger.exception("Failed to process skill file uploads")
 
         if workspace_file_uploads:
-            uploaded_files = await runtime_thread_manager.run(
+            uploaded_files = await thread_manager.run(
                 "control-io",
                 ManagedTaskSpec(
                     task_name="enrich-workspace-file-urls",
@@ -627,7 +632,7 @@ async def _stream_agent_chunks(
 
             mark_failed = partial(fail_unfinished_assistant_projection, tenant_id=tenant_id)
         terminal_status, persistence_failed, final_answer_content = await finalize_assistant_projection(
-            thread_manager=runtime_thread_manager,
+            thread_manager=thread_manager,
             message_id=streaming_message_id,
             conversation_id=agent_request.conversation_id,
             terminal_status=terminal_status,

@@ -14,6 +14,7 @@ from runtime.api.agent import execution
 @pytest.mark.asyncio
 async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(mocker):
     from runtime.adapters.nexent.factory import materialize_legacy_run
+    from runtime.thread_management import runtime_thread_manager
 
     actor = ServicePrincipal("actor", "tenant")
     legacy_stream = mocker.patch.object(execution, "run_legacy_agent_stream", return_value=StreamingResponse(iter(())))
@@ -23,9 +24,24 @@ async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(moc
     assert response is legacy_stream.return_value
     options = legacy_stream.await_args.kwargs
     assert options["legacy_materializer"] is materialize_legacy_run
+    assert options["thread_manager"] is runtime_thread_manager
     assert options["agent_request"]._track_execution
     assert options["skip_user_save"]
     assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_compatibility_stream_requires_a_pool_before_starting_a_conversation(mocker):
+    from contracts.agent import AgentRequest
+    from management.services.agent import lifecycle, subscription
+
+    mocker.patch.object(lifecycle, "get_default_thread_manager", return_value=None)
+    create = mocker.patch.object(subscription, "create_new_conversation")
+
+    with pytest.raises(RuntimeError, match="requires a thread manager"):
+        await subscription.run_agent_stream(AgentRequest(query="run"), None, "actor", "tenant")
+
+    create.assert_not_called()
 
 
 @pytest.mark.asyncio
