@@ -1507,6 +1507,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluation_snapshot, "run_blocking", control_io)
     monkeypatch.setattr(evaluation_snapshot, "get_conversation", read_conversation)
     monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda _user: False)
+
+    def read_history(conversation_id, boundary_id, user_id, tenant_id):
+        assert (conversation_id, boundary_id, user_id, tenant_id) == (42, 23, actor.user_id, actor.tenant_id)
+        return {
+            "history_summary": {"unit_id": 51, "summary": {"markdown": "earlier"}, "covered_through_message_id": 20},
+            "conversation_turns": [{"user_message": "previous query", "assistant_final_answer": "previous answer",
+                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
+        }
+
+    monkeypatch.setattr(evaluation_snapshot, "get_historical_context", read_history)
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda *_args: [model_record])
     monkeypatch.setattr(compile_run, "create_model_config_list", read_models)
     monkeypatch.setattr(compile_run, "query_current_version_no", lambda **kwargs: 3)
@@ -1518,7 +1528,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
     request = await evaluation_snapshot.prepare_conversation_snapshot(
         AgentRequest(query="question", conversation_id=42, agent_id=7, enable_automation_tool=False),
-        reference, actor.user_id, actor.tenant_id, language="en",
+        reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
     )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
@@ -1531,6 +1541,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     async def runner(info, **_kwargs):
         assert info.runtime_metadata == {"project": "demo"} and info.runtime_metadata_version == 4
         assert info.model_config_list[0].api_key == "synthetic-provider-secret"
+        assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
         calls.append("started")
         yield '{"type":"thought","content":"step"}'
         yield '{"type":"final_answer","content":"answer"}'
@@ -1569,6 +1580,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         result = script.execute("skill", "report.py")
         assert "absolute_path" not in result and len(published) == 1
         yield json.dumps(published[0])
+        yield json.dumps({"type": "history_summary", "content": json.dumps({
+            "status": "accepted", "persist_status": "not_configured", "summary": {"markdown": "compact"},
+            "covered_through_message_id": 22, "previous_summary_unit_id": 51,
+        })})
 
     from runtime.executions import LocalExecutionRegistry
     registry = LocalExecutionRegistry()
@@ -1620,7 +1635,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             f"id: {reference.run_id}:2\nevent: agentos_observer\n"
             'data: {"type":"final_answer","content":"answer"}\n\n'
         )
-        assert body.endswith(f'id: {reference.run_id}:4\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
+        assert body.endswith(f'id: {reference.run_id}:5\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
         assert "absolute_path" not in body and '"type":"file_artifact"' in body
         def persist(**fields):
             persisted.append(fields)
@@ -1632,11 +1647,14 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             agentos.resume, reference, actor.user_id, actor.tenant_id,
             message_index=1, message_source=MessageSource.AUTOMATION,
         )
-        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 3)
+        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 4)
         assert len(persisted) == 1
         batch = persisted[0]
         assert (batch["projection_run_id"], batch["conversation_id"]) == (reference.run_id, 42)
         assert batch["message_content"] == "answer"
+        assert batch["history_checkpoints"] == [{
+            "summary": {"markdown": "compact"}, "covered_through_message_id": 22, "previous_summary_unit_id": 51,
+        }]
         key = f"workspace/{actor.user_id}/{reference.run_id}/outputs/report.txt"
         assert uploaded == [(b"report", key)]
         assert batch["skill_files"] == [{

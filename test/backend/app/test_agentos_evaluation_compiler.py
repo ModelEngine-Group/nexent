@@ -71,10 +71,15 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             "runtime_metadata_version": 4,
         })
         mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+        read_history = mocker.patch.object(evaluation_snapshot, "get_historical_context", return_value={
+            "history_summary": {"unit_id": 51, "summary": {"markdown": "earlier"}, "covered_through_message_id": 20},
+            "conversation_turns": [{"user_message": "previous query", "assistant_final_answer": "previous answer",
+                                    "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
+        })
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False),
-            reference, user, tenant, language="en", timezone="Asia/Shanghai",
+            reference, user, tenant, language="en", timezone="Asia/Shanghai", current_user_message_id=23,
         )
         assert isinstance(prepared, PreparedAgentRun)
         assert (prepared.run_id, prepared.conversation_id, prepared.resource.version_no) == (reference.run_id, 42, 2)
@@ -83,6 +88,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
         assert info.runtime_metadata == {"project": "test"}
         assert info.runtime_metadata_version == 4
+        read_history.assert_called_once_with(42, 23, user, tenant)
+        assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
     else:
         case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
         assert await runtime_client.forward_evaluation_case(case, user, tenant) is client.run_prepared_evaluation.return_value
@@ -169,3 +176,40 @@ async def test_prepared_conversation_does_not_drop_memory_or_scope(mocker):
     assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
     memory.assert_called_once_with("actor")
     compile_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepared_conversation_cannot_export_unowned_message_boundary(mocker):
+    from contracts.errors.exceptions import ForbiddenError
+
+    mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={})
+    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    read_history = mocker.patch.object(evaluation_snapshot, "get_historical_context", return_value=None)
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
+
+    with pytest.raises(ForbiddenError, match="history boundary"):
+        await evaluation_snapshot.prepare_conversation_snapshot(
+            request, reference, "actor", "tenant", current_user_message_id=99,
+        )
+    read_history.assert_called_once_with(42, 99, "actor", "tenant")
+    compile_run.assert_not_called()
+
+
+def test_prepared_conversation_rejects_foreign_history_attachment():
+    from contracts.agentos import PreparedConversationHistory
+    from contracts.constants.environment import MINIO_DEFAULT_BUCKET
+
+    turn = {"user_message": "request", "assistant_final_answer": "answer",
+            "user_message_id": 21, "assistant_message_id": 22}
+    attachment = {"name": "report", "url": f"s3://{MINIO_DEFAULT_BUCKET or 'nexent'}/attachments/other/report"}
+    with pytest.raises(PermissionError):
+        evaluation_snapshot._prepare_conversation_history(
+            {"conversation_turns": [turn | {"attachments": [attachment]}]}, "actor", "tenant",
+        )
+
+    context = PreparedConversationHistory(conversation_turns=[turn | {"attachment_refs": [attachment]}])
+    with pytest.raises(HTTPException) as error:
+        prepared_evaluation._restore_conversation_history(context, ServicePrincipal("actor", "tenant"))
+    assert error.value.status_code == 403

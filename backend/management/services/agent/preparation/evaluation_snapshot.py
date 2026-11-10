@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Export authorized AgentOS snapshots from the Management compiler."""
 
+import json
 from functools import cache
 
 from pydantic_core import PydanticSerializationError
@@ -9,7 +10,7 @@ from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
-    PreparedAgentRun, PreparedConversationScope, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
+    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
@@ -31,7 +32,7 @@ from infrastructure.rdb.mcp_execution_records import (
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
-from management.db.conversation.repository import get_conversation
+from management.db.conversation.repository import get_conversation, get_historical_context
 from management.services.agent.context import prepend_current_time
 from management.services.configuration.user.memory import get_memory_switch
 from management.services.agent.preparation.langchain_tool import export_langchain_tool
@@ -81,9 +82,33 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
     )
 
 
+def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConversationHistory:
+    summary = history.get("history_summary")
+    checkpoint = None
+    if summary is not None:
+        checkpoint = PreparedHistoryCheckpoint.model_validate({
+            name: summary[name] for name in PreparedHistoryCheckpoint.model_fields if name in summary
+        })
+
+    turns = []
+    for turn in history["conversation_turns"]:
+        attachments = turn.get("attachments")
+        if isinstance(attachments, str):
+            try:
+                attachments = json.loads(attachments)
+            except ValueError:
+                attachments = None
+        refs = _export_attachments(attachments if isinstance(attachments, list) else None)
+        turns.append({key: value for key, value in turn.items() if key != "attachments"} | {"attachment_refs": refs})
+    snapshot = PreparedConversationHistory(history_summary=checkpoint, conversation_turns=turns)
+    urls = {ref.url for turn in snapshot.conversation_turns for ref in turn.attachment_refs}
+    validate_attachment_references(list(urls), user_id, tenant_id)
+    return snapshot
+
+
 async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
-    language: str = "zh", timezone: str | None = None,
+    language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
 ) -> PreparedAgentRun | None:
     """Compile an existing authorized conversation without constructing Runtime SDK objects."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -112,8 +137,19 @@ async def prepare_conversation_snapshot(
 
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
+    historical_context = None
+    if current_user_message_id is not None:
+        history = await run_blocking(
+            "snapshot-conversation-history", get_historical_context,
+            reference.conversation_id, current_user_message_id, user_id, tenant_id,
+            lane="control-io", owner="management",
+        )
+        if history is None:
+            raise ForbiddenError("Conversation history boundary is not accessible")
+        historical_context = _prepare_conversation_history(history, user_id, tenant_id)
     scope = PreparedConversationScope(
         **reference.model_dump(),
+        historical_context=historical_context,
         runtime_metadata=conversation.get("runtime_metadata") or {},
         runtime_metadata_version=conversation.get("runtime_metadata_version") or 0,
     )

@@ -2,12 +2,13 @@
 """Replay a signed Runtime journal into Management-owned assistant history."""
 
 import json
+import logging
 from contextlib import aclosing
 from dataclasses import dataclass
 
 import httpx
 
-from contracts.agentos import AgentResume, AgentRunReference
+from contracts.agentos import AgentResume, AgentRunReference, HistoryCheckpointCandidate
 from contracts.conversation import MessageSource
 from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.db.conversation.repository import persist_prepared_assistant_projection
@@ -15,6 +16,9 @@ from management.services.agent.artifacts import transform_skill_files_to_standar
 from management.services.agent.persistence import canonicalize_assistant_units
 from management.services.agent.stream import AssistantMessageProjection
 from nexent.core.concurrency import run_blocking
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ def _parse_frame(frame: bytes, expected: str):
         raise RuntimeServiceUnavailableError("Invalid or missing AgentOS projection event") from exc
 
 
-async def _consume_projection(resume, reference, user_id, tenant_id, projection, files):
+async def _consume_projection(resume, reference, user_id, tenant_id, projection, files, checkpoints):
     cursor = None
     index = 0
     for _ in range(2):
@@ -68,7 +72,7 @@ async def _consume_projection(resume, reference, user_id, tenant_id, projection,
                         return payload["status"], index - 1
                     if kind != "agentos_observer":
                         raise RuntimeServiceUnavailableError("Unexpected AgentOS projection event")
-                    _project_event(projection, files, data, payload)
+                    _project_event(projection, files, checkpoints, data, payload)
                     cursor = next_id
         except httpx.TransportError:
             # The last full frame is safe to retain; an incomplete frame is read again.
@@ -76,7 +80,24 @@ async def _consume_projection(resume, reference, user_id, tenant_id, projection,
     raise RuntimeServiceUnavailableError("AgentOS journal ended before its terminal event")
 
 
-def _project_event(projection, files, data, payload):
+def _collect_checkpoint(checkpoints, content):
+    try:
+        content = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(content, dict) or content.get("status") != "accepted":
+            return
+        if content.get("persist_status") != "not_configured":
+            return
+        candidate = HistoryCheckpointCandidate.model_validate({
+            name: content[name] for name in HistoryCheckpointCandidate.model_fields if name in content
+        })
+        checkpoints.append(candidate.model_dump(exclude_none=True))
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid AgentOS history checkpoint")
+
+
+def _project_event(projection, files, checkpoints, data, payload):
+    if payload.get("type") == "history_summary":
+        _collect_checkpoint(checkpoints, payload.get("content"))
     if payload.get("type") == "skill_artifact":
         raise RuntimeServiceUnavailableError("Runtime must upload skill artifacts before projection")
     if payload.get("type") != "file_artifact":
@@ -102,8 +123,8 @@ async def resume_assistant_projection(
 ) -> ProjectedRun:
     """Commit only a complete projection and let duplicate replays reuse its receipt."""
     projection = AssistantMessageProjection(persist_units=True)
-    files = {}
-    status, chunks = await _consume_projection(resume, reference, user_id, tenant_id, projection, files)
+    files, checkpoints = {}, []
+    status, chunks = await _consume_projection(resume, reference, user_id, tenant_id, projection, files, checkpoints)
     answer, _ = canonicalize_assistant_units(projection.units)
     message_id = await run_blocking(
         "persist-prepared-assistant-projection", persist_prepared_assistant_projection,
@@ -112,6 +133,6 @@ async def resume_assistant_projection(
         user_id=user_id, tenant_id=tenant_id, message_content=answer, terminal_status=status,
         message_units=projection.units, search_records=projection.search_records, image_urls=projection.image_urls,
         skill_files=transform_skill_files_to_standard_format(list(files.values())),
-        automation_proposals=projection.automation_proposals,
+        automation_proposals=projection.automation_proposals, history_checkpoints=checkpoints,
     )
     return ProjectedRun(message_id, status, chunks)

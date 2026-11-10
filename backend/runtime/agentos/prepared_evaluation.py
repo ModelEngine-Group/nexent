@@ -23,6 +23,7 @@ from contracts.constants.environment import (
 from infrastructure.a2a_execution import (
     build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
 )
+from infrastructure.agent_attachments import validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
 from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
@@ -248,12 +249,35 @@ def _remove_skill_files(workspace_path: str | None) -> None:
         logger.warning("Could not remove staged evaluation skill files", exc_info=True)
 
 
+def _restore_conversation_history(history, actor):
+    if history is None:
+        return None
+    refs = {ref.url for turn in history.conversation_turns for ref in turn.attachment_refs}
+    try:
+        validate_attachment_references(list(refs), actor.user_id, actor.tenant_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"code": "AGENTOS_ATTACHMENT_FORBIDDEN"}) from exc
+
+    return {
+        "history_summary": history.history_summary.model_dump(exclude_none=True) if history.history_summary else None,
+        "conversation_turns": [
+            turn.model_dump(exclude={"attachment_refs"}) | {
+                "attachments": [{"name": ref.name, "url": ref.url} for ref in turn.attachment_refs],
+            }
+            for turn in history.conversation_turns
+        ],
+    }
+
+
 def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, actor: ServicePrincipal) -> AgentRunInfo:
     if any((
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
     )):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
+    historical_context = (
+        _restore_conversation_history(payload.historical_context, actor) if isinstance(payload, PreparedAgentRun) else None
+    )
     query, history, files = materialize_evaluation_input(payload.input, actor, payload.language)
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
@@ -310,7 +334,7 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
         if isinstance(payload, PreparedAgentRun):
             info.runtime_metadata = payload.runtime_metadata
             info.runtime_metadata_version = payload.runtime_metadata_version
-        info.context_input = build_authorized_context_input(info)
+        info.context_input = build_authorized_context_input(info, historical_context)
         cleanup.pop_all()
     return info
 

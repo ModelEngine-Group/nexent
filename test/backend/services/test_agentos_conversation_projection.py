@@ -93,3 +93,29 @@ async def test_persists_uploaded_artifact_with_stable_fields_only(monkeypatch):
     files = persist.await_args.kwargs["skill_files"]
     assert files == [dict(object_name="artifacts/report.txt", name="report.txt", type="file", size=9,
                           url="s3://bucket/artifacts/report.txt", description="")]
+
+
+@pytest.mark.asyncio
+async def test_history_checkpoint_is_included_in_the_terminal_transaction(monkeypatch):
+    def checkpoint(status):
+        content = json.dumps({
+            "status": status, "persist_status": "not_configured",
+            "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16,
+        })
+        return json.dumps({"type": "history_summary", "content": content})
+
+    resume = AsyncMock(return_value=response(
+        event(1, "agentos_observer", checkpoint("compacting")),
+        event(2, "agentos_observer", checkpoint("accepted")),
+        event(3, "agentos_terminal", '{"status":"completed"}'),
+    ))
+    persist = AsyncMock(return_value=91)
+    monkeypatch.setattr(prepared_projection, "run_blocking", persist)
+    await prepared_projection.resume_assistant_projection(
+        resume, REFERENCE, "actor", "tenant", message_index=5, message_source=MessageSource.AUTOMATION,
+    )
+    batch = persist.await_args.kwargs
+    assert batch["message_units"] == []
+    assert batch["history_checkpoints"] == [{
+        "summary": {"markdown": "earlier history"}, "covered_through_message_id": 16,
+    }]

@@ -4,12 +4,14 @@ from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT
 from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
+import logging
 import re
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
@@ -30,6 +32,8 @@ from management.db.models import (
     ConversationSourceSearch,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_unit_content(content: Any) -> str:
@@ -494,7 +498,7 @@ def persist_assistant_run_batch(
     user_id: str,
     tenant_id: str,
     projection_run_id: str | None = None,
-    *, db_session=None,
+    *, db_session=None, history_checkpoints: list[dict] | None = None,
 ) -> Dict[int, int]:
     """Persist one completed assistant stream in a single transaction.
 
@@ -506,6 +510,8 @@ def persist_assistant_run_batch(
     Returns:
         Mapping from unit_index to the generated unit_id.
     """
+    if history_checkpoints and projection_run_id is None:
+        raise ValueError("History checkpoints require a run projection receipt")
     if terminal_status not in {"completed", "failed", "stopped"}:
         raise ValueError(f"Unsupported assistant terminal status: {terminal_status}")
 
@@ -523,7 +529,7 @@ def persist_assistant_run_batch(
         )
         from infrastructure.rdb.conversation_state import tenant_membership_matches
 
-        payload_digest = projection_payload_digest({
+        digest_payload = {
             "message_content": message_content or "",
             "terminal_status": terminal_status,
             "message_units": message_units,
@@ -531,7 +537,10 @@ def persist_assistant_run_batch(
             "image_urls": image_urls,
             "skill_files": skill_files,
             "automation_proposals": automation_proposals,
-        })
+        }
+        if history_checkpoints:
+            digest_payload["history_checkpoints"] = history_checkpoints
+        payload_digest = projection_payload_digest(digest_payload)
 
     with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         if projection_run_id is not None and not tenant_membership_matches(session, user_id, tenant_id):
@@ -691,6 +700,16 @@ def persist_assistant_run_batch(
                 [*existing_files, *skill_files],
                 ensure_ascii=False,
             )
+
+        for checkpoint in history_checkpoints or ():
+            try:
+                with session.begin_nested():
+                    save_history_summary(
+                        conversation_id, user_id, tenant_id, db_session=session, **checkpoint,
+                    )
+            except (HistorySummaryPersistenceError, SQLAlchemyError) as exc:
+                logger.warning("Unable to save history checkpoint conversation=%s error=%s",
+                               conversation_id, type(exc).__name__)
 
         parent.message_content = message_content or ""
         parent.status = terminal_status
@@ -2478,17 +2497,24 @@ def save_history_summary(
     compaction_attempts: Optional[int] = None,
     compaction_trigger_threshold_tokens: Optional[int] = None,
     compaction_target_tokens: Optional[int] = None,
+    *, db_session=None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
         raise HistorySummaryPersistenceError("user_id, tenant_id and an object summary are required")
     conversation_id = int(conversation_id)
     covered_through_message_id = int(covered_through_message_id)
-    user_tenant = _get_user_tenant(user_id)
-    if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
-        raise HistorySummaryPersistenceError("conversation is not accessible")
+    if db_session is None:
+        user_tenant = _get_user_tenant(user_id)
+        if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+    else:
+        from infrastructure.rdb.conversation_state import tenant_membership_matches
 
-    with get_db_session() as session:
+        if not tenant_membership_matches(db_session, user_id, tenant_id):
+            raise HistorySummaryPersistenceError("conversation is not accessible")
+
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         owner = session.execute(
             select(ConversationRecord.conversation_id).where(
                 ConversationRecord.conversation_id == conversation_id,

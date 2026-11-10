@@ -418,7 +418,37 @@ class AgentRunSpec(RunSpecModel):
     tool_caller: ToolCallerContext | None = None
 
 
+class HistoryCheckpointCandidate(RunSpecModel):
+    summary: dict[str, JsonValue]
+    covered_through_message_id: PositiveInt
+    previous_summary_unit_id: PositiveInt | None = None
+    trigger: str | None = None
+    history_tokens_before: int | None = Field(default=None, ge=0)
+    history_tokens_after: int | None = Field(default=None, ge=0)
+    compaction_attempts: int | None = Field(default=None, ge=0)
+    compaction_trigger_threshold_tokens: int | None = Field(default=None, ge=0)
+    compaction_target_tokens: int | None = Field(default=None, ge=0)
+
+
+class PreparedHistoryCheckpoint(HistoryCheckpointCandidate):
+    unit_id: PositiveInt
+
+
+class PreparedHistoryTurn(RunSpecModel):
+    user_message: str
+    assistant_final_answer: str
+    user_message_id: PositiveInt
+    assistant_message_id: int
+    attachment_refs: list[RunAttachment] = Field(default_factory=list)
+
+
+class PreparedConversationHistory(RunSpecModel):
+    history_summary: PreparedHistoryCheckpoint | None = None
+    conversation_turns: list[PreparedHistoryTurn] = Field(default_factory=list)
+
+
 class PreparedConversationScope(AgentRunReference):
+    historical_context: PreparedConversationHistory | None = None
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
     runtime_metadata_version: int | None = Field(default=None, ge=0)
 
