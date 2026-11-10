@@ -74,13 +74,14 @@ async def forward_conversation_run(
     payload: CompatibilityConversationRun, user_id: str, tenant_id: str, *,
     northbound_fallback: Callable[[], Awaitable[StreamingResponse]] | None = None,
 ):
-    client = _agentos_client()
+    request = AgentRequest.model_validate(payload.request)
+    if request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=404, detail={"code": "WORKBENCH_DISABLED"})
+
     from management.services.agent import prepared_turn
     from management.services.agent.conversation_submission import submit_conversation
 
-    request = AgentRequest.model_validate(payload.request)
-    if payload.resume and request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
-        raise HTTPException(status_code=404, detail={"code": "WORKBENCH_DISABLED"})
+    client = _agentos_client()
     if request.is_debug and not payload.resume and northbound_fallback is None:
         from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 

@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
-from contracts.agentos import AgentResume
+from contracts.agentos import AgentResume, CompatibilityConversationRun
 from management.services.agent import agentos_events as public_events
 from management.services.agent import runtime_client
 
@@ -229,3 +230,27 @@ async def test_debug_scope_does_not_mask_runtime_rejection():
     source = response(b'{"code":"AGENTOS_RESOURCE_UNSUPPORTED"}', status_code=422)
     event = {"type": "knowledge_scope_resolved", "content": {"warnings": []}}
     assert public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_event=event) is source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resume,is_debug", [(False, False), (False, True), (True, False)])
+async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, resume, is_debug):
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", False)
+    client = mocker.patch.object(runtime_client, "_agentos_client")
+    payload = CompatibilityConversationRun(
+        request={
+            "entrypoint": "workbench",
+            "query": "hello",
+            "conversation_id": 42 if resume else None,
+            "is_debug": is_debug,
+            "workbench": {"mode": "generic_chat", "model_id": 1},
+        },
+        resume=resume,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+
+    assert error.value.status_code == 404
+    assert error.value.detail == {"code": "WORKBENCH_DISABLED"}
+    client.assert_not_called()
