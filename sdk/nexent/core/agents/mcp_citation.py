@@ -7,7 +7,10 @@ retrieval-shaped JSON results returned by an MCP tool, assigns citation
 indexes, reports them through the observer search-content channel and
 rewrites the model-facing payload with reference marks, so citation
 rendering works exactly like built-in search tools without any backend or
-frontend change.
+frontend change. Inline ``<img>`` tags are stripped from chunk text and,
+when an image URL builder is provided, image chunks are rebuilt as image
+markers resolved through the picture-web channel, mirroring the built-in
+AIDP search tool flow.
 """
 
 import functools
@@ -15,7 +18,7 @@ import inspect
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import SearchResultTextMessage, ToolSign
@@ -47,6 +50,10 @@ _FILE_URL_FIELDS = ("file_url",)
 # Inline <img> tags embedded in data-platform RAG chunk text are stripped the
 # same way built-in AIDP search tools do before reporting citation content.
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+# Marker path shared with built-in AIDP image rebuild flow: image chunks are
+# rebuilt as ![Image] markers whose key is resolved by the frontend through
+# URLs delivered on the PICTURE_WEB channel.
+_IMAGE_MARKER_PATH = "/__aidp_image__/"
 # Minimum characters a text-like field must contain to count as a chunk.
 _MIN_TEXT_LENGTH = 10
 # Minimum share of items that must carry an identity field.
@@ -211,12 +218,19 @@ def annotate_mcp_search_results(
     result_text: Any,
     observer: Optional[MessageObserver],
     tool_name: str = "",
+    image_url_builder: Optional[Callable[[str], str]] = None,
 ) -> Optional[str]:
     """Annotate a retrieval-shaped JSON result with citation metadata.
 
     Returns the rewritten model-facing JSON string, or ``None`` when the
     result does not look like a retrieval result (callers keep the original
     output unchanged in that case).
+
+    When ``image_url_builder`` is callable, image chunks are additionally
+    rebuilt the way built-in AIDP search tools do: the observer entry carries
+    an ``image_key``, the model payload embeds an image marker to copy into
+    the final answer, and the proxy URLs are reported on the PICTURE_WEB
+    channel.
     """
     if observer is None or not isinstance(result_text, str) or not result_text.strip():
         return None
@@ -231,23 +245,83 @@ def annotate_mcp_search_results(
 
     tool_sign = ToolSign.MCP_SEARCH.value
     start_index = observer.reserve_citations(tool_sign, len(items))
-    messages = [
-        _build_search_result_message(item, start_index + offset, tool_name, tool_sign)
-        for offset, item in enumerate(items)
-    ]
+    ui_results: List[Dict[str, Any]] = []
+    model_results: List[Dict[str, Any]] = []
+    image_urls: List[str] = []
+    for offset, item in enumerate(items):
+        message = _build_search_result_message(
+            item, start_index + offset, tool_name, tool_sign
+        )
+        ui_result = message.to_dict()
+        model_result = message.to_model_dict()
+        _rebuild_image_chunk(
+            message, ui_result, model_result, image_urls, image_url_builder
+        )
+        ui_results.append(ui_result)
+        model_results.append(model_result)
     observer.add_message(
         "",
         ProcessType.SEARCH_CONTENT,
-        json.dumps([message.to_dict() for message in messages], ensure_ascii=False),
+        json.dumps(ui_results, ensure_ascii=False),
     )
-    return json.dumps([message.to_model_dict() for message in messages], ensure_ascii=False)
+    if image_urls:
+        observer.add_message(
+            "",
+            ProcessType.PICTURE_WEB,
+            json.dumps({"images_url": image_urls}, ensure_ascii=False),
+        )
+    return json.dumps(model_results, ensure_ascii=False)
 
 
-def wrap_mcp_tool_with_citation(tool: Any, observer: Optional[MessageObserver]) -> Any:
+def _rebuild_image_chunk(
+    message: SearchResultTextMessage,
+    ui_result: Dict[str, Any],
+    model_result: Dict[str, Any],
+    image_urls: List[str],
+    image_url_builder: Optional[Callable[[str], str]],
+) -> None:
+    """Rebuild an image chunk inline reference, mirroring AIDP search tools.
+
+    Stripped ``<img>`` tags are restored as an ``![Image]`` marker keyed by
+    the citation index; the browser resolves the marker through the URL
+    delivered on the PICTURE_WEB channel. Chunks that are not images, lack a
+    file URL, or run without an URL builder stay stripped (same fallback as
+    built-in AIDP search tools).
+    """
+    details = message.score_details if isinstance(message.score_details, dict) else {}
+    chunk_type = str(details.get("chunk_type") or "")
+    file_url = str(details.get("file_url") or "")
+    if chunk_type != "image" or not file_url or not callable(image_url_builder):
+        return
+    try:
+        proxy_url = image_url_builder(file_url)
+    except Exception as exc:  # backend callback boundary, same as AIDP tools
+        logger.warning(
+            "Failed to build image proxy URL for MCP tool result: %s", exc
+        )
+        proxy_url = ""
+    if not proxy_url:
+        return
+    image_key = f"{message.tool_sign}{message.cite_index}"
+    marker = f"![Image]({_IMAGE_MARKER_PATH}{image_key})"
+    ui_result["image_key"] = image_key
+    model_result["text"] += (
+        f"\n\nImage marker: {marker}. Copy this marker unchanged into "
+        "the final answer immediately after the paragraph it illustrates."
+    )
+    image_urls.append(proxy_url)
+
+
+def wrap_mcp_tool_with_citation(
+    tool: Any,
+    observer: Optional[MessageObserver],
+    image_url_builder: Optional[Callable[[str], str]] = None,
+) -> Any:
     """Wrap an MCP tool forward so retrieval results carry citation marks.
 
     Non-retrieval outputs pass through unchanged; annotation failures never
-    break the underlying tool call.
+    break the underlying tool call. ``image_url_builder`` (typically injected
+    by the backend through tool metadata) enables image chunk rebuild.
     """
     if observer is None or getattr(tool, "_nexent_mcp_citation_wrapped", False):
         return tool
@@ -257,7 +331,9 @@ def wrap_mcp_tool_with_citation(tool: Any, observer: Optional[MessageObserver]) 
 
     def _annotate(result: Any) -> Any:
         try:
-            annotated = annotate_mcp_search_results(result, observer, tool_name)
+            annotated = annotate_mcp_search_results(
+                result, observer, tool_name, image_url_builder
+            )
         except Exception:
             logger.exception("Failed to annotate MCP search results for tool %s", tool_name)
             return result

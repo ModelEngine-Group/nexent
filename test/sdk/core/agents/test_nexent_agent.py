@@ -137,6 +137,7 @@ class _MockProcessType:
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
     SEARCH_CONTENT = "search_content"
+    PICTURE_WEB = "picture_web"
 
 
 @dataclass

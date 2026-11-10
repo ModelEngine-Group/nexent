@@ -714,7 +714,16 @@ class NexentAgent:
         elif source == "mcp":
             tool_obj = self.create_mcp_tool(class_name)
             tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
-            tool_obj = wrap_mcp_tool_with_citation(tool_obj, self.observer)
+            # Same metadata-driven builder wiring as built-in AIDP search
+            # tools: the backend may inject an image URL builder so image
+            # chunks are rebuilt instead of merely stripped.
+            tool_obj = wrap_mcp_tool_with_citation(
+                tool_obj,
+                self.observer,
+                tool_config.metadata.get("image_url_builder")
+                if tool_config.metadata
+                else None,
+            )
         elif source == "langchain":
             tool_obj = self.create_langchain_tool(tool_config)
         elif source == "builtin":

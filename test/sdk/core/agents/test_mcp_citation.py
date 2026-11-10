@@ -373,6 +373,124 @@ def test_citation_indexes_are_continuous_across_calls():
 
 
 # ---------------------------------------------------------------------------
+# Image chunk rebuild (mirrors built-in AIDP search tool behavior)
+# ---------------------------------------------------------------------------
+
+IMAGE_CHUNK = {
+    "title": "Architecture diagram",
+    "url": "https://aidp.example.com/files/8",
+    "text": 'Intro paragraph <img src="/md_image/diagram.png" alt="diagram"> closing sentence.',
+    "chunk_type": "image",
+    "file_url": "https://aidp.example.com/files/8",
+}
+
+
+def _proxy_builder(file_url):
+    return "/proxy/" + file_url.rsplit("/", 1)[-1]
+
+
+def test_rebuilds_image_chunk_with_builder():
+    observer = _RecordingObserver()
+    result = annotate_mcp_search_results(
+        json.dumps([IMAGE_CHUNK]), observer, "rag", _proxy_builder
+    )
+    assert result is not None
+    # Search content entry carries the image key and the stripped text.
+    assert len(observer.messages) == 2
+    search_type, search_content = observer.messages[0][1], observer.messages[0][2]
+    assert search_type == RealProcessType.SEARCH_CONTENT
+    reported = json.loads(search_content)
+    assert reported[0]["image_key"] == "q1"
+    assert "<img" not in reported[0]["text"]
+    # Model payload embeds the marker instruction to copy into the answer.
+    payload = json.loads(result)
+    assert "/__aidp_image__/q1" in payload[0]["text"]
+    assert "Copy this marker unchanged" in payload[0]["text"]
+    # Proxy URLs are delivered on the picture-web channel.
+    picture_type, picture_content = observer.messages[1][1], observer.messages[1][2]
+    assert picture_type == RealProcessType.PICTURE_WEB
+    assert json.loads(picture_content) == {"images_url": ["/proxy/8"]}
+
+
+def test_multiple_image_chunks_emit_urls_in_order():
+    observer = _RecordingObserver()
+    second = {
+        **IMAGE_CHUNK,
+        "title": "Flow chart",
+        "url": "https://aidp.example.com/files/9",
+        "file_url": "https://aidp.example.com/files/9",
+    }
+    text_chunk = {
+        "title": "Doc",
+        "url": "https://example.com/t",
+        "text": "Plain text chunk long enough to pass detection checks.",
+    }
+    annotate_mcp_search_results(
+        json.dumps([IMAGE_CHUNK, text_chunk, second]), observer, "rag", _proxy_builder
+    )
+    reported = json.loads(observer.messages[0][2])
+    assert reported[0]["image_key"] == "q1"
+    assert "image_key" not in reported[1]
+    assert reported[2]["image_key"] == "q3"
+    assert json.loads(observer.messages[1][2]) == {"images_url": ["/proxy/8", "/proxy/9"]}
+
+
+def test_builder_failure_skips_image_rebuild():
+    observer = _RecordingObserver()
+
+    def broken_builder(file_url):
+        raise RuntimeError("signing key missing")
+
+    result = annotate_mcp_search_results(
+        json.dumps([IMAGE_CHUNK]), observer, "rag", broken_builder
+    )
+    assert result is not None
+    # Only search content is reported; the chunk stays merely stripped.
+    assert len(observer.messages) == 1
+    reported = json.loads(observer.messages[0][2])
+    assert "image_key" not in reported[0]
+    assert "<img" not in reported[0]["text"]
+    assert "/__aidp_image__/" not in json.loads(result)[0]["text"]
+
+
+def test_builder_empty_url_skips_image_rebuild():
+    observer = _RecordingObserver()
+    result = annotate_mcp_search_results(
+        json.dumps([IMAGE_CHUNK]), observer, "rag", lambda file_url: ""
+    )
+    assert result is not None
+    assert len(observer.messages) == 1
+    assert "image_key" not in json.loads(observer.messages[0][2])[0]
+
+
+def test_non_image_chunk_is_not_rebuilt():
+    observer = _RecordingObserver()
+    items = [{**IMAGE_CHUNK, "chunk_type": "text"}]
+    annotate_mcp_search_results(json.dumps(items), observer, "rag", _proxy_builder)
+    assert len(observer.messages) == 1
+    assert "image_key" not in json.loads(observer.messages[0][2])[0]
+
+
+def test_image_chunk_without_file_url_is_not_rebuilt():
+    observer = _RecordingObserver()
+    items = {k: v for k, v in IMAGE_CHUNK.items() if k != "file_url"}
+    annotate_mcp_search_results(json.dumps([items]), observer, "rag", _proxy_builder)
+    assert len(observer.messages) == 1
+    assert "image_key" not in json.loads(observer.messages[0][2])[0]
+
+
+def test_image_chunk_without_builder_stays_stripped():
+    observer = _RecordingObserver()
+    result = annotate_mcp_search_results(json.dumps([IMAGE_CHUNK]), observer, "rag")
+    assert result is not None
+    # Same fallback as built-in AIDP search tools without a URL builder.
+    assert len(observer.messages) == 1
+    reported = json.loads(observer.messages[0][2])
+    assert "image_key" not in reported[0]
+    assert "<img" not in reported[0]["text"]
+
+
+# ---------------------------------------------------------------------------
 # Tool wrapper behavior
 # ---------------------------------------------------------------------------
 
@@ -421,6 +539,17 @@ def test_wrap_tolerates_unwritable_citation_flag():
 def test_wrap_without_observer_returns_tool_unchanged():
     tool = _make_tool(json.dumps(RAG_RESULTS))
     assert wrap_mcp_tool_with_citation(tool, None) is tool
+
+
+def test_wrap_passes_builder_to_annotation():
+    observer = _RecordingObserver()
+    tool = wrap_mcp_tool_with_citation(
+        _make_tool(json.dumps([IMAGE_CHUNK])), observer, _proxy_builder
+    )
+    payload = json.loads(tool.forward(query="diagram"))
+    assert "/__aidp_image__/q1" in payload[0]["text"]
+    assert len(observer.messages) == 2
+    assert json.loads(observer.messages[1][2]) == {"images_url": ["/proxy/8"]}
 
 
 def test_wrap_preserves_non_retrieval_output():
@@ -494,3 +623,37 @@ def test_create_tool_mcp_branch_applies_citation_wrapper():
     assert reported[0]["tool_sign"] == "q"
     # The shared collection template must stay unwrapped.
     assert template.forward(query="deploy") == json.dumps(RAG_RESULTS)
+
+
+def test_create_tool_mcp_branch_wires_metadata_image_url_builder():
+    observer = MessageObserver()
+    agent = NexentAgent(observer=observer, model_config_list=[], stop_event=Event())
+    template = SimpleNamespace(
+        name="rag_search",
+        inputs={"query": {}},
+        forward=lambda query: json.dumps([IMAGE_CHUNK]),
+    )
+    agent.mcp_tool_collection = SimpleNamespace(tools=[template])
+    config = ToolConfig(
+        class_name="rag_search", name="rag_search", description="RAG search",
+        inputs="{}", output_type="string", params={}, source="mcp",
+        metadata={"image_url_builder": _proxy_builder},
+    )
+    tool = agent.create_tool(config)
+    payload = json.loads(tool.forward(query="diagram"))
+    # The builder injected through tool metadata activates the rebuild.
+    assert "/__aidp_image__/q1" in payload[0]["text"]
+    picture_messages = [
+        entry for entry in observer.messages
+        if len(entry["args"]) >= 3 and entry["args"][1] == "picture_web"
+    ]
+    assert len(picture_messages) == 1
+    assert json.loads(picture_messages[0]["args"][2]) == {"images_url": ["/proxy/8"]}
+    reported = json.loads(
+        next(
+            entry["args"][2]
+            for entry in observer.messages
+            if len(entry["args"]) >= 3 and entry["args"][1] == "search_content"
+        )
+    )
+    assert reported[0]["image_key"] == "q1"
