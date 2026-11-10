@@ -10,6 +10,34 @@ from infrastructure.redis.run_state import runtime_state_service
 
 START = "0-1"
 
+# Check the retained tail and set the flag atomically with respect to terminal writes.
+_RUN_STATE_SCRIPT = """
+local tail = redis.call('XREVRANGE', KEYS[1], '+', '-', 'COUNT', 1)
+if #tail == 0 then
+    return nil
+end
+local fields = tail[1][2]
+local status = 'running'
+local terminal = false
+for i = 1, #fields, 2 do
+    if fields[i] == 'kind' then
+        terminal = fields[i + 1] == 'terminal'
+        if fields[i + 1] == 'start' then
+            status = 'starting'
+        end
+    elseif fields[i] == 'status' then
+        status = fields[i + 1]
+    end
+end
+if terminal then
+    return {tail[1][1], status, 0}
+end
+if ARGV[1] == 'stop' then
+    redis.call('SET', KEYS[2], '1', 'EX', ARGV[2], 'NX')
+end
+return {tail[1][1], status, redis.call('EXISTS', KEYS[2])}
+"""
+
 
 @dataclass(frozen=True)
 class RunJournal:
@@ -37,6 +65,23 @@ class RunJournal:
 
     def finish(self, index: int, status: str) -> None:
         self._append(f"{index}-0", {"kind": "terminal", "status": status}, RUNTIME_COMPLETED_TTL_SECONDS)
+
+    @property
+    def cancel_key(self) -> str:
+        return f"{self.key}:cancel"
+
+    def run_state(self, request_stop: bool = False) -> tuple[str, str, bool] | None:
+        state = runtime_state_service.client.eval(
+            _RUN_STATE_SCRIPT, 2, self.key, self.cancel_key,
+            "stop" if request_stop else "inspect", max(1, RUNTIME_STREAM_TTL_SECONDS),
+        )
+        if state is None:
+            return None
+        event_id, status, cancellation_requested = state
+        return event_id, status, bool(cancellation_requested)
+
+    def is_stop_requested(self) -> bool:
+        return bool(runtime_state_service.client.exists(self.cancel_key))
 
     def replay(self, after_id):
         with runtime_state_service.client.pipeline() as pipe:

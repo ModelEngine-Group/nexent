@@ -9,6 +9,8 @@ from contracts.agentos import (
     MAX_REQUEST_BYTES,
     AgentOperation,
     AgentResume,
+    AgentRunReference,
+    AgentRunState,
     AgentRunningState,
     BackgroundAgentResult,
     CompatibilityConversationRun,
@@ -126,6 +128,14 @@ class AgentOSClient:
     async def stop(self, conversation_id, user_id, tenant_id):
         payload = CompatibilityStop(conversation_id=conversation_id)
         return await self._post_json(CompatibilityOperation.STOP, payload, user_id, tenant_id)
+
+    async def inspect_run(self, payload: AgentRunReference, user_id: str, tenant_id: str) -> AgentRunState:
+        result = await self._post_json(AgentOperation.INSPECT, payload, user_id, tenant_id)
+        return self._validate_result(AgentRunState, result)
+
+    async def stop_run(self, payload: AgentRunReference, user_id: str, tenant_id: str) -> AgentRunState:
+        result = await self._post_json(AgentOperation.STOP, payload, user_id, tenant_id)
+        return self._validate_result(AgentRunState, result)
 
     async def get_model(self, model_id: int, user_id: str, tenant_id: str) -> ModelMetadata:
         payload = ModelReference(model_id=model_id)

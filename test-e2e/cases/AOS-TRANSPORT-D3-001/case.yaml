@@ -51,6 +51,9 @@ case:
   - order: 8
     action: Submit a signed conversation twice with one idempotency key and then change the request under that key.
     expected: Both original requests identify the same run; the changed request returns 409, and execution starts once.
+  - order: 9
+    action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
+    expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -60,6 +63,7 @@ case:
   - Resume returns only events after the supplied cursor and never opens a journal for an unauthorized actor.
   - Management relays the Runtime response and run ID while preserving the signed scope and request context.
   - The admission claim returns the original run identity on retry without starting a second execution.
+  - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -122,4 +126,9 @@ case:
     description: Ordinary signed submission retries reuse the original run identity and reject conflicting input.
     steps: [8]
     expected_results: [8]
+    forbidden_side_effects: [2]
+  - id: AC-09
+    description: Signed inspect and stop target one retained run and enforce user and tenant ownership.
+    steps: [9]
+    expected_results: [9]
     forbidden_side_effects: [2]

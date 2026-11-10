@@ -182,8 +182,12 @@ class LocalExecutionRegistry:
 
     def stop_agent_run(self, conversation_id: Union[int, str], user_id: str) -> bool:
         """stop agent run for specified conversation_id and user_id"""
+        return self.stop_local_run(conversation_id, user_id)
+
+    def stop_local_run(self, conversation_id, user_id, expected_run=None) -> bool:
+        """Cancel a local execution without broadcasting to another replica."""
         agent_run_info = self.get_agent_run_info(conversation_id, user_id)
-        if agent_run_info is not None:
+        if agent_run_info is not None and (expected_run is None or agent_run_info is expected_run):
             agent_run_info.stop_event.set()
             cancellation_scope = getattr(agent_run_info, "cancellation_scope", None)
             if cancellation_scope is not None:

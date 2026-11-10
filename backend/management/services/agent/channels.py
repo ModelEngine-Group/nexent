@@ -58,6 +58,10 @@ class StreamingChannel:
         self._journal_fragment = ""
         self._journal_gap = False
 
+    @property
+    def run_journal(self) -> RunJournal | None:
+        return self._journal
+
     async def start_journal(self, tenant_id: str, run_id: str) -> str | None:
         journal = RunJournal(tenant_id, self.user_id, self.conversation_id, run_id)
         async with self._lock:

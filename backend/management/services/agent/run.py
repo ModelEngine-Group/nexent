@@ -27,8 +27,12 @@ from management.services.agent.context import (
     build_authorized_context_input,
 )
 from management.services.agent.execution import (
+    AGENTOS_PREPARATION_STOP,
     _agent_run_identifier,
+    _cancel_preparation_on_agentos_stop,
     _cancel_task_on_runtime_signal,
+    _journal_stop_requested,
+    _run_journal,
     _stream_agent_chunks,
     _unregister_agent_run_after_execution,
 )
@@ -321,6 +325,8 @@ async def generate_stream(
 
     memory_enabled_runtime = False
     agent_run_info = None
+    scoped_preparation_stop = False
+    journal = _run_journal(channel)
     try:
         if enable_memory:
             # Resolve the user-level switch for tool loading only.
@@ -333,7 +339,12 @@ async def generate_stream(
 
         # Prepare the agent with or without memory. The preparation path runs
         # fixed retrieval before the model loop and exposes only store_memory.
+        preparation_poll = None
         try:
+            if journal is not None and _outer_task is not None:
+                if await _journal_stop_requested(journal):
+                    raise asyncio.CancelledError(AGENTOS_PREPARATION_STOP)
+                preparation_poll = asyncio.create_task(_cancel_preparation_on_agentos_stop(journal, _outer_task))
             prepare_kwargs = {}
             if reservation_token is not None:
                 prepare_kwargs["reservation_token"] = reservation_token
@@ -352,6 +363,9 @@ async def generate_stream(
             # the memory-enabled path can decide between retry-without-memory
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
+        finally:
+            if preparation_poll is not None:
+                preparation_poll.cancel()
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -365,10 +379,14 @@ async def generate_stream(
         ):
             yield data_chunk
 
-    except (asyncio.CancelledError, GeneratorExit):
+    except (asyncio.CancelledError, GeneratorExit) as exc:
+        scoped_preparation_stop = journal is not None and exc.args == (AGENTOS_PREPARATION_STOP,)
         if agent_run_info is not None:
             run_identifier = _agent_run_identifier(agent_request)
-            agent_run_manager.stop_agent_run(run_identifier, user_id)
+            if journal is None:
+                agent_run_manager.stop_agent_run(run_identifier, user_id)
+            else:
+                agent_run_manager.stop_local_run(run_identifier, user_id, agent_run_info)
             _unregister_agent_run_after_execution(
                 run_identifier,
                 user_id,
@@ -443,7 +461,9 @@ async def generate_stream(
                 wait_timeout=0,
                 mark_stuck_on_timeout=False,
             )
-        if reservation_token is not None:
+        # The detached producer owns terminal publication and releases a
+        # stopped preparation's reservation in its done callback.
+        if reservation_token is not None and not scoped_preparation_stop:
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 user_id,

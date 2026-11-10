@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from redis.exceptions import ConnectionError
 
-from contracts.agentos import AgentResume
+from contracts.agentos import AgentResume, AgentRunReference
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.redis.agent_events import RunJournal
 from runtime.agentos import resume
@@ -99,8 +100,6 @@ async def test_legacy_channel_records_complete_sse_frames(mocker):
 
 @pytest.mark.asyncio
 async def test_legacy_channel_marks_gap_and_keeps_serving_when_journal_fails(mocker):
-    from redis.exceptions import ConnectionError
-
     from management.services.agent import channels
 
     async def control_io(_task, function, *args, **_kwargs):
@@ -122,3 +121,41 @@ async def test_legacy_channel_marks_gap_and_keeps_serving_when_journal_fails(moc
     assert legacy_append.await_count == 2
     journal.append.assert_called_once_with(1, "data: first\n\n")
     journal.finish.assert_called_once_with(3, "completed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("request_stop", "tail", "status", "cursor", "requested"), [
+    (False, ("0-1", "starting", False), "starting", None, False),
+    (True, ("7-0", "running", True), "running", f"{RUN_ID}:7", True),
+    (True, ("8-0", "completed", False), "completed", f"{RUN_ID}:8", False),
+])
+async def test_run_state_returns_status_and_exact_cursor(journal, request_stop, tail, status, cursor, requested):
+    journal.run_state.return_value = tail
+    payload = AgentRunReference(conversation_id=42, run_id=RUN_ID)
+    result = await resume.run_state(payload, ACTOR, request_stop=request_stop)
+
+    assert (result.run_id, result.status, result.latest_event_id, result.cancellation_requested) == (
+        RUN_ID, status, cursor, requested,
+    )
+    resume.RunJournal.assert_called_once_with("tenant", "actor", 42, RUN_ID)
+    journal.run_state.assert_called_once_with(request_stop=request_stop)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("owned", "enabled", "error", "status", "code"), [
+    (False, True, None, 404, "AGENTOS_RUN_NOT_FOUND"),
+    (True, True, None, 404, "AGENTOS_RUN_NOT_FOUND"),
+    (True, False, None, 503, "AGENTOS_EVENT_STORE_UNAVAILABLE"),
+    (True, True, ConnectionError("Redis disconnected"), 503, "AGENTOS_EVENT_STORE_UNAVAILABLE"),
+])
+async def test_stop_denial_has_no_conversation_wide_fallback(journal, owned, enabled, error, status, code):
+    resume.conversation_belongs_to.return_value = owned
+    resume.runtime_state_service.enabled = enabled
+    journal.run_state.side_effect = error
+    journal.run_state.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        await resume.run_state(AgentRunReference(conversation_id=42, run_id=RUN_ID), ACTOR, request_stop=True)
+    assert (exc.value.status_code, exc.value.detail) == (status, {"code": code})
+    assert journal.run_state.call_count == int(owned and enabled)
+    resume.runtime_state_service.set_cancel_signal.assert_not_called()

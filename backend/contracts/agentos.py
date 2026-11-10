@@ -69,6 +69,8 @@ class EvaluationAgentRun(BaseModel):
 class AgentOperation(str, Enum):
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
+    INSPECT = NAMESPACE + "v1/agent/inspect"
+    STOP = NAMESPACE + "v1/agent/stop"
 
 
 class RunSpecModel(BaseModel):
@@ -79,10 +81,19 @@ RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
 EVENT_ID_PATTERN = r"^[0-9a-f]{32}:[1-9][0-9]{0,18}$"
 
 
-class AgentResume(RunSpecModel):
+class AgentRunReference(RunSpecModel):
     conversation_id: PositiveInt
     run_id: str = Field(pattern=RUN_ID_PATTERN)
+
+
+class AgentResume(AgentRunReference):
     after_event_id: str | None = Field(default=None, pattern=EVENT_ID_PATTERN)
+
+
+class AgentRunState(AgentRunReference):
+    status: Literal["starting", "running", "completed", "failed", "stopped"]
+    latest_event_id: str | None = Field(pattern=EVENT_ID_PATTERN)
+    cancellation_requested: bool
 
 
 class ToolBinding(RunSpecModel):

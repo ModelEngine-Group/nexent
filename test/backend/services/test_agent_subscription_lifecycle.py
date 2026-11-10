@@ -4,6 +4,7 @@
 
 import asyncio
 import importlib.util
+import threading
 from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
@@ -358,3 +359,120 @@ async def test_failed_admission_binding_cleans_journal_before_releasing_reservat
     assert not env.manager._reservations
     assert not env.service._agent_stream_producer_tasks
     assert env.future.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_agentos_stop_during_preparation_releases_worker_after_terminal_publication(lifecycle, monkeypatch):
+    env = lifecycle
+    execution = service_tests.agent_execution
+    run = service_tests.agent_run_service
+    run_id = "a" * 32
+    env.channel.run_journal = execution.RunJournal("t", "u", 123, run_id)
+    preparing = asyncio.Event()
+    stop = asyncio.Event()
+
+    async def prepare(**kwargs):
+        preparing.set()
+        await asyncio.Future()
+
+    async def poll_stop(journal):
+        assert journal is env.channel.run_journal
+        return stop.is_set()
+
+    async def complete_channel(**kwargs):
+        assert env.manager._reservations
+        env.channel.complete(kwargs["status"])
+
+    monkeypatch.setattr(run, "agent_run_manager", env.manager)
+    monkeypatch.setattr(run, "prepare_agent_run", prepare)
+    monkeypatch.setattr(run, "_stream_agent_chunks", MagicMock())
+    monkeypatch.setattr(run, "_journal_stop_requested", poll_stop)
+    monkeypatch.setattr(execution, "_journal_stop_requested", poll_stop)
+    monkeypatch.setattr(execution, "RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(execution.streaming_channel_manager, "complete_channel", complete_channel)
+
+    await env.start(run.generate_stream)
+    producer, = env.service._agent_stream_producer_tasks
+    await asyncio.wait_for(preparing.wait(), timeout=1)
+    stop.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(producer), timeout=1)
+    assert producer.cancelled()
+    assert env.channel.completion_status == "stopped"
+    assert not env.manager._reservations
+    assert env.future.cancelled()
+    run._stream_agent_chunks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agentos_worker_polls_only_its_own_run_id(monkeypatch):
+    execution = service_tests.agent_execution
+    first = execution.RunJournal("t", "u", 123, "a" * 32)
+    next_run = execution.RunJournal("t", "u", 123, "b" * 32)
+    scoped_reads = []
+
+    async def poll_stop(journal):
+        scoped_reads.append(journal)
+        return journal == first
+
+    legacy_signal = AsyncMock(return_value=False)
+    monkeypatch.setattr(execution.runtime_state_service, "is_cancelled_async", legacy_signal)
+    monkeypatch.setattr(execution, "_journal_stop_requested", poll_stop)
+    old_event, next_event = threading.Event(), threading.Event()
+    old_scope, next_scope = MagicMock(), MagicMock()
+    next_poll = asyncio.create_task(execution._poll_runtime_cancel_signal(
+        123, "u", next_event, next_scope, journal=next_run,
+    ))
+    try:
+        await asyncio.sleep(0)
+        await execution._poll_runtime_cancel_signal(123, "u", old_event, old_scope, journal=first)
+        assert old_event.is_set() and not next_event.is_set()
+        old_scope.cancel.assert_called_once_with()
+        next_scope.cancel.assert_not_called()
+        assert scoped_reads == [next_run, first]
+        legacy_signal.assert_awaited_once_with(user_id="u", conversation_id=123)
+    finally:
+        next_poll.cancel()
+        await asyncio.gather(next_poll, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_agentos_stop_between_preparation_and_sdk_dispatch(lifecycle, monkeypatch):
+    env = lifecycle
+    worker = service_tests.agent_execution
+    run = service_tests.agent_run_service
+    env.channel.run_journal = worker.RunJournal("t", "u", 123, "a" * 32)
+    info = SimpleNamespace(stop_event=threading.Event(), cancellation_scope=None, agent_config=SimpleNamespace())
+    prepared = False
+
+    async def prepare(**kwargs):
+        nonlocal prepared
+        env.manager.register_agent_run(123, info, "u", kwargs["reservation_token"])
+        prepared = True
+        return info, None
+
+    async def poll_stop(journal):
+        return prepared
+
+    monkeypatch.setattr(run, "agent_run_manager", env.manager)
+    monkeypatch.setattr(run, "prepare_agent_run", prepare)
+    monkeypatch.setattr(run, "_journal_stop_requested", poll_stop)
+    monkeypatch.setattr(worker, "_journal_stop_requested", poll_stop)
+    monkeypatch.setattr(worker, "save_message", MagicMock(return_value=7))
+    async def finalize_projection(**kwargs):
+        assert kwargs["terminal_status"] == "stopped"
+        return "stopped", False, ""
+
+    monkeypatch.setattr(worker, "finalize_assistant_projection", finalize_projection)
+    monkeypatch.setattr(worker, "agent_run", MagicMock())
+    env.deferred.cancel.side_effect = lambda: env.future.set_result(None)
+
+    await env.start(run.generate_stream)
+    producer, = env.service._agent_stream_producer_tasks
+    await asyncio.wait_for(producer, timeout=1)
+    assert env.channel.completion_status == "stopped"
+    assert not env.manager._reservations
+    assert not env.manager.agent_runs
+    worker.agent_run.assert_not_called()
+    env.deferred.cancel.assert_called_once()
+    assert info.thread_future is env.future

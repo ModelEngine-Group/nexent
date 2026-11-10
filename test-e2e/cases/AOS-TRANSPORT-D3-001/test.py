@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
-    AgentOperation, AgentResume, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
+    AgentOperation, AgentResume, AgentRunReference, AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun,
     EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants import environment
@@ -191,6 +191,7 @@ async def test_signed_agentos_transport(monkeypatch):
     ]
     await _assert_prepared_evaluation_over_signed_http(monkeypatch)
     await _assert_resume_over_signed_http(monkeypatch)
+    await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
 
 
@@ -329,7 +330,7 @@ async def _assert_resume_over_signed_http(monkeypatch):
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
-    runtime.include_router(resume.create_resume_router())
+    runtime.include_router(resume.create_run_lifecycle_router())
 
     with serve(runtime) as runtime_url:
         agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
@@ -445,3 +446,62 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
 
     assert len(received) == 4
     assert executions == [run_id]
+
+
+async def _assert_run_lifecycle_over_signed_http(monkeypatch):
+    from runtime.agentos import resume
+
+    first = AgentRunReference(conversation_id=42, run_id="1" * 32)
+    next_run = AgentRunReference(conversation_id=42, run_id="2" * 32)
+    states = {first.run_id: ("2-0", "running"), next_run.run_id: ("0-1", "starting")}
+    requested = set()
+
+    class Journal:
+        def __init__(self, tenant_id, user_id, conversation_id, run_id):
+            assert (tenant_id, user_id, conversation_id) == ("tenant-a", "user-a", 42)
+            self.run_id = run_id
+
+        def run_state(self, request_stop=False):
+            event, status = states[self.run_id]
+            if request_stop and status in {"running", "starting"}:
+                requested.add(self.run_id)
+            return event, status, status in {"running", "starting"} and self.run_id in requested
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(resume, "_control_io", control_io)
+    monkeypatch.setattr(resume, "RunJournal", Journal)
+    monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=True))
+    monkeypatch.setattr(
+        resume, "conversation_belongs_to",
+        lambda conversation_id, *, user_id, tenant_id: (conversation_id, user_id, tenant_id) == (42, "user-a", "tenant-a"),
+    )
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(resume.create_run_lifecycle_router())
+
+    with serve(runtime) as runtime_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        state = await agentos.inspect_run(first, "user-a", "tenant-a")
+        assert (state.status, state.latest_event_id, state.cancellation_requested) == ("running", f"{first.run_id}:2", False)
+
+        for actor in (("other-user", "tenant-a"), ("user-a", "other-tenant")):
+            for command in (agentos.inspect_run, agentos.stop_run):
+                with pytest.raises(RuntimeUpstreamError) as denied:
+                    await command(first, *actor)
+                assert denied.value.status_code == 404
+        assert not requested
+
+        stop = await agentos.stop_run(first, "user-a", "tenant-a")
+        assert stop.status == "running" and stop.cancellation_requested
+        assert await agentos.stop_run(first, "user-a", "tenant-a") == stop
+        states[first.run_id] = ("3-0", "stopped")
+        terminal = await agentos.stop_run(first, "user-a", "tenant-a")
+        assert (terminal.status, terminal.latest_event_id, terminal.cancellation_requested) == (
+            "stopped", f"{first.run_id}:3", False,
+        )
+        next_state = await agentos.inspect_run(next_run, "user-a", "tenant-a")
+        assert next_state.status == "starting" and next_state.latest_event_id is None and not next_state.cancellation_requested
+        assert requested == {first.run_id}

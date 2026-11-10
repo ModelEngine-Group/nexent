@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Signed AgentOS subscription to a retained ordinary conversation run."""
+"""Signed AgentOS lifecycle commands for retained ordinary conversation runs."""
 
 import json
 
@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from redis.exceptions import RedisError
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentResume
+from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, AgentResume, AgentRunReference, AgentRunState
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from infrastructure.redis.agent_events import START, RunJournal
 from infrastructure.redis.run_state import runtime_state_service
@@ -23,9 +23,9 @@ def _stream_error(code):
     return f"event: agentos_error\ndata: {json.dumps({'code': code})}\n\n"
 
 
-async def resume_run(payload, actor):
+async def _owned_journal(payload: AgentRunReference, actor) -> RunJournal:
     owned = await _control_io(
-        "agentos-resume-ownership", conversation_belongs_to, payload.conversation_id,
+        "agentos-run-ownership", conversation_belongs_to, payload.conversation_id,
         user_id=actor.user_id, tenant_id=actor.tenant_id,
     )
     if not owned:
@@ -33,6 +33,27 @@ async def resume_run(payload, actor):
     if not runtime_state_service.enabled:
         raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"})
 
+    return RunJournal(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
+
+
+async def run_state(payload: AgentRunReference, actor, *, request_stop: bool = False) -> AgentRunState:
+    journal = await _owned_journal(payload, actor)
+    try:
+        state = await _control_io("agentos-run-state", journal.run_state, request_stop=request_stop)
+    except (RedisError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail={"code": "AGENTOS_EVENT_STORE_UNAVAILABLE"}) from exc
+    if state is None:
+        raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
+    event_id, status, cancellation_requested = state
+    latest_event_id = None if event_id == START else f"{payload.run_id}:{event_id.split('-')[0]}"
+    return AgentRunState(
+        conversation_id=payload.conversation_id, run_id=payload.run_id, status=status,
+        latest_event_id=latest_event_id, cancellation_requested=cancellation_requested,
+    )
+
+
+async def resume_run(payload: AgentResume, actor):
+    journal = await _owned_journal(payload, actor)
     sequence = 0
     after_id = START
     if payload.after_event_id is not None:
@@ -42,7 +63,6 @@ async def resume_run(payload, actor):
         sequence = int(cursor_index)
         after_id = f"{sequence}-0"
 
-    journal = RunJournal(actor.tenant_id, actor.user_id, payload.conversation_id, payload.run_id)
     try:
         anchor, events, tail = await _control_io("agentos-resume-replay", journal.replay, after_id)
     except (RedisError, RuntimeError) as exc:
@@ -86,18 +106,30 @@ async def resume_run(payload, actor):
     })
 
 
-def create_resume_router():
+def create_run_lifecycle_router():
     router = APIRouter()
 
-    @router.post(AgentOperation.RESUME.value, include_in_schema=False)
-    async def resume(request: Request):
-        actor = request.scope.get(PRINCIPAL_KEY)
-        if actor is None:
-            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
-        try:
-            payload = AgentResume.model_validate_json(request.scope[BODY_KEY])
-        except ValidationError:
-            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-        return await resume_run(payload, actor)
+    def handler(schema, command, **options):
+        async def handle(request: Request):
+            actor = request.scope.get(PRINCIPAL_KEY)
+            if actor is None:
+                return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+            try:
+                payload = schema.model_validate_json(request.scope[BODY_KEY])
+            except ValidationError:
+                return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+            return await command(payload, actor, **options)
 
+        return handle
+
+    router.add_api_route(
+        AgentOperation.RESUME.value, handler(AgentResume, resume_run), methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        AgentOperation.INSPECT.value, handler(AgentRunReference, run_state), methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        AgentOperation.STOP.value, handler(AgentRunReference, run_state, request_stop=True),
+        methods=["POST"], include_in_schema=False,
+    )
     return router

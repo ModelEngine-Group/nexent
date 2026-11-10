@@ -14,6 +14,8 @@ from typing import (
     Optional,
 )
 
+from redis.exceptions import RedisError
+
 from management.services.agent.lifecycle import (
     agent_run_manager,
 )
@@ -66,6 +68,7 @@ from nexent.core.concurrency import (
     ManagedExecution,
     ManagedTaskSpec,
     RunCancellationScope,
+    run_blocking,
 )
 from nexent.core.models import (
     OpenAIModel,
@@ -91,6 +94,7 @@ from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
+from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
@@ -111,6 +115,7 @@ from management.services.configuration.tenant.settings import (
 )
 
 logger = logging.getLogger(__name__)
+AGENTOS_PREPARATION_STOP = "agentos preparation stop"
 
 
 def _unregister_agent_run_after_execution(conversation_id, user_id, status, agent_run_info=None) -> bool:
@@ -146,12 +151,15 @@ async def _consume_agent_stream_producer(
     user_id: str,
 ) -> None:
     """Consume a non-debug agent stream independently from its SSE subscriber."""
+    fallback_status = "failed"
     producer_error = False
     try:
         with agent_monitoring_context(agent_metadata):
             async for _ in stream_gen:
                 pass
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
+        if exc.args == (AGENTOS_PREPARATION_STOP,):
+            fallback_status = "stopped"
         try:
             await stream_gen.aclose()
         except (AttributeError, RuntimeError):
@@ -179,7 +187,7 @@ async def _consume_agent_stream_producer(
         # _stream_agent_chunks normally owns persistence and terminal state.
         # This fallback covers failures before that generator is entered.
         if not channel.is_completed:
-            if not producer_error:
+            if fallback_status == "failed" and not producer_error:
                 logger.error(
                     "Agent stream producer exited without terminal state conversation=%s",
                     conversation_id,
@@ -191,7 +199,7 @@ async def _consume_agent_stream_producer(
                 _unregister_agent_run_after_execution(
                     conversation_id,
                     user_id,
-                    status="failed",
+                    status=fallback_status,
                     agent_run_info=run_info,
                 )
             except Exception:
@@ -203,7 +211,7 @@ async def _consume_agent_stream_producer(
                 await streaming_channel_manager.complete_channel(
                     conversation_id=conversation_id,
                     user_id=user_id,
-                    status="failed",
+                    status=fallback_status,
                 )
             except Exception:
                 logger.exception(
@@ -231,12 +239,37 @@ async def _consume_agent_stream_producer(
         )
 
 
+def _run_journal(channel) -> RunJournal | None:
+    journal = getattr(channel, "run_journal", None)
+    return journal if isinstance(journal, RunJournal) else None
+
+
+async def _journal_stop_requested(journal: RunJournal | None) -> bool:
+    if journal is None:
+        return False
+    try:
+        return await run_blocking(
+            "agentos-poll-stop", journal.is_stop_requested, lane="control-io", owner="runtime",
+        )
+    except (RedisError, RuntimeError):
+        logger.warning("Could not check AgentOS stop signal for run %s", journal.run_id)
+        return False
+
+
+async def _cancel_preparation_on_agentos_stop(journal: RunJournal, task: asyncio.Task) -> None:
+    while not task.done():
+        if await _journal_stop_requested(journal):
+            task.cancel(AGENTOS_PREPARATION_STOP)
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
+
+
 async def _poll_runtime_cancel_signal(
-    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None, *, journal=None,
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
-        if await runtime_state_service.is_cancelled_async(
+        if await _journal_stop_requested(journal) or await runtime_state_service.is_cancelled_async(
             user_id=user_id, conversation_id=conversation_id
         ):
             stop_event.set()
@@ -364,12 +397,14 @@ async def _stream_agent_chunks(
         agent_run_info.cancellation_scope = RunCancellationScope(
             agent_run_info.stop_event
         )
+    journal = _run_journal(channel)
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
             cancellation_scope=agent_run_info.cancellation_scope,
+            journal=journal,
         )
     )
 
@@ -383,6 +418,13 @@ async def _stream_agent_chunks(
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
     async def _iter_run_chunks():
+        if journal is not None and (await _journal_stop_requested(journal) or agent_run_info.stop_event.is_set()):
+            agent_run_info.cancellation_scope.cancel()
+            if deferred_run is not None and execution is not None:
+                agent_run_info.thread_future = execution.future
+                agent_run_info.thread_execution_id = execution.execution_id
+                deferred_run.cancel()
+            return
         for event in getattr(
             agent_run_info.agent_config,
             "pre_run_tool_events",
