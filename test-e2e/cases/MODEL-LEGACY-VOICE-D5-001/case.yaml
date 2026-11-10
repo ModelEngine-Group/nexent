@@ -1,0 +1,47 @@
+schema_version: '1.0'
+stage: D5
+module: MODEL-SERVICE
+case:
+  case_id: MODEL-LEGACY-VOICE-D5-001
+  feature_id: F-032
+  business_rule_ids: [F-032-RULE-02]
+  title: Retire old built-in voice models without changing tenant-managed settings
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise the historical voice data cleanup and safe reapplication in PostgreSQL.
+  preconditions:
+  - The test owns an isolated PostgreSQL scratch database.
+  test_data:
+    configuration: Duplicate and singleton legacy records, configured models with the same names, defaults across tenants, and a reference to a previously retired seed.
+  steps:
+  - order: 1
+    action: Apply the upgrade to the synthetic model and tenant configuration tables.
+    expected: Legacy models and their default references are soft-deleted with audit updates. Custom models, valid defaults and unrelated configuration retain their original values.
+  - order: 2
+    action: Reapply the migration and compare both tables to their post-upgrade state.
+    expected: Both tables remain identical, including audit fields.
+  expected_results:
+  - All active seed copies are retired, including singleton rows and defaults still pointing to previously retired seeds.
+  - The migration preserves other tenant and model-type references, custom models, and metadata for a surviving STT selection.
+  - Reapplication changes zero rows.
+  forbidden_side_effects:
+  - No hard deletion, custom configuration loss or writes outside the owned database.
+  risk_type: DEPLOYMENT
+  risk: Upgrade cleanup could remove working tenant voice configurations or leave stale defaults.
+  condition: [Owned PostgreSQL scratch database with synthetic pre-upgrade data]
+  metrics: [Remaining active seed count, Preserved row mismatch count, Rows changed on reapplication]
+  thresholds: [All three counts are zero]
+  recovery_expectations: [Reapplication after a successful cleanup leaves persisted state identical]
+  acceptance:
+  - id: AC-01
+    description: Retire the obsolete seed records and only the related default settings.
+    steps: [1]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Reapply without changing any stored fields.
+    steps: [2]
+    expected_results: [3]
+    forbidden_side_effects: [1]

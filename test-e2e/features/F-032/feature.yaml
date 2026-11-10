@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-032-RULE-01
     description: LLM/Embedding/Multi-Embedding/VLM/STT/TTS 模型新增/更新/软删除
-  required_test_stages: []
+  - rule_id: F-032-RULE-02
+    description: Upgrades retire obsolete built-in voice models and their defaults while preserving tenant-managed voice configurations. Reapplying the cleanup is safe.
+  required_test_stages: [D5]
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

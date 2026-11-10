@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from contracts.tool import ToolSourceEnum, ToolValidateRequest
 from management.db.client import minio_client
@@ -113,7 +113,7 @@ async def _validate_mcp_tool_nexent(
             inputs,
             custom_headers={
                 "X-Tenant-ID": str(tenant_id),
-                "X-Nexent-Internal-Token": TOKEN,
+                "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
             },
         )
     return await _call_mcp_tool(actual_mcp_url, tool_name, inputs)

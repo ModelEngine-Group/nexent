@@ -33,7 +33,7 @@ from management.services.agent.preparation.inputs import join_minio_file_descrip
 from management.services.agent.creation import create_nl2agent_agent_config
 from management.services.agent.system import system_agent_provider
 from management.db.agent.repository import search_agent_info_by_agent_id
-from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_INTERNAL_TOKEN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
@@ -1540,7 +1540,7 @@ async def build_nl2agent_run_info(
         "true" if _requires_policy_clarification(request.query) else "false"
     )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
-    mcp_headers["X-Nexent-Internal-Token"] = TOKEN
+    mcp_headers["X-Nexent-Internal-Token"] = NEXENT_MCP_INTERNAL_TOKEN
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 
