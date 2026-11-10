@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResume, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
+    AgentResume, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
@@ -55,13 +55,18 @@ async def forward_northbound_run(
 ):
     payload = CompatibilityConversationRun(request=agent_request.model_dump(mode="json"))
     try:
-        return await forward_conversation_run(payload, user_id, tenant_id, northbound_fallback=fallback)
+        response = await forward_conversation_run(payload, user_id, tenant_id, northbound_fallback=fallback)
     except HTTPException as exc:
         if exc.status_code != 409 or exc.detail != {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}:
             raise
     except RuntimeUpstreamError as exc:
         if exc.status_code != 409 or exc.headers.get("X-Stream-Status") != "conflict":
             raise
+    else:
+        if response.status_code != 409 or response.headers.get("X-Stream-Status") != "conflict":
+            return response
+        if response.background is not None:
+            await response.background()
     return active_run_error_response(payload.language)
 
 
@@ -144,9 +149,16 @@ async def forward_agent_stop(
     client = _agentos_client()
     pending = await find_pending_turn(conversation_id, user_id, tenant_id)
     if pending is None:
-        return await client.stop(conversation_id, user_id, tenant_id)
+        run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
+        if run_id is None:
+            return await client.stop(conversation_id, user_id, tenant_id)
+        reference = AgentRunReference(run_id=run_id, conversation_id=conversation_id)
+    else:
+        reference = pending.reference
 
-    state = await client.stop_run(AgentStop(**pending.reference.model_dump(), prevent_start=True), user_id, tenant_id)
+    state = await client.stop_run(
+        AgentStop(**reference.model_dump(), prevent_start=pending is not None), user_id, tenant_id,
+    )
     if state.cancellation_requested:
         message = f"successfully stopped agent run for user_id {user_id}, run_id {conversation_id}"
         return {"status": "success", "message": message}

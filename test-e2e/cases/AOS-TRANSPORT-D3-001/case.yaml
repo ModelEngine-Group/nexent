@@ -55,8 +55,8 @@ case:
     action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
   - order: 10
-    action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
-    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy stop respects user and tenant ownership.
+    action: Stop a registered run through the public Management and Northbound paths, and start and cancel an automation run using its persisted execution ID.
+    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime marks persistent Gateway and Northbound compatibility starts for registration, and legacy stop respects user and tenant ownership.
   - order: 11
     action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
@@ -310,7 +310,7 @@ case:
     expected_results: [9]
     forbidden_side_effects: [2]
   - id: AC-10
-    description: Public stop and automation background operations preserve exact run identity across signed HTTP.
+    description: Public stop, Northbound stop and automation background operations preserve exact run identity across signed HTTP. Persistent compatibility starts opt in to tracked execution.
     steps: [10]
     expected_results: [10]
     forbidden_side_effects: [2]

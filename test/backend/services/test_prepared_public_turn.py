@@ -404,6 +404,25 @@ async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_northbound_translates_and_closes_legacy_admission_conflict(mocker):
+    from starlette.background import BackgroundTask
+
+    close = AsyncMock()
+    runtime_response = StreamingResponse(
+        iter(()), status_code=409, headers={"X-Stream-Status": "conflict"}, background=BackgroundTask(close),
+    )
+    mocker.patch.object(runtime_client, "forward_conversation_run", return_value=runtime_response)
+
+    response = await runtime_client.forward_northbound_run(
+        AgentRequest(query="hello", conversation_id=42, agent_id=7), *ACTOR, fallback=AsyncMock(),
+    )
+
+    assert response.status_code == 200
+    assert len([frame async for frame in response.body_iterator]) == 1
+    close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
     pending = SimpleNamespace(reference=REFERENCE, user_id=ACTOR[0], tenant_id=ACTOR[1])
     find = mocker.patch.object(prepared_turn, "find_pending_turn", return_value=pending)
@@ -418,6 +437,23 @@ async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
     client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
     client.stop.assert_not_awaited()
     assert result["message"] == "successfully stopped agent run for user_id actor, run_id 42"
+
+
+@pytest.mark.asyncio
+async def test_northbound_stop_targets_registered_run_without_legacy_stop(mocker):
+    mocker.patch.object(prepared_turn, "find_pending_turn", return_value=None)
+    client = SimpleNamespace(
+        find_active_run=AsyncMock(return_value=REFERENCE.run_id), stop=AsyncMock(),
+        stop_run=AsyncMock(return_value=SimpleNamespace(cancellation_requested=True)),
+    )
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+
+    result = await runtime_client.forward_agent_stop(REFERENCE.conversation_id, *ACTOR)
+
+    client.find_active_run.assert_awaited_once_with(REFERENCE.conversation_id, *ACTOR)
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump()), *ACTOR)
+    client.stop.assert_not_awaited()
+    assert result == {"status": "success", "message": "successfully stopped agent run for user_id actor, run_id 42"}
 
 
 @pytest.mark.asyncio

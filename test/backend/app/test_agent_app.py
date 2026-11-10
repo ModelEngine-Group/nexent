@@ -481,6 +481,40 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
     assert call_kwargs["tenant_id"] == "tenant-a"
     assert call_kwargs["skip_user_save"] is True
     assert call_kwargs["http_request"] is None
+    assert call_kwargs["agent_request"]._track_execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("conversation_id", "debug", "tracked"), [(123, False, True), (None, True, False)])
+async def test_signed_compatibility_run_tracks_only_persistent_execution(mocker, conversation_id, debug, tracked):
+    from runtime.api.agent import execution
+
+    stream = mocker.patch.object(
+        execution, "run_agent_stream", new_callable=AsyncMock, return_value=StreamingResponse(iter(())),
+    )
+    actor = ServicePrincipal("user-a", "tenant-a")
+    response = await execution.run_agentos_compatibility(
+        {"agent_id": 1, "conversation_id": conversation_id, "query": "hello", "is_debug": debug}, actor,
+    )
+
+    assert response is stream.return_value
+    options = stream.await_args.kwargs
+    assert options["agent_request"]._track_execution is tracked
+    assert (options["user_id"], options["tenant_id"], options["skip_user_save"]) == ("user-a", "tenant-a", True)
+
+
+@pytest.mark.asyncio
+async def test_signed_compatibility_run_reports_execution_conflict(mocker):
+    from infrastructure.rdb.agent_execution import ActiveExecutionError
+    from runtime.api.agent import execution
+
+    mocker.patch.object(execution, "run_agent_stream", side_effect=ActiveExecutionError)
+    response = await execution.run_agentos_compatibility(
+        {"agent_id": 1, "conversation_id": 123, "query": "hello"}, ServicePrincipal("user-a", "tenant-a"),
+    )
+
+    assert response.status_code == 409
+    assert response.headers["X-Stream-Status"] == "conflict"
 
 
 @pytest.mark.asyncio

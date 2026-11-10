@@ -1495,8 +1495,10 @@ async def _assert_run_lifecycle_over_signed_http(monkeypatch):
 
 
 async def _assert_public_stop_and_background(monkeypatch):
+    from unittest.mock import AsyncMock
+
     from management.api.agent import conversation_run
-    from management.services.agent import runtime_client
+    from management.services.agent import prepared_turn, runtime_client
     from runtime.agentos import resume
     from runtime.api.agent import execution
 
@@ -1553,6 +1555,7 @@ async def _assert_public_stop_and_background(monkeypatch):
     monkeypatch.setattr(execution, "_require_owned_conversation", lambda cid, actor: require_owner(cid, actor.user_id, actor.tenant_id))
     monkeypatch.setattr(execution, "run_agent_stream", stream)
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda auth: ("user-a", auth or "tenant-a"))
+    monkeypatch.setattr(prepared_turn, "find_pending_turn", AsyncMock(return_value=None))
 
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
@@ -1573,6 +1576,14 @@ async def _assert_public_stop_and_background(monkeypatch):
                 assert response.status_code == 200 and response.json()["run_id"] == run_id
                 assert response.json()["cancellation_requested"]
 
+        with pytest.raises(RuntimeUpstreamError) as foreign:
+            await runtime_client.forward_agent_stop(42, "user-a", "foreign")
+        assert foreign.value.status_code == 404 and stopped == [run_id, run_id]
+        stopped_northbound = await runtime_client.forward_agent_stop(42, "user-a", "tenant-a")
+        assert stopped_northbound == {
+            "status": "success", "message": "successfully stopped agent run for user_id user-a, run_id 42",
+        }
+
         fenced = await agentos.stop_run(
             AgentStop(run_id=blocked_id, conversation_id=42, prevent_start=True), "user-a", "tenant-a",
         )
@@ -1586,7 +1597,7 @@ async def _assert_public_stop_and_background(monkeypatch):
         assert (result.run_id, result.assistant_message_id) == (automation_id, 77)
         state = await agentos.inspect_run(AgentRunReference(conversation_id=42, run_id=automation_id), "user-a", "tenant-a")
         assert state.status == "completed" and state.resource_versions.agent_version_no == 4
-    assert stopped == [run_id, run_id, blocked_id]
+    assert stopped == [run_id, run_id, run_id, blocked_id]
     assert launches == [automation_id]
 
 async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
@@ -1611,7 +1622,7 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
         return callback(*args)
 
     async def stream(**kwargs):
-        starts.append((kwargs["user_id"], kwargs["tenant_id"]))
+        starts.append((kwargs["user_id"], kwargs["tenant_id"], kwargs["agent_request"]._track_execution))
 
         async def events():
             yield _EVENTS
@@ -1656,7 +1667,11 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
             assert foreign.value.status_code == 404 and not info.stop_event.is_set()
             result = await agentos.stop(conversation_id, "legacy-actor", "tenant-a")
             assert result["status"] == "success" and info.stop_event.is_set()
-            assert starts == [("legacy-actor", "tenant-a")]
+            response = await agentos.run(
+                {"conversation_id": conversation_id, "query": "northbound"}, "legacy-actor", "tenant-a",
+            )
+            assert response.status_code == 200 and b"".join([chunk async for chunk in response.body_iterator]) == _EVENTS
+            assert starts == [("legacy-actor", "tenant-a", True), ("legacy-actor", "tenant-a", True)]
             assert checks == [
                 (conversation_id, "legacy-actor", "tenant-b"),
                 (conversation_id, "legacy-actor", "tenant-b"),

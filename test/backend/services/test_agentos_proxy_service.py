@@ -9,7 +9,7 @@ import pytest
 
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.agent import AgentRequest
-from contracts.agentos import CompatibilityOperation
+from contracts.agentos import AgentOperation, CompatibilityOperation
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal, verify_call
 from management.services.agent import runtime_client as proxy
@@ -233,10 +233,12 @@ async def test_agentos_stream_can_be_closed_before_reading(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_forward_agent_stop_returns_json(monkeypatch):
-    captured = {}
+    captured = []
 
     async def handler(request: httpx.Request):
-        captured["request"] = request
+        captured.append(request)
+        if request.url.path == f"/api{AgentOperation.ACTIVE.value}":
+            return httpx.Response(200, json={"run_id": None})
         return httpx.Response(200, json={"message": "stopped"})
 
     transport = httpx.MockTransport(handler)
@@ -250,15 +252,23 @@ async def test_forward_agent_stop_returns_json(monkeypatch):
     result = await proxy.forward_agent_stop(123, "user-a", "tenant-a")
 
     assert result == {"message": "stopped"}
-    assert str(captured["request"].url) == (
+    active, stop = captured
+    assert active.url.path == f"/api{AgentOperation.ACTIVE.value}"
+    assert json.loads(active.content) == {"conversation_id": 123}
+    assert str(stop.url) == (
         "http://runtime:5014/api/internal/agentos/v1/compat/agent/stop"
     )
-    assert captured["request"].method == "POST"
-    assert json.loads(captured["request"].content) == {"conversation_id": 123}
+    assert stop.method == "POST"
+    assert json.loads(stop.content) == {"conversation_id": 123}
+
+
+@pytest.fixture
+def no_active_northbound_run(monkeypatch):
+    monkeypatch.setattr(proxy.AgentOSClient, "find_active_run", AsyncMock(return_value=None))
 
 
 @pytest.mark.asyncio
-async def test_forward_agent_stop_preserves_upstream_error(monkeypatch):
+async def test_forward_agent_stop_preserves_upstream_error(monkeypatch, no_active_northbound_run):
     async def handler(request: httpx.Request):
         return httpx.Response(
             403,
@@ -294,6 +304,7 @@ async def test_forward_agent_stop_maps_transport_errors(
     monkeypatch,
     transport_error,
     expected_error,
+    no_active_northbound_run,
 ):
     async def handler(request: httpx.Request):
         transport_error.request = request
@@ -322,6 +333,7 @@ async def test_forward_agent_stop_rejects_invalid_success_payload(
     monkeypatch,
     response_kwargs,
     expected_message,
+    no_active_northbound_run,
 ):
     async def handler(request: httpx.Request):
         return httpx.Response(200, **response_kwargs)

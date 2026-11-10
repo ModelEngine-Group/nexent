@@ -31,6 +31,12 @@ agent_runtime_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
 
 
+def _execution_conflict_response() -> JSONResponse:
+    return JSONResponse(
+        {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}, status_code=409, headers={"X-Stream-Status": "conflict"},
+    )
+
+
 def _runtime_overload_response(exc: Exception) -> JSONResponse:
     if isinstance(exc, RuntimeQueueTimeoutError):
         code = "RUNTIME_QUEUE_TIMEOUT"
@@ -64,6 +70,7 @@ async def agent_run_api(
     resume: bool = Query(False, description="Resume an existing streaming conversation"),
 ):
     """Legacy signed Gateway entry for starting or resuming a stream."""
+    agent_request._track_execution = not resume and not agent_request.is_debug
     return await _run_public_conversation(
         agent_request, http_request, _gateway_session_principal(), resume,
     )
@@ -102,9 +109,7 @@ async def _run_public_conversation(agent_request, http_request, principal, resum
             resume=resume,
         )
     except ActiveExecutionError:
-        return JSONResponse(
-            {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}, status_code=409, headers={"X-Stream-Status": "conflict"},
-        )
+        return _execution_conflict_response()
     except PermissionError as exc:
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
     except ForbiddenError as e:
@@ -249,6 +254,7 @@ async def run_agentos_tracked_background(payload: BackgroundRun, principal: Serv
 
 
 async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str):
+    agent_request._track_execution = not agent_request.is_debug and (agent_request.conversation_id or 0) > 0
     try:
         return await run_agent_stream(
             agent_request=agent_request,
@@ -257,6 +263,8 @@ async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, ten
             tenant_id=tenant_id,
             skip_user_save=True,
         )
+    except ActiveExecutionError:
+        return _execution_conflict_response()
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
     except ForbiddenError as exc:
