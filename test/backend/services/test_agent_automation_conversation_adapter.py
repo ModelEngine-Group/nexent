@@ -51,6 +51,7 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
     )
 
     assert turn["user_message_id"] == 31
+    assert turn["assistant_message_index"] == 5
     assert [(item.role, item.content) for item in turn["history"]] == [
         ("user", "原始请求"),
         ("assistant", "上次结果"),

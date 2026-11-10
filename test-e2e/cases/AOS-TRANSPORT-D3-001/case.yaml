@@ -60,6 +60,9 @@ case:
   - order: 11
     action: Compile an owned conversation snapshot in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
+  - order: 12
+    action: Drop the prepared automation acknowledgement after Runtime accepts the run, then recover from the persisted Automation record.
+    expected: Management retains the exact execution ID and pending projection, inspects and replays the signed journal, and finalizes one assistant message without starting the run again.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -72,6 +75,7 @@ case:
   - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
   - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
   - Prepared conversation execution starts once and is resumable independently of the submit connection.
+  - The prepared automation runner recovers the same scoped run and commits its assistant message after the lost acknowledgement.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -189,4 +193,9 @@ case:
     description: Prepared Agent.run and resume use the same scoped identity and retain raw observer events across HTTP requests.
     steps: [11]
     expected_results: [11]
+    forbidden_side_effects: [2]
+  - id: AC-20
+    description: Prepared automation recovers a dropped start acknowledgement through inspect and replay of the original execution.
+    steps: [12]
+    expected_results: [12]
     forbidden_side_effects: [2]

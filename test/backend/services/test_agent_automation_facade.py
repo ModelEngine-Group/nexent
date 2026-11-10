@@ -755,50 +755,34 @@ async def test_confirm_proposal_rejects_and_marks_expired_proposal(monkeypatch):
     assert statuses == [AutomationProposalStatus.EXPIRED.value]
 
 
+@pytest.mark.parametrize("prepared", [False, True])
 @pytest.mark.asyncio
-async def test_cancel_run_marks_running_run_canceled(monkeypatch):
-    stopped = {}
+async def test_cancel_run_marks_running_run_canceled(monkeypatch, prepared):
+    operations = []
+    run = {
+        "run_id": 7, "tenant_id": "tenant", "user_id": "user", "task_id": 88,
+        "conversation_id": 99, "runtime_run_id": "a" * 32, "status": AutomationRunStatus.RUNNING.value,
+        "projection_message_index": 3 if prepared else None,
+    }
 
     async def fake_stop(runtime_run_id, conversation_id, user_id, tenant_id):
-        stopped.update(runtime_run_id=runtime_run_id, conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id)
+        assert (runtime_run_id, conversation_id, user_id, tenant_id) == ("a" * 32, 99, "user", "tenant")
+        operations.append("stop")
 
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "get_run",
-        lambda run_id, tenant_id, user_id: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "task_id": 88,
-            "conversation_id": 99,
-            "runtime_run_id": "a" * 32,
-            "status": AutomationRunStatus.RUNNING.value,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "cancel_run",
-        lambda run_id, tenant_id, user_id, reason: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "status": AutomationRunStatus.CANCELED.value,
-            "error_message": reason,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
-    )
+    def cancel(run_id, tenant_id, user_id, reason):
+        assert (run_id, tenant_id, user_id) == (7, "tenant", "user")
+        operations.append("cancel")
+        return {**run, "status": AutomationRunStatus.CANCELED.value, "error_message": reason}
 
-    service = AgentAutomationFacade()
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *_: run)
+    monkeypatch.setattr(facade_module.agent_automation_db, "cancel_run", cancel)
+    monkeypatch.setattr(facade_module.agent_automation_db, "update_task", lambda *_: operations.append("update"))
     monkeypatch.setattr("management.services.automation.runner.agent_automation_runner.cancel_runtime_run", fake_stop)
 
-    canceled = await service.cancel_run(7, "tenant", "user")
+    canceled = await AgentAutomationFacade().cancel_run(7, "tenant", "user")
 
     assert canceled["status"] == AutomationRunStatus.CANCELED.value
-    assert stopped == {"runtime_run_id": "a" * 32, "conversation_id": 99, "user_id": "user", "tenant_id": "tenant"}
+    assert operations == (["cancel", "stop"] if prepared else ["stop", "cancel", "update"])
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):

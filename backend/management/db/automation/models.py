@@ -121,6 +121,7 @@ class AgentAutomationRun(TableBase):
     runtime_run_id = Column(String(32), doc="Stable AgentOS execution ID assigned before dispatch")
     generated_prompt = Column(Text, nullable=True, doc="Prompt appended to the conversation")
     user_message_id = Column(BigInteger, nullable=True, doc="Automation user message ID")
+    projection_message_index = Column(Integer, doc="Assistant message index while AgentOS projection is pending")
     assistant_message_id = Column(BigInteger, nullable=True, doc="Assistant message ID")
     started_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run start time")
     finished_at = Column(TIMESTAMP(timezone=True), nullable=True, doc="Run finish time")

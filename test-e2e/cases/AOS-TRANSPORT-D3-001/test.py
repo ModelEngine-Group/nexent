@@ -1424,11 +1424,14 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
 
 
 async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
     from pathlib import Path
-    from unittest.mock import Mock
+    from unittest.mock import AsyncMock, Mock
 
     from contracts.agent import AgentRequest
     from contracts.conversation import MessageSource
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+    from management.services.automation import runner as automation
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
@@ -1622,8 +1625,35 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         async with httpx.AsyncClient(base_url=runtime_url, trust_env=False) as raw:
             unauthorized = await raw.post(f"/api{AgentOperation.RUN.value}", json=request.model_dump(mode="json"))
             assert unauthorized.status_code == 401
-        assert await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id) == reference
+        stored_run = {
+            "run_id": 51, "runtime_run_id": reference.run_id, "status": "RUNNING",
+            "task_id": 1, "trigger_type": "MANUAL", "conversation_id": 42,
+            "user_id": actor.user_id, "tenant_id": actor.tenant_id,
+            "started_at": datetime.now(timezone.utc),
+        }
+        task = {**stored_run, "status": "ACTIVE", "agent_id": 7, "instruction": "question"}
+        def record(run_id, values, user_id, *, expected_statuses):
+            assert (run_id, user_id, expected_statuses) == (51, actor.user_id, ["RUNNING"])
+            stored_run.update(values)
+            return stored_run.copy()
+
+        real_start = agentos.start_prepared_run
+        async def start_then_drop_ack(payload, user_id, tenant_id):
+            assert stored_run["projection_message_index"] == 1 and stored_run["user_message_id"] == 23
+            assert await real_start(payload, user_id, tenant_id) == reference
+            raise RuntimeServiceUnavailableError("Synthetic dropped acknowledgement")
+
+        monkeypatch.setattr(agentos, "start_prepared_run", start_then_drop_ack)
+        monkeypatch.setattr(automation, "_agentos_client", lambda: agentos)
+        monkeypatch.setattr(automation, "prepare_conversation_snapshot", AsyncMock(return_value=request))
+        monkeypatch.setattr(automation, "validate_bindings_available", AsyncMock(return_value={"available": True}))
+        monkeypatch.setattr(automation.automation_conversation_adapter, "append_run_prompt",
+                            lambda *_: {"user_message_id": 23, "history": [], "assistant_message_index": 1})
+        monkeypatch.setattr(automation.agent_automation_db, "update_run", record)
+        submission = await automation.AgentAutomationRunner()._execute_active_run(stored_run.copy(), task)
+        assert submission["status"] == "RUNNING" and stored_run["projection_message_index"] == 1
         assert await asyncio.to_thread(finished.wait, 5)
+        monkeypatch.setattr(agentos, "start_prepared_run", real_start)
         with pytest.raises(RuntimeUpstreamError) as duplicate:
             await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id)
         assert duplicate.value.status_code == 409
@@ -1643,12 +1673,25 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
         monkeypatch.setattr(prepared_projection, "run_blocking", control_io)
         monkeypatch.setattr(prepared_projection, "persist_prepared_assistant_projection", persist)
-        projection = await prepared_projection.resume_assistant_projection(
-            agentos.resume, reference, actor.user_id, actor.tenant_id,
-            message_index=1, message_source=MessageSource.AUTOMATION,
-        )
-        assert (projection.assistant_message_id, projection.status, projection.chunks) == (77, "completed", 4)
+        def finalize(pending, run_values, task_values):
+            assert pending["runtime_run_id"] == reference.run_id
+            assert task_values["last_run_status"] == "SUCCEEDED"
+            stored_run.update(run_values)
+            return stored_run.copy()
+
+        monkeypatch.setattr(automation, "run_blocking", control_io)
+        monkeypatch.setattr(automation, "get_prepared_projection_receipt", lambda **_: None)
+        monkeypatch.setattr(automation.agent_automation_db, "get_task", lambda *_: task)
+        monkeypatch.setattr(automation.agent_automation_db, "finish_prepared_run", finalize)
+        monkeypatch.setattr(resume, "read_execution", lambda run_id, user, tenant, cid, **_: {
+            "conversation_id": cid, "status": "completed", "cancellation_requested": False,
+        } if (run_id, user, tenant, cid) == (reference.run_id, actor.user_id, actor.tenant_id, 42) else None)
+        monkeypatch.setattr(Journal, "run_state", lambda self: (journal_events[-1][0], "completed", False), raising=False)
+        await automation.AgentAutomationRunner().recover_prepared_run(stored_run.copy())
+        assert stored_run["assistant_message_id"] == 77 and stored_run["status"] == "SUCCEEDED"
+        assert stored_run["projection_message_index"] is None
         assert len(persisted) == 1
+        assert persisted[0]["message_source"] is MessageSource.AUTOMATION
         batch = persisted[0]
         assert (batch["projection_run_id"], batch["conversation_id"]) == (reference.run_id, 42)
         assert batch["message_content"] == "answer"

@@ -2,6 +2,7 @@
 """Backend adapter for the SDK's durable lease scheduler."""
 
 import asyncio
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable
@@ -71,6 +72,7 @@ class AgentAutomationLeaseStore:
 
     def __init__(self) -> None:
         self._recovery_time: datetime | None = None
+        self._projection_cursor = 0
 
     async def recover(self) -> None:
         recovery_time = _utcnow()
@@ -109,6 +111,18 @@ class AgentAutomationLeaseStore:
                 continue
             runnable_tasks.append(task)
         return [ClaimedJob(job_id=task["task_id"], payload=task) for task in runnable_tasks]
+
+    async def reconcile_pending_projection(self) -> None:
+        pending = await run_blocking(
+            "automation-pending-projections", agent_automation_db.list_pending_projections,
+            self._projection_cursor, 1, lane="control-io", owner="management",
+        )
+        self._projection_cursor = pending[-1]["run_id"] if pending else 0
+        for run in pending:
+            try:
+                await asyncio.wait_for(agent_automation_runner.recover_prepared_run(run), timeout=30)
+            except Exception as exc:
+                logger.warning("Deferred automation recovery run_id=%s error=%s", run["run_id"], type(exc).__name__)
 
     async def _skip_claimed_misfire(self, task: Dict[str, Any], owner_id: str) -> bool:
         """Advance a pre-restart recurring fire without invoking its executor."""
@@ -209,8 +223,10 @@ class AgentAutomationScheduler:
     """Application lifecycle wrapper around the reusable SDK scheduler."""
 
     def __init__(self) -> None:
+        self._store = AgentAutomationLeaseStore()
+        self._recovery_task: asyncio.Task | None = None
         self._scheduler = LeaseScheduler(
-            store=AgentAutomationLeaseStore(),
+            store=self._store,
             executor=execute_agent_automation,
             config=SchedulerConfig(
                 poll_interval_seconds=AGENT_AUTOMATION_POLL_INTERVAL_SECONDS,
@@ -229,12 +245,27 @@ class AgentAutomationScheduler:
         return self._scheduler.is_running
 
     async def start(self) -> None:
-        if not AGENT_AUTOMATION_ENABLED:
+        if AGENT_AUTOMATION_ENABLED:
+            await self._scheduler.start()
+        else:
             logger.info("Agent automation scheduler disabled")
-            return
-        await self._scheduler.start()
+        # Manual runs and previously admitted work still need reconciliation.
+        if self._recovery_task is None:
+            self._recovery_task = asyncio.create_task(self._recover_projections(), name="automation-projection-recovery")
+
+    async def _recover_projections(self) -> None:
+        while True:
+            try:
+                await self._store.reconcile_pending_projection()
+            except Exception:
+                logger.exception("Unable to load pending automation projections")
+            await asyncio.sleep(AGENT_AUTOMATION_POLL_INTERVAL_SECONDS)
 
     async def stop(self) -> None:
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            await asyncio.gather(self._recovery_task, return_exceptions=True)
+            self._recovery_task = None
         await self._scheduler.stop()
 
 

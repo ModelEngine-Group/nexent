@@ -106,6 +106,7 @@ class AutomationConversationAdapter:
         )
         return {
             "user_message_id": message_id,
+            "assistant_message_index": next_message_index + 1,
             "history": self._history_items(messages),
         }
 

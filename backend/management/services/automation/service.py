@@ -778,13 +778,23 @@ class AgentAutomationFacade:
 
         from management.services.automation.runner import agent_automation_runner
 
-        await agent_automation_runner.cancel_runtime_run(run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id)
+        prepared = run.get("projection_message_index") is not None
+        if not prepared:
+            await agent_automation_runner.cancel_runtime_run(
+                run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+            )
         canceled = agent_automation_db.cancel_run(
             run_id,
             tenant_id,
             user_id,
             "Automation run was canceled by user.",
         )
+        if prepared:
+            if canceled:
+                await agent_automation_runner.cancel_runtime_run(
+                    run.get("runtime_run_id"), run["conversation_id"], user_id, tenant_id,
+                )
+            return canceled or agent_automation_db.get_run(run_id, tenant_id, user_id) or run
         agent_automation_db.update_task(run["task_id"], tenant_id, user_id, {
             "last_run_status": AutomationRunStatus.CANCELED.value,
             "last_error": "Automation run was canceled by user.",

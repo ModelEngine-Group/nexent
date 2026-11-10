@@ -171,11 +171,16 @@ async def resume_task(task_id: int, authorization: Optional[str] = Header(None))
         raise _map_error(exc)
 
 
+def _public_run(run: dict) -> dict:
+    return {key: value for key, value in run.items() if key not in {"projection_message_index", "_lease_owner"}}
+
+
 @router.post("/{task_id}/run", response_model=AutomationResponse)
 async def run_task_now(task_id: int, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=await agent_automation_facade.run_task_now(task_id, tenant_id, user_id))
+        run = await agent_automation_facade.run_task_now(task_id, tenant_id, user_id)
+        return AutomationResponse(data=_public_run(run))
     except AgentAutomationError as exc:
         raise _map_error(exc)
 
@@ -198,7 +203,8 @@ async def list_runs(
 ):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.list_runs(task_id, tenant_id, user_id, page, page_size))
+        result = agent_automation_facade.list_runs(task_id, tenant_id, user_id, page, page_size)
+        return AutomationResponse(data={**result, "items": [_public_run(run) for run in result["items"]]})
     except AgentAutomationError as exc:
         raise _map_error(exc)
 
@@ -207,7 +213,8 @@ async def list_runs(
 async def cancel_run(run_id: int, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=await agent_automation_facade.cancel_run(run_id, tenant_id, user_id))
+        run = await agent_automation_facade.cancel_run(run_id, tenant_id, user_id)
+        return AutomationResponse(data=_public_run(run))
     except AgentAutomationError as exc:
         raise _map_error(exc)
 

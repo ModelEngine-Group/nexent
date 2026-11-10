@@ -32,6 +32,7 @@ def _load_scheduler_with_runner_stub(monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(module, "run_blocking", run_inline)
+    monkeypatch.setattr(module.agent_automation_db, "list_pending_projections", lambda *_args: [])
     return module
 
 
@@ -261,9 +262,34 @@ async def test_scheduler_wrapper_honors_feature_flag_and_delegates_lifecycle(mon
     monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", False)
     await service.start()
     inner.start.assert_not_awaited()
+    recovery = service._recovery_task
+    assert recovery is not None
 
     monkeypatch.setattr(scheduler_module, "AGENT_AUTOMATION_ENABLED", True)
     await service.start()
+    assert service._recovery_task is recovery
     await service.stop()
+    assert recovery.done()
     inner.start.assert_awaited_once()
     inner.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_projection_poll_advances_past_a_temporarily_unavailable_run(monkeypatch):
+    module = _load_scheduler_with_runner_stub(monkeypatch)
+    store = module.AgentAutomationLeaseStore()
+    cursors = []
+
+    def pending(cursor, limit):
+        assert limit == 1
+        cursors.append(cursor)
+        return {0: [{"run_id": 5}], 5: [{"run_id": 9}], 9: []}[cursor]
+
+    monkeypatch.setattr(module.agent_automation_db, "list_pending_projections", pending)
+    recover = AsyncMock(side_effect=[RuntimeError("offline"), None, None])
+    monkeypatch.setattr(module.agent_automation_runner, "recover_prepared_run", recover, raising=False)
+    for _ in range(4):
+        await store.reconcile_pending_projection()
+
+    assert cursors == [0, 5, 9, 0]
+    assert [call.args[0]["run_id"] for call in recover.await_args_list] == [5, 9, 5]

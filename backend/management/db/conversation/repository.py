@@ -444,6 +444,34 @@ def _lock_projection_conversation(session, conversation_id: int, user_id: str) -
         raise ValueError("Conversation does not exist or is not accessible")
 
 
+def get_prepared_projection_receipt(
+    *, projection_run_id: str, conversation_id: int, message_index: int,
+    message_source: MessageSource, user_id: str, tenant_id: str,
+) -> tuple[int, str] | None:
+    from infrastructure.rdb.conversation_state import tenant_membership_matches
+    from management.db.conversation.projection_receipt import ConversationProjectionReceipt
+
+    receipt = ConversationProjectionReceipt
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return None
+        row = session.execute(
+            select(receipt.message_id, ConversationMessage.status)
+            .join(ConversationMessage, ConversationMessage.message_id == receipt.message_id)
+            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+            .where(
+                receipt.run_id == projection_run_id, receipt.tenant_id == tenant_id,
+                receipt.created_by == user_id, receipt.delete_flag == "N",
+                ConversationMessage.conversation_id == conversation_id, ConversationMessage.created_by == user_id,
+                ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_index == message_index,
+                ConversationMessage.message_source == MessageSource(message_source).value,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            )
+        ).one_or_none()
+        return (row.message_id, row.status) if row is not None else None
+
+
 def persist_prepared_assistant_projection(
     *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
     user_id: str, tenant_id: str, **batch,

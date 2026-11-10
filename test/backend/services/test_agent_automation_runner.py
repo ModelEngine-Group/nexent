@@ -16,6 +16,7 @@ class _Payload:
 
 def _load_runner_with_stubs(monkeypatch):
     consts_model = types.ModuleType("contracts.agent")
+    consts_model.__dict__.update(vars(importlib.import_module("contracts.agent")))
     consts_model.AgentRequest = _Payload
     consts_model.HistoryItem = _Payload
     consts_model.MessageRequest = _Payload
@@ -625,7 +626,7 @@ async def test_execute_task_carries_lease_owner_into_active_run(monkeypatch):
         lambda values, user_id: {"run_id": 21, **values},
     )
 
-    async def capture_active_run(run, task, scheduled, trigger_type):
+    async def capture_active_run(run, task):
         captured.update(run)
         return run
 
