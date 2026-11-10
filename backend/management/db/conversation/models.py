@@ -16,34 +16,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 from management.db.base import SCHEMA, TableBase
-from infrastructure.rdb.conversation_record import ConversationMessage as ConversationMessage, ConversationRecord as ConversationRecord
-
-
-class ConversationMessageUnit(TableBase):
-    """
-    Holds the agent's output content in each message
-    """
-    __tablename__ = "conversation_message_unit_t"
-    __table_args__ = {"schema": SCHEMA}
-
-    unit_id = Column(Integer, Sequence("conversation_message_unit_t_unit_id_seq",
-                     schema=SCHEMA), primary_key=True, nullable=False)
-    message_id = Column(
-        Integer, doc="Formal foreign key used to associate with the message")
-    conversation_id = Column(
-        Integer, doc="Formal foreign key used to associate with the conversation")
-    unit_index = Column(
-        Integer, doc="Sequence number for frontend display sorting")
-    unit_type = Column(String(100), doc="Type of the smallest answer unit")
-    unit_content = Column(
-        String, doc="Complete content of the smallest reply unit")
-    unit_status = Column(
-        String(30), default='completed',
-        doc="Lifecycle status: streaming (still aggregating) or completed (fully persisted)")
-    tool_call_id = Column(
-        String(36), doc="Unique ID of the originating tool invocation. Used to attribute side-channel units to the correct tool call when multiple calls run in parallel.")
-    invocation_id = Column(
-        String(36), doc="Identifies which sub-agent invocation produced this unit. Used by the frontend history adapter to route deep-thinking / reasoning chunks into the correct nested sub-agent card.")
+from infrastructure.rdb.conversation_record import (
+    ConversationMessage as ConversationMessage,
+    ConversationMessageUnit as ConversationMessageUnit,
+    ConversationRecord as ConversationRecord,
+)
 
 
 class ConversationSourceImage(TableBase):

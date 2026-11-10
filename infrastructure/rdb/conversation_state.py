@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from infrastructure.rdb.account_record import UserTenant
 from infrastructure.rdb.client import get_db_session
-from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
+from infrastructure.rdb.conversation_record import ConversationMessage, ConversationMessageUnit, ConversationRecord
 
 
 def tenant_membership_matches(session, user_id: str, tenant_id: str) -> bool:
@@ -39,6 +39,30 @@ def conversation_belongs_to(conversation_id: int, *, user_id: str, tenant_id: st
                 ConversationRecord.delete_flag == "N",
             )
         ) is not None
+
+
+def read_legacy_resume_state(conversation_id: int, user_id: str, tenant_id: str):
+    """Read the persisted playback offset within the signed conversation scope."""
+    message, unit = ConversationMessage, ConversationMessageUnit
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            raise PermissionError("Conversation is not accessible to the current identity")
+        conversation = session.execute(select(ConversationRecord.workbench_config).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        )).one_or_none()
+        if conversation is None:
+            raise PermissionError("Conversation is not accessible to the current identity")
+
+        last_unit = select(func.max(unit.unit_index)).where(
+            unit.message_id == message.message_id, unit.delete_flag == "N",
+        ).correlate(message).scalar_subquery()
+        assistant = session.execute(select(message.status, last_unit).where(
+            message.conversation_id == conversation_id, message.message_role == "assistant",
+            message.delete_flag == "N",
+        ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1)).one_or_none()
+        return bool(conversation.workbench_config), tuple(assistant) if assistant is not None else None
 
 
 def fail_streaming_assistant_messages() -> list[dict]:

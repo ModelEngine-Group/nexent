@@ -25,6 +25,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
+from runtime.agentos.legacy_resume import resume_legacy_conversation
 from runtime.executions import AgentRunManager, agent_run_manager, stop_registered_run
 from runtime.thread_management import (
     agent_stream_producer_tasks,
@@ -140,6 +141,10 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
 
 async def _run_public_conversation(agent_request, http_request, principal, resume):
     try:
+        if resume and not agent_request.is_debug and (agent_request.conversation_id or 0) > 0:
+            return await resume_legacy_conversation(
+                agent_request.conversation_id, principal, workbench=agent_request.entrypoint == "workbench",
+            )
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,

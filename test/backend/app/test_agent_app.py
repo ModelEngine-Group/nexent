@@ -633,17 +633,33 @@ async def test_agentos_conversation_uses_signed_actor_and_preserves_request_cont
     actor = ServicePrincipal("actor", "tenant")
     payload = CompatibilityConversationRun(
         request={"query": "question", "conversation_id": 42},
-        language="en", timezone="Asia/Shanghai", resume=True,
+        language="en", timezone="Asia/Shanghai",
     )
     result = await execution.run_agentos_conversation(payload, actor)
     assert result is runner.return_value
     args = runner.await_args.kwargs
-    assert (args["user_id"], args["tenant_id"], args["resume"]) == ("actor", "tenant", True)
+    assert (args["user_id"], args["tenant_id"], args["resume"]) == ("actor", "tenant", False)
     assert args["agent_request"].conversation_id == 42
     assert args["http_request"].cookies["NEXT_LOCALE"] == "en"
     assert args["http_request"].headers["x-user-timezone"] == "Asia/Shanghai"
     assert "skip_user_save" not in args
     auth.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agentos_cursorless_resume_bypasses_management_subscription(mocker):
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("actor", "tenant")
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+    replay = mocker.patch.object(execution, "resume_legacy_conversation", new=AsyncMock(return_value=object()))
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock())
+
+    assert await execution.run_agentos_conversation(payload, actor) is replay.return_value
+    replay.assert_awaited_once_with(42, actor, workbench=False)
+    runner.assert_not_awaited()
 
 
 @pytest.mark.asyncio
