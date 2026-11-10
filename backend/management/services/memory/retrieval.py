@@ -32,7 +32,7 @@ from management.services.memory.index import (
     MemoryIndexService,
     get_memory_index_service,
 )
-from management.services.memory.query_embedding import embed_memory_query
+from management.services.memory.embedding import embed_memory_text
 from management.services.memory.records import (
     MemoryRecordService,
     _resolve_tenant_embedding_model_info,
@@ -205,7 +205,7 @@ class MemoryRetrievalService:
         # Compute query embedding when a model is available.
         embedding: Optional[List[float]] = None
         if query and embedding_model_info:
-            embedding = await embed_memory_query(query, embedding_model_info, user_id, tenant_id)
+            embedding = await embed_memory_text(query, embedding_model_info, user_id, tenant_id)
 
         request = MemorySearchRequest(
             tenant_id=tenant_id,

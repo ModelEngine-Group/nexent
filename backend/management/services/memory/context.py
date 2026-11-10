@@ -29,7 +29,7 @@ from nexent.memory.policy import MemoryRetrievalPolicy
 
 from contracts.constants.environment import AGENT_SHORT_TERM_HALF_LIFE_DAYS, MMR_CANDIDATE_TOP_K, MMR_DUPLICATE_THRESHOLD, MMR_FINAL_TOP_K, MMR_LAMBDA, MEMORY_TOKEN_BUDGET, W_AGENT_SHORT_TERM, W_EXTERNAL
 
-from management.services.memory.query_embedding import embed_memory_query
+from management.services.memory.embedding import embed_memory_text
 from management.services.memory.records import _resolve_tenant_embedding_model_info
 from management.services.memory.retrieval import (
     MemoryRetrievalService,
@@ -56,7 +56,7 @@ async def _prepare_search_embedding(
     resolved = embedding_model_info or _resolve_tenant_embedding_model_info(tenant_id)
     if resolved is None:
         return None, None
-    computed = await embed_memory_query(query, resolved, user_id, tenant_id)
+    computed = await embed_memory_text(query, resolved, user_id, tenant_id)
     if computed is None:
         logger.warning("query_embedding computation failed for tenant=%s", tenant_id)
     return resolved, computed

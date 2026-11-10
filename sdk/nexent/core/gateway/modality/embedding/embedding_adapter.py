@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Embedding adapter root: request type + shared text/multimodal embedding machinery."""
 
 from __future__ import annotations
@@ -61,6 +63,7 @@ class EmbeddingRequest:
         timeout: Per-request timeout; ``None`` uses ``retry_timeout_step``.
         retries: Number of retries on timeout (total attempts = ``retries + 1``).
         retry_timeout_step: Seconds added to the timeout per retry.
+        worker_lane: Optional ThreadManager lane for blocking provider calls.
     """
 
     inputs: Union[str, List[str], List[Dict[str, Any]]]
@@ -68,6 +71,7 @@ class EmbeddingRequest:
     timeout: float = None
     retries: int = 3
     retry_timeout_step: float = 5.0
+    worker_lane: Optional[str] = None
 
 
 class EmbeddingAdapter(MultimodalAdapter, HttpTransportMixin):
@@ -299,16 +303,17 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
 
     async def invoke(self, request: EmbeddingRequest):
         """Embed ``request.inputs`` via the multimodal or text path, offloaded to a thread."""
+        worker_options = {"lane": request.worker_lane} if request.worker_lane is not None else {}
         if _is_multimodal(request.inputs):
             return await run_blocking(
                 "gateway-multimodal-embedding-invoke",
                 self.get_multimodal_embeddings, request.inputs,
-                with_metadata=request.with_metadata, timeout=request.timeout,
+                with_metadata=request.with_metadata, timeout=request.timeout, **worker_options,
             )
         return await run_blocking(
             "gateway-text-embedding-invoke",
             self.get_embeddings, request.inputs,
-            with_metadata=request.with_metadata, timeout=request.timeout,
+            with_metadata=request.with_metadata, timeout=request.timeout, **worker_options,
         )
 
 

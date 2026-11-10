@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from nexent.core.concurrency import run_blocking
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import (
     MemoryIngestUnit,
@@ -71,7 +72,8 @@ async def _backend_store_hook(
                 "Failed to store memory: tenant embedding model is not configured"
             )
 
-    result = service.create_memory(
+    result = await run_blocking(
+        "memory-store-record", service.create_memory, lane="background-service", owner="management.memory",
         tenant_id=tenant_id,
         user_id=payload["user_id"],
         content=payload["content"],

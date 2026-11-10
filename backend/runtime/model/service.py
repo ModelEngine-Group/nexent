@@ -85,7 +85,7 @@ class ModelService:
             modality = metadata.model_type
             slot = "multiEmbedding" if modality == "multi_embedding" else "embedding"
             adapter = self.build_adapter(record, modality, slot, actor.tenant_id)
-            output = await adapter.invoke(EmbeddingRequest(payload.input))
+            output = await adapter.invoke(EmbeddingRequest(payload.input, worker_lane="model-embedding"))
         else:
             adapter = self.build_adapter(record, "rerank", "rerank", actor.tenant_id)
             options = payload.options

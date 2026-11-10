@@ -7,6 +7,8 @@ import socket
 import threading
 import time
 from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -23,9 +25,12 @@ from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from management.services.memory.extraction import AgentOSMemoryExtractionModel
-from management.services.memory.query_embedding import embed_memory_query
+from management.services.memory.embedding import embed_memory_text
 from nexent.memory.embedding_model import EmbeddingModelInfo
-from nexent.core.concurrency import shutdown_fallback_thread_manager
+from nexent.core.concurrency import (
+    LanePolicy, ManagedTaskSpec, ThreadManager, clear_default_thread_manager, set_default_thread_manager,
+    shutdown_fallback_thread_manager,
+)
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.agentos.model import create_model_router
@@ -222,10 +227,13 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 model_name="test-embedding", dimension=2, model_id=17, revision=record["update_time"] + "Z",
                 base_url="http://unused-management.invalid", api_key="unused-management-key",
             )
-            assert await embed_memory_query("recall", memory_model, "worker-a", "tenant-a") == [0.1, 0.2]
-            assert await embed_memory_query("foreign recall", memory_model, "worker-a", "tenant-b") is None
+            assert await embed_memory_text("recall", memory_model, "worker-a", "tenant-a") == [0.1, 0.2]
+            assert await embed_memory_text("foreign recall", memory_model, "worker-a", "tenant-b") is None
             memory_model.revision = "stale"
-            assert await embed_memory_query("stale recall", memory_model, "worker-a", "tenant-a") is None
+            assert await embed_memory_text("stale recall", memory_model, "worker-a", "tenant-a") is None
+            memory_model.revision = record["update_time"]
+            with monkeypatch.context() as memory_patches:
+                await _assert_memory_write_uses_signed_embedding(memory_patches, memory_model)
 
             registration = ModelRegistration(
                 model_name="new-model", model_type="llm", base_url=record["base_url"], api_key="test-registration-key",
@@ -276,5 +284,82 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["max_tokens"] == 700
     assert embed_calls == [
         ("Bearer provider-secret", {"model": "test-embedding", "input": [query]})
-        for query in ("search", "recall")
+        for query in ("search", "recall", "store memory", "updated memory")
     ]
+
+
+async def _assert_memory_write_uses_signed_embedding(monkeypatch, model):
+    from management.services.memory import provider as memory_provider, records as memory_records
+
+    rows = {}
+    index = Mock()
+    index.index_record.side_effect = lambda *, embedding, **_: bool(embedding)
+
+    def insert(values):
+        memory_id = len(rows) + 1
+        rows[memory_id] = {**values, "memory_id": memory_id}
+        return memory_id
+
+    def find(*, tenant_id, idempotency_key):
+        return next((row for row in rows.values() if
+                     (row["tenant_id"], row["idempotency_key"]) == (tenant_id, idempotency_key)), None)
+
+    def load(memory_id, tenant_id):
+        row = rows.get(memory_id)
+        return dict(row) if row is not None and row["tenant_id"] == tenant_id else None
+
+    def update(memory_id, tenant_id, values):
+        assert load(memory_id, tenant_id) is not None
+        rows[memory_id].update(values)
+        return True
+
+    database = SimpleNamespace(
+        insert_memory_record=insert, find_by_idempotency=find, get_memory_record=load, update_memory_record=update,
+    )
+    service = memory_records.MemoryRecordService(index_service=index)
+    monkeypatch.setattr(memory_records, "memory_record_db", database)
+    monkeypatch.setattr(memory_records, "_resolve_tenant_embedding_model_info", lambda _tenant: model)
+    monkeypatch.setattr(memory_provider, "_resolve_tenant_embedding_model_info", lambda _tenant: model)
+    monkeypatch.setattr(memory_provider, "get_memory_record_service", lambda: service)
+    monkeypatch.setattr(memory_provider, "_fanout_external_ingest", AsyncMock())
+
+    manager = ThreadManager(service_name="model-memory-test", lane_policies={
+        lane: LanePolicy(name=lane, max_workers=1, max_queue_size=0, queue_timeout_seconds=0)
+        for lane in ("model-tool-io", "background-service", "control-io", "model-embedding")
+    })
+    payload = {
+        "tenant_id": "tenant-a", "user_id": "worker-a", "agent_id": "7", "conversation_id": "42",
+        "content": "store memory", "idempotency_key": "store-once",
+    }
+
+    def store(values):
+        return asyncio.run(memory_provider._backend_store_hook(values))
+
+    manager.start()
+    set_default_thread_manager(manager)
+    try:
+        spec = ManagedTaskSpec(task_name="sdk-memory-tool", owner="test")
+        # The sole tool worker waits on the Runtime HTTP response. AgentOS must
+        # dispatch the provider call on a different lane.
+        stored = await asyncio.wait_for(manager.run("model-tool-io", spec, store, payload), timeout=8)
+        assert stored["event"] == "ADD" and stored["indexed"]
+        repeated = await asyncio.wait_for(manager.run("model-tool-io", spec, store, payload), timeout=8)
+        assert repeated["memory_id"] == stored["memory_id"] and repeated["event"] == "UNCHANGED"
+        assert len(rows) == 1 and index.index_record.call_count == 1
+        updated = await asyncio.wait_for(manager.run(
+            "background-service", ManagedTaskSpec(task_name="api-memory-update", owner="test"),
+            service.update_memory, stored["memory_id"], "tenant-a",
+            {"content": "updated memory", "updated_by": "writer-a"},
+        ), timeout=8)
+        assert updated and rows[stored["memory_id"]]["content"] == "updated memory"
+        assert index.index_record.call_args.kwargs["embedding"] == [0.1, 0.2]
+
+        model.revision = "stale"
+        degraded = await asyncio.wait_for(manager.run("model-tool-io", spec, store, {
+            **payload, "content": "persist without vector", "idempotency_key": "degraded",
+        }), timeout=8)
+        assert degraded["event"] == "ADD" and not degraded["indexed"]
+        assert rows[degraded["memory_id"]]["content"] == "persist without vector"
+    finally:
+        clear_default_thread_manager(manager)
+        await manager.shutdown(timeout=3)

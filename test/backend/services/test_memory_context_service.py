@@ -431,7 +431,7 @@ class TestPrepareSearchEmbedding:
             memory_context_service, "_resolve_tenant_embedding_model_info", resolve
         )
         monkeypatch.setattr(
-            memory_context_service, "embed_memory_query", compute
+            memory_context_service, "embed_memory_text", compute
         )
 
         resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
@@ -454,7 +454,7 @@ class TestPrepareSearchEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "embed_memory_query",
+            "embed_memory_text",
             AsyncMock(return_value=[0.1, 0.2, 0.3]),
         )
 
@@ -474,7 +474,7 @@ class TestPrepareSearchEmbedding:
             MagicMock(return_value=None),
         )
         compute = AsyncMock(return_value="should not be called")
-        monkeypatch.setattr(memory_context_service, "embed_memory_query", compute)
+        monkeypatch.setattr(memory_context_service, "embed_memory_text", compute)
 
         resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hi",
@@ -493,7 +493,7 @@ class TestPrepareSearchEmbedding:
         monkeypatch.setattr(
             memory_context_service, "_resolve_tenant_embedding_model_info", resolve
         )
-        monkeypatch.setattr(memory_context_service, "embed_memory_query", compute)
+        monkeypatch.setattr(memory_context_service, "embed_memory_text", compute)
 
         resolved_info, resolved_emb = await memory_context_service._prepare_search_embedding(
             query="hi",
@@ -515,7 +515,7 @@ class TestPrepareSearchEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "embed_memory_query",
+            "embed_memory_text",
             AsyncMock(return_value=None),
         )
 
@@ -717,7 +717,7 @@ class TestBuildContextEmbedding:
         )
         monkeypatch.setattr(
             memory_context_service,
-            "embed_memory_query",
+            "embed_memory_text",
             AsyncMock(return_value=[0.7, 0.8, 0.9]),
         )
         await service.build_context(

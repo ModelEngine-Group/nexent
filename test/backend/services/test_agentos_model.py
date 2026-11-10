@@ -114,6 +114,8 @@ async def test_model_invoke_uses_registered_model(model_type, request_body, prov
     adapter = SimpleNamespace(invoke=AsyncMock(return_value=provider_result))
     build = Mock(return_value=adapter)
     result = await ModelService(Mock(return_value=record), build).invoke(request_body, _ACTOR)
+    if model_type == "embedding":
+        assert adapter.invoke.await_args.args[0].worker_lane == "model-embedding"
     assert result.output == expected
     assert result.revision == record["update_time"]
     assert build.call_args.args[0] is record
@@ -129,7 +131,7 @@ def test_chat_sampling_does_not_allow_connection_fields_or_unbounded_values(opti
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["success", "dimension", "missing"])
 async def test_memory_query_embedding_checks_binding_and_dimension(mocker, outcome):
-    from management.services.memory.query_embedding import embed_memory_query
+    from management.services.memory.embedding import embed_memory_text
 
     model = SimpleNamespace(model_id=11 if outcome != "missing" else None, revision="rev", dimension=2)
     invoke = mocker.patch(
@@ -137,7 +139,7 @@ async def test_memory_query_embedding_checks_binding_and_dimension(mocker, outco
         return_value=[0.1, 0.2] if outcome == "success" else [0.1],
     )
 
-    result = await embed_memory_query("query", model, _ACTOR.user_id, _ACTOR.tenant_id)
+    result = await embed_memory_text("query", model, _ACTOR.user_id, _ACTOR.tenant_id)
 
     assert result == ([0.1, 0.2] if outcome == "success" else None)
     if outcome == "missing":

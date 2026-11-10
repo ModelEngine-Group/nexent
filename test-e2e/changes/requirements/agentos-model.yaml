@@ -26,6 +26,7 @@ change:
     - Management worker inference forwards its job identity and preserves model output and failure handling.
     - Evaluation vectorization, automation intent and final-answer memory extraction use model IDs and the trusted actor.
     - Memory query vectorization uses the signed model binding and hybrid search reuses that vector with scope filters.
+    - Memory writes share signed embedding and skip repeated inference for an existing idempotent write.
     reason: Existing adapter and legacy model management tests do not exercise the new AgentOS model contract.
     test_selectors:
     - test/backend/services/test_agentos_model.py
@@ -50,5 +51,8 @@ change:
     - test/backend/services/test_memory_context_service.py
     - test/backend/services/test_memory_retrieval_service.py
     - test/backend/services/test_memory_index_service.py
+    - test/backend/services/test_memory_record_service.py
+    - test/backend/services/test_memory_backend_adapter.py
+    - test/backend/services/test_memory_transparent_proxy.py
     - test/sdk/vector_database/test_elasticsearch_core.py
   requirement_id: AOS-REQ-008

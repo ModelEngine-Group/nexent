@@ -39,6 +39,9 @@ case:
   - order: 7
     action: Vectorize a Memory query with its signed model ID and revision and retry under another tenant and a stale revision.
     expected: The valid request uses the Runtime provider configuration. Neither rejected request invokes the provider.
+  - order: 8
+    action: Store and update Memory through the signed embedding path while the tool worker waits for Runtime. Repeat the store and retry with an invalid model revision.
+    expected: Runtime vectorizes on its own worker lane. A duplicate returns the original receipt without another model call. Invalid model revisions retain the stored row without a vector.
   expected_results:
   - Metadata and inference traverse the signed transport with the configured tenant model.
   - Rejected requests produce no provider calls.
@@ -47,6 +50,7 @@ case:
   - Management workers receive text through the same Runtime model operation.
   - A Management worker obtains the registered model vector without a local provider client.
   - Memory receives one scoped query vector without calling a provider in Management.
+  - Memory writes use signed Runtime vectors and persist safely if the vectorization fails.
   forbidden_side_effects:
   - AgentOS metadata must not expose provider credentials.
   - The case must not leave temporary servers running.
@@ -96,4 +100,9 @@ case:
     description: Memory query vectorization uses signed tenant and model revision through Runtime.
     steps: [7]
     expected_results: [7]
+    forbidden_side_effects: [1, 2]
+  - id: AC-08
+    description: Memory writes use signed Runtime embedding, independent of the occupied tool lane.
+    steps: [8]
+    expected_results: [8]
     forbidden_side_effects: [1, 2]

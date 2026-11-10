@@ -443,7 +443,7 @@ async def test_search_memories_resolves_layers_embedding_and_delegates(service, 
     )
     monkeypatch.setattr(
         memory_retrieval_service,
-        "embed_memory_query",
+        "embed_memory_text",
         AsyncMock(return_value=[0.1, 0.2]),
     )
     expected = [memory_retrieval_service.MemorySearchResult(memory_id=1)]
@@ -483,7 +483,7 @@ async def test_search_memories_skips_embedding_for_empty_query(service, monkeypa
     embed_mock = AsyncMock(return_value=[0.1])
     search_mock = AsyncMock(return_value=[])
     monkeypatch.setattr(memory_retrieval_service, "_resolve_tenant_embedding_model_info", resolve_mock)
-    monkeypatch.setattr(memory_retrieval_service, "embed_memory_query", embed_mock)
+    monkeypatch.setattr(memory_retrieval_service, "embed_memory_text", embed_mock)
     monkeypatch.setattr(service, "search", search_mock)
 
     await service.search_memories("tn", "u1", "", layers=None)

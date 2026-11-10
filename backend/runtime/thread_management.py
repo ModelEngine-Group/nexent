@@ -42,6 +42,14 @@ runtime_thread_manager = ThreadManager(
             cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
         ),
+        "model-embedding": LanePolicy(
+            name="model-embedding",
+            max_workers=max(4, RUNTIME_AGENT_THREAD_MAX_WORKERS),
+            max_queue_size=RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE,
+            queue_timeout_seconds=0,
+            cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "mcp-session": LanePolicy(
             name="mcp-session",
             max_workers=RUNTIME_AGENT_THREAD_MAX_WORKERS,
