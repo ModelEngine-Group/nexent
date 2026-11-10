@@ -11,17 +11,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
-from management.services.agent.service import run_agent_background, run_agent_stream
+from management.services.agent.service import run_agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
 from contracts.agentos import (
-    AgentRunningState, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, TrackedBackgroundResult,
+    BackgroundRun, CompatibilityConversationRun, TrackedBackgroundResult,
 )
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
 from runtime.agentos.debug import stop_agentos_debug
-from runtime.executions import agent_run_manager, stop_registered_run
+from runtime.executions import stop_registered_run
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -180,26 +180,6 @@ async def stop_agentos_compatibility(conversation_id: int, principal: ServicePri
     )
 
 
-async def run_agentos_background(payload: dict, principal: ServicePrincipal) -> BackgroundAgentResult:
-    try:
-        agent_request = AgentRequest.model_validate(payload)
-    except PayloadValidationError as exc:
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
-    conversation_id = agent_request.conversation_id
-    if type(conversation_id) is not int or conversation_id <= 0 or agent_request.is_debug:
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"})
-
-    await run_blocking(
-        "agentos-background-conversation", _require_owned_conversation,
-        conversation_id, principal, lane="control-io", owner="runtime",
-    )
-    agent_request.enable_automation_tool = False
-    result = await run_agent_background(
-        agent_request=agent_request, user_id=principal.user_id, tenant_id=principal.tenant_id, skip_user_save=True,
-    )
-    return BackgroundAgentResult.model_validate(result)
-
-
 async def run_agentos_tracked_background(payload: BackgroundRun, principal: ServicePrincipal) -> TrackedBackgroundResult:
     try:
         request = AgentRequest.model_validate(payload.request)
@@ -266,17 +246,6 @@ async def run_agentos_tracked_background(payload: BackgroundRun, principal: Serv
         run_id=payload.run_id, conversation_id=conversation_id,
         assistant_message_id=state["assistant_message_id"], chunks=chunks,
     )
-
-
-async def inspect_agentos_conversation(conversation_id: int, principal: ServicePrincipal) -> AgentRunningState:
-    def inspect_owned_conversation():
-        _require_owned_conversation(conversation_id, principal)
-        return agent_run_manager.get_agent_run_info(conversation_id, principal.user_id) is not None
-
-    running = await run_blocking(
-        "agentos-inspect-conversation", inspect_owned_conversation, lane="control-io", owner="runtime",
-    )
-    return AgentRunningState(running=running)
 
 
 async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str):

@@ -51,3 +51,34 @@ async def test_background_disconnect_requests_stop_for_the_dispatched_run(mocker
         mocker.call(run_id, "actor", "tenant", 42),
         mocker.call(run_id, "actor", "tenant", 42, request_stop=True, prevent_start=True),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_name", ["BACKGROUND", "INSPECT"])
+async def test_untracked_background_routes_require_run_id(mocker, operation_name):
+    import httpx
+
+    from contracts.agentos import CompatibilityOperation
+    from contracts.constants import environment
+    from infrastructure.agentos_identity import sign_call
+    from runtime.api.application import app
+
+    mocker.patch.object(environment, "JWT_SECRET", "fixture-retired-background-key")
+    lookup = mocker.patch.object(execution, "_require_owned_conversation")
+    start = mocker.patch.object(execution, "run_agent_stream")
+    operation = CompatibilityOperation[operation_name]
+    actor = ServicePrincipal("actor", "tenant")
+    body = b'{"request":{"conversation_id":42,"query":"test"}}' if operation_name == "BACKGROUND" else b'{"conversation_id":42}'
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
+        assert (await client.post(operation.value, content=body)).status_code == 401
+        for payload, status, code in (
+            (b"{}", 422, "AGENTOS_INVALID_REQUEST"),
+            (body, 410, "AGENTOS_RUN_ID_REQUIRED"),
+        ):
+            token = sign_call(operation, payload, actor)
+            response = await client.post(operation.value, content=payload, headers={"Authorization": f"Bearer {token}"})
+            assert response.status_code == status
+            assert response.json() == {"code": code}
+    lookup.assert_not_called()
+    start.assert_not_called()

@@ -65,43 +65,38 @@ def create_compatibility_router(run, stop, *, conversation_run=None, debug_stop=
     return router
 
 
-def create_background_router(run, inspect, *, tracked_run=None) -> APIRouter:
+def create_background_router(tracked_run) -> APIRouter:
     router = APIRouter()
 
-    @router.post(CompatibilityOperation.BACKGROUND.value, include_in_schema=False)
-    async def run_background(request: Request):
-        principal = request.scope.get(PRINCIPAL_KEY)
-        if principal is None:
-            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
-        try:
-            payload = CompatibilityRun.model_validate_json(request.scope[BODY_KEY])
-        except ValidationError:
-            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-
-        return await run_until_disconnect(request, run(payload.request, principal))
-
-    if tracked_run is not None:
-        @router.post(AgentOperation.BACKGROUND.value, include_in_schema=False)
-        async def run_tracked_background(request: Request):
-            principal = request.scope.get(PRINCIPAL_KEY)
-            if principal is None:
+    def retired(schema):
+        async def reject(request: Request):
+            if request.scope.get(PRINCIPAL_KEY) is None:
                 return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
             try:
-                payload = BackgroundRun.model_validate_json(request.scope[BODY_KEY])
+                schema.model_validate_json(request.scope[BODY_KEY])
             except ValidationError:
                 return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-            return await run_until_disconnect(request, tracked_run(payload, principal))
+            return JSONResponse({"code": "AGENTOS_RUN_ID_REQUIRED"}, status_code=410)
 
-    @router.post(CompatibilityOperation.INSPECT.value, include_in_schema=False)
-    async def inspect_agent(request: Request):
+        return reject
+
+    router.add_api_route(
+        CompatibilityOperation.BACKGROUND.value, retired(CompatibilityRun), methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        CompatibilityOperation.INSPECT.value, retired(CompatibilityStop), methods=["POST"], include_in_schema=False,
+    )
+
+    @router.post(AgentOperation.BACKGROUND.value, include_in_schema=False)
+    async def run_tracked_background(request: Request):
         principal = request.scope.get(PRINCIPAL_KEY)
         if principal is None:
             return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
         try:
-            payload = CompatibilityStop.model_validate_json(request.scope[BODY_KEY])
+            payload = BackgroundRun.model_validate_json(request.scope[BODY_KEY])
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-        return await inspect(payload.conversation_id, principal)
+        return await run_until_disconnect(request, tracked_run(payload, principal))
 
     return router
 

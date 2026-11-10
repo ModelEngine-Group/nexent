@@ -16,8 +16,9 @@ from fastapi import FastAPI, Request, Response
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
-    AgentOperation, AgentResume, AgentRunReference, AgentRunningState, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityOperation, CompatibilityRun,
-    EvaluationAgentResult, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun,
+    AgentOperation, AgentResume, AgentRunReference, AgentStop, BackgroundRun, CompatibilityOperation, CompatibilityRun,
+    CompatibilityStop, EvaluationAgentResult, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun,
+    TrackedBackgroundResult,
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
@@ -89,25 +90,24 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     canceled = threading.Event()
 
     async def background(payload, actor):
-        calls.append(("background", payload["conversation_id"], actor))
-        if payload["conversation_id"] == 43:
+        conversation_id = payload.request["conversation_id"]
+        calls.append(("background", conversation_id, payload.run_id, actor))
+        if conversation_id == 43:
             started.set()
             try:
                 await asyncio.sleep(30)
             finally:
                 canceled.set()
-        return BackgroundAgentResult(conversation_id=42, assistant_message_id=17, chunks=3)
-
-    async def inspect(conversation_id, actor):
-        calls.append(("inspect", conversation_id, actor))
-        return AgentRunningState(running=True)
+        return TrackedBackgroundResult(
+            run_id=payload.run_id, conversation_id=conversation_id, assistant_message_id=17, chunks=3,
+        )
 
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_compatibility_router(run, stop))
     runtime.include_router(create_evaluation_router())
-    runtime.include_router(create_background_router(background, inspect))
+    runtime.include_router(create_background_router(background))
 
     with monkeypatch.context() as evaluation_stub, serve(runtime) as runtime_url:
         evaluation_stub.setattr(prepared_evaluation, "execute_prepared_evaluation", evaluate)
@@ -193,12 +193,32 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
                 assert response.status_code == status
                 assert response.json() == {"code": code}
 
-            background_result = await agentos.run_background({"conversation_id": 42}, principal.user_id, principal.tenant_id)
-            assert background_result.model_dump() == {"conversation_id": 42, "assistant_message_id": 17, "chunks": 3}
-            state = await agentos.inspect(42, principal.user_id, principal.tenant_id)
-            assert state.running is True
-            pending = asyncio.create_task(agentos.run_background(
-                {"conversation_id": 43}, principal.user_id, principal.tenant_id,
+            for operation, payload in (
+                (CompatibilityOperation.BACKGROUND, CompatibilityRun(request={"conversation_id": 42})),
+                (CompatibilityOperation.INSPECT, CompatibilityStop(conversation_id=42)),
+            ):
+                body = payload.model_dump_json().encode()
+                signed = sign_call(operation, body, principal)
+                invalid = b"{}"
+                for content, credential, status, code in (
+                    (body, None, 401, "AGENTOS_UNAUTHORIZED"),
+                    (body.replace(b"42", b"43"), signed, 401, "AGENTOS_UNAUTHORIZED"),
+                    (invalid, sign_call(operation, invalid, principal), 422, "AGENTOS_INVALID_REQUEST"),
+                    (body, signed, 410, "AGENTOS_RUN_ID_REQUIRED"),
+                ):
+                    headers = {"Authorization": f"Bearer {credential}"} if credential else {}
+                    response = await client.post(f"{runtime_url}/api{operation.value}", content=content, headers=headers)
+                    assert response.status_code == status
+                    assert response.json() == {"code": code}
+
+            background_result = await agentos.run_tracked_background(
+                BackgroundRun(run_id="a" * 32, request={"conversation_id": 42}), principal.user_id, principal.tenant_id,
+            )
+            assert background_result.model_dump() == {
+                "run_id": "a" * 32, "conversation_id": 42, "assistant_message_id": 17, "chunks": 3,
+            }
+            pending = asyncio.create_task(agentos.run_tracked_background(
+                BackgroundRun(run_id="b" * 32, request={"conversation_id": 43}), principal.user_id, principal.tenant_id,
             ))
             try:
                 assert await asyncio.to_thread(started.wait, 5)
@@ -212,9 +232,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         ("run", {"conversation_id": 42}, principal),
         ("stop", 42, principal),
         ("evaluate", -12, principal),
-        ("background", 42, principal),
-        ("inspect", 42, principal),
-        ("background", 43, principal),
+        ("background", 42, "a" * 32, principal),
+        ("background", 43, "b" * 32, principal),
     ]
     await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path)
     with monkeypatch.context() as tool_patches:
@@ -1539,7 +1558,7 @@ async def _assert_public_stop_and_background(monkeypatch):
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(resume.create_run_lifecycle_router())
-    runtime.include_router(create_background_router(None, None, tracked_run=execution.run_agentos_tracked_background))
+    runtime.include_router(create_background_router(execution.run_agentos_tracked_background))
     management = FastAPI(root_path="/api")
     management.include_router(conversation_run.router)
 
@@ -1604,7 +1623,6 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
     info = SimpleNamespace(stop_event=Event())
     registry.register_agent_run(conversation_id, info, "legacy-actor")
     monkeypatch.setattr(executions, "agent_run_manager", registry)
-    monkeypatch.setattr(execution, "agent_run_manager", registry)
     monkeypatch.setattr(conversation_state, "conversation_belongs_to", owns)
     monkeypatch.setattr(execution, "run_blocking", control_io)
     monkeypatch.setattr(execution, "run_agent_stream", stream)
@@ -1613,7 +1631,6 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(execution.agent_runtime_router)
     runtime.include_router(create_compatibility_router(execution.run_agentos_compatibility, execution.stop_agentos_compatibility))
-    runtime.include_router(create_background_router(execution.run_agentos_background, execution.inspect_agentos_conversation))
 
     run_path = "/api/agent/run"
     stop_path = f"/api/agent/stop/{conversation_id}"
@@ -1634,8 +1651,6 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
                 assert response.status_code == 200 and response.content == _EVENTS
                 response = await client.get(stop_path, headers=signed("GET", stop_path, dict(identity, tenant_id="tenant-b")))
                 assert response.status_code == 404 and not info.stop_event.is_set()
-            state = await agentos.inspect(conversation_id, "legacy-actor", "tenant-a")
-            assert state.running
             with pytest.raises(RuntimeUpstreamError) as foreign:
                 await agentos.stop(conversation_id, "legacy-actor", "tenant-b")
             assert foreign.value.status_code == 404 and not info.stop_event.is_set()
@@ -1644,7 +1659,6 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
             assert starts == [("legacy-actor", "tenant-a")]
             assert checks == [
                 (conversation_id, "legacy-actor", "tenant-b"),
-                (conversation_id, "legacy-actor", "tenant-a"),
                 (conversation_id, "legacy-actor", "tenant-b"),
                 (conversation_id, "legacy-actor", "tenant-a"),
             ]

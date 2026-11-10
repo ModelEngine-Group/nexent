@@ -37,8 +37,8 @@ case:
     action: Run a prepared synthetic evaluation and probe the retired compatibility route.
     expected: Prepared evaluation preserves events and rejects a positive ID. The retired route returns 401 without signing, 422 for invalid input and 410 for a valid signed request.
   - order: 4
-    action: Submit signed background and inspect calls and disconnect a background client.
-    expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
+    action: Submit a signed background call with a run ID and disconnect another background client.
+    expected: Runtime receives the signed actor and run ID, returns the assistant message, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
     expected: Runtime rebuilds scoped file, attachment, skill, external A2A and direct or skill-derived MCP bindings and a child Agent with the expected model parameters. The system parallel executor retains its timeout and tool order; an invalid timeout is rejected before execution. Events stay ordered. Out-of-scope attachments and changed execution bindings are refused. The runner reads the verified skill guide and effective configuration from its isolated workspace. A changed MCP skill contributor cannot start the runner. Knowledge search respects the index and document scope; group revocation denies the run before search. The runner uses the Runtime Docker policy and regenerated sandbox context even when Management compiled local Python guidance. Image analysis binds the signed tenant model, rejects unauthorized storage aliases and refuses a stale model before execution. A configured Dify tool uses its Runtime credentials and configured dataset without exposing them over AgentOS. A skill-derived local tool keeps its order and refuses a changed contributor. Independent AIDP retrieval uses the pinned tenant binding, and the Management proxy accepts the image reference signed by Runtime. Shared AIDP retrieves only from the current authorized scope, and revocation prevents another upstream search. A deployed LangChain plugin runs in tool order, and changed plugin bytes are rejected before execution. A pinned workspace tool writes in its configured Runtime path and the model body is restored from the bound Agent version; either revision changing prevents execution. An independent AIDP image generated from a skill-derived binding resolves through Management and rejects a changed contributor.
@@ -56,7 +56,7 @@ case:
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
   - order: 10
     action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
-    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy inspect and stop respect user and tenant ownership.
+    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy stop respects user and tenant ownership.
   - order: 11
     action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
@@ -153,11 +153,14 @@ case:
   - order: 42
     action: Reconnect to a registered legacy execution without a run ID and follow replay and live events over AgentOS.
     expected: Management uses the registered execution and returns legacy status frames, replay count, and the final status.
+  - order: 43
+    action: Send unsigned, tampered, invalid signed, and valid signed requests to both retired conversation-scoped background routes.
+    expected: Runtime authenticates and validates the requests, returns 410 for valid signed input, and does not dispatch any work.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
   - Evaluation returns exact ordered events without using a real conversation.
-  - Background execution returns the assistant message ID and stops after the caller disconnects.
+  - Background execution returns the exact run ID and assistant message ID, and stops after the caller disconnects.
   - Prepared evaluation returns ordered events and releases the run registration and staged skill files. Unauthorized requests cannot start the runner.
   - Resume returns only events after the supplied cursor and never opens a journal for an unauthorized actor.
   - Management relays the Runtime response and run ID while preserving the signed scope and request context.
@@ -197,6 +200,7 @@ case:
   - Native metadata follows the prepared admission path, remains scoped to its conversation, and keeps the public version header.
   - A cursorless request for a terminal prepared turn is settled by Management using the owned projection.
   - Registered legacy journals resume without invoking the compatibility execution router.
+  - Retired background start and inspection require a run ID and cannot enter an execution handler.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -236,7 +240,7 @@ case:
     expected_results: [3]
     forbidden_side_effects: [2]
   - id: AC-04
-    description: Signed background run and inspect preserve the actor and disconnect cancels the execution.
+    description: Signed background execution preserves the actor and run ID, and disconnect cancels the execution.
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [2]
@@ -474,4 +478,9 @@ case:
     description: A cursorless legacy client receives a scoped AgentOS journal in the original public SSE format.
     steps: [42]
     expected_results: [43]
+    forbidden_side_effects: [1, 2]
+  - id: AC-52
+    description: Retired conversation-scoped background start and inspection reject unauthenticated or invalid requests and never dispatch an execution.
+    steps: [43]
+    expected_results: [44]
     forbidden_side_effects: [1, 2]

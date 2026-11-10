@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResume, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
+    AgentResume, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
@@ -131,14 +131,6 @@ async def forward_conversation_run(
 async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):
     response = await _agentos_client().resume(payload, user_id, tenant_id)
     return present_public_resume(response, payload, user_id)
-
-
-async def forward_agent_background(agent_request: AgentRequest, user_id: str, tenant_id: str) -> BackgroundAgentResult:
-    return await _agentos_client().run_background(agent_request.model_dump(mode="json"), user_id, tenant_id)
-
-
-async def forward_agent_inspect(conversation_id: int, user_id: str, tenant_id: str) -> bool:
-    return (await _agentos_client().inspect(conversation_id, user_id, tenant_id)).running
 
 
 async def forward_agent_stop(

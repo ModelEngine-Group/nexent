@@ -64,11 +64,6 @@ class BackgroundAgentResult(BaseModel):
     chunks: int = Field(ge=0)
 
 
-class AgentRunningState(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    running: bool
-
-
 class EvaluationAgentRun(BaseModel):
     """Execute one synthetic evaluation case without a persisted conversation."""
 

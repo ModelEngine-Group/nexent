@@ -17,8 +17,6 @@ from runtime.model.service import ModelService
 from runtime.recovery import recover_streaming_runs, watch_executions
 from runtime.api.agent.execution import (
     agent_runtime_router as agent_router,
-    inspect_agentos_conversation,
-    run_agentos_background,
     run_agentos_tracked_background,
     run_agentos_compatibility,
     run_agentos_conversation,
@@ -121,9 +119,7 @@ app.include_router(create_compatibility_router(
     run_agentos_compatibility, stop_agentos_compatibility, conversation_run=run_agentos_conversation,
     debug_stop=stop_agentos_debug,
 ))
-app.include_router(create_background_router(
-    run_agentos_background, inspect_agentos_conversation, tracked_run=run_agentos_tracked_background,
-))
+app.include_router(create_background_router(run_agentos_tracked_background))
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_memory_store_router())

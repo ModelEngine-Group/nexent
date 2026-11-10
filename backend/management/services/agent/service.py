@@ -86,7 +86,6 @@ from management.services.agent.run import (
     generate_stream,
     is_agent_running,
     prepare_agent_run,
-    run_agent_background,
     save_messages,
     stop_agent_tasks,
 )
@@ -153,7 +152,6 @@ __all__ = (
     "generate_stream",
     "_detect_resume_position",
     "run_agent_stream",
-    "run_agent_background",
     "shutdown_agent_stream_tasks",
     "stop_agent_tasks",
     "is_agent_running",

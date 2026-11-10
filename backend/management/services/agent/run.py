@@ -23,7 +23,6 @@ from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import MemoryPreparationException
 from contracts.agent import AgentRequest
 from management.services.agent.context import (
-    build_agent_run_context,
     build_authorized_context_input,
 )
 from management.services.agent.execution import (
@@ -47,12 +46,8 @@ from nexent.core.concurrency import (
     ManagedExecution,
     run_blocking,
 )
-from nexent.monitor import (
-    agent_monitoring_context,
-)
 from management.services.conversation.service import (
     get_current_run_user_message_id,
-    get_latest_assistant_message,
     load_historical_context,
     persist_history_summary_candidate,
     save_conversation_user,
@@ -495,67 +490,6 @@ async def generate_stream(
                 user_id,
                 reservation_token,
             )
-
-
-async def run_agent_background(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-    language: str = LANGUAGE["ZH"],
-    skip_user_save: bool = False,
-) -> Dict[str, Any]:
-    """
-    Run an agent without returning an SSE response.
-
-    This path is used by background automation tasks. It reuses the same
-    preparation, monitoring, memory and message persistence flow as
-    run_agent_stream, but consumes generated chunks internally.
-    """
-    if not agent_request.conversation_id:
-        raise ValueError("conversation_id is required for background agent runs")
-
-    # Background automation provenance is server-owned, including run-now.
-    agent_request._message_source = "AUTOMATION"
-
-    if not agent_request.is_debug and not skip_user_save:
-        save_messages(
-            agent_request,
-            target=MESSAGE_ROLE["USER"],
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
-
-    run_context = build_agent_run_context(
-        agent_request,
-        user_id,
-        tenant_id,
-        language,
-        extra_metadata={"background": True, "skip_user_save": skip_user_save},
-    )
-    agent_metadata = run_context.metadata
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-        enable_memory=run_context.enable_memory,
-    )
-
-    chunks = 0
-    with agent_monitoring_context(agent_metadata):
-        async for _ in stream_gen:
-            chunks += 1
-
-    latest_message = get_latest_assistant_message(
-        agent_request.conversation_id, user_id
-    )
-    return {
-        "conversation_id": agent_request.conversation_id,
-        "assistant_message_id": latest_message.get("message_id")
-        if latest_message
-        else None,
-        "chunks": chunks,
-    }
 
 
 def stop_agent_tasks(conversation_id: int | str, user_id: str):

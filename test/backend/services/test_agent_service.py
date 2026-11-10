@@ -10581,51 +10581,6 @@ def test_generate_stream_decorated():
     assert callable(generate_stream)
 
 
-@pytest.mark.asyncio
-async def test_run_agent_background_consumes_stream_and_returns_assistant_message():
-    request = MagicMock()
-    request.conversation_id = 99
-    request.agent_id = 42
-    request.query = "automation prompt"
-    request.is_debug = False
-    request.history = []
-    request.minio_files = []
-
-    async def fake_stream():
-        yield "chunk-1"
-        yield "chunk-2"
-
-    memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
-    with (
-        patch(
-            "management.services.configuration.user.memory.build_memory_context",
-            return_value=memory_context,
-        ),
-        patch(
-            "management.services.agent.run.generate_stream", return_value=fake_stream()
-        ),
-        patch(
-            "management.services.agent.run.get_latest_assistant_message",
-            return_value={"message_id": 123},
-        ),
-        patch("management.services.agent.run.save_messages") as mock_save_messages,
-    ):
-        result = await agent_service.run_agent_background(
-            request,
-            user_id="user",
-            tenant_id="tenant",
-            skip_user_save=True,
-        )
-
-    assert result == {
-        "conversation_id": 99,
-        "assistant_message_id": 123,
-        "chunks": 2,
-    }
-    assert request._message_source == "AUTOMATION"
-    mock_save_messages.assert_not_called()
-
-
 # =============================================================================
 # Tests for export_agent_with_skills_impl and import_agent_with_skills_impl
 # =============================================================================
