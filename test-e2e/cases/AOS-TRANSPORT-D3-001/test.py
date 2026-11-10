@@ -1568,6 +1568,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         "delete_flag": "N", "display_name": "test-model", "model_name": "test-model", "model_repo": None,
         "base_url": "http://provider.test/v1", "api_key": "synthetic-provider-secret",
         "update_time": "2026-11-10T00:00:00",
+        "extra_params": {"enable_thinking": True, "__custom__": {"temperature": 0.1}},
     }
 
     async def read_models(tenant_id):
@@ -1608,8 +1609,13 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_args: model_record)
     monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr("management.db.agent.repository.search_agent_info_by_agent_id", lambda **_: {"model_ids": [11]})
+    monkeypatch.setattr("management.services.model.run_controls.get_model_by_model_id", lambda *_: model_record)
     request = await evaluation_snapshot.prepare_conversation_snapshot(
-        AgentRequest(query="question", conversation_id=42, agent_id=7, enable_automation_tool=False),
+        AgentRequest(
+            query="question", conversation_id=42, agent_id=7, version_no=3, enable_automation_tool=False,
+            generation_config={"temperature": 0.45},
+        ),
         reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
     )
     assert isinstance(request, PreparedAgentRun)
@@ -1623,6 +1629,10 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     async def runner(info, **_kwargs):
         assert info.runtime_metadata == {"project": "demo"} and info.runtime_metadata_version == 4
         assert info.model_config_list[0].api_key == "synthetic-provider-secret"
+        assert info.model_config_list[0].temperature == 0.45
+        assert info.model_config_list[0].explicit_sampling == ["temperature"]
+        assert info.model_config_list[0].enable_thinking is True
+        assert "temperature" not in info.model_config_list[0].extra_body
         assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
         calls.append("started")
         yield '{"type":"thought","content":"step"}'

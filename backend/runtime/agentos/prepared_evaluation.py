@@ -27,7 +27,7 @@ from infrastructure.a2a_execution import (
 from infrastructure.agent_attachments import validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision, normalize_model_revision
 from infrastructure.agent_model_overrides import (
-    get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
+    apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
 )
 from infrastructure.agent_tool_config import (
     PLAN_TOOL_NAMES, build_parallel_executor_tool_config, build_plan_tool_configs,
@@ -255,11 +255,13 @@ def _materialize_model(binding, actor, resource):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_MODEL_BODY_REVISION_MISMATCH"})
         updates["extra_body"] = body
     model = model.model_copy(update={"cite_name": binding.alias, **updates})
-    if binding.root_generation is not None:
-        try:
+    try:
+        if binding.turn_generation is not None:
+            return apply_turn_model_generation(model, binding.turn_generation, binding.alias)
+        if binding.root_generation is not None:
             return overlay_root_model(model, binding.root_generation.model_dump(), binding.alias)
-        except RunModelControlsError as exc:
-            raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
+    except RunModelControlsError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code}) from exc
     return model
 
 
@@ -307,8 +309,12 @@ def prepare_run_snapshot(
 
     workbench_version = payload.workbench_config_version if isinstance(payload, PreparedAgentRun) else None
     root_generation = payload.models.llm.root_generation
-    if (root_generation is not None) != (workbench_version is not None) or any(
-        binding.root_generation is not None for binding in payload.models.additional_llms
+    turn_generation = payload.models.llm.turn_generation
+    if (
+        (root_generation is not None) != (workbench_version is not None)
+        or (turn_generation is not None and (workbench_version is not None or not isinstance(payload, PreparedAgentRun)))
+        or any(binding.root_generation is not None or binding.turn_generation is not None
+               for binding in payload.models.additional_llms)
     ):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
@@ -333,7 +339,7 @@ def prepare_run_snapshot(
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
-                root_only_alias=payload.models.llm.alias if root_generation is not None else None,
+                root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
                 allow_scoped_aidp=workbench_version is not None,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
+from contracts.model import WorkbenchGenerationConfig
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
 from infrastructure.agent_model_config import create_model_config_from_record
@@ -22,7 +23,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "clarification", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
@@ -98,6 +99,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             query="hello", agent_id=7, conversation_id=42, clarification_response=clarification,
             enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
         )
+        if kind in {"turn_generation", "legacy_reasoning"}:
+            if kind == "turn_generation":
+                request.generation_config = WorkbenchGenerationConfig(temperature=0.4)
+            else:
+                request.reasoning_effort = "auto"
+            request.version_no = 2
+            mocker.patch("management.db.agent.repository.search_agent_info_by_agent_id", side_effect=read_agent)
+            mocker.patch("management.services.model.run_controls.get_model_by_model_id", return_value=record)
         if metadata is not None:
             assert await evaluation_snapshot.prepare_conversation_snapshot(
                 request, reference, user, tenant, new_conversation=new,
@@ -155,6 +164,15 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert "Original form" not in prepared.model_dump_json()
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
+        if kind in {"turn_generation", "legacy_reasoning"}:
+            wire = payload.model_dump()["models"]["llm"]["turn_generation"]
+            assert wire.get("settings") == ({"temperature": 0.4} if kind == "turn_generation" else None)
+            assert wire.get("reasoning_effort") == ("auto" if kind == "legacy_reasoning" else None)
+            assert info.agent_config.model_name != info.agent_config.worker_agents[0].model_name
+            assert info.model_config_list[1].temperature == model.temperature
+            if kind == "turn_generation":
+                assert info.model_config_list[0].temperature == 0.4
+                assert info.model_config_list[0].explicit_sampling == ["temperature"]
         if use_workbench:
             root_tools = [call for call in compile_tools.await_args_list if call.args[0] == 7]
             assert root_tools[0].kwargs["runtime_skill_snapshot"] == []
@@ -225,11 +243,12 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     assert "fixture-private-option" not in encoded
     assert ("provider_body_revision" in encoded) is persisted_body
     if persisted_body:
-        if use_workbench:
+        if use_workbench or kind in {"turn_generation", "legacy_reasoning"}:
             assert lookup_override.call_count == 2
-            assert info.model_config_list[0].extra_body == {
-                "provider_option": "fixture-private-option", "enable_thinking": False,
-            }
+            extra = {"provider_option": "fixture-private-option"}
+            if use_workbench:
+                extra["enable_thinking"] = False
+            assert info.model_config_list[0].extra_body == extra
         else:
             lookup_override.assert_called_once_with(7, 2, "tenant-a")
             assert info.model_config_list[0].extra_body == {"provider_option": "fixture-private-option"}

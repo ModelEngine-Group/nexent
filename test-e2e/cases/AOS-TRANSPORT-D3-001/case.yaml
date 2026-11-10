@@ -58,7 +58,7 @@ case:
     action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
     expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy inspect and stop respect user and tenant ownership.
   - order: 11
-    action: Compile an owned conversation snapshot in Management, submit it signed and reconnect after the first event.
+    action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
   - order: 12
     action: Drop the prepared automation acknowledgement after Runtime accepts the run, then recover from the persisted Automation record.
@@ -128,6 +128,7 @@ case:
   - Workbench preserves both configuration and metadata revisions across signed admission and one projection.
   - Workbench carries a scoped shared AIDP catalog binding and Runtime enforces the narrowed KDS scope.
   - A clarification response produces one signed prepared run and stays in Management history.
+  - Runtime applies the explicit temperature from the signed root model while reading provider credentials locally.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -315,4 +316,9 @@ case:
     description: Management retains structured clarification answers and starts one signed prepared run for the owned conversation.
     steps: [25]
     expected_results: [25]
+    forbidden_side_effects: [1, 2]
+  - id: AC-34
+    description: Signed native conversation execution reconstructs the explicit root sampling settings.
+    steps: [11]
+    expected_results: [26]
     forbidden_side_effects: [1, 2]

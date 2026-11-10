@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from contracts.agentos import PreparedConversationScope
+from contracts.agentos import PreparedConversationScope, TurnModelGeneration
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
     MCP_REQUEST_TIMEOUT_SECONDS,
@@ -18,7 +18,7 @@ from contracts.constants.environment import (
 )
 from contracts.tool import ToolParamsRequest
 from backend.http.client import create_httpx_client
-from infrastructure.agent_model_overrides import merge_provider_body
+from infrastructure.agent_model_overrides import apply_turn_model_generation, merge_provider_body
 from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
@@ -142,6 +142,7 @@ async def create_agent_run_info(
     resource_versions: dict | None = None,
     prepared_conversation: PreparedConversationScope | None = None,
     prepared_workbench: "PreparedWorkbench | None" = None,
+    turn_generation: TurnModelGeneration | None = None,
 ):
     export_resources = export_evaluation or prepared_conversation is not None
     if override_model_id is not None:
@@ -327,17 +328,20 @@ async def create_agent_run_info(
                         ):
                             mc.reasoning_budget_tokens = budget
                     break
-    # Request-scoped Workbench settings apply only to the root model. Static
-    # children retain the model aliases from their published versions.
-    # Static children keep their published aliases and never inherit this overlay.
-    source_model_alias = apply_root_generation_overlay(
-        model_list,
-        agent_config,
-        runtime_generation_config,
-    )
+    # Request-scoped settings apply only to the root model.
+    if turn_generation is not None:
+        selected = next((model for model in model_list if model.cite_name == agent_config.model_name), None)
+        if selected is None:
+            return None
+        source_model_alias = selected.cite_name
+        root = apply_turn_model_generation(selected, turn_generation, "turn_root_model")
+        model_list.append(root)
+        agent_config.model_name = root.cite_name
+    else:
+        source_model_alias = apply_root_generation_overlay(model_list, agent_config, runtime_generation_config)
 
-    # Legacy top-level fields use the same capability policy as generation overlays.
-    if reasoning_effort is not None or reasoning_budget_tokens is not None:
+    # Retain legacy in-process and Workbench reasoning handling.
+    if turn_generation is None and (reasoning_effort is not None or reasoning_budget_tokens is not None):
         from management.services.model.run_controls import overlay_root_model
 
         selected_config = next(
@@ -360,6 +364,8 @@ async def create_agent_run_info(
         from management.services.agent.preparation.evaluation_snapshot import export_snapshot
 
         export_options = {}
+        if turn_generation is not None:
+            export_options.update(turn_generation=turn_generation, source_model_alias=source_model_alias)
         if prepared_workbench is not None:
             from management.services.agent.workbench import compile_runtime_mount_plan
 

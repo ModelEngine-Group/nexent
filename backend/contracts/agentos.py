@@ -182,6 +182,21 @@ class RunModelOverrides(RunSpecModel):
         return {name: value for name, value in handler(self).items() if name in self.model_fields_set}
 
 
+class TurnModelGeneration(RunSpecModel):
+    """Explicit generation settings and legacy reasoning controls for one root run."""
+
+    settings: WorkbenchGenerationConfig | None = None
+    reasoning_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = None
+    reasoning_budget_tokens: PositiveInt | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_explicit_settings(self, handler):
+        data = {name: value for name, value in handler(self).items() if value is not None}
+        if self.settings is not None:
+            data["settings"] = self.settings.model_dump(mode="json", exclude_unset=True)
+        return data
+
+
 class RunModelBinding(RunSpecModel):
     model_id: PositiveInt
     alias: str = Field(min_length=1)
@@ -189,11 +204,12 @@ class RunModelBinding(RunSpecModel):
     overrides: RunModelOverrides | None = None
     provider_body_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     root_generation: WorkbenchGenerationConfig | None = None
+    turn_generation: TurnModelGeneration | None = None
 
     @model_serializer(mode="wrap")
     def serialize_optional_model_fields(self, handler):
         data = handler(self)
-        for name in ("provider_body_revision", "root_generation"):
+        for name in ("provider_body_revision", "root_generation", "turn_generation"):
             if data.get(name) is None:
                 data.pop(name, None)
         return data

@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import PreparedEvaluationRun
@@ -50,6 +51,35 @@ def model_record(**changes):
         "model_repo": None, "display_name": "Evaluation", "api_key": "runtime-only",
         "base_url": "https://runtime-provider.example/v1", "update_time": "revision-1",
     } | changes
+
+
+@pytest.mark.parametrize("target", ["evaluation", "subagent", "workbench"])
+def test_runtime_rejects_native_generation_outside_a_native_root(mocker, target):
+    from contracts.agentos import PreparedAgentRun
+    from runtime.agentos.prepared_evaluation import prepare_run_snapshot
+
+    raw = evaluation_payload()
+    models = raw["models"]
+    generation = {"settings": {"temperature": 0.4}}
+    if target == "subagent":
+        models["additional_llms"] = [{**models["llm"], "alias": "child", "turn_generation": generation}]
+    else:
+        models["llm"]["turn_generation"] = generation
+    if target == "evaluation":
+        payload = PreparedEvaluationRun.model_validate(raw)
+    else:
+        if target == "workbench":
+            raw["workbench_config_version"] = 1
+            models["llm"]["root_generation"] = {"temperature": 0.3}
+        raw.update(conversation_id=42, run_id="a" * 32)
+        payload = PreparedAgentRun.model_validate(raw)
+    load = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id")
+
+    with pytest.raises(HTTPException) as error:
+        prepare_run_snapshot(payload, ServicePrincipal("user-a", "tenant-a"))
+
+    assert error.value.status_code == 422
+    load.assert_not_called()
 
 
 def test_runtime_materializes_authorized_model_and_local_objects(mocker):

@@ -69,6 +69,7 @@ change:
     - Workbench updates authorized runtime metadata with configuration in one confirmation and keeps both versions.
     - Scoped Workbench AIDP binds tenant catalog revisions and typed search options, and rechecks Runtime permissions.
     - Management stages and pins clarification answers before a new signed prepared run without exposing the form to Runtime.
+    - Signed native turns retain explicit root model settings without changing child aliases or transporting provider secrets.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

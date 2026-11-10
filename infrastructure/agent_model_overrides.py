@@ -8,6 +8,7 @@ from typing import Any
 
 from nexent.core.agents.agent_model import ModelConfig
 
+from contracts.agentos import TurnModelGeneration
 from contracts.constants import environment
 from contracts.errors.exceptions import RunModelControlsError
 from infrastructure.model_reasoning import reasoning_controls
@@ -101,3 +102,15 @@ def overlay_root_model(base: ModelConfig, values: dict[str, Any], alias: str) ->
         extra.pop("reasoning_budget_tokens", None)
     root.extra_body = extra or None
     return root
+
+
+def apply_turn_model_generation(base: ModelConfig, generation: TurnModelGeneration, alias: str) -> ModelConfig:
+    """Replay request settings followed by legacy controls, preserving the base model."""
+    settings = generation.settings.model_dump(exclude_unset=True) if generation.settings is not None else {}
+    root = overlay_root_model(base, settings, alias)
+    legacy = {}
+    if generation.reasoning_effort is not None:
+        legacy["thinking_effort"] = generation.reasoning_effort
+    if generation.reasoning_budget_tokens is not None:
+        legacy["reasoning_budget_tokens"] = generation.reasoning_budget_tokens
+    return overlay_root_model(root, legacy, alias) if legacy else root

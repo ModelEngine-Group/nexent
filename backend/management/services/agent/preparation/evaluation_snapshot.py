@@ -14,7 +14,7 @@ from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
-    SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
+    SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
 )
 from contracts.constants import environment
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
@@ -25,7 +25,9 @@ from contracts.runtime_metadata import validate_runtime_metadata
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
-from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision
+from infrastructure.agent_model_overrides import (
+    apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
+)
 from infrastructure.agent_tool_config import (
     AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, build_automation_proposal_tool,
     build_parallel_executor_tool_config, build_plan_tool_configs,
@@ -185,7 +187,7 @@ async def prepare_conversation_snapshot(
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if any((
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
-        request.is_debug, request.generation_config,
+        request.is_debug or (workbench is not None and request.generation_config is not None),
         workbench is None and request.metadata is not None and (not allow_metadata_update or new_conversation),
         workbench is None and (request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None),
     )):
@@ -221,6 +223,14 @@ async def prepare_conversation_snapshot(
             )
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
+    if workbench is None and any((
+        request.generation_config is not None and request.generation_config.model_fields_set,
+        request.reasoning_effort is not None, request.reasoning_budget_tokens is not None,
+    )):
+        compile_options["turn_generation"] = TurnModelGeneration(
+            settings=request.generation_config, reasoning_effort=request.reasoning_effort,
+            reasoning_budget_tokens=request.reasoning_budget_tokens,
+        )
     historical_context = None
     if current_user_message_id is not None or before_message_index is not None:
         boundary = {"before_message_index": before_message_index} if before_message_index is not None else {}
@@ -470,18 +480,24 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
     )
 
 
-def _export_model(alias, models, tenant_id, resource, agent_model_overrides, *, root_generation=None, source_alias=None):
-    record_alias = source_alias if root_generation is not None else alias
+def _export_model(
+    alias, models, tenant_id, resource, agent_model_overrides, *, root_generation=None, turn_generation=None,
+    source_alias=None,
+):
+    record_alias = source_alias if root_generation is not None or turn_generation is not None else alias
     candidates = get_model_records({"display_name": record_alias, "model_type": "llm"}, tenant_id)
     effective = [model for model in models if model.cite_name == record_alias]
     if len(candidates) != 1 or len(effective) != 1:
         raise ValueError("Evaluation requires an unambiguous model binding")
     record = candidates[0]
     selected = effective[0]
-    if root_generation is not None:
-        overlaid = [model for model in models if model.cite_name == alias]
-        if overlaid != [overlay_root_model(selected, root_generation.model_dump(), alias)]:
-            raise ValueError("Unsupported Workbench root model overlay")
+    if root_generation is not None or turn_generation is not None:
+        overlay = (
+            apply_turn_model_generation(selected, turn_generation, alias) if turn_generation is not None
+            else overlay_root_model(selected, root_generation.model_dump(), alias)
+        )
+        if [model for model in models if model.cite_name == alias] != [overlay]:
+            raise ValueError("Unsupported root model overlay")
     base = create_model_config_from_record(record)
     changes = {
         name: getattr(selected, name) for name in RunModelOverrides.model_fields
@@ -501,14 +517,14 @@ def _export_model(alias, models, tenant_id, resource, agent_model_overrides, *, 
     return RunModelBinding(
         model_id=model_id, alias=alias, revision=model_record_revision(record),
         overrides=RunModelOverrides(**changes) if changes else None, provider_body_revision=body_revision,
-        root_generation=root_generation,
+        root_generation=root_generation, turn_generation=turn_generation,
     )
 
 
 def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
-    root_generation=None, source_model_alias=None,
+    root_generation=None, turn_generation=None, source_model_alias=None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -521,7 +537,8 @@ def export_snapshot(
         bindings = [
             _export_model(
                 alias, models, tenant_id, resource, agent_model_overrides,
-                root_generation=root_generation if alias == agent.model_name else None, source_alias=source_model_alias,
+                root_generation=root_generation if alias == agent.model_name else None,
+                turn_generation=turn_generation if alias == agent.model_name else None, source_alias=source_model_alias,
             )
             for alias in aliases
         ]
