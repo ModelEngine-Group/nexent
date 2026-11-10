@@ -68,6 +68,7 @@ change:
     - A2A ephemeral execution preserves observer frames, signed versions, and file scope, and releases resources on disconnect.
     - Workbench updates authorized runtime metadata with configuration in one confirmation and keeps both versions.
     - Scoped Workbench AIDP binds tenant catalog revisions and typed search options, and rechecks Runtime permissions.
+    - Management stages and pins clarification answers before a new signed prepared run without exposing the form to Runtime.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -75,6 +76,7 @@ change:
     - test/backend/app/test_northbound_app.py
     - test/backend/services/test_northbound_service.py
     - test/backend/services/test_prepared_public_turn.py
+    - test/backend/services/test_clarification_response.py
     - test/backend/services/test_agentos_public_events.py
     - test/backend/services/test_agentos_proxy_service.py
     - test/backend/services/test_runtime_proxy_service.py

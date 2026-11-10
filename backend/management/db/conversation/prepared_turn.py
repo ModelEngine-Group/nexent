@@ -8,13 +8,15 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 
 from contracts.agentos import AgentRunReference
-from contracts.errors.exceptions import RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.repository import (
     _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
+    _resolve_clarification_response,
     create_conversation, create_conversation_message,
 )
 
@@ -110,6 +112,7 @@ def stage_turn(
 ) -> PreparedTurn:
     admission = ConversationRunAdmission
     workbench = user_turn.get("workbench_update")
+    clarification = user_turn.get("clarification_response")
     with get_db_session() as session:
         if initial_title is None:
             if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
@@ -126,6 +129,16 @@ def stage_turn(
                 _require_workbench_version(conversation, workbench["expected_version"], workbench["config"])
             if (metadata_update := user_turn.get("metadata_update")) is not None:
                 _require_metadata_version(conversation, metadata_update["expected_version"])
+            if clarification is not None:
+                resolved = _resolve_clarification_response(
+                    session, reference.conversation_id, user_id, "user", clarification,
+                )
+                source_id = resolved.pop("source_message_id")
+                user_turn = {
+                    **user_turn, "clarification_response": resolved, "clarification_source_id": source_id,
+                }
+        elif clarification is not None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification requires an existing conversation")
         elif not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
         row = session.scalar(select(admission).where(
@@ -201,10 +214,21 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 conversation.runtime_metadata_version = metadata_version + 1
                 conversation.updated_by = turn.user_id
                 conversation.update_time = func.now()
-            source_message_id = create_conversation_message({
+            user_message = {
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index - 1,
                 "role": "user", "content": user_turn["query"], "minio_files": user_turn["minio_files"],
-            }, turn.user_id, db_session=session)
+            }
+            clarification = user_turn.get("clarification_response")
+            options = {}
+            if clarification is not None:
+                user_message["clarification_response"] = clarification
+                options["expected_clarification_source_id"] = user_turn["clarification_source_id"]
+            try:
+                source_message_id = create_conversation_message(user_message, turn.user_id, db_session=session, **options)
+            except AppException as exc:
+                if clarification is None or exc.error_code != ErrorCode.COMMON_VALIDATION_ERROR:
+                    raise
+                raise PreparedTurnConflict from exc
             row.prepared_assistant_id = create_conversation_message({
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index,
                 "role": "assistant", "content": "",

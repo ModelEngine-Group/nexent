@@ -265,7 +265,8 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *,
                                  message_source: MessageSource = MessageSource.CHAT, execution_identity=None,
-                                 streaming_owner: str | None = None, db_session=None) -> int:
+                                 streaming_owner: str | None = None, db_session=None,
+                                 expected_clarification_source_id: int | None = None) -> int:
     """
     Create a conversation message record
 
@@ -301,6 +302,9 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             response = _resolve_clarification_response(
                 session, conversation_id, user_id, message_role, message_data['clarification_response'],
             )
+            if (expected_clarification_source_id is not None
+                    and response["source_message_id"] != expected_clarification_source_id):
+                raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification source changed")
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage

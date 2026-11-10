@@ -72,6 +72,35 @@ async def test_public_prepared_stages_confirms_and_uses_signed_journal(flow):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("has_conversation", [True, False])
+async def test_clarification_stays_in_management_staging_and_starts_a_new_run(flow, mocker, has_conversation):
+    operations, _, client, _ = flow
+    request = AgentRequest.model_validate({
+        **PAYLOAD.request,
+        "conversation_id": REFERENCE.conversation_id if has_conversation else None,
+        "clarification_response": {
+            "form": {"schema_version": 1, "questions": [{"id": "goal", "type": "text", "title": "Goal?"}]},
+            "answers": [{"questionId": "goal", "value": "Continue"}],
+        },
+    })
+    if not has_conversation:
+        reject = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+        with pytest.raises(AppException, match="Clarification requires an existing conversation"):
+            await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+        client.start_prepared_run.assert_not_awaited()
+        reject.assert_awaited_once_with(PAYLOAD, *ACTOR)
+        assert operations == []
+        return
+    result = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+
+    assert operations == ["stage", "start", "confirm"]
+    assert prepared_turn.store.stage_turn.call_args.args[5]["clarification_response"] == (
+        request.clarification_response.model_dump(mode="json")
+    )
+    assert result.headers["run_id"] == REFERENCE.run_id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("known", [False, True])
 async def test_public_prepared_only_releases_a_definitive_rejection(flow, known):
     operations, _, client, _ = flow

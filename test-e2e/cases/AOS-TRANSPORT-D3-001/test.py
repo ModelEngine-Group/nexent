@@ -234,6 +234,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
     with monkeypatch.context() as turn_patches:
         await _assert_public_prepared_turn_over_signed_http(turn_patches)
+    with monkeypatch.context() as clarification_patches:
+        await _assert_public_prepared_turn_over_signed_http(clarification_patches, clarification=True)
     with monkeypatch.context() as new_turn_patches:
         await _assert_public_prepared_turn_over_signed_http(new_turn_patches, new_conversation=True)
     with monkeypatch.context() as northbound_patches:
@@ -1901,9 +1903,10 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
-    use_knowledge_scope=False,
+    use_knowledge_scope=False, clarification=False,
 ):
     from contracts.agent import WorkbenchSessionConfig
+    from contracts.clarification import ClarificationResponse
     from contracts.constants.constants import DEFAULT_EN_TITLE
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
@@ -1943,6 +1946,10 @@ async def _assert_public_prepared_turn_over_signed_http(
                      "tools": bindings},
         "models": {"llm": llm},
     })
+    response = ClarificationResponse.model_validate({
+        "form": {"schema_version": 1, "questions": [{"id": "goal", "type": "text", "title": "Goal?"}]},
+        "answers": [{"questionId": "goal", "value": "Continue"}],
+    }) if clarification else None
     state = {"status": "pending"}
     calls = []
     pending = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
@@ -1961,6 +1968,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
         assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
         assert turn["query"] == "test"
+        assert turn.get("clarification_response") == (response.model_dump(mode="json") if response else None)
         if use_workbench:
             assert turn["workbench_update"] == {
                 "config": config.model_dump(mode="json"), "expected_version": 3, "version": 4,
@@ -2002,6 +2010,7 @@ async def _assert_public_prepared_turn_over_signed_http(
 
     async def start(payload, signed_actor):
         assert payload == snapshot and signed_actor == actor and calls == ["stage"]
+        assert "clarification_response" not in payload.model_dump_json()
         calls.append("start")
         return reference
 
@@ -2060,6 +2069,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata
+        assert request.clarification_response == response
         assert kwargs.get("allow_metadata_update", False) == (metadata is not None and northbound)
         if use_workbench:
             assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
@@ -2112,6 +2122,8 @@ async def _assert_public_prepared_turn_over_signed_http(
             })
         if not new_conversation:
             request["conversation_id"] = reference.conversation_id
+        if response is not None:
+            request["clarification_response"] = response.model_dump(mode="json")
         headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1", "Cookie": "NEXT_LOCALE=en"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
                                      base_url="http://management") as browser:

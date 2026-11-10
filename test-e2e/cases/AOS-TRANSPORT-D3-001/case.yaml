@@ -99,6 +99,9 @@ case:
   - order: 24
     action: Send a Workbench turn with a mounted shared AIDP tool and revoke one selected KDS before Runtime materializes it.
     expected: The signed binding keeps typed retrieval options, and Runtime permits only the KDS still authorized.
+  - order: 25
+    action: Submit a clarification response for an owned conversation and retry with the same key.
+    expected: Management stages the structured response locally and sends only the prepared execution input to Runtime. The retry keeps the original run ID and another tenant receives 404.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -124,6 +127,7 @@ case:
   - The signed ephemeral stream retains observer events and releases request-owned execution on disconnect.
   - Workbench preserves both configuration and metadata revisions across signed admission and one projection.
   - Workbench carries a scoped shared AIDP catalog binding and Runtime enforces the narrowed KDS scope.
+  - A clarification response produces one signed prepared run and stays in Management history.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -306,4 +310,9 @@ case:
     description: A signed Workbench turn mounts a shared AIDP catalog tool with Runtime ACL rechecks.
     steps: [24]
     expected_results: [24]
+    forbidden_side_effects: [1, 2]
+  - id: AC-33
+    description: Management retains structured clarification answers and starts one signed prepared run for the owned conversation.
+    steps: [25]
+    expected_results: [25]
     forbidden_side_effects: [1, 2]

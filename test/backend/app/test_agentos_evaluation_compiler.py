@@ -22,7 +22,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "clarification", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope", "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
@@ -90,8 +90,12 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             metadata = {"project": "replacement"}
         elif kind == "clear_metadata":
             metadata = {}
+        clarification = {
+            "form": {"schema_version": 1, "questions": [{"id": "goal", "type": "text", "title": "Original form"}]},
+            "answers": [{"questionId": "goal", "value": "hello"}],
+        } if kind == "clarification" else None
         request = AgentRequest(
-            query="hello", agent_id=7, conversation_id=42,
+            query="hello", agent_id=7, conversation_id=42, clarification_response=clarification,
             enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
         )
         if metadata is not None:
@@ -147,6 +151,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         assert isinstance(prepared, PreparedAgentRun)
         assert (prepared.run_id, prepared.conversation_id, prepared.resource.version_no) == (reference.run_id, 42, 2)
         assert prepared.input.query != "hello" and "hello" in prepared.input.query
+        if clarification is not None:
+            assert "Original form" not in prepared.model_dump_json()
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
         if use_workbench:

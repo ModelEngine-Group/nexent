@@ -113,6 +113,8 @@ async def start_turn(
     initial_title = None
     try:
         conversation_id = request.conversation_id
+        if conversation_id is None and request.clarification_response is not None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification requires an existing conversation")
         workbench = None
         if request.entrypoint == "workbench":
             workbench = await _prepare_workbench(request, conversation_id, user_id, tenant_id)
@@ -162,6 +164,8 @@ async def start_turn(
             "agent_id": snapshot.resource.agent_id if workbench is not None else request.agent_id,
             "automation": automation,
         }
+        if request.clarification_response is not None:
+            user_turn["clarification_response"] = request.clarification_response.model_dump(mode="json")
         if workbench is not None:
             user_turn["workbench_update"] = {
                 "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,

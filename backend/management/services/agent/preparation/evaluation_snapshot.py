@@ -187,7 +187,6 @@ async def prepare_conversation_snapshot(
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug, request.generation_config,
         workbench is None and request.metadata is not None and (not allow_metadata_update or new_conversation),
-        request.clarification_response is not None,
         workbench is None and (request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None),
     )):
         return None
