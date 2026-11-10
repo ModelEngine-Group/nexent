@@ -690,6 +690,12 @@ class WorkbenchSkillLookup(AgentRunReference):
     workbench_version: PositiveInt
 
 
+class WorkbenchDebugSkillLookup(RunSpecModel):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    agent_id: PositiveInt
+    agent_version: Annotated[int, Field(ge=0)]
+
+
 class WorkbenchSkillMount(RunSpecModel):
     skill_id: PositiveInt
     config_values: dict[str, JsonValue]
@@ -711,6 +717,7 @@ class ManagementOperation(str, Enum):
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
     WORKBENCH_SKILL_MOUNTS = NAMESPACE + "v1/agent/workbench-skill-mounts"
+    WORKBENCH_DEBUG_SKILL_MOUNTS = NAMESPACE + "v1/agent/workbench-debug-skill-mounts"
 
 
 MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in ManagementOperation)

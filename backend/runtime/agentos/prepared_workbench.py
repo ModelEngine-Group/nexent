@@ -4,15 +4,20 @@
 import httpx
 from fastapi import HTTPException
 
-from contracts.agentos import ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
+from contracts.agentos import ManagementOperation, WorkbenchDebugSkillLookup, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.constants import environment
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
 
 _TIMEOUT = httpx.Timeout(10, connect=3)
 
 
-def fetch_workbench_skill_mounts(lookup: WorkbenchSkillLookup, actor: ServicePrincipal) -> dict[int, dict]:
-    operation = ManagementOperation.WORKBENCH_SKILL_MOUNTS
+def fetch_workbench_skill_mounts(
+    lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup, actor: ServicePrincipal,
+) -> dict[int, dict]:
+    operation = (
+        ManagementOperation.WORKBENCH_DEBUG_SKILL_MOUNTS if isinstance(lookup, WorkbenchDebugSkillLookup)
+        else ManagementOperation.WORKBENCH_SKILL_MOUNTS
+    )
     body = lookup.model_dump_json().encode()
     try:
         token = sign_call(operation, body, actor)
