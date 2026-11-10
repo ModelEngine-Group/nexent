@@ -138,6 +138,9 @@ class _ObservedMCPTool(MCPTool):
 
     async def invoke(self, inputs, **kwargs):
         with self._observe(self.card.name, inputs) or nullcontext():
+            # Empty collections and explicit null are valid MCP argument values.
+            # Keep native schema validation and formatting, but never erase them.
+            kwargs["skip_none_value"] = False
             result = await super().invoke(inputs, **kwargs)
             if self._emit_result:
                 self._emit_result(result)

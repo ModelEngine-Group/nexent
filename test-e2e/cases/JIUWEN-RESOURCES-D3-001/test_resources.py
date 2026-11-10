@@ -27,6 +27,10 @@ def test_resource_protocol_roundtrip(monkeypatch, tmp_path, protocol, scenario):
     assert info.attempt_outcome == "completed", output[-1:]
     assert calls == [(2,3)] and state["mcp_calls"] == 1
     assert state["user_id"] == "captured-user"
+    assert state["payload"] == {
+        "config": [], "empty_object": {}, "explicit_null": None,
+        "nested": [[], {}, None, {"value": None}, False, 0, ""],
+    }
     assert effects == ("" if scenario == "parallel" else "x")
     assert state["model_calls"] == (2 if scenario == "parallel" else
                                     6 if scenario == "docker" and protocol == "native" else 5)

@@ -26,7 +26,8 @@ case:
     action: Execute the resource scenario through the actual factory and controlled
       protocol endpoints.
     expected: Native and text protocols execute authorized local/MCP/Skills once,
-      inject hidden caller identity and return actual observations.
+      inject hidden caller identity and return actual observations. Valid empty arrays,
+      objects and explicit null, including nested positions, reach the actual MCP peer unchanged.
   - order: 2
     action: Execute the resource scenario through the actual factory and controlled
       protocol endpoints.
@@ -36,7 +37,8 @@ case:
   - Native and text protocols execute authorized local/MCP/Skills once, inject hidden
     caller identity and return actual observations. Native Docker mode also creates
     a real workspace file through the reserved controlled Python tool. Registered
-    normalized MCP class names resolve to the original hyphenated wire tool name.
+    normalized MCP class names resolve to the original hyphenated wire tool name. The
+    actual peer receives exact empty arrays, objects and explicit null at nested positions.
   - Follow-up does not replay effects; owned tools, sessions and managed workers are
     reclaimed.
   forbidden_side_effects:
@@ -53,6 +55,11 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Valid nested JSON values survive the actual native MCP wire boundary.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
   execution:
     profiles:
     - name: mock

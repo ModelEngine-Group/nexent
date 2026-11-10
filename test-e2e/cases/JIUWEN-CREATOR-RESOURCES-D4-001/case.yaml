@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-CREATOR-RESOURCES-D4-001
+  feature_id: AGENT-CORE-CONFIG
+  requirement_ids: [JIUWEN-MCP-VALUES-20261110]
+  business_rule_ids: [AGENT-CORE-CONFIG-RULE-004]
+  title: Real Jiuwen NL2Agent recommends and binds a Skill with no configuration
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove the actual recommended empty configuration survives native MCP and the resulting draft binding persists.
+  preconditions:
+  - Authorized Local Workbench account, global Jiuwen, real model and an existing visible Skill whose trusted recommendation config is an empty list. The Case never deploys or edits the source Skill.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Start an owned Workbench Agent creation request for the selected existing no-configuration Skill and answer any required initial clarification.
+    expected: The real search and recommendation tools resolve the Skill; its original config empty list is retained in wrapper arguments and in the binding card.
+  - order: 2
+    action: Select the recommended Skill, submit the binding card and continue generation.
+    expected: The existing Skill instance API saves exactly that Skill to the owned draft; real generation completes without missing-config validation errors.
+  - order: 3
+    action: Reopen and refresh the conversation, then clean owned data.
+    expected: The binding and matching generated-result card remain, history loading starts no run, original records are unchanged, and only the new draft and conversation are deleted.
+  expected_results:
+  - The actual no-configuration recommendation and native wrapper retain config=[], and the shared UI renders the Skill binding card.
+  - Submitting the card binds the exact existing Skill to the generated draft and produces a verified completion result.
+  - History refresh does not replay generation; original Skill/Agent/history records are protected and owned cleanup succeeds.
+  forbidden_side_effects:
+  - No provider substitution, fabricated tool results, disabled schema validation, source resource mutation, credential disclosure or unowned deletion.
+  actor: Authorized Workbench user
+  journey: [Create draft, Recommend Skill, Bind Skill, Complete generation, Reload and clean up]
+  final_business_result:
+  - A generated Agent draft retains its real no-configuration Skill binding after history reload.
+  failure_evidence:
+  - Sanitized MCP argument checks, browser assertions and database fingerprints.
+  cleanup:
+  - Delete only the marked draft and conversation and remove private authentication and fixture files.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services: [model-provider]
+    timeout_seconds: 900
+  acceptance:
+  - id: AC-01
+    description: Real empty-config recommendation, binding persistence and history restoration preserve source ownership.
+    steps: [1, 2, 3]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]

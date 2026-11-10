@@ -7,6 +7,7 @@ import json
 import sys
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
 
@@ -27,9 +28,10 @@ mcp = FastMCP("jiuwen-local-fixture")
 
 
 @mcp.tool(name="multiply-values")
-async def multiply(a: int, b: int, user_id: str | None = None) -> int:
+async def multiply(a: int, b: int, user_id: str | None = None, payload: dict[str, Any] | None = None) -> int:
     state["mcp_calls"] += 1
     state["user_id"] = user_id
+    state["payload"] = payload
     if a == 999:
         await asyncio.Event().wait()
     return a * b
@@ -59,9 +61,11 @@ async def completions(request: Request):
     if "TRANSIENT_RETRY_MARKER" in json.dumps(messages) and "add" in results and not state.get("retry_injected"):
         state["retry_injected"] = True
         return JSONResponse({"error": {"message": "Temporary fixture failure", "type": "server_error"}}, status_code=503)
+    payload = {"config": [], "empty_object": {}, "explicit_null": None,
+               "nested": [[], {}, None, {"value": None}, False, 0, ""]}
     chain = [
         ("add", {"a": 2, "b": 3}),
-        ("multiply", {"a": 5, "b": 99}),
+        ("multiply", {"a": 5, "b": 99, "payload": payload}),
         ("read_skill_md", {"skill_name": "fixture_skill"}),
         ("run_skill_script", {"skill_name": "fixture_skill", "script_path": "scripts/hello.py"}),
     ]
@@ -76,7 +80,7 @@ async def completions(request: Request):
         chain = [("multiply", {"a": 999, "b": 4})]
     if "PARALLEL_MARKER" in json.dumps(messages):
         chain = [("parallel_executor", {"tasks": [{"tool_name": "add", "arguments": {"a": 2, "b": 3}},
-                   {"tool_name": "multiply", "arguments": {"a": 5, "b": 99}}]})]
+                   {"tool_name": "multiply", "arguments": {"a": 5, "b": 99, "payload": payload}}]})]
     if text_mode:
         completed = sum("historical_tool_result" in str(message.get("content", "")) for message in messages)
         remaining = chain[completed:]

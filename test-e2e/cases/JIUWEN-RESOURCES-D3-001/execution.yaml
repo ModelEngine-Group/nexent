@@ -8,6 +8,8 @@ timeout_seconds: 180
 acceptance_bindings:
   AC-01:
   - test_resource_protocol_roundtrip
+  AC-02:
+  - test_resource_protocol_roundtrip
 preparation:
   families: []
   anchors: false
