@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pydantic import ValidationError
 
-from contracts.agentos import AgentMemoryReceipt, AgentMemoryStore, AgentResource, PreparedMemorySearch, ToolBinding
+from contracts.agentos import (
+    AgentMemoryReceipt, AgentMemoryStore, AgentMemoryStored, AgentResource, PreparedMemorySearch, ToolBinding,
+)
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from runtime.agentos import memory, prepared_memory
@@ -104,6 +106,8 @@ def test_request_rejects_unsigned_scope_and_nonfinite_vectors(extra):
 async def test_prepared_store_ignores_identity_in_sdk_payload(monkeypatch):
     local = AsyncMock(return_value=AgentMemoryReceipt(memory_id=17, event="ADD"))
     monkeypatch.setattr(prepared_memory, "get_memory_store_service", lambda: SimpleNamespace(store=local))
+    notify = AsyncMock()
+    monkeypatch.setattr(prepared_memory, "notify_memory_stored", notify)
     actor = ServicePrincipal("user-a", "tenant-a")
     search = PreparedMemorySearch(query="question", result="Found 1 memory")
     resource = AgentResource(
@@ -123,6 +127,7 @@ async def test_prepared_store_ignores_identity_in_sdk_payload(monkeypatch):
     assert local.await_args.args == (
         AgentMemoryStore(agent_id=8, conversation_id=42, content="remember", idempotency_key="one"), actor,
     )
+    notify.assert_awaited_once_with(AgentMemoryStored(memory_id=17, agent_id=8, conversation_id=42), actor)
 
 
 @pytest.mark.parametrize("conversation_id, credentials, params, error", [

@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-39:
+  - test_signed_agentos_transport
   AC-38:
   - test_signed_agentos_transport
   AC-37:

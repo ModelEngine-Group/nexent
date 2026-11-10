@@ -13,6 +13,7 @@ from management.api.automation.agent_automation import (
     router as agent_automation_router,
 )
 from management.api.automation.agentos_callback import router as automation_callback_router
+from management.api.memory.agentos_callback import router as memory_callback_router
 from management.api.conversation.conversation_management import router as conversation_router
 from management.api.conversation.workbench_pins import router as workbench_pins_router
 from management.api.conversation.conversation_share import router as conversation_share_router
@@ -173,6 +174,7 @@ app.include_router(agent_router)
 app.include_router(conversation_run_router)
 app.include_router(agent_automation_router)
 app.include_router(automation_callback_router)
+app.include_router(memory_callback_router)
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
 app.include_router(conversation_share_router)

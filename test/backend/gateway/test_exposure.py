@@ -74,6 +74,7 @@ def test_snapshot_keeps_all_original_northbound_contracts():
     ("POST", "/api/internal/agentos/v1/compat/agent/run", None),
     ("POST", "/api/internal/agentos/v1/compat/agent/background", None),
     ("POST", "/api/internal/agentos/v1/compat/agent/inspect", None),
+    ("POST", "/api/internal/agentos/v1/memory/stored", None),
     ("POST", "/api/agent/automations/42/run", "management"),
     ("POST", "/api/agent/automations/runs/42/cancel", "management"),
     ("GET", "/api/conversation/42/automation", "management"),

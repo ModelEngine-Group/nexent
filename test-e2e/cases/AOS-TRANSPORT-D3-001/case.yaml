@@ -114,6 +114,9 @@ case:
   - order: 29
     action: Submit a signed prepared conversation containing authorized Memory and execute its bound SDK store tool.
     expected: Runtime reconstructs the tool for the signed owner and journals search events before model events.
+  - order: 30
+    action: Execute a prepared Memory write and observe the signed Management notification. Retry with missing or modified credentials and foreign ownership.
+    expected: Management ingests only the committed record for the signed owner and refuses untrusted notifications.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -145,6 +148,7 @@ case:
   - Native knowledge scope preserves the public warning without leaking the revoked index into Runtime.
   - Agent Memory store preserves the receipt on replay and does not dispatch untrusted or out-of-scope writes.
   - Prepared Memory preserves retrieved context, search event order and the signed scope of a local store.
+  - Prepared Memory notifies Management after local persistence. A notification cannot supply stored content or cross owner boundaries.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -357,4 +361,9 @@ case:
     description: Signed prepared runs carry authorized Memory context and locally bind the store tool to the conversation actor.
     steps: [29]
     expected_results: [30]
+    forbidden_side_effects: [1, 2]
+  - id: AC-39
+    description: Runtime's Memory store tool uses a signed reverse callback for scoped external ingestion.
+    steps: [30]
+    expected_results: [31]
     forbidden_side_effects: [1, 2]

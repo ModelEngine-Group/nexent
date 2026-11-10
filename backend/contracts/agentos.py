@@ -597,8 +597,18 @@ class AgentMemoryReceipt(RunSpecModel):
     indexed: bool = False
 
 
+class AgentMemoryStored(RunSpecModel):
+    memory_id: PositiveInt
+    agent_id: PositiveInt
+    conversation_id: PositiveInt
+
+
 class ManagementOperation(str, Enum):
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
+    MEMORY_STORED = NAMESPACE + "v1/memory/stored"
+
+
+MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in ManagementOperation)
 
 
 AgentOSOperation = (

@@ -1586,7 +1586,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock, Mock
 
     from contracts.agent import AgentRequest
-    from contracts.agentos import AgentMemoryReceipt, PreparedMemorySearch
+    from contracts.agentos import AgentMemoryReceipt, AgentMemoryStored, ManagementOperation, PreparedMemorySearch
     from contracts.conversation import MessageSource
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
     from management.services.automation import runner as automation
@@ -1595,6 +1595,8 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
+    from management.api.memory import agentos_callback as memory_api
+    from management.services.memory import agentos_callback as memory_callback
     from management.services.agent import agentos_events, prepared_projection, runtime_client
     from management.services.agent.preparation import evaluation_snapshot, run as compile_run
     from nexent.core.agents.agent_model import AgentConfig
@@ -1809,7 +1811,41 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     runtime.include_router(prepared_run.create_prepared_run_router())
     runtime.include_router(resume.create_run_lifecycle_router())
 
-    with serve(runtime) as runtime_url:
+    ingested = AsyncMock()
+    monkeypatch.setattr(memory_callback, "run_blocking", control_io)
+    monkeypatch.setattr(memory_callback, "conversation_belongs_to", owns)
+    monkeypatch.setattr(memory_callback, "_fanout_external_ingest", ingested)
+
+    def read_memory(memory_id, tenant):
+        if (memory_id, tenant) != (17, actor.tenant_id):
+            return None
+        local_store.assert_awaited_once()
+        return {
+            "tenant_id": tenant, "user_id": actor.user_id, "agent_id": "7", "layer": "agent",
+            "memory_type": "short_term", "status": "active", "content": "committed memory",
+        }
+
+    monkeypatch.setattr(memory_callback, "get_memory_record", read_memory)
+    callback_app = FastAPI(root_path="/api")
+    callback_app.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    callback_app.include_router(memory_api.router)
+    with serve(runtime) as runtime_url, serve(callback_app) as callback_url:
+        monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", callback_url)
+        operation = ManagementOperation.MEMORY_STORED
+        notice = AgentMemoryStored(memory_id=17, agent_id=7, conversation_id=42)
+        body = notice.model_dump_json().encode()
+        token = sign_call(operation, body, actor)
+        other_actor = ServicePrincipal(actor.user_id, "tenant-b")
+        async with httpx.AsyncClient(base_url=callback_url, trust_env=False) as raw:
+            for callback_body, credential, expected in (
+                (body, None, 401),
+                (body.replace(b"17", b"18"), token, 401),
+                (body, sign_call(operation, body, other_actor), 404),
+            ):
+                headers = {"Authorization": f"Bearer {credential}"} if credential else {}
+                rejected = await raw.post(f"/api{operation.value}", content=callback_body, headers=headers)
+                assert rejected.status_code == expected
+        ingested.assert_not_awaited()
         agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         with pytest.raises(RuntimeUpstreamError) as foreign:
             await agentos.start_prepared_run(request, actor.user_id, "tenant-b")
@@ -1845,6 +1881,11 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         submission = await automation.AgentAutomationRunner()._execute_active_run(stored_run.copy(), task)
         assert submission["status"] == "RUNNING" and stored_run["projection_message_index"] == 1
         assert await asyncio.to_thread(finished.wait, 5)
+        ingested.assert_awaited_once()
+        stored_record, event = ingested.await_args.args
+        assert (stored_record["content"], stored_record["conversation_id"], event) == (
+            "committed memory", "42", {"memory_id": 17},
+        )
         monkeypatch.setattr(agentos, "start_prepared_run", real_start)
         with pytest.raises(RuntimeUpstreamError) as duplicate:
             await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id)
