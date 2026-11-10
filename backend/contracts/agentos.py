@@ -181,15 +181,22 @@ class ModelBindings(RunSpecModel):
     additional_llms: list[RunModelBinding] = Field(default_factory=list)
 
 
+class RunAttachment(RunSpecModel):
+    name: str = Field(min_length=1)
+    url: str = Field(pattern=r"^s3://[^/]+/.+$")
+    presign: bool = False
+
+
 class RunHistoryMessage(RunSpecModel):
     role: Literal["user", "assistant"]
     content: str
+    attachment_refs: list[RunAttachment] = Field(default_factory=list)
 
 
 class RunInput(RunSpecModel):
     query: str
     history: list[RunHistoryMessage] = Field(default_factory=list)
-    attachment_refs: list[str] = Field(default_factory=list)
+    attachment_refs: list[RunAttachment] = Field(default_factory=list)
 
 
 class EvaluationFileTool(str, Enum):

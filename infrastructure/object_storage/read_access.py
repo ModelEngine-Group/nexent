@@ -2,8 +2,9 @@
 
 """Object-read scope shared by Management and Runtime tool adapters."""
 
+from urllib.parse import quote
+
 from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
-from nexent.multi_modal.utils import parse_s3_url
 
 
 def can_read_object(object_name: str, user_id: str, tenant_id: str | None) -> bool:
@@ -22,6 +23,8 @@ def can_read_object(object_name: str, user_id: str, tenant_id: str | None) -> bo
 
 
 def require_s3_read_access(urls: list[str], user_id: str, tenant_id: str) -> None:
+    from nexent.multi_modal.utils import parse_s3_url
+
     for url in urls:
         try:
             _, object_name = parse_s3_url(url)
@@ -29,3 +32,9 @@ def require_s3_read_access(urls: list[str], user_id: str, tenant_id: str) -> Non
             raise PermissionError("Invalid S3 URL") from exc
         if not can_read_object(object_name, user_id, tenant_id):
             raise PermissionError("Object is outside the run's read scope")
+
+
+def build_attachment_proxy_url(presigned_url: str, northbound_url: str) -> str:
+    if not presigned_url:
+        return ""
+    return f"{northbound_url}/nb/v1/file/fetch?presigned_url={quote(presigned_url, safe='')}"

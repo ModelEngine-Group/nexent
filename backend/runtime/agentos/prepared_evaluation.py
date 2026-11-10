@@ -24,13 +24,14 @@ from infrastructure.object_storage.read_access import require_s3_read_access
 from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
 from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.workspace_paths import create_run_workspace
-from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo, ToolConfig
+from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ToolConfig
 from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.context_input import build_authorized_context_input
 from nexent.core.concurrency import run_blocking
 from runtime.adapters.nexent.factory import build_run_info
 from runtime.adapters.nexent.runner import agent_run
 from runtime.agentos.evaluation import collect_observer_output
+from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_mcp import PreparedMCP
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
@@ -160,11 +161,12 @@ def _materialize_model(binding, actor):
 
 def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
     if any((
-        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local", payload.input.attachment_refs,
+        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local",
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
     )):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
+    query, history, files = materialize_evaluation_input(payload.input, actor, payload.language)
     mcp = PreparedMCP(actor)
     bindings = [payload.models.llm, *payload.models.additional_llms]
     aliases = {binding.alias for binding in bindings}
@@ -194,8 +196,9 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         user_context=user_context,
-        query=payload.input.query,
-        history=[AgentHistory(**message.model_dump()) for message in payload.input.history],
+        query=query,
+        history=history,
+        minio_files=files or None,
         agent_config=agent_config,
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,

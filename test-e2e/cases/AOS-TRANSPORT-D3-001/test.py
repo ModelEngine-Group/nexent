@@ -197,13 +197,16 @@ async def test_signed_agentos_transport(monkeypatch):
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
+    from types import SimpleNamespace
+    from infrastructure import agent_attachments
+    from infrastructure.object_storage.client import minio_client
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent import runtime_client
     from management.services.agent.preparation import evaluation_snapshot
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from infrastructure.mcp_execution import build_mcp_tool
-    from runtime.agentos import prepared_evaluation, prepared_mcp
+    from runtime.agentos import prepared_attachments, prepared_evaluation, prepared_mcp
     from runtime.executions import LocalExecutionRegistry
 
     key = "synthetic-prepared-evaluation-fixture-secret"
@@ -211,6 +214,15 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", key)
     monkeypatch.setattr(prepared_evaluation, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
 
+    monkeypatch.setattr(agent_attachments, "MINIO_DEFAULT_BUCKET", "bucket")
+    monkeypatch.setattr(prepared_attachments, "NORTHBOUND_EXTERNAL_URL", "https://gateway.invalid")
+    signed_files = []
+
+    def get_file_url(key, bucket):
+        signed_files.append((key, bucket))
+        return True, "https://storage.invalid/fresh-evaluation-link"
+
+    monkeypatch.setattr(minio_client, "get_file_url", get_file_url)
     lookups = []
     invocations = []
     registry = LocalExecutionRegistry()
@@ -277,6 +289,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         assert host["headers"] == {"Authorization": "runtime-mcp-token"}
         assert host["allowed_tools"] == {"catalog_lookup": "catalog_lookup"}
         assert info.user_context["user_id"] == "user-a"
+        assert "attachments/user-a/report.txt" in info.query
+        assert "fresh-evaluation-link" in info.history[0].content
+        assert "earlier" in info.history[0].content
+        assert info.minio_files[0]["url"] == "s3://bucket/attachments/user-a/report.txt"
         access = info.agent_config.tools[0].metadata["validate_url_access"]
         access(["s3://bucket/attachments/user-a/allowed.txt"])
         with pytest.raises(PermissionError):
@@ -309,14 +325,21 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
+    request_input = evaluation_snapshot.build_evaluation_input(
+        case.query, None, [SimpleNamespace(role="user", content="earlier", minio_files=[{
+            "name": "report.txt", "url": "s3://bucket/attachments/user-a/report.txt",
+            "presigned_url": "previous-link-from-history",
+        }])], "user-a", "tenant-a",
+    )
     prepared = evaluation_snapshot.export_snapshot(
-        agent, [model], case.query, None, tenant_id="tenant-a", conversation_id=-42, language="zh",
+        agent, [model], case.query, None, tenant_id="tenant-a", conversation_id=-42, language="zh", run_input=request_input,
     )
     assert isinstance(prepared, PreparedEvaluationRun)
     assert "/management/workspace" not in prepared.model_dump_json()
     assert "only-in-runtime" not in prepared.model_dump_json()
     assert external_row["agent_url"] not in prepared.model_dump_json()
     assert "local-peer-token" not in prepared.model_dump_json()
+    assert "previous-link-from-history" not in prepared.model_dump_json()
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
@@ -335,6 +358,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
             {"type": "thought", "content": "step"}, {"type": "final_answer", "content": "answer"},
         ]
         assert "only-in-runtime" not in result.model_dump_json()
+        assert signed_files == [("attachments/user-a/report.txt", "bucket")]
+        with pytest.raises(RuntimeUpstreamError) as foreign_attachment:
+            await agentos.run_prepared_evaluation(prepared, "user-b", "tenant-a")
+        assert foreign_attachment.value.status_code == 403
+        assert "AGENTOS_ATTACHMENT_FORBIDDEN" in foreign_attachment.value.content.decode()
+        assert len(signed_files) == 1
         with pytest.raises(RuntimeUpstreamError) as refused:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
         assert refused.value.status_code == 404

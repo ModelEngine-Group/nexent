@@ -148,10 +148,16 @@ async def create_agent_run_info(
             workspace_path,
             tenant_id,
         )
-    effective_minio_files = _collect_run_minio_files(minio_files, history)
-    if export_evaluation and effective_minio_files:
-        return None
-    _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
+    if export_evaluation:
+        from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
+
+        try:
+            run_input = build_evaluation_input(query, minio_files, history, user_id, tenant_id)
+        except (TypeError, ValueError):
+            return None
+    else:
+        effective_minio_files = _collect_run_minio_files(minio_files, history)
+        _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
     runtime_file_context = {
         "workspace_path": workspace_path,
         "minio_client": minio_client,
@@ -184,7 +190,7 @@ async def create_agent_run_info(
         version_no=version_no,
     )
 
-    final_query = await join_minio_file_description_to_query(
+    final_query = query if export_evaluation else await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
         history=history,
@@ -355,7 +361,7 @@ async def create_agent_run_info(
         from management.services.agent.preparation.evaluation_snapshot import export_snapshot
 
         return export_snapshot(
-            agent_config, model_list, final_query, _convert_history_with_minio_files(history, language=language),
+            agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
         )
 

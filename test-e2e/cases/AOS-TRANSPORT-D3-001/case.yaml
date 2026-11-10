@@ -41,7 +41,7 @@ case:
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
-    expected: Runtime rebuilds scoped file, external A2A and MCP bindings and a child Agent with the expected model parameters. Events stay ordered. Cross-tenant access and changed execution bindings are refused.
+    expected: Runtime rebuilds scoped file, attachment, external A2A and MCP bindings and a child Agent with the expected model parameters. Events stay ordered. Out-of-scope attachment references and changed execution bindings are refused.
   - order: 6
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.

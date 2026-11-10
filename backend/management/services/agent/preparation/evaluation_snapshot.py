@@ -10,14 +10,42 @@ from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, ExternalA2AExecutionBinding,
     FileToolDescription, MCPExecutionBinding, ToolCallerContext,
-    ModelBindings, PreparedEvaluationRun, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
+    ModelBindings, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
 )
 from contracts.constants.environment import NEXENT_SANDBOX_DEFAULT_LEVEL
 from infrastructure.a2a_execution import external_agent_execution_revision
+from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.mcp_execution import build_mcp_tool, mcp_execution_revision, select_mcp_server
 from infrastructure.rdb.mcp_execution_records import read_bound_mcp_tools, read_mcp_execution_servers
 from infrastructure.rdb.model_records import get_model_records
+from nexent.multi_modal.utils import parse_s3_url
+
+
+def _export_attachments(files):
+    refs = []
+    for file in (files or []):
+        if not isinstance(file, dict) or not file.get("name") or not (url := _build_internal_s3_url(file)):
+            continue
+        bucket, key = parse_s3_url(url)
+        refs.append(RunAttachment(
+            name=file["name"], url=f"s3://{bucket}/{key}", presign=bool(file.get("presigned_url")),
+        ))
+    return refs
+
+
+def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> RunInput:
+    request = RunInput(
+        query=query, attachment_refs=_export_attachments(minio_files),
+        history=[
+            RunHistoryMessage(role=item.role, content=item.content, attachment_refs=_export_attachments(item.minio_files))
+            for item in (history or [])
+        ],
+    )
+    urls = {file.url for file in request.attachment_refs}
+    urls.update(file.url for message in request.history for file in message.attachment_refs)
+    validate_attachment_references(list(urls), user_id, tenant_id)
+    return request
 
 
 async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str, tenant_id: str):
@@ -143,7 +171,7 @@ def _export_model(alias, models, tenant_id):
     )
 
 
-def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None):
+def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
     try:
@@ -157,7 +185,7 @@ def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id
         return PreparedEvaluationRun(
             mode="nexent", language=language, conversation_id=conversation_id, resource=resource, tool_caller=tool_caller,
             models=ModelBindings(llm=bindings[0], additional_llms=bindings[1:]),
-            input=RunInput(
+            input=run_input or RunInput(
                 query=query, history=[RunHistoryMessage(role=item.role, content=item.content) for item in (history or [])],
             ),
         )
