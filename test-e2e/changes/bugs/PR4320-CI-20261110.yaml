@@ -65,9 +65,14 @@ change:
     - test/backend/agents/test_global_agent_core.py
     - test/backend/services/test_model_runtime_provisioning_service.py
     - test/backend/utils/test_agent_prompt_bundle.py
+    - test/sdk/core/agents/test_jiuwen_native_files.py
   notes: SPEC runtime-agent-core-factory PR4320 CI section. Header-only formal script
     changes retain all acceptance contracts/bindings and need static validation, not
     artificial journey reruns. Existing D3 owns HTTP/process cleanup with self-contained
     preparation; no new D1 or deployment switch. No workflow, suppression, branch
     protection or assertion removal. Published consolidated SQL is unchanged; operator
-    approved removal of three obsolete reintroduced copies.
+    approved restoration of develop SQL ownership; ten reintroduced old copies are
+    removed across this fix. Six of the final seven have identical SQL bodies; the
+    activity/source copy is superseded by the documented v2.8.0 simplification.
+    The unmerged runtime_outlet_snapshot column and its migration remain required
+    by the current ORM and legacy write bridge, independently of global Core policy.

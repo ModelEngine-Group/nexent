@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from nexent.core.agents.context.models import ContextItemInput, ContextItemType
 from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
@@ -51,15 +52,25 @@ def test_native_executor_is_model_visible_but_text_internal_entry_is_never_adver
     assert [tool.name for tool in view.tool_definitions] == [NATIVE_EXECUTION_TOOL, "read_skill_md"]
 
 
-def test_native_guidance_uses_authorized_skill_api_not_guessed_s3_paths(mocker):
-    mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_context_items", return_value=[])
+@pytest.mark.parametrize("authorized_skill", [False, True])
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_native_guidance_uses_authorized_skill_api_not_guessed_s3_paths(mocker, authorized_skill, language):
+    items = [ContextItemInput(id="skill:docx", type=ContextItemType.SKILL,
+                              content={"name": "docx", "description": "Create documents"})] if authorized_skill else []
+    mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_context_items", return_value=items)
     mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_history", return_value=[])
-    info = SimpleNamespace(agent_config=SimpleNamespace(name="files", instructions="Write files", description=""))
+    info = SimpleNamespace(agent_config=SimpleNamespace(name="files", instructions="Write files", description=""),
+                           observer=SimpleNamespace(lang=language))
     adapter = JiuwenAdapter(info)
     prompt = adapter._compile_context()
-    assert "read_skill_md" in prompt and "run_skill_script" in prompt
-    assert "never invent skill names, script paths or S3 paths" in prompt
-    assert "nexent_execute_python" in prompt and "never for skills" in prompt
+    assert "nexent_execute_python" in prompt
+    if authorized_skill:
+        assert "read_skill_md" in prompt and "run_skill_script" in prompt
+        assert "never invent skill names, script paths or S3 paths" in prompt
+        assert "never for skills" in prompt
+    else:
+        assert "read_skill_md" not in prompt and "run_skill_script" not in prompt
+        assert "For a new file request no download is needed" in prompt
 
 
 @pytest.mark.parametrize("reserved", [EXECUTION_TOOL, NATIVE_EXECUTION_TOOL])
