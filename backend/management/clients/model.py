@@ -66,13 +66,20 @@ def invoke_chat_prompt_in_worker(
     return remove_think_blocks(output).strip()
 
 
-def embed_query_in_worker(*, model_id: int, query: str, user_id: str, tenant_id: str) -> list[float]:
-    """Obtain the one query vector requested by a synchronous evaluation worker."""
-    payload = EmbeddingInvocation(model_id=model_id, input=[query])
-    output = asyncio.run(_model_client().invoke_model(payload, user_id, tenant_id)).output
+async def embed_query(
+    *, model_id: int, query: str, user_id: str, tenant_id: str, revision: str | None = None,
+) -> list[float]:
+    """Obtain one query vector using the tenant's Runtime model binding."""
+    payload = EmbeddingInvocation(model_id=model_id, input=[query], expected_revision=revision)
+    output = (await _model_client().invoke_model(payload, user_id, tenant_id)).output
     if not isinstance(output, list) or len(output) != 1 or not isinstance(output[0], list):
         raise RuntimeServiceUnavailableError("Invalid AgentOS query embedding response")
     vector = output[0]
     if not vector or any(type(value) not in (int, float) or not math.isfinite(value) for value in vector):
         raise RuntimeServiceUnavailableError("Invalid AgentOS query embedding vector")
     return vector
+
+
+def embed_query_in_worker(*, model_id: int, query: str, user_id: str, tenant_id: str) -> list[float]:
+    """Obtain one query vector from an existing synchronous evaluation worker."""
+    return asyncio.run(embed_query(model_id=model_id, query=query, user_id=user_id, tenant_id=tenant_id))

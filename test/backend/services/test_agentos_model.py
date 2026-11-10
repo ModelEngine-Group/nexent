@@ -124,3 +124,25 @@ async def test_model_invoke_uses_registered_model(model_type, request_body, prov
 def test_chat_sampling_does_not_allow_connection_fields_or_unbounded_values(options):
     with pytest.raises(ValidationError):
         ChatOptions.model_validate(options)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "dimension", "missing"])
+async def test_memory_query_embedding_checks_binding_and_dimension(mocker, outcome):
+    from management.services.memory.query_embedding import embed_memory_query
+
+    model = SimpleNamespace(model_id=11 if outcome != "missing" else None, revision="rev", dimension=2)
+    invoke = mocker.patch(
+        "management.clients.model.embed_query", new_callable=AsyncMock,
+        return_value=[0.1, 0.2] if outcome == "success" else [0.1],
+    )
+
+    result = await embed_memory_query("query", model, _ACTOR.user_id, _ACTOR.tenant_id)
+
+    assert result == ([0.1, 0.2] if outcome == "success" else None)
+    if outcome == "missing":
+        invoke.assert_not_awaited()
+    else:
+        invoke.assert_awaited_once_with(
+            model_id=11, revision="rev", query="query", user_id=_ACTOR.user_id, tenant_id=_ACTOR.tenant_id,
+        )

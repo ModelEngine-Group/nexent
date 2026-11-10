@@ -6,6 +6,7 @@ implementations:
   selector: test_agentos_model_over_http
   profiles: [mock]
 acceptance_bindings:
+  AC-07: [test_agentos_model_over_http]
   AC-01: [test_agentos_model_over_http]
   AC-02: [test_agentos_model_over_http]
   AC-03: [test_agentos_model_over_http]

@@ -190,8 +190,7 @@ class MemoryIndexService:
         Args:
             index_name: ES index carrying the tenant's per-embedding-model
                 memory chunks.
-            embedding: Pre-computed query embedding (used by the pure kNN
-                branch).
+            embedding: Pre-computed query embedding used by the vector branch.
             tenant_id / user_id / agent_id: isolation keys compiled into an
                 ES ``bool.filter`` so callers never see another tenant's,
                 user's, or agent's memories. ``conversation_id`` is retained
@@ -201,17 +200,14 @@ class MemoryIndexService:
             top_k: Maximum number of hits to return.
             hybrid: When ``True``, delegate to
                 :py:meth:`ElasticSearchCore.hybrid_search` so fuzzy
-                (BM25) and semantic (kNN) scores are blended. Requires
-                both ``query_text`` and ``embedding_model`` to be supplied.
+                (BM25) and semantic (kNN) scores are blended. Requires a query text.
                 When ``False`` (the default), behaviour is bit-for-bit
                 identical to the previous release: a single kNN query.
             query_text: Raw user query, required when ``hybrid=True`` so the
                 fuzzy branch has something to score against.
             weight_accurate: Weight of the fuzzy (BM25) branch in the hybrid
                 combination; ignored unless ``hybrid=True``.
-            embedding_model: Embedding model instance (carries the HTTP client
-                + dimension metadata) used by ``hybrid_search`` to re-vectorise
-                ``query_text``. Ignored unless ``hybrid=True``.
+            embedding_model: Optional legacy adapter used only to select the vector fields.
 
         Returns:
             A list of normalized result dicts ready to be passed to
@@ -234,11 +230,8 @@ class MemoryIndexService:
         )
 
         if hybrid:
-            if not query_text or embedding_model is None:
-                logger.warning(
-                    "[ES_SEARCH] hybrid requested without query_text or "
-                    "embedding_model; falling back to kNN path.",
-                )
+            if not query_text:
+                logger.warning("[ES_SEARCH] hybrid requested without query_text; falling back to kNN path.")
             else:
                 return self._hybrid_search_similar(
                     index_name=index_name,
@@ -345,30 +338,22 @@ class MemoryIndexService:
                 top_k=top_k,
             )
 
+        vector_options = {"query_embedding": embedding}
+        if embedding_model is not None:
+            vector_options["embedding_model"] = embedding_model
         try:
             raw = vdb_core.hybrid_search(
                 index_names=[index_name],
                 query_text=query_text,
-                embedding_model=embedding_model,
                 top_k=max(1, int(top_k)),
                 weight_accurate=weight_accurate,
                 filter={"bool": {"must": isolation_filter}},
+                **vector_options,
             )
         except TypeError:
-            # Defensive fallback if an older implementation missing the
-            # ``filter`` kwarg is wired in. Mirrors the legacy behaviour
-            # without the isolation filter, which is unsafe but matches
-            # the original SDK contract.
-            logger.warning(
-                "[ES_HYBRID] hybrid_search rejected ``filter`` kwarg; "
-                "retrying without isolation filter.",
-            )
-            raw = vdb_core.hybrid_search(
-                index_names=[index_name],
-                query_text=query_text,
-                embedding_model=embedding_model,
-                top_k=max(1, int(top_k)),
-                weight_accurate=weight_accurate,
+            logger.warning("[ES_HYBRID] filtered hybrid search unavailable; using isolated kNN.")
+            return self._knn_search_similar(
+                index_name=index_name, embedding=embedding, isolation_filter=isolation_filter, top_k=top_k,
             )
         except Exception:
             logger.exception("hybrid_search failed for %s", index_name)

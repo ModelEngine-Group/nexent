@@ -409,7 +409,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     read = mocker.patch.object(authorization, "search_agent_info_by_agent_id", return_value=draft)
     mocker.patch.object(authorization, "get_user_role_by_tenant", return_value="MEMBER")
     groups = mocker.patch.object(authorization, "query_group_ids_by_user_in_tenant", return_value=[member_group])
-    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
     mocker.patch("management.services.model.run_controls.preflight_turn_controls")
     fields = evaluation_payload()
     fields["resource"]["version_no"] = version
@@ -436,3 +436,4 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
         compile_run.assert_not_awaited()
     read.assert_called_once_with(7, "tenant-a", version)
     groups.assert_called_once_with("actor", "tenant-a")
+    memory.assert_not_called()

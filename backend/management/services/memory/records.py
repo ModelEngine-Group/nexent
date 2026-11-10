@@ -142,6 +142,9 @@ def _resolve_tenant_embedding_model_info(
         )
         return None
 
+    revision = model_config.get("update_time") or model_config.get("create_time")
+    if isinstance(revision, datetime):
+        revision = revision.isoformat()
     try:
         return EmbeddingModelInfo(
             model_name=model_name,
@@ -150,6 +153,8 @@ def _resolve_tenant_embedding_model_info(
             base_url=base_url,
             api_key=model_config.get("api_key") or "sk-no-api-key",
             ssl_verify=bool(model_config.get("ssl_verify", True)),
+            model_id=int(model_config.get("model_id") or record["config_value"]),
+            revision=revision or "legacy",
         )
     except (TypeError, ValueError):
         logger.exception(

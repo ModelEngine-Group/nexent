@@ -443,8 +443,8 @@ async def test_search_memories_resolves_layers_embedding_and_delegates(service, 
     )
     monkeypatch.setattr(
         memory_retrieval_service,
-        "_compute_content_embedding",
-        MagicMock(return_value=[0.1, 0.2]),
+        "embed_memory_query",
+        AsyncMock(return_value=[0.1, 0.2]),
     )
     expected = [memory_retrieval_service.MemorySearchResult(memory_id=1)]
     search_mock = AsyncMock(return_value=expected)
@@ -480,10 +480,10 @@ async def test_search_memories_resolves_layers_embedding_and_delegates(service, 
 async def test_search_memories_skips_embedding_for_empty_query(service, monkeypatch):
     embedding_info = MagicMock(model_name="model")
     resolve_mock = MagicMock(return_value=embedding_info)
-    embed_mock = MagicMock(return_value=[0.1])
+    embed_mock = AsyncMock(return_value=[0.1])
     search_mock = AsyncMock(return_value=[])
     monkeypatch.setattr(memory_retrieval_service, "_resolve_tenant_embedding_model_info", resolve_mock)
-    monkeypatch.setattr(memory_retrieval_service, "_compute_content_embedding", embed_mock)
+    monkeypatch.setattr(memory_retrieval_service, "embed_memory_query", embed_mock)
     monkeypatch.setattr(service, "search", search_mock)
 
     await service.search_memories("tn", "u1", "", layers=None)
@@ -582,47 +582,22 @@ def test_vector_search_returns_empty_when_index_returns_no_hits(service):
     ) == []
 
 
-def test_vector_search_hybrid_builds_client(service, monkeypatch):
-    embedding_client = object()
-    get_client = MagicMock(return_value=embedding_client)
+def test_vector_search_hybrid_reuses_the_query_embedding(service, monkeypatch):
+    get_client = MagicMock(side_effect=AssertionError("Management must not create an embedding client"))
     embedding_module = importlib.import_module("nexent.memory.embedding_model")
     monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
-        embedding=[0.1], threshold=0.5,
-        query="hello", hybrid=True, weight_accurate=0.6,
-    )
-    model_info = MagicMock(
-        model_name="model", dimension=2, base_url="url", api_key="key",
-        model_repo="repo", ssl_verify=True,
-        get_index_name=MagicMock(return_value="index"),
-    )
-
-    service._vector_search(
-        request=request, layer="agent", top_k=5, embedding_model_info=model_info
-    )
-
-    assert get_client.call_args.kwargs["model_name"] == "model"
-    assert service.index_service.search_similar.call_args.kwargs["embedding_model"] is embedding_client
-
-
-def test_vector_search_hybrid_client_failure_falls_back(service, monkeypatch):
-    get_client = MagicMock(side_effect=RuntimeError("client failure"))
-    embedding_module = importlib.import_module("nexent.memory.embedding_model")
-    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
-    request = memory_retrieval_service.MemorySearchRequest(
-        tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
-        embedding=[0.1], threshold=0.5,
-        query="hello", hybrid=True,
+        embedding=[0.1], threshold=0.5, query="hello", hybrid=True, weight_accurate=0.6,
     )
     model_info = MagicMock(get_index_name=MagicMock(return_value="index"))
+    service._vector_search(request=request, layer="agent", top_k=5, embedding_model_info=model_info)
 
-    results = service._vector_search(
-        request=request, layer="agent", top_k=5, embedding_model_info=model_info
-    )
-
-    assert results
-    assert service.index_service.search_similar.call_args.kwargs["embedding_model"] is None
+    get_client.assert_not_called()
+    options = service.index_service.search_similar.call_args.kwargs
+    assert options["embedding"] == [0.1]
+    assert options["hybrid"] is True and options["weight_accurate"] == 0.6
+    assert "embedding_model" not in options
 
 
 def test_record_hits_skips_invalid_ids_and_handles_insert_failure(service, monkeypatch):

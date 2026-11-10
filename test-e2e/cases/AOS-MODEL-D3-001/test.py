@@ -23,6 +23,8 @@ from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
 from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from management.services.memory.extraction import AgentOSMemoryExtractionModel
+from management.services.memory.query_embedding import embed_memory_query
+from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.core.concurrency import shutdown_fallback_thread_manager
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.middleware import AgentOSMiddleware
@@ -216,6 +218,15 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 )
             assert failure.value.status_code == 404
 
+            memory_model = EmbeddingModelInfo(
+                model_name="test-embedding", dimension=2, model_id=17, revision=record["update_time"] + "Z",
+                base_url="http://unused-management.invalid", api_key="unused-management-key",
+            )
+            assert await embed_memory_query("recall", memory_model, "worker-a", "tenant-a") == [0.1, 0.2]
+            assert await embed_memory_query("foreign recall", memory_model, "worker-a", "tenant-b") is None
+            memory_model.revision = "stale"
+            assert await embed_memory_query("stale recall", memory_model, "worker-a", "tenant-a") is None
+
             registration = ModelRegistration(
                 model_name="new-model", model_type="llm", base_url=record["base_url"], api_key="test-registration-key",
             )
@@ -263,4 +274,7 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"
     assert provider_input["max_tokens"] == 700
-    assert embed_calls == [("Bearer provider-secret", {"model": "test-embedding", "input": ["search"]})]
+    assert embed_calls == [
+        ("Bearer provider-secret", {"model": "test-embedding", "input": [query]})
+        for query in ("search", "recall")
+    ]

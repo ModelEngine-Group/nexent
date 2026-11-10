@@ -169,10 +169,6 @@ async def prepare_debug_snapshot(
     )
     if any((request.conversation_id is not None, request.enable_plan, request.workbench, request.knowledge_scope)):
         return None
-    if await run_blocking(
-        "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
-    ):
-        return None
     if request.metadata is not None:
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": version}), tenant_id)
     await run_blocking(

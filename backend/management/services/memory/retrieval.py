@@ -32,9 +32,9 @@ from management.services.memory.index import (
     MemoryIndexService,
     get_memory_index_service,
 )
+from management.services.memory.query_embedding import embed_memory_query
 from management.services.memory.records import (
     MemoryRecordService,
-    _compute_content_embedding,
     _resolve_tenant_embedding_model_info,
     get_memory_record_service,
 )
@@ -205,7 +205,7 @@ class MemoryRetrievalService:
         # Compute query embedding when a model is available.
         embedding: Optional[List[float]] = None
         if query and embedding_model_info:
-            embedding = _compute_content_embedding(query, embedding_model_info)
+            embedding = await embed_memory_query(query, embedding_model_info, user_id, tenant_id)
 
         request = MemorySearchRequest(
             tenant_id=tenant_id,
@@ -259,27 +259,6 @@ class MemoryRetrievalService:
             logger.warning("No index name found")
             return []
 
-        # The hybrid branch in ``search_similar`` needs an actual
-        # ``OpenAICompatibleEmbedding`` instance so it can re-vectorise
-        # ``query_text`` via ``hybrid_search``. Build it lazily so that the
-        # default (hybrid=False) path doesn't pay this cost.
-        embedding_client = None
-        if getattr(request, "hybrid", False):
-            try:
-                from nexent.memory.embedding_model import get_embedding_client
-                embedding_client = get_embedding_client(
-                    model_name=embedding_model_info.model_name,
-                    dimension=embedding_model_info.dimension,
-                    base_url=embedding_model_info.base_url,
-                    api_key=embedding_model_info.api_key,
-                    model_repo=embedding_model_info.model_repo,
-                    ssl_verify=embedding_model_info.ssl_verify,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to build embedding client for hybrid: search_similar will fall back to kNN.",
-                )
-
         raw_hits = self.index_service.search_similar(
             index_name=index_name,
             embedding=list(embedding),
@@ -291,7 +270,6 @@ class MemoryRetrievalService:
             hybrid=getattr(request, "hybrid", False),
             query_text=request.query if getattr(request, "hybrid", False) else None,
             weight_accurate=getattr(request, "weight_accurate", 0.3),
-            embedding_model=embedding_client,
         )
 
         if not raw_hits:

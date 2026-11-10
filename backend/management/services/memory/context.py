@@ -29,10 +29,8 @@ from nexent.memory.policy import MemoryRetrievalPolicy
 
 from contracts.constants.environment import AGENT_SHORT_TERM_HALF_LIFE_DAYS, MMR_CANDIDATE_TOP_K, MMR_DUPLICATE_THRESHOLD, MMR_FINAL_TOP_K, MMR_LAMBDA, MEMORY_TOKEN_BUDGET, W_AGENT_SHORT_TERM, W_EXTERNAL
 
-from management.services.memory.records import (
-    _compute_content_embedding,
-    _resolve_tenant_embedding_model_info,
-)
+from management.services.memory.query_embedding import embed_memory_query
+from management.services.memory.records import _resolve_tenant_embedding_model_info
 from management.services.memory.retrieval import (
     MemoryRetrievalService,
     get_memory_retrieval_service,
@@ -42,12 +40,13 @@ from management.services.memory.retrieval import (
 logger = logging.getLogger("memory_context_service")
 
 
-def _prepare_search_embedding(
+async def _prepare_search_embedding(
     *,
     query: Optional[str],
     embedding: Optional[List[float]],
     embedding_model_info: Optional[EmbeddingModelInfo],
     tenant_id: str,
+    user_id: str,
 ) -> tuple[Optional[EmbeddingModelInfo], Optional[List[float]]]:
     """Resolve the embedding model and compute the query embedding when needed."""
     if embedding is not None:
@@ -57,7 +56,7 @@ def _prepare_search_embedding(
     resolved = embedding_model_info or _resolve_tenant_embedding_model_info(tenant_id)
     if resolved is None:
         return None, None
-    computed = _compute_content_embedding(query, resolved)
+    computed = await embed_memory_query(query, resolved, user_id, tenant_id)
     if computed is None:
         logger.warning("query_embedding computation failed for tenant=%s", tenant_id)
     return resolved, computed
@@ -166,11 +165,12 @@ class MemoryContextService:
                 | MemoryRetrievalPolicy.VECTOR_SEARCH_LAYERS
             )
 
-        resolved_model_info, resolved_embedding = _prepare_search_embedding(
+        resolved_model_info, resolved_embedding = await _prepare_search_embedding(
             query=query,
             embedding=embedding,
             embedding_model_info=embedding_model_info,
             tenant_id=tenant_id,
+            user_id=user_id,
         )
 
         request = MemorySearchRequest(

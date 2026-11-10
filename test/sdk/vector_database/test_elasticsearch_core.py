@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.util
 import time
 import types
@@ -1691,6 +1693,18 @@ def test_semantic_search_sets_knn_parameters(elasticsearch_core_instance):
         assert search_query["knn"]["num_candidates"] == 8
         assert search_query["size"] == 4
         assert search_query["_source"]["excludes"] == ["embedding"]
+
+
+def test_hybrid_search_uses_a_precomputed_vector_with_both_filters(elasticsearch_core_instance):
+    isolation = {"term": {"metadata.tenant_id.keyword": "tenant-a"}}
+    with patch.object(elasticsearch_core_instance, "exec_query", return_value=[]) as execute:
+        assert elasticsearch_core_instance.hybrid_search(
+            ["memory-index"], "query", filter=isolation, query_embedding=[0.1, 0.2],
+        ) == []
+    first, second = (call.args[1] for call in execute.call_args_list)
+    assert first["query"]["bool"]["filter"] == [isolation]
+    assert second["knn"]["filter"] == isolation
+    assert second["knn"]["query_vector"] == [0.1, 0.2]
 
 
 def test_hybrid_search_success(elasticsearch_core_instance):

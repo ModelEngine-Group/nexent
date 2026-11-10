@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Embedding model metadata and client factory for the memory system.
 
 This module provides:
@@ -53,6 +55,8 @@ class EmbeddingModelInfo:
     api_key: str
     model_repo: Optional[str] = None
     ssl_verify: bool = True
+    model_id: Optional[int] = None
+    revision: Optional[str] = None
 
     def get_index_name(self) -> str:
         """Derive the Elasticsearch index name for this model.

@@ -12,6 +12,7 @@ from contracts.agentos import (
     ModelMetadata,
     ModelResult,
 )
+from infrastructure.agent_model_config import normalize_model_revision
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.concurrency import run_blocking
 from nexent.core.gateway.modality.embedding.embedding_adapter import EmbeddingRequest
@@ -66,7 +67,9 @@ class ModelService:
 
     async def invoke(self, payload: ModelInvocation, actor: ServicePrincipal) -> ModelResult:
         record, metadata = await self._load(payload.model_id, actor)
-        if payload.expected_revision is not None and payload.expected_revision != metadata.revision:
+        if payload.expected_revision is not None and (
+            normalize_model_revision(payload.expected_revision) != normalize_model_revision(metadata.revision)
+        ):
             raise ModelAccessError(409, "MODEL_REVISION_MISMATCH")
         if metadata.model_type not in _MODEL_TYPES[payload.operation]:
             raise ModelAccessError(422, "MODEL_OPERATION_UNSUPPORTED")
