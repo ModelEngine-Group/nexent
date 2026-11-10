@@ -36,10 +36,14 @@ case:
   - order: 3
     action: Run a synthetic evaluation case and attempt to submit a persistent conversation ID.
     expected: Runtime returns the answer and ordered observer events for the synthetic case and rejects the positive ID.
+  - order: 4
+    action: Submit signed background and inspect calls and disconnect a background client.
+    expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
   - Evaluation returns exact ordered events without using a real conversation.
+  - Background execution returns the assistant message ID and stops after the caller disconnects.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -77,4 +81,9 @@ case:
     description: Signed evaluation case transport preserves events and rejects a real conversation key.
     steps: [3]
     expected_results: [3]
+    forbidden_side_effects: [2]
+  - id: AC-04
+    description: Signed background run and inspect preserve the actor and disconnect cancels the execution.
+    steps: [4]
+    expected_results: [4]
     forbidden_side_effects: [2]

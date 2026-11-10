@@ -227,52 +227,8 @@ sys.modules["management.utils.audit_fields"] = utils_mod
 
 # Import module under test after stubbing
 from contracts.errors.exceptions import HistorySummaryPersistenceError
-from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, fail_streaming_assistant_messages, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
-
-
-def test_fail_streaming_assistant_messages_returns_runtime_identities(
-    monkeypatch, mock_session_ctx
-):
-    """Startup recovery fails only the rows it locked as streaming."""
-    from types import SimpleNamespace
-
-    session, ctx = mock_session_ctx
-    query = MagicMock(name="query")
-    query.filter.return_value = query
-    query.with_for_update.return_value = query
-    query.all.return_value = [
-        SimpleNamespace(message_id=7, conversation_id=11, created_by="user-1"),
-        SimpleNamespace(message_id=8, conversation_id=12, created_by="user-2"),
-    ]
-    query.update.return_value = 2
-    session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
-
-    rows = fail_streaming_assistant_messages()
-
-    assert rows == [
-        {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
-        {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
-    ]
-    updates = query.update.call_args.args[0]
-    assert updates["status"] == "failed"
-    assert query.with_for_update.called
-
-
-def test_fail_streaming_assistant_messages_returns_empty_without_rows(
-    monkeypatch, mock_session_ctx
-):
-    session, ctx = mock_session_ctx
-    query = MagicMock(name="query")
-    query.filter.return_value = query
-    query.with_for_update.return_value = query
-    query.all.return_value = []
-    session.query.return_value = query
-    monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
-
-    assert fail_streaming_assistant_messages() == []
-    query.update.assert_not_called()
 
 
 @pytest.mark.parametrize("config_version,metadata_version", [(1, 9), (2, 8)])

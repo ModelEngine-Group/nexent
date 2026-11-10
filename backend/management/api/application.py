@@ -7,6 +7,10 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from management.api.agent.agent import agent_config_router as agent_router
+from management.api.automation.agent_automation import (
+    conversation_automation_router,
+    router as agent_automation_router,
+)
 from management.api.conversation.conversation_management import router as conversation_router
 from management.api.conversation.workbench_pins import router as workbench_pins_router
 from management.api.conversation.conversation_share import router as conversation_share_router
@@ -103,6 +107,22 @@ async def stop_dreaming_scheduler():
 
 
 @asynccontextmanager
+async def automation_lifespan():
+    from management.services.automation.scheduler import agent_automation_scheduler, recover_automation_runs
+
+    await config_thread_manager.run(
+        "control-io",
+        ManagedTaskSpec(task_name="recover-automation-runs", owner="management.api.application"),
+        recover_automation_runs,
+    )
+    await agent_automation_scheduler.start()
+    try:
+        yield
+    finally:
+        await agent_automation_scheduler.stop()
+
+
+@asynccontextmanager
 async def config_lifespan(_app):
     # One Management manager owns ordinary and Northbound requests and recovery.
     async with northbound_lifespan(_app):
@@ -114,7 +134,8 @@ async def config_lifespan(_app):
             await validate_external_service_configuration()
             dreaming_started = True
             await start_dreaming_scheduler()
-            yield
+            async with automation_lifespan():
+                yield
         finally:
             try:
                 if dreaming_started:
@@ -145,6 +166,8 @@ async def thread_capacity():
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
+app.include_router(agent_automation_router)
+app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)
 app.include_router(conversation_share_router)
 app.include_router(conversation_router)

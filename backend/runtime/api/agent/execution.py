@@ -13,7 +13,7 @@ from contracts.agent import AgentRequest, NL2AgentRunRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from permissions.depends import require
 from permissions.models import CurrentUser
-from management.services.agent.service import run_agent_stream, stop_agent_tasks
+from management.services.agent.service import is_agent_running, run_agent_background, run_agent_stream, stop_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
@@ -21,6 +21,7 @@ from management.services.conversation.creation_history import prepare_creation_h
 from management.services.permission.identity.session import get_current_user_info, get_current_user_id
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
+from contracts.agentos import AgentRunningState, BackgroundAgentResult
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -123,17 +124,52 @@ async def run_agentos_compatibility(payload: dict, principal: ServicePrincipal):
     return await _execute_northbound_run(agent_request, principal.user_id, principal.tenant_id)
 
 
-async def stop_agentos_compatibility(conversation_id: int, principal: ServicePrincipal):
-    from management.db.conversation.repository import get_conversation
+def _require_owned_conversation(conversation_id: int, principal: ServicePrincipal) -> None:
+    from infrastructure.rdb.conversation_state import conversation_belongs_to
 
+    if not conversation_belongs_to(conversation_id, user_id=principal.user_id, tenant_id=principal.tenant_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+
+async def stop_agentos_compatibility(conversation_id: int, principal: ServicePrincipal):
     def stop_owned_conversation():
-        if not get_conversation(conversation_id, user_id=principal.user_id, tenant_id=principal.tenant_id):
-            raise HTTPException(status_code=404, detail="Conversation not found")
+        _require_owned_conversation(conversation_id, principal)
         return stop_agent_tasks(conversation_id, principal.user_id)
 
     return await run_blocking(
         "agentos-stop-conversation", stop_owned_conversation, lane="control-io", owner="runtime",
     )
+
+
+async def run_agentos_background(payload: dict, principal: ServicePrincipal) -> BackgroundAgentResult:
+    try:
+        agent_request = AgentRequest.model_validate(payload)
+    except PayloadValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
+    conversation_id = agent_request.conversation_id
+    if type(conversation_id) is not int or conversation_id <= 0 or agent_request.is_debug:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"})
+
+    await run_blocking(
+        "agentos-background-conversation", _require_owned_conversation,
+        conversation_id, principal, lane="control-io", owner="runtime",
+    )
+    agent_request.enable_automation_tool = False
+    result = await run_agent_background(
+        agent_request=agent_request, user_id=principal.user_id, tenant_id=principal.tenant_id, skip_user_save=True,
+    )
+    return BackgroundAgentResult.model_validate(result)
+
+
+async def inspect_agentos_conversation(conversation_id: int, principal: ServicePrincipal) -> AgentRunningState:
+    def inspect_owned_conversation():
+        _require_owned_conversation(conversation_id, principal)
+        return is_agent_running(conversation_id, principal.user_id)
+
+    running = await run_blocking(
+        "agentos-inspect-conversation", inspect_owned_conversation, lane="control-io", owner="runtime",
+    )
+    return AgentRunningState(running=running)
 
 
 async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str):

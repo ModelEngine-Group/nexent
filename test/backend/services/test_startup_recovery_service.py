@@ -18,61 +18,31 @@ def _install_module(monkeypatch, name, **attributes):
     return module
 
 
-def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
-    fail_messages = MagicMock(
+def test_recover_streaming_runs_finishes_redis_state(monkeypatch):
+    from runtime import recovery
+
+    monkeypatch.setattr(recovery, "fail_streaming_assistant_messages", MagicMock(
         return_value=[
             {"message_id": 1, "conversation_id": 10, "user_id": "user-1"},
             {"message_id": 2, "conversation_id": 20, "user_id": None},
         ]
-    )
-    reap = MagicMock(side_effect=[2, 3])
+    ))
     runtime_state = MagicMock()
-    _install_module(
-        monkeypatch,
-        "management.db.conversation.repository",
-        fail_streaming_assistant_messages=fail_messages,
-    )
-    _install_module(
-        monkeypatch,
-        "management.db.automation.repository",
-        recover_orphaned_runs=MagicMock(return_value=4),
-        release_all_task_locks=MagicMock(return_value=5),
-    )
-    _install_module(
-        monkeypatch,
-        "management.db.evaluation.runs",
-        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1", "tenant-2"]),
-        reap_stale_runs=reap,
-    )
-    _install_module(
-        monkeypatch,
-        "infrastructure.redis.run_state",
-        runtime_state_service=runtime_state,
-    )
+    monkeypatch.setattr(recovery, "runtime_state_service", runtime_state)
 
-    result = startup_recovery_service.recover_runtime_tasks()
-
-    assert result == {
-        "conversation_messages": 2,
-        "agent_evaluations": 5,
-        "automation_runs": 4,
-        "automation_locks": 5,
-    }
-    assert reap.call_args_list == [
-        call("tenant-1", timeout_minutes=0),
-        call("tenant-2", timeout_minutes=0),
-    ]
+    assert recovery.recover_streaming_runs() == 2
     runtime_state.mark_run_finished.assert_called_once_with("user-1", 10, "failed")
-    runtime_state.mark_stream_completed.assert_called_once_with(
-        "user-1", 10, "failed"
-    )
+    runtime_state.mark_stream_completed.assert_called_once_with("user-1", 10, "failed")
 
 
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
+    reap = MagicMock(side_effect=[2, 3])
     _install_module(
         monkeypatch,
         "management.db.evaluation.runs",
         fail_interrupted_no_set_runs_on_startup=MagicMock(return_value=2),
+        list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1", "tenant-2"]),
+        reap_stale_runs=reap,
     )
     _install_module(
         monkeypatch,
@@ -88,10 +58,12 @@ def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
 
     assert startup_recovery_service.recover_config_tasks() == {
         "agent_evaluation_setups": 2,
+        "agent_evaluations": 5,
         "evaluation_set_generations": 3,
         "orphaned_virtual_sets": 4,
         "dreaming_runs": 6,
     }
+    assert reap.call_args_list == [call("tenant-1", timeout_minutes=0), call("tenant-2", timeout_minutes=0)]
 
 
 def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(monkeypatch):

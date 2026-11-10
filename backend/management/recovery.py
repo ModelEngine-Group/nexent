@@ -14,46 +14,19 @@ _upload_cleanup_tasks: set[asyncio.Task] = set()
 _system_agent_backfill_tasks: set[asyncio.Task] = set()
 
 
-def recover_runtime_tasks() -> dict[str, int]:
-    """Fail work that was owned by the previous runtime process."""
-    from management.db.automation.repository import recover_orphaned_runs, release_all_task_locks
-    from management.db.evaluation.runs import list_evaluation_tenant_ids, reap_stale_runs
-    from management.db.conversation.repository import fail_streaming_assistant_messages
-    from infrastructure.redis.run_state import runtime_state_service
-
-    messages = fail_streaming_assistant_messages()
-    for message in messages:
-        user_id = message.get("user_id")
-        if user_id:
-            runtime_state_service.mark_run_finished(
-                str(user_id), int(message["conversation_id"]), "failed"
-            )
-            runtime_state_service.mark_stream_completed(
-                str(user_id), int(message["conversation_id"]), "failed"
-            )
-
-    evaluations = 0
-    for tenant_id in list_evaluation_tenant_ids():
-        evaluations += reap_stale_runs(tenant_id, timeout_minutes=0)
-
-    result = {
-        "conversation_messages": len(messages),
-        "agent_evaluations": evaluations,
-        "automation_runs": recover_orphaned_runs(),
-        "automation_locks": release_all_task_locks(),
-    }
-    logger.info("Runtime startup recovery completed: %s", result)
-    return result
-
-
 def recover_config_tasks() -> dict[str, int]:
     """Fail config-owned background work lost during process restart."""
-    from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup
+    from management.db.evaluation.runs import (
+        fail_interrupted_no_set_runs_on_startup, list_evaluation_tenant_ids, reap_stale_runs,
+    )
     from management.db.evaluation.sets import cleanup_orphaned_virtual_evaluation_sets, recover_interrupted_generations
     from management.db.memory.dreaming import recover_stale
 
     result = {
         "agent_evaluation_setups": fail_interrupted_no_set_runs_on_startup(),
+        "agent_evaluations": sum(
+            reap_stale_runs(tenant_id, timeout_minutes=0) for tenant_id in list_evaluation_tenant_ids()
+        ),
         "evaluation_set_generations": recover_interrupted_generations(),
         "orphaned_virtual_sets": cleanup_orphaned_virtual_evaluation_sets(),
         "dreaming_runs": recover_stale(include_unexpired=True),

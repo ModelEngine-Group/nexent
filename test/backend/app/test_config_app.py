@@ -130,6 +130,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
+            "management.api.automation.agent_automation": {"router": APIRouter(), "conversation_automation_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
             "management.api.configuration.config_sync": {"router": APIRouter()},
@@ -330,6 +331,12 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
+        automation_scheduler = types.SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+        automation_recover = MagicMock()
+        monkeypatch.setitem(sys.modules, "management.services.automation.scheduler", types.SimpleNamespace(
+            agent_automation_scheduler=automation_scheduler, recover_automation_runs=automation_recover,
+        ))
+
         validate_external = AsyncMock()
 
         async def exercise_lifespan():
@@ -354,6 +361,11 @@ class TestConfigAppRouterConfiguration:
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
+        automation_recover.assert_called_once_with()
+        automation_scheduler.start.assert_awaited_once_with()
+        automation_scheduler.stop.assert_awaited_once_with()
+        for router in router_modules["management.api.automation.agent_automation"].values():
+            assert router in config_app.app.included_routers
 
         # A failure after Northbound recovery must still release Management ownership.
         for target in ("recover_config_tasks_on_startup", "validate_external_service_configuration", "start_dreaming_scheduler"):

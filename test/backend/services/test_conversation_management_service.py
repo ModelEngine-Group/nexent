@@ -802,7 +802,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_delete_conversation.return_value = True
 
         # Execute
-        delete_conversation_service(123, self.user_id)
+        asyncio.run(delete_conversation_service(123, self.user_id, "tenant-1"))
 
         # Assert
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
@@ -1507,7 +1507,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("Conversation 123", str(ctx.exception))
 
     @patch('management.services.conversation.service.delete_conversation')
@@ -1516,7 +1516,7 @@ class TestDeleteConversationService(unittest.TestCase):
         mock_delete.return_value = True
         from management.services.conversation.service import delete_conversation_service
 
-        result = delete_conversation_service(123, "user-1")
+        result = asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
 
         self.assertTrue(result)
 
@@ -1527,7 +1527,7 @@ class TestDeleteConversationService(unittest.TestCase):
         from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
-            delete_conversation_service(123, "user-1")
+            asyncio.run(delete_conversation_service(123, "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1540,7 +1540,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101, 102]
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([101, 102, 999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 2)
         self.assertEqual(result["failed_ids"], [999])
@@ -1552,7 +1552,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = []
         from management.services.conversation.service import delete_conversations_batch_service
 
-        result = delete_conversations_batch_service([999], "user-1")
+        result = asyncio.run(delete_conversations_batch_service([999], "user-1", "tenant-1"))
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["failed_ids"], [999])
@@ -1564,7 +1564,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         from management.services.conversation.service import delete_conversations_batch_service
 
         with self.assertRaises(RuntimeError) as ctx:
-            delete_conversations_batch_service([101], "user-1")
+            asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
         self.assertIn("DB error", str(ctx.exception))
 
 
@@ -1575,14 +1575,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         calls = []
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 calls.append((conversation_id, user_id))
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102, 999], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102, 999], "user-1", "tenant-1"))
 
         self.assertEqual(calls, [(101, "user-1"), (102, "user-1"), (999, "user-1")])
         self.assertEqual(result, {"deleted_count": 2, "failed_ids": [999]})
@@ -1594,14 +1594,14 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         mock_delete_batch.return_value = [101]
 
         class _Facade:
-            def on_conversation_deleted(self, conversation_id, user_id):
+            async def on_conversation_deleted(self, conversation_id, user_id, tenant_id):
                 raise RuntimeError("automation boom")
 
         facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101, 102], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101, 102], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": [102]})
         mock_delete_batch.assert_called_once_with([101, 102], "user-1")
@@ -1614,7 +1614,7 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         # No agent_automation_facade attribute -> `from ... import` raises AttributeError
         from management.services.conversation.service import delete_conversations_batch_service
         with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
-            result = delete_conversations_batch_service([101], "user-1")
+            result = asyncio.run(delete_conversations_batch_service([101], "user-1", "tenant-1"))
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": []})
         mock_delete_batch.assert_called_once_with([101], "user-1")

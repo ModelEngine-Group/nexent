@@ -738,11 +738,12 @@ class AgentAutomationFacade:
             raise AutomationNotFoundError("Automation task not found.")
         return _enrich_task_with_agent_name(updated, tenant_id, user_id)
 
-    def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
+    async def delete_task(self, task_id: int, tenant_id: str, user_id: str) -> bool:
         task = self.get_task(task_id, tenant_id, user_id)
-        self._cancel_active_runs_for_conversation(
+        await self._cancel_active_runs_for_conversation(
             task["conversation_id"],
             user_id,
+            tenant_id,
             "Automation task was deleted.",
         )
         if not agent_automation_db.soft_delete_task(task_id, tenant_id, user_id):
@@ -767,7 +768,7 @@ class AgentAutomationFacade:
         from management.services.automation.runner import agent_automation_runner
         return await agent_automation_runner.execute_task(task, trigger_type="MANUAL")
 
-    def cancel_run(self, run_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def cancel_run(self, run_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
         run = agent_automation_db.get_run(run_id, tenant_id, user_id)
         if not run:
             raise AutomationNotFoundError("Automation run not found.")
@@ -775,7 +776,7 @@ class AgentAutomationFacade:
         if run["status"] not in {AutomationRunStatus.QUEUED.value, AutomationRunStatus.RUNNING.value}:
             return run
 
-        self._request_conversation_stop(run["conversation_id"], user_id)
+        await self._request_conversation_stop(run["conversation_id"], user_id, tenant_id)
         canceled = agent_automation_db.cancel_run(
             run_id,
             tenant_id,
@@ -834,24 +835,26 @@ class AgentAutomationFacade:
         )
         return True
 
-    def on_conversation_deleted(self, conversation_id: int, user_id: str) -> int:
-        self._cancel_active_runs_for_conversation(
+    async def on_conversation_deleted(self, conversation_id: int, user_id: str, tenant_id: str) -> int:
+        await self._cancel_active_runs_for_conversation(
             conversation_id,
             user_id,
+            tenant_id,
             "Conversation was deleted.",
         )
         return agent_automation_db.soft_delete_task_by_conversation(conversation_id, user_id)
 
-    def _cancel_active_runs_for_conversation(self, conversation_id: int, user_id: str, reason: str) -> None:
-        self._request_conversation_stop(conversation_id, user_id)
+    async def _cancel_active_runs_for_conversation(self, conversation_id: int, user_id: str, tenant_id: str, reason: str) -> None:
+        await self._request_conversation_stop(conversation_id, user_id, tenant_id)
         agent_automation_db.cancel_runs_by_conversation(conversation_id, user_id, reason)
 
-    def _request_conversation_stop(self, conversation_id: int, user_id: str) -> None:
+    async def _request_conversation_stop(self, conversation_id: int, user_id: str, tenant_id: str) -> None:
+        from management.services.automation.runner import agent_automation_runner
+
         try:
-            from management.services.automation.runner import agent_automation_runner
-            agent_automation_runner.cancel_for_conversation(conversation_id, user_id)
+            await agent_automation_runner.cancel_for_conversation(conversation_id, user_id, tenant_id)
         except Exception:
-            pass
+            logger.warning("Unable to request automation cancellation for conversation_id=%s", conversation_id)
 
 
 agent_automation_facade = AgentAutomationFacade()

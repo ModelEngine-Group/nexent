@@ -15,6 +15,8 @@ BODY_KEY = "nexent.agentos.body"
 class CompatibilityOperation(str, Enum):
     RUN = NAMESPACE + "v1/compat/agent/run"
     STOP = NAMESPACE + "v1/compat/agent/stop"
+    BACKGROUND = NAMESPACE + "v1/compat/agent/background"
+    INSPECT = NAMESPACE + "v1/compat/agent/inspect"
     EVALUATION_CASE = NAMESPACE + "v1/compat/agent/evaluation-case"
 
 
@@ -30,6 +32,18 @@ class CompatibilityStop(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     conversation_id: PositiveInt
+
+
+class BackgroundAgentResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    conversation_id: PositiveInt
+    assistant_message_id: PositiveInt | None
+    chunks: int = Field(ge=0)
+
+
+class AgentRunningState(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    running: bool
 
 
 class EvaluationAgentRun(BaseModel):

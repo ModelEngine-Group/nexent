@@ -5,22 +5,21 @@ import time
 from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
-from runtime.agentos.compatibility import create_compatibility_router
+from runtime.agentos.compatibility import create_background_router, create_compatibility_router
 from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.agentos.model import create_model_router
 from runtime.agentos.model_administration import create_model_administration_router
 from runtime.model.service import ModelService
+from runtime.recovery import recover_streaming_runs
 from runtime.api.agent.execution import (
     agent_runtime_router as agent_router,
+    inspect_agentos_conversation,
+    run_agentos_background,
     run_agentos_compatibility,
     stop_agentos_compatibility,
 )
 from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
 from infrastructure.model_adapter import get_adapter_from_config
-from management.api.automation.agent_automation import (
-    conversation_automation_router,
-    router as agent_automation_router,
-)
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from runtime.api.skill.creation import skill_creator_router
@@ -33,15 +32,13 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from runtime.thread_management import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager, shutdown_agent_stream_tasks
 from infrastructure.redis.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
 
-async def start_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
-    from management.recovery import recover_runtime_tasks
+async def recover_runtime_state():
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
@@ -50,16 +47,9 @@ async def start_agent_automation_scheduler():
             task_name="recover-runtime-tasks",
             owner="runtime.api.application",
         ),
-        recover_runtime_tasks,
+        recover_streaming_runs,
     )
     cleanup_orphaned_agent_workspaces()
-    await agent_automation_scheduler.start()
-
-
-async def stop_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
-
-    await agent_automation_scheduler.stop()
 
 
 @asynccontextmanager
@@ -74,14 +64,10 @@ async def runtime_lifespan(_app):
             ManagedTaskSpec(task_name="recover-model-connectivity", owner="runtime"),
             fail_detecting_models_on_startup,
         )
-        await start_agent_automation_scheduler()
+        await recover_runtime_state()
         yield
     finally:
         shutdown_deadline = time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
-        await stop_agent_automation_scheduler()
-        from management.services.agent.execution import (
-            shutdown_agent_stream_tasks,
-        )
 
         pending_stream_tasks = await shutdown_agent_stream_tasks(timeout=max(0, shutdown_deadline - time.monotonic()))
         if pending_stream_tasks:
@@ -120,12 +106,11 @@ async def thread_capacity():
 app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
 app.include_router(create_compatibility_router(run_agentos_compatibility, stop_agentos_compatibility))
+app.include_router(create_background_router(run_agentos_background, inspect_agentos_conversation))
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_model_administration_router())
 app.include_router(agent_router)
 app.include_router(create_evaluation_router())
-app.include_router(agent_automation_router)
-app.include_router(conversation_automation_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)

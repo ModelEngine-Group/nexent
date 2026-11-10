@@ -1,5 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
+import logging
+
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
 from contracts.constants.environment import (
@@ -73,3 +76,39 @@ runtime_thread_manager = ThreadManager(
         ),
     },
 )
+
+
+logger = logging.getLogger(__name__)
+channel_cleanup_tasks: set[asyncio.Task[None]] = set()
+agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
+external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
+fa_extraction_tasks: set[asyncio.Task[None]] = set()
+
+
+async def shutdown_agent_stream_tasks(timeout: float) -> tuple[str, ...]:
+    """Cancel request-owned async tasks before the Runtime thread manager drains."""
+    task_groups = (
+        agent_stream_producer_tasks,
+        external_memory_ingest_tasks,
+        fa_extraction_tasks,
+        channel_cleanup_tasks,
+    )
+    tasks = tuple(
+        task
+        for task_group in task_groups
+        for task in tuple(task_group)
+        if not task.done()
+    )
+    if not tasks:
+        return ()
+
+    for task in tasks:
+        task.cancel()
+    done, pending = await asyncio.wait(tasks, timeout=max(0, timeout))
+    logger.info(
+        "Agent stream task shutdown requested=%s completed=%s pending=%s",
+        len(tasks),
+        len(done),
+        len(pending),
+    )
+    return tuple(task.get_name() for task in pending)

@@ -96,16 +96,19 @@ from infrastructure.redis.run_state import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from runtime.thread_management import runtime_thread_manager
+from runtime.thread_management import (
+    agent_stream_producer_tasks as _agent_stream_producer_tasks,
+    channel_cleanup_tasks as _channel_cleanup_tasks,
+    external_memory_ingest_tasks as _external_memory_ingest_tasks,
+    fa_extraction_tasks as _fa_extraction_tasks,
+    runtime_thread_manager,
+    shutdown_agent_stream_tasks as shutdown_agent_stream_tasks,
+)
 from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 
 logger = logging.getLogger(__name__)
-_channel_cleanup_tasks: set[asyncio.Task[None]] = set()
-_agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
-_external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
-_fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
 def _unregister_agent_run_after_execution(
@@ -138,35 +141,6 @@ def _unregister_agent_run_after_execution(
         status=status,
         agent_run_info=agent_run_info,
     )
-
-
-async def shutdown_agent_stream_tasks(timeout: float) -> tuple[str, ...]:
-    """Cancel request-owned async tasks before the Runtime thread manager drains."""
-    task_groups = (
-        _agent_stream_producer_tasks,
-        _external_memory_ingest_tasks,
-        _fa_extraction_tasks,
-        _channel_cleanup_tasks,
-    )
-    tasks = tuple(
-        task
-        for task_group in task_groups
-        for task in tuple(task_group)
-        if not task.done()
-    )
-    if not tasks:
-        return ()
-
-    for task in tasks:
-        task.cancel()
-    done, pending = await asyncio.wait(tasks, timeout=max(0, timeout))
-    logger.info(
-        "Agent stream task shutdown requested=%s completed=%s pending=%s",
-        len(tasks),
-        len(done),
-        len(pending),
-    )
-    return tuple(task.get_name() for task in pending)
 
 
 async def _cleanup_channel_later(

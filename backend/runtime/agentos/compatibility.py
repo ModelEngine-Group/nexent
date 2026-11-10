@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bind authenticated AgentOS transport to the current Agent execution handlers."""
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
@@ -32,5 +34,49 @@ def create_compatibility_router(run, stop) -> APIRouter:
         except ValidationError:
             return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
         return await stop(payload.conversation_id, principal)
+
+    return router
+
+
+def create_background_router(run, inspect) -> APIRouter:
+    router = APIRouter()
+
+    @router.post(CompatibilityOperation.BACKGROUND.value, include_in_schema=False)
+    async def run_background(request: Request):
+        principal = request.scope.get(PRINCIPAL_KEY)
+        if principal is None:
+            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+        try:
+            payload = CompatibilityRun.model_validate_json(request.scope[BODY_KEY])
+        except ValidationError:
+            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+
+        async def wait_for_disconnect():
+            while (await request.receive())["type"] != "http.disconnect":
+                pass
+
+        execution = asyncio.create_task(run(payload.request, principal))
+        disconnected = asyncio.create_task(wait_for_disconnect())
+        try:
+            completed, _ = await asyncio.wait((execution, disconnected), return_when=asyncio.FIRST_COMPLETED)
+            if execution in completed:
+                return execution.result()
+            return JSONResponse({"code": "AGENTOS_CLIENT_DISCONNECTED"}, status_code=499)
+        finally:
+            disconnected.cancel()
+            if not execution.done():
+                execution.cancel()
+            await asyncio.gather(disconnected, execution, return_exceptions=True)
+
+    @router.post(CompatibilityOperation.INSPECT.value, include_in_schema=False)
+    async def inspect_agent(request: Request):
+        principal = request.scope.get(PRINCIPAL_KEY)
+        if principal is None:
+            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
+        try:
+            payload = CompatibilityStop.model_validate_json(request.scope[BODY_KEY])
+        except ValidationError:
+            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
+        return await inspect(payload.conversation_id, principal)
 
     return router

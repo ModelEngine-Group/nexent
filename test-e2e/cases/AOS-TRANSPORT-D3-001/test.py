@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise real AgentOS HTTP boundaries with a recording execution adapter."""
 
+import asyncio
 import json
 import socket
 import threading
@@ -14,14 +15,16 @@ import uvicorn
 from fastapi import FastAPI
 from starlette.responses import StreamingResponse
 
-from contracts.agentos import CompatibilityOperation, CompatibilityRun, EvaluationAgentResult, EvaluationAgentRun
+from contracts.agentos import (
+    AgentRunningState, BackgroundAgentResult, CompatibilityOperation, CompatibilityRun, EvaluationAgentResult, EvaluationAgentRun,
+)
 from contracts.constants import environment
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from gateway.security.context import trusted_identity
 from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
-from runtime.agentos.compatibility import create_compatibility_router
+from runtime.agentos.compatibility import create_background_router, create_compatibility_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.agentos.middleware import AgentOSMiddleware
 
@@ -79,11 +82,29 @@ async def test_signed_agentos_transport(monkeypatch):
         calls.append(("evaluate", payload.conversation_id, actor))
         return EvaluationAgentResult(answer="answer", events=case_events)
 
+    started = threading.Event()
+    canceled = threading.Event()
+
+    async def background(payload, actor):
+        calls.append(("background", payload["conversation_id"], actor))
+        if payload["conversation_id"] == 43:
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            finally:
+                canceled.set()
+        return BackgroundAgentResult(conversation_id=42, assistant_message_id=17, chunks=3)
+
+    async def inspect(conversation_id, actor):
+        calls.append(("inspect", conversation_id, actor))
+        return AgentRunningState(running=True)
+
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_compatibility_router(run, stop))
     runtime.include_router(create_evaluation_router(evaluate))
+    runtime.include_router(create_background_router(background, inspect))
 
     with serve(runtime) as runtime_url:
         def client_factory(**kwargs):
@@ -143,8 +164,26 @@ async def test_signed_agentos_transport(monkeypatch):
             )
             assert response.status_code == 422
 
+            background_result = await agentos.run_background({"conversation_id": 42}, principal.user_id, principal.tenant_id)
+            assert background_result.model_dump() == {"conversation_id": 42, "assistant_message_id": 17, "chunks": 3}
+            state = await agentos.inspect(42, principal.user_id, principal.tenant_id)
+            assert state.running is True
+            pending = asyncio.create_task(agentos.run_background(
+                {"conversation_id": 43}, principal.user_id, principal.tenant_id,
+            ))
+            try:
+                assert await asyncio.to_thread(started.wait, 5)
+            finally:
+                pending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+            assert await asyncio.to_thread(canceled.wait, 5)
+
     assert calls == [
         ("run", {"conversation_id": 42}, principal),
         ("stop", 42, principal),
         ("evaluate", -12, principal),
+        ("background", 42, principal),
+        ("inspect", 42, principal),
+        ("background", 43, principal),
     ]

@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import asyncio
 import json
 import logging
 
@@ -638,7 +639,7 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
         raise Exception(str(e))
 
 
-def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
+async def delete_conversation_service(conversation_id: int, user_id: str, tenant_id: str) -> bool:
     """
     Delete specified conversation
 
@@ -652,7 +653,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     try:
         try:
             from management.services.automation.service import agent_automation_facade
-            agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+            await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
         except Exception as automation_error:
             logging.warning(
                 "Failed to cleanup automation task for conversation %s: %s",
@@ -670,7 +671,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         raise Exception(str(e))
 
 
-def delete_conversations_batch_service(conversation_ids: List[int], user_id: str) -> Dict[str, Any]:
+async def delete_conversations_batch_service(conversation_ids: List[int], user_id: str, tenant_id: str) -> Dict[str, Any]:
     """
     Batch-delete conversations owned by the user.
 
@@ -689,15 +690,19 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
     try:
         try:
             from management.services.automation.service import agent_automation_facade
-            for conversation_id in conversation_ids:
+            async def cleanup(conversation_id):
                 try:
-                    agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+                    await agent_automation_facade.on_conversation_deleted(conversation_id, user_id, tenant_id)
                 except Exception as automation_error:
                     logging.warning(
                         "Failed to cleanup automation task for conversation %s: %s",
                         conversation_id,
                         automation_error,
                     )
+
+            batch_size = 8
+            for start in range(0, len(conversation_ids), batch_size):
+                await asyncio.gather(*(cleanup(cid) for cid in conversation_ids[start:start + batch_size]))
         except Exception as automation_error:
             logging.warning(
                 "Failed to setup automation cleanup for batch delete: %s",

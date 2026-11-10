@@ -653,11 +653,11 @@ def renew_task_lock(task_id: int, lock_owner: str, lease_seconds: float) -> bool
 
 
 def recover_orphaned_runs() -> int:
-    """Finish runs that were executing when the single runtime stopped.
+    """Finish runs that were executing when the single scheduler stopped.
 
     Queued runs are intentionally preserved so the existing scheduler can
     consume work that never began. The deployment currently supports a single
-    runtime replica, therefore every persisted RUNNING row belongs to the
+    scheduler replica, therefore every persisted RUNNING row belongs to the
     previous process even when its lease has not expired yet.
     """
     sql = text("""
@@ -676,7 +676,7 @@ def recover_orphaned_runs() -> int:
 
 
 def release_all_task_locks() -> int:
-    """Release scheduler leases owned by the previous single runtime."""
+    """Release scheduler leases owned by the previous scheduler."""
     with get_db_session() as session:
         result = session.execute(
             update(AgentAutomationTask)

@@ -390,7 +390,7 @@
       "method": "GET",
       "path": "/api/agent/automations",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-5a2a72d2a65fcc5a",
       "credential_kinds": [
@@ -401,7 +401,7 @@
       "method": "POST",
       "path": "/api/agent/automations/proposals",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4807e86742b538e6",
       "credential_kinds": [
@@ -412,7 +412,7 @@
       "method": "PATCH",
       "path": "/api/agent/automations/proposals/{proposal_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-35d5bc9e33d531a5",
       "credential_kinds": [
@@ -423,7 +423,7 @@
       "method": "POST",
       "path": "/api/agent/automations/proposals/{proposal_id}/confirm",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-0d15b30a2b15879b",
       "credential_kinds": [
@@ -434,7 +434,7 @@
       "method": "DELETE",
       "path": "/api/agent/automations/runs/{run_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-2d8beddbdf84358a",
       "credential_kinds": [
@@ -445,7 +445,7 @@
       "method": "POST",
       "path": "/api/agent/automations/runs/{run_id}/cancel",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-e95b67344aedbd9c",
       "credential_kinds": [
@@ -456,7 +456,7 @@
       "method": "DELETE",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4510a4a686db0111",
       "credential_kinds": [
@@ -467,7 +467,7 @@
       "method": "GET",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-c72461303e35786f",
       "credential_kinds": [
@@ -478,7 +478,7 @@
       "method": "PATCH",
       "path": "/api/agent/automations/{task_id}",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-c0d9f4823add1f96",
       "credential_kinds": [
@@ -489,7 +489,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/pause",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-4570cd3b22153382",
       "credential_kinds": [
@@ -500,7 +500,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/resume",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-06e791c0084b6446",
       "credential_kinds": [
@@ -511,7 +511,7 @@
       "method": "POST",
       "path": "/api/agent/automations/{task_id}/run",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-3e8a2b46eec53820",
       "credential_kinds": [
@@ -522,7 +522,7 @@
       "method": "GET",
       "path": "/api/agent/automations/{task_id}/runs",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-d97fa98991293290",
       "credential_kinds": [
@@ -1358,7 +1358,7 @@
       "method": "GET",
       "path": "/api/conversation/{conversation_id}/automation",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/automation/agent_automation.py",
       "route_id": "route-ba15db0c1101e081",
       "credential_kinds": [

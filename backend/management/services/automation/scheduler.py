@@ -58,6 +58,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def recover_automation_runs() -> dict[str, int]:
+    """Recover runs and release leases left behind by the previous scheduler."""
+    return {
+        "automation_runs": agent_automation_db.recover_orphaned_runs(),
+        "automation_locks": agent_automation_db.release_all_task_locks(),
+    }
+
+
 class AgentAutomationLeaseStore:
     """Adapt synchronous PostgreSQL operations to the async scheduler contract."""
 
@@ -70,13 +78,13 @@ class AgentAutomationLeaseStore:
             "automation-recover-runs",
             agent_automation_db.recover_orphaned_runs,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         await run_blocking(
             "automation-release-locks",
             agent_automation_db.release_all_task_locks,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         self._recovery_time = recovery_time
 
@@ -93,7 +101,7 @@ class AgentAutomationLeaseStore:
             limit,
             lease_seconds,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         runnable_tasks = []
         for task in tasks:
@@ -154,7 +162,7 @@ class AgentAutomationLeaseStore:
             owner_id,
             task_values,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
         if not updated:
             logger.warning(
@@ -172,7 +180,7 @@ class AgentAutomationLeaseStore:
             owner_id,
             lease_seconds,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
 
     async def release(self, job_id: Hashable, owner_id: str) -> bool:
@@ -182,7 +190,7 @@ class AgentAutomationLeaseStore:
             int(job_id),
             owner_id,
             lane="control-io",
-            owner="runtime",
+            owner="management",
         )
 
 

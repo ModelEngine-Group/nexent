@@ -162,8 +162,13 @@ _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
-_thread_lifecycle_module = types.ModuleType("runtime.thread_management")
-_thread_lifecycle_module.runtime_thread_manager = MagicMock()
+_concurrency_module.LanePolicy = MagicMock()
+_concurrency_module.ThreadManager = MagicMock()
+_thread_spec = importlib.util.spec_from_file_location(
+    "runtime.thread_management", Path(__file__).resolve().parents[3] / "backend/runtime/thread_management.py",
+)
+_thread_lifecycle_module = importlib.util.module_from_spec(_thread_spec)
+_thread_spec.loader.exec_module(_thread_lifecycle_module)
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
 )

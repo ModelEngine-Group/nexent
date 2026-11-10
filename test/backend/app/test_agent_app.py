@@ -569,8 +569,8 @@ async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, 
 
     mocker.patch("runtime.api.agent.execution.run_blocking", side_effect=run_control_io)
     lookup = mocker.patch(
-        "management.db.conversation.repository.get_conversation",
-        return_value={"conversation_id": 123} if owned else None,
+        "infrastructure.rdb.conversation_state.conversation_belongs_to",
+        return_value=owned,
     )
     stop = mocker.patch(
         "runtime.api.agent.execution.stop_agent_tasks", return_value={"message": "stopped"},
@@ -588,6 +588,47 @@ async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, 
         assert error.value.status_code == 404
         stop.assert_not_called()
     lookup.assert_called_once_with(123, user_id="user-a", tenant_id="tenant-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owned", [True, False])
+async def test_agentos_automation_checks_owner_before_background_run_and_inspection(mocker, owned):
+    from fastapi import HTTPException
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    async def run_control_io(_task_name, function, *args, **_kwargs):
+        return function(*args)
+
+    mocker.patch.object(execution, "run_blocking", side_effect=run_control_io)
+    lookup = mocker.patch("infrastructure.rdb.conversation_state.conversation_belongs_to", return_value=owned)
+    run = mocker.patch.object(execution, "run_agent_background", new=AsyncMock(return_value={
+        "conversation_id": 123, "assistant_message_id": 456, "chunks": 2,
+    }))
+    running = mocker.patch.object(execution, "is_agent_running", return_value=True)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    payload = {"conversation_id": 123, "query": "scheduled", "agent_id": 7, "enable_automation_tool": True}
+
+    if owned:
+        result = await execution.run_agentos_background(payload, actor)
+        assert result.assistant_message_id == 456
+        assert (await execution.inspect_agentos_conversation(123, actor)).running is True
+        assert run.await_args.kwargs["skip_user_save"] is True
+        assert run.await_args.kwargs["tenant_id"] == "tenant-a"
+        assert run.await_args.kwargs["agent_request"].enable_automation_tool is False
+        running.assert_called_once_with(123, "user-a")
+    else:
+        with pytest.raises(HTTPException) as denied_run:
+            await execution.run_agentos_background(payload, actor)
+        with pytest.raises(HTTPException) as denied_inspection:
+            await execution.inspect_agentos_conversation(123, actor)
+        assert denied_run.value.status_code == denied_inspection.value.status_code == 404
+        run.assert_not_called()
+        running.assert_not_called()
+    assert len(lookup.call_args_list) == 2
+    for lookup_call in lookup.call_args_list:
+        assert lookup_call.args == (123,)
+        assert lookup_call.kwargs == {"user_id": "user-a", "tenant_id": "tenant-a"}
 
 
 @pytest.mark.asyncio

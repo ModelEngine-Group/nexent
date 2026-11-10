@@ -27,11 +27,13 @@ change:
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
+    - Automation schedules run and inspect through AgentOS, and Runtime cancels an abandoned background request.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
     - test/backend/services/test_agentos_proxy_service.py
     - test/backend/services/test_runtime_proxy_service.py
+    - test/backend/services/test_agent_automation_runner.py
     - test/backend/services/test_evaluation_dispatch.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py

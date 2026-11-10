@@ -184,7 +184,7 @@ async def run_task_now(task_id: int, authorization: Optional[str] = Header(None)
 async def delete_task(task_id: int, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.delete_task(task_id, tenant_id, user_id))
+        return AutomationResponse(data=await agent_automation_facade.delete_task(task_id, tenant_id, user_id))
     except AgentAutomationError as exc:
         raise _map_error(exc)
 
@@ -207,7 +207,7 @@ async def list_runs(
 async def cancel_run(run_id: int, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = _get_current_user(authorization)
-        return AutomationResponse(data=agent_automation_facade.cancel_run(run_id, tenant_id, user_id))
+        return AutomationResponse(data=await agent_automation_facade.cancel_run(run_id, tenant_id, user_id))
     except AgentAutomationError as exc:
         raise _map_error(exc)
 

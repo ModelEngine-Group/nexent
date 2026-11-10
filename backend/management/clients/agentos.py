@@ -7,6 +7,8 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
+    AgentRunningState,
+    BackgroundAgentResult,
     CompatibilityOperation,
     CompatibilityRun,
     CompatibilityStop,
@@ -89,6 +91,18 @@ class AgentOSClient:
             CompatibilityOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
         )
         return self._validate_result(EvaluationAgentResult, result)
+
+    async def run_background(self, request, user_id, tenant_id) -> BackgroundAgentResult:
+        result = await self._post_json(
+            CompatibilityOperation.BACKGROUND, CompatibilityRun(request=request), user_id, tenant_id, _STREAM_TIMEOUT,
+        )
+        return self._validate_result(BackgroundAgentResult, result)
+
+    async def inspect(self, conversation_id, user_id, tenant_id) -> AgentRunningState:
+        result = await self._post_json(
+            CompatibilityOperation.INSPECT, CompatibilityStop(conversation_id=conversation_id), user_id, tenant_id,
+        )
+        return self._validate_result(AgentRunningState, result)
 
     async def stop(self, conversation_id, user_id, tenant_id):
         payload = CompatibilityStop(conversation_id=conversation_id)
