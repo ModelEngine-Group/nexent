@@ -58,7 +58,22 @@ def test_failed_next_invocation_never_reuses_previous_response_usage_or_diagnost
     state['error'] = normalize_model_error(ModelTransportError('HTTP_TLS_ERROR'), request_id='failure', attempt=2, max_attempts=3)
     with pytest.raises(ModelInvocationTerminalError):
         model.generate([{'role': 'user', 'content': 'second'}])
+    assert model.last_context_observation is None
     assert model.last_input_token_count is model.last_output_token_count is model.last_finish_reason is None
     assert model.last_prompt_cache_usage is model.last_cached_input_token_count is None
     assert model.last_response_diagnostics['content_char_count'] == 0
     assert model.last_response_diagnostics['reasoning_char_count'] == 0
+
+
+def test_completed_observation_pairs_provider_input_with_actual_request(setup):
+    from nexent.core.models.context_usage import context_model_key, request_characters
+    model, state, calls, _observer = setup
+    state["usage"] = TokenUsage(input_tokens=10, output_tokens=0, origin="provider")
+    messages = [{'role': 'user', 'content': 'request body'}]
+    model.generate(messages)
+    observation = model.last_context_observation
+    assert observation.input_tokens == 10
+    assert observation.input_characters == request_characters(messages, [])
+    assert observation.model_key == context_model_key(model)
+    assert observation.request_id == calls[-1][0].request_id
+    assert observation.attempt == 2
