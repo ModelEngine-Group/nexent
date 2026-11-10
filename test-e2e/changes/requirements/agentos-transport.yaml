@@ -33,6 +33,7 @@ change:
     - Signed resume authorizes the conversation and replays a strict run-scoped cursor.
     - Ordinary conversation admission uses the signed AgentOS compatibility transport and preserves request and SSE context.
     - Ordinary assistant projections replay by run ID and payload digest after committing their receipt in the same transaction.
+    - Signed ordinary submissions bind a stable run ID to the actor, key and normalized request before execution.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
@@ -45,6 +46,7 @@ change:
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_resume.py
     - test/backend/app/test_conversation_run_app.py
+    - test/backend/app/test_agentos_admission.py
     - test/backend/database/test_conversation_projection_receipt.py
     - test/backend/gateway/test_exposure.py
   requirement_id: AOS-REQ-001

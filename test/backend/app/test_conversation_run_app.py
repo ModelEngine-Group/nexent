@@ -74,3 +74,24 @@ async def test_public_resume_rejects_invalid_combinations(app, mocker, params, b
     assert response.status_code == 422
     run.assert_not_called()
     resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_public_run_forwards_idempotency_key_only_for_new_conversations(app, mocker):
+    forward = mocker.patch.object(conversation_run, "forward_conversation_run", return_value=stream())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        response = await client.post(
+            "/agent/run", json={"query": "question"}, headers={"Idempotency-Key": "client-123"},
+        )
+        assert response.status_code == 200
+        assert forward.await_args.args[0].idempotency_key == "client-123"
+
+        for target, body, key in (
+            ("/agent/run?resume=true", {"query": "", "conversation_id": 42}, "client-123"),
+            ("/agent/run", {"query": "question", "is_debug": True}, "client-123"),
+            ("/agent/run", {"query": "question"}, "invalid key"),
+        ):
+            response = await client.post(target, json=body, headers={"Idempotency-Key": key})
+            assert response.status_code == 422
+
+    forward.assert_awaited_once()

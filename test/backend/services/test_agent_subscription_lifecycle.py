@@ -295,3 +295,66 @@ async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecyc
     chunks = [chunk async for chunk in response.body_iterator]
     assert "conversation_created" in chunks[0]
     assert chunks[1:] == ["data: answer\n\n"]
+
+
+@pytest.mark.asyncio
+async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle, monkeypatch):
+    from infrastructure.rdb import agent_admission
+
+    env = lifecycle
+    run_id = "a" * 32
+    scope = "b" * 64
+    env.request._projection_run_id = run_id
+    env.request._run_admission_scope = scope
+    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value=run_id), raising=False)
+    order = []
+
+    def record(*args, **kwargs):
+        assert args == (scope, run_id, "u", "t")
+        assert kwargs == {"conversation_id": 123, "journal_available": True}
+        order.append("bound")
+        return True
+
+    monkeypatch.setattr(agent_admission, "set_conversation_admission", record)
+
+    async def source(_request, **_kwargs):
+        order.append("producer")
+        yield "data: answer\n\n"
+        env.future.set_result(None)
+
+    response = await env.start(source)
+    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+
+    assert response.headers["X-AgentOS-Run-ID"] == run_id
+    env.channel.start_journal.assert_awaited_once_with("t", run_id)
+    assert order == ["bound", "producer"]
+
+
+@pytest.mark.asyncio
+async def test_failed_admission_binding_cleans_journal_before_releasing_reservation(lifecycle, monkeypatch):
+    from infrastructure.rdb import agent_admission
+
+    env = lifecycle
+    env.request._projection_run_id = "a" * 32
+    env.request._run_admission_scope = "b" * 64
+    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value="a" * 32), raising=False)
+    monkeypatch.setattr(env.channel, "finish_journal", AsyncMock(), raising=False)
+    monkeypatch.setattr(agent_admission, "set_conversation_admission", lambda *args, **kwargs: False)
+
+    async def remove(conversation_id, user_id, *, expected_channel):
+        assert (conversation_id, user_id, expected_channel) == (123, "u", env.channel)
+        assert env.manager._reservations
+
+    monkeypatch.setattr(env.service.streaming_channel_manager, "remove_channel", AsyncMock(side_effect=remove))
+    source = MagicMock()
+
+    with pytest.raises(RuntimeError, match="claim is no longer pending"):
+        await env.start(source)
+
+    env.channel.finish_journal.assert_awaited_once_with("failed")
+    source.assert_not_called()
+    assert not env.manager._reservations
+    assert not env.service._agent_stream_producer_tasks
+    assert env.future.cancelled()

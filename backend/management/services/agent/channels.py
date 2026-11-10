@@ -62,7 +62,9 @@ class StreamingChannel:
         journal = RunJournal(tenant_id, self.user_id, self.conversation_id, run_id)
         async with self._lock:
             if self._journal is not None:
-                return self._journal.run_id
+                if self._journal.run_id != run_id:
+                    raise RuntimeError("Output journal belongs to another run")
+                return run_id
             try:
                 await run_blocking("agentos-journal-start", journal.start, lane="control-io", owner="runtime")
             except (RedisError, RuntimeError):

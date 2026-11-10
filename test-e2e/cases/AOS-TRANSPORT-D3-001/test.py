@@ -352,11 +352,36 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
 
 async def _assert_public_conversation_over_signed_http(monkeypatch):
+    from contracts.agent import AgentRequest
+    from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
     from management.api.agent import conversation_run
     from management.services.agent import runtime_client
+    from runtime.agentos import admission
 
     received = []
+    executions = []
     run_id = "a" * 32
+    claims = {}
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    def claim(scope, fingerprint, user_id, tenant_id):
+        assert (user_id, tenant_id) == ("user-a", "tenant-a")
+        if scope not in claims:
+            claims[scope] = (fingerprint, "pending")
+            return AdmissionClaim(run_id, "pending", None, False, True)
+        expected, status = claims[scope]
+        if fingerprint != expected:
+            raise AdmissionRequestConflict
+        return AdmissionClaim(run_id, status, 42, True, False)
+
+    monkeypatch.setattr(admission, "_control_io", control_io)
+    monkeypatch.setattr(admission, "claim_conversation_run", claim)
+    monkeypatch.setattr(
+        admission, "conversation_belongs_to",
+        lambda conversation_id, *, user_id, tenant_id: (conversation_id, user_id, tenant_id) == (42, "user-a", "tenant-a"),
+    )
 
     async def run_conversation(payload, actor):
         received.append((payload, actor))
@@ -364,9 +389,24 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
         async def body():
             yield _EVENTS
 
-        return StreamingResponse(
-            body(), media_type="text/event-stream", headers={"X-AgentOS-Run-ID": run_id},
-        )
+        def stream():
+            return StreamingResponse(
+                body(), media_type="text/event-stream",
+                headers={"X-AgentOS-Run-ID": run_id, "conversation_id": "42"},
+            )
+
+        if payload.idempotency_key is None:
+            return stream()
+        request = AgentRequest.model_validate(payload.request)
+
+        async def execute():
+            assert request._projection_run_id == run_id
+            scope = request._run_admission_scope
+            claims[scope] = (claims[scope][0], "admitted")
+            executions.append(run_id)
+            return stream()
+
+        return await admission.admit_conversation_run(payload, request, actor, execute)
 
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
@@ -391,4 +431,17 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             assert actor == ServicePrincipal("user-a", "tenant-a")
             assert payload.request == {"query": "question", "conversation_id": 42, "model_id": None}
             assert (payload.resume, payload.language, payload.timezone) == (True, "en", "Asia/Shanghai")
-    assert len(received) == 1
+
+            url = f"{management_url}/api/agent/run"
+            headers = {"Idempotency-Key": "retry-1"}
+            request_body = {"query": "question"}
+            first = await client.post(url, json=request_body, headers=headers)
+            retry = await client.post(url, json=request_body, headers=headers)
+            changed = await client.post(url, json={"query": "changed"}, headers=headers)
+            assert first.status_code == 200 and first.headers["X-AgentOS-Run-ID"] == run_id
+            assert retry.status_code == 202 and retry.headers["X-AgentOS-Run-ID"] == run_id
+            assert retry.json() == {"run_id": run_id, "status": "admitted", "conversation_id": 42, "journal_available": True}
+            assert changed.status_code == 409 and changed.json()["detail"]["code"] == "AGENTOS_IDEMPOTENCY_CONFLICT"
+
+    assert len(received) == 4
+    assert executions == [run_id]

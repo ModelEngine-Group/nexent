@@ -10,6 +10,7 @@ NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 PRINCIPAL_KEY = "nexent.agentos.principal"
 BODY_KEY = "nexent.agentos.body"
+IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 
 
 class CompatibilityOperation(str, Enum):
@@ -32,6 +33,7 @@ class CompatibilityConversationRun(CompatibilityRun):
     resume: bool = False
     language: Literal["zh", "en"] = "zh"
     timezone: str | None = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, pattern=IDEMPOTENCY_KEY_PATTERN)
 
 
 class CompatibilityStop(BaseModel):

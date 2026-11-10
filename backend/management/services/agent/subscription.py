@@ -855,6 +855,8 @@ async def run_agent_stream(
             },
         )
 
+    channel = None
+    admission_scope = getattr(agent_request, "_run_admission_scope", None)
     try:
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
@@ -883,17 +885,29 @@ async def run_agent_stream(
         agent_metadata = run_context.metadata
         use_memory_stream = run_context.enable_memory
 
-        channel = None
         journal_run_id = None
         if not agent_request.is_debug:
             channel = await streaming_channel_manager.get_or_create_channel(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
             )
-            agent_request._projection_run_id = uuid.uuid4().hex
+            agent_request._projection_run_id = (
+                getattr(agent_request, "_projection_run_id", None) or uuid.uuid4().hex
+            )
             if runtime_state_service.enabled is True:
                 journal_run_id = await channel.start_journal(resolved_tenant_id, agent_request._projection_run_id)
-    except Exception:
+            if admission_scope is not None:
+                from infrastructure.rdb.agent_admission import set_conversation_admission
+
+                recorded = await run_blocking(
+                    "agentos-bind-conversation", set_conversation_admission,
+                    admission_scope, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
+                    conversation_id=agent_request.conversation_id, journal_available=journal_run_id is not None,
+                    lane="control-io", owner="runtime",
+                )
+                if not recorded:
+                    raise RuntimeError("Conversation run claim is no longer pending")
+    except (Exception, asyncio.CancelledError):
         deferred_run.cancel()
         runtime_thread_manager.cancel(
             execution.execution_id,
@@ -901,11 +915,18 @@ async def run_agent_stream(
             wait_timeout=0,
             mark_stuck_on_timeout=False,
         )
-        agent_run_manager.release_agent_run_reservation(
-            _agent_run_identifier(agent_request),
-            resolved_user_id,
-            reservation_token,
-        )
+        try:
+            if admission_scope is not None and channel is not None:
+                await channel.finish_journal("failed")
+                await streaming_channel_manager.remove_channel(
+                    agent_request.conversation_id, resolved_user_id, expected_channel=channel,
+                )
+        finally:
+            agent_run_manager.release_agent_run_reservation(
+                _agent_run_identifier(agent_request),
+                resolved_user_id,
+                reservation_token,
+            )
         raise
 
     stream_kwargs = {

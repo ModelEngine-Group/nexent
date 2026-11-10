@@ -73,9 +73,17 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     except (PayloadValidationError, UnicodeEncodeError) as exc:
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
     context = Request({"type": "http", "headers": headers})
-    return await _run_public_conversation(
-        request, context, lambda: (principal.user_id, principal.tenant_id), payload.resume,
-    )
+
+    async def execute():
+        return await _run_public_conversation(
+            request, context, lambda: (principal.user_id, principal.tenant_id), payload.resume,
+        )
+
+    if payload.idempotency_key is not None:
+        from runtime.agentos.admission import admit_conversation_run
+
+        return await admit_conversation_run(payload, request, principal, execute)
+    return await execute()
 
 
 async def _run_public_conversation(agent_request, http_request, resolve_actor, resume):
