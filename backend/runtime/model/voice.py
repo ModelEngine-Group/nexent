@@ -12,8 +12,8 @@ from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
 
 from contracts.constants.constants import TEST_VOICE_PATH, TEST_PCM_PATH
 from contracts.errors.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException
-from management.db.model.repository import get_model_records
-from management.services.configuration.tenant.settings import tenant_config_manager
+from infrastructure.rdb.model_records import get_model_records
+from infrastructure.rdb.model_bindings import get_bound_model
 
 logger = logging.getLogger("voice_service")
 
@@ -90,7 +90,7 @@ class VoiceService:
         """
         try:
             # Get STT model configuration from tenant config
-            stt_config = tenant_config_manager.get_model_config(tenant_id, "stt")
+            stt_config = get_bound_model(tenant_id, "stt")
 
             if stt_config:
                 model_factory = stt_config.get("model_factory", "")
@@ -197,7 +197,7 @@ class VoiceService:
             TTS model instance based on tenant's configuration
         """
         try:
-            tts_config = tenant_config_manager.get_model_config(tenant_id, "tts")
+            tts_config = get_bound_model(tenant_id, "tts")
 
             if tts_config:
                 model_factory = tts_config.get("model_factory", "")

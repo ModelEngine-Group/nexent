@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List

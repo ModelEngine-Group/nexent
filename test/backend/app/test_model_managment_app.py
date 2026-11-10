@@ -819,7 +819,7 @@ async def test_check_model_health_success(client, auth_header, user_credentials,
     data = response.json()
     assert data["message"] == "Successfully checked model connectivity"
     assert data["data"]["connectivity"] is True
-    mock_check.assert_called_once_with("Test Model", user_credentials[1], "embedding")
+    mock_check.assert_called_once_with("Test Model", user_credentials[1], "embedding", user_id=user_credentials[0])
 
 
 @pytest.mark.asyncio
@@ -916,80 +916,21 @@ async def test_verify_model_config_exception(client, auth_header, sample_model_d
 
 
 @pytest.mark.asyncio
-async def test_probe_falls_back_to_stored_key_for_stored_url(client, auth_header, user_credentials, mocker):
-    """Empty-key probe of an existing model borrows the stored key when the
-    probe targets the stored endpoint (edit dialog, URL untouched)."""
-    mocker.patch(
-        'management.api.model.model_managment.get_current_user_id',
-        return_value=user_credentials,
-    )
-    stored = {
-        "api_key": "stored-secret-key",
-        "base_url": "https://api.example.com/v1/",  # trailing slash on purpose
-    }
-    mocker.patch(
-        'management.api.model.model_managment.get_model_by_model_id',
-        return_value=stored,
-    )
-    mock_verify = mocker.patch(
-        'management.api.model.model_managment.verify_model_config_connectivity',
+async def test_temporary_healthcheck_passes_probe_reference(client, auth_header, user_credentials, mocker):
+    mocker.patch("management.api.model.model_managment.get_current_user_id", return_value=user_credentials)
+    probe = mocker.patch(
+        "management.api.model.model_managment.verify_model_config_connectivity",
         return_value={"connectivity": False, "model_name": "m"},
     )
-
     response = client.post(
-        "/model/temporary_healthcheck",
-        headers=auth_header,
-        json={
-            "model_name": "m",
-            "model_type": "llm",
-            "base_url": "https://api.example.com/v1",  # no trailing slash
-            "api_key": "sk-no-api-key",
-            "probe_model_id": 7,
-        },
+        "/model/temporary_healthcheck", headers=auth_header,
+        json={"model_name": "m", "model_type": "llm", "probe_model_id": 7},
     )
-
     assert response.status_code == HTTPStatus.OK
-    probed_config = mock_verify.call_args.args[0]
-    assert probed_config["api_key"] == "stored-secret-key"
-
-
-@pytest.mark.asyncio
-async def test_probe_does_not_borrow_stored_key_for_foreign_url(client, auth_header, user_credentials, mocker):
-    """A probe pointing at a different base_url must NOT receive the stored
-    key — otherwise any tenant member could exfiltrate stored keys by
-    directing the probe at their own server."""
-    mocker.patch(
-        'management.api.model.model_managment.get_current_user_id',
-        return_value=user_credentials,
-    )
-    stored = {
-        "api_key": "stored-secret-key",
-        "base_url": "https://api.example.com/v1/",
-    }
-    mocker.patch(
-        'management.api.model.model_managment.get_model_by_model_id',
-        return_value=stored,
-    )
-    mock_verify = mocker.patch(
-        'management.api.model.model_managment.verify_model_config_connectivity',
-        return_value={"connectivity": False, "model_name": "m"},
-    )
-
-    response = client.post(
-        "/model/temporary_healthcheck",
-        headers=auth_header,
-        json={
-            "model_name": "m",
-            "model_type": "llm",
-            "base_url": "https://attacker.example/collect",
-            "api_key": "sk-no-api-key",
-            "probe_model_id": 7,
-        },
-    )
-
-    assert response.status_code == HTTPStatus.OK
-    probed_config = mock_verify.call_args.args[0]
-    assert probed_config["api_key"] == "sk-no-api-key"
+    probe.assert_awaited_once()
+    assert probe.await_args.args[0]["probe_model_id"] == 7
+    assert probe.await_args.args[0]["api_key"] == ""
+    assert probe.await_args.kwargs == {"user_id": user_credentials[0], "tenant_id": user_credentials[1]}
 
 
 # Tests for /model/update endpoint
@@ -1731,7 +1672,7 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
     data = response.json()
     assert "Successfully checked model connectivity" in data["message"]
     assert data["data"]["connectivity"] is True
-    mock_check.assert_called_once_with("test-model", "target_tenant", "llm")
+    mock_check.assert_called_once_with("test-model", "target_tenant", "llm", user_id=user_credentials[0])
 
 
 @pytest.mark.asyncio
@@ -1753,7 +1694,7 @@ async def test_manage_healthcheck_without_model_type_is_backward_compatible(
     response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
-    mock_check.assert_called_once_with("test-model", "target_tenant", None)
+    mock_check.assert_called_once_with("test-model", "target_tenant", None, user_id=user_credentials[0])
 
 
 @pytest.mark.asyncio
@@ -1856,7 +1797,7 @@ async def test_manage_provider_list_success(client, auth_header, user_credential
     data = response.json()
     assert "Successfully retrieved provider model list" in data["message"]
     assert len(data["data"]) == 2
-    mock_list.assert_called_once_with("target_tenant", "silicon", "llm")
+    mock_list.assert_called_once_with("target_tenant", "silicon", "llm", user_id=user_credentials[0])
 
 
 @pytest.mark.asyncio
@@ -1942,7 +1883,8 @@ async def test_manage_provider_create_success(client, auth_header, user_credenti
     assert len(data["data"]) == 2
     mock_create.assert_called_once_with(
         "target_tenant",
-        {"provider": "silicon", "model_type": "llm", "api_key": "test_api_key", "base_url": ""}
+        {"provider": "silicon", "model_type": "llm", "api_key": "test_api_key", "base_url": ""},
+        user_id=user_credentials[0],
     )
 
 
@@ -1976,7 +1918,8 @@ async def test_manage_provider_create_with_base_url(client, auth_header, user_cr
     assert response.status_code == HTTPStatus.OK
     mock_create.assert_called_once_with(
         "target_tenant",
-        {"provider": "modelengine", "model_type": "llm", "api_key": "test_api_key", "base_url": "https://api.modelengine.example.com"}
+        {"provider": "modelengine", "model_type": "llm", "api_key": "test_api_key", "base_url": "https://api.modelengine.example.com"},
+        user_id=user_credentials[0],
     )
 
 

@@ -5298,8 +5298,8 @@
       "method": "POST",
       "path": "/api/voice/connectivity",
       "transport": "http",
-      "target": "management",
-      "source": "backend/management/api/voice/voice.py",
+      "target": "runtime",
+      "source": "backend/runtime/api/voice/streaming.py",
       "route_id": "route-45af8e77c2b4f9ac",
       "credential_kinds": [
         "session"

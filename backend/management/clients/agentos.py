@@ -95,6 +95,12 @@ class AgentOSClient:
         result = await self._post_json(ModelOperation.INVOKE, payload, user_id, tenant_id, _MODEL_TIMEOUT)
         return self._validate_result(ModelResult, result)
 
+    async def model_command(self, operation, payload, user_id, tenant_id):
+        response = await self._post_json(operation, payload, user_id, tenant_id, _MODEL_TIMEOUT)
+        if "result" not in response:
+            raise RuntimeServiceUnavailableError("Invalid AgentOS model administration response")
+        return response["result"]
+
     @staticmethod
     def _validate_result(schema, result):
         try:

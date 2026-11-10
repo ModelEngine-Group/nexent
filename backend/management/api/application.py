@@ -29,7 +29,6 @@ from management.api.skill.skill import router as skill_router
 from management.api.configuration.tenant_config import router as tenant_config_router
 from management.api.tool.tool_config import router as tool_config_router
 from management.api.identity.user_management import router as user_management_router
-from management.api.voice.voice import voice_config_router as voice_router
 from management.api.identity.tenant import router as tenant_router
 from management.api.identity.group import router as group_router
 from management.api.identity.user import router as user_router
@@ -150,7 +149,6 @@ app.include_router(agent_repository_router)
 app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)
 app.include_router(datamate_router)
-app.include_router(voice_router)
 app.include_router(file_manager_router)
 app.include_router(proxy_router)
 app.include_router(tool_config_router)

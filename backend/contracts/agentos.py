@@ -36,10 +36,22 @@ class ModelOperation(str, Enum):
     INVOKE = NAMESPACE + "v1/model/invoke"
 
 
-AgentOSOperation = CompatibilityOperation | ModelOperation
+class ModelAdministrationOperation(str, Enum):
+    REGISTER = NAMESPACE + "v1/model/register"
+    UPDATE = NAMESPACE + "v1/model/update"
+    DEACTIVATE = NAMESPACE + "v1/model/deactivate"
+    IMPORT = NAMESPACE + "v1/model/provider-import"
+    BATCH_UPDATE = NAMESPACE + "v1/model/batch-update"
+    DISCOVER = NAMESPACE + "v1/model/provider-discover"
+    LIST_PROVIDER = NAMESPACE + "v1/model/provider-list"
+    HEALTHCHECK = NAMESPACE + "v1/model/healthcheck"
+    PROBE = NAMESPACE + "v1/model/probe"
+
+
+AgentOSOperation = CompatibilityOperation | ModelOperation | ModelAdministrationOperation
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
-    for operations in (CompatibilityOperation, ModelOperation)
+    for operations in (CompatibilityOperation, ModelOperation, ModelAdministrationOperation)
     for operation in operations
 }
 

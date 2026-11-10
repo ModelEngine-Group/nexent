@@ -1,4 +1,6 @@
-from management.services.model.reasoning import (
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from infrastructure.model_reasoning import (
     _control,
     _controls,
     normalize_reasoning_params,

@@ -8,6 +8,7 @@ implementations:
 acceptance_bindings:
   AC-01: [test_agentos_model_over_http]
   AC-02: [test_agentos_model_over_http]
+  AC-03: [test_agentos_model_over_http]
 preparation:
   families: []
   anchors: false

@@ -80,9 +80,9 @@ def update_model_record(
         if user_id:
             cleaned_data = add_update_tracking(cleaned_data, user_id)
 
-        # Add tenant_id to cleaned_data if provided
+        conditions = [ModelRecord.model_id == model_id, ModelRecord.delete_flag == "N"]
         if tenant_id is not None:
-            cleaned_data["tenant_id"] = tenant_id
+            conditions.append(ModelRecord.tenant_id == tenant_id)
 
         # v2.6.0: filter extra_params to only allowed keys for this model type.
         # When model_type is not part of the update payload, look it up from the
@@ -92,12 +92,12 @@ def update_model_record(
             model_type = cleaned_data.get("model_type")
             if model_type is None:
                 model_type = session.scalars(
-                    select(ModelRecord.model_type).where(ModelRecord.model_id == model_id)
+                    select(ModelRecord.model_type).where(*conditions)
                 ).first()
             cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
 
         # Build the update statement
-        stmt = update(ModelRecord).where(ModelRecord.model_id == model_id).values(cleaned_data)
+        stmt = update(ModelRecord).where(*conditions).values(cleaned_data)
 
         # Execute the update statement
         result = session.execute(stmt)
@@ -106,7 +106,7 @@ def update_model_record(
 
 
 def fail_detecting_models_on_startup() -> int:
-    """Finish connectivity checks interrupted by a config-service restart."""
+    """Finish connectivity checks interrupted by a Runtime restart."""
     with get_db_session() as session:
         result = session.execute(
             update(ModelRecord)
@@ -141,9 +141,11 @@ def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
             update_data = add_update_tracking(update_data, user_id)
 
         # Build the update statement
-        stmt = update(ModelRecord).where(ModelRecord.model_id == model_id).values(update_data)
-
-        stmt = stmt.values(tenant_id=tenant_id)
+        stmt = update(ModelRecord).where(
+            ModelRecord.model_id == model_id,
+            ModelRecord.tenant_id == tenant_id,
+            ModelRecord.delete_flag == "N",
+        ).values(update_data)
 
         # Execute the update statement
         result = session.execute(stmt)
@@ -374,3 +376,30 @@ def get_model_by_name_factory(model_name: str, model_factory: str, tenant_id: st
     filters = {"model_name": model_name, "model_factory": model_factory}
     records = get_model_records(filters, tenant_id)
     return records[0] if records else None
+
+
+def get_created_model_ids(
+    display_names: List[str],
+    tenant_id: str,
+    model_type: Optional[str] = None,
+) -> set:
+    """Resolve the ids of freshly created models from their display names.
+
+    create_model_record returns only a bool, so the ids are recovered by
+    display-name lookup. An optional model_type restricts the match; for
+    multi_embedding creates the embedding twin is included automatically
+    (both records share the display name).
+    """
+    accepted_types = None
+    if model_type:
+        accepted_types = {model_type}
+        if model_type == "multi_embedding":
+            accepted_types.add("embedding")
+    ids = set()
+    for name in display_names:
+        if not name:
+            continue
+        for record in get_models_by_display_name(name, tenant_id):
+            if accepted_types is None or record.get("model_type") in accepted_types:
+                ids.add(record["model_id"])
+    return ids

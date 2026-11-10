@@ -33,12 +33,10 @@ from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 from management.services.monitor.audit import record_security_event
-from management.services.model.health import (
+from management.services.model.capacity import suggest_capacity
+from management.services.model.commands import (
     check_model_connectivity,
     verify_model_config_connectivity,
-)
-from management.services.model.capacity import suggest_capacity
-from management.services.model.management import (
     create_model_for_tenant,
     create_provider_models_for_tenant,
     batch_create_models_for_tenant,
@@ -46,6 +44,8 @@ from management.services.model.management import (
     update_single_model_for_tenant,
     batch_update_models_for_tenant,
     delete_model_for_tenant,
+)
+from management.services.model.management import (
     list_models_for_tenant,
     list_llm_models_for_tenant,
     list_models_for_admin,
@@ -66,7 +66,6 @@ from permissions.models import CurrentUser
 from management.services.permission.identity.session import get_current_user_id
 from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
-from management.db.model.repository import get_model_by_model_id
 
 # Permission strings normalized by backend RBAC cache (lower-case type:subtype).
 # Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
@@ -413,7 +412,7 @@ async def create_provider_model(
     try:
         provider_model_config = request.model_dump()
         tenant_id = current_user.tenant_id
-        model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config)
+        model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -513,7 +512,7 @@ async def get_provider_list(
     """
     try:
         tenant_id = current_user.tenant_id
-        model_list = await list_provider_models_for_tenant(tenant_id, request.provider, request.model_type)
+        model_list = await list_provider_models_for_tenant(tenant_id, request.provider, request.model_type, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -715,7 +714,7 @@ async def check_model_health(
     """
     try:
         tenant_id = current_user.tenant_id
-        result = await check_model_connectivity(display_name, tenant_id, model_type)
+        result = await check_model_connectivity(display_name, tenant_id, model_type, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Successfully checked model connectivity", "data": result}
         )
@@ -733,16 +732,6 @@ async def check_model_health(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-def _normalize_probe_base_url(url: Optional[str]) -> str:
-    """Normalize a base_url for the probe key-fallback match.
-
-    Only trailing slashes are stripped: the match must stay an exact-string
-    comparison — prefix or fuzzy matching would re-open the exfiltration
-    path the fallback guards against.
-    """
-    return (url or "").rstrip("/")
-
-
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
     request: ModelProbeRequest,
@@ -756,23 +745,9 @@ async def check_temporary_model_health(
         request: Model configuration to verify.
     """
     try:
-        # Edit-dialog probes arrive without the api_key (the backend never
-        # returns the persisted key to the client, and the dialog leaves the
-        # field empty to "keep existing"). Fall back to the stored key so
-        # verifying does not require retyping it — but ONLY when the probe
-        # targets the stored endpoint itself: substituting the key while the
-        # caller controls base_url would let any tenant member exfiltrate a
-        # stored key by pointing the probe at their own server.
-        if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
-            stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=current_user.tenant_id)
-            if (
-                stored_model
-                and stored_model.get("api_key")
-                and _normalize_probe_base_url(request.base_url)
-                == _normalize_probe_base_url(stored_model.get("base_url"))
-            ):
-                request.api_key = stored_model["api_key"]
-        result = await verify_model_config_connectivity(request.model_dump())
+        result = await verify_model_config_connectivity(
+            request.model_dump(), user_id=current_user.user_id, tenant_id=current_user.tenant_id,
+        )
         if result.get("connectivity") is True:
             # suggest_capacity may now issue an LLM self-report HTTP call
             # (catalog miss → _llm_infer_capacity). Run it through the
@@ -823,7 +798,7 @@ async def manage_check_model_health(
             f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}"
         )
 
-        result = await check_model_connectivity(request.display_name, request.tenant_id, request.model_type)
+        result = await check_model_connectivity(request.display_name, request.tenant_id, request.model_type, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Successfully checked model connectivity", "data": result}
         )
@@ -1142,7 +1117,7 @@ async def manage_list_provider_models(
             f"provider: {request.provider}, model_type: {request.model_type}"
         )
 
-        model_list = await list_provider_models_for_tenant(request.tenant_id, request.provider, request.model_type)
+        model_list = await list_provider_models_for_tenant(request.tenant_id, request.provider, request.model_type, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -1188,7 +1163,7 @@ async def manage_create_provider_models(
             "api_key": request.api_key,
             "base_url": request.base_url,
         }
-        model_list = await create_provider_models_for_tenant(request.tenant_id, provider_request)
+        model_list = await create_provider_models_for_tenant(request.tenant_id, provider_request, user_id=current_user.user_id)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

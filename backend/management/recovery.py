@@ -50,14 +50,12 @@ def recover_config_tasks() -> dict[str, int]:
     """Fail config-owned background work lost during process restart."""
     from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup
     from management.db.evaluation.sets import cleanup_orphaned_virtual_evaluation_sets, recover_interrupted_generations
-    from management.db.model.repository import fail_detecting_models_on_startup
     from management.db.memory.dreaming import recover_stale
 
     result = {
         "agent_evaluation_setups": fail_interrupted_no_set_runs_on_startup(),
         "evaluation_set_generations": recover_interrupted_generations(),
         "orphaned_virtual_sets": cleanup_orphaned_virtual_evaluation_sets(),
-        "model_connectivity_checks": fail_detecting_models_on_startup(),
         "dreaming_runs": recover_stale(include_unexpired=True),
     }
     logger.info("Config startup recovery completed: %s", result)

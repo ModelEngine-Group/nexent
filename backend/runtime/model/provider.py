@@ -8,20 +8,20 @@ from contracts.model import ModelConnectStatusEnum
 from contracts.model import ModelRequest
 from contracts.constants.constants import DASHSCOPE_REALTIME_BASE_URL
 from contracts.model import ProviderEnum
-from management.db.model.repository import get_models_by_tenant_factory_type
-from management.services.model.names import add_repo_to_name, split_repo_name
-from management.services.model.probe import (
+from infrastructure.rdb.model_records import get_models_by_tenant_factory_type
+from contracts.model_names import add_repo_to_name, split_repo_name
+from runtime.model.probe import (
     _infer_model_factory,
     embedding_dimension_check,
 )
-from management.services.model.providers.base import AbstractModelProvider
-from management.services.model.providers.modelengine_provider import (
+from runtime.model.providers.base import AbstractModelProvider
+from runtime.model.providers.modelengine_provider import (
     MODEL_ENGINE_NORTH_PREFIX,
     ModelEngineProvider,
     get_model_engine_raw_url,
 )
-from management.services.model.providers.openai_provider import OpenAICompatibleProvider
-from management.services.model.providers.silicon_provider import SiliconModelProvider
+from runtime.model.providers.openai_provider import OpenAICompatibleProvider
+from runtime.model.providers.silicon_provider import SiliconModelProvider
 
 logger = logging.getLogger("model_provider")
 

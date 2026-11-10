@@ -150,7 +150,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.configuration.tenant_config": {"router": APIRouter()},
             "management.api.tool.tool_config": {"router": APIRouter()},
             "management.api.identity.user_management": {"router": APIRouter()},
-            "management.api.voice.voice": {"voice_config_router": APIRouter()},
+            "runtime.api.voice.streaming": {"voice_config_router": APIRouter()},
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},

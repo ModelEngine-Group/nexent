@@ -24,9 +24,13 @@ case:
   - order: 2
     action: Invoke with a foreign tenant, stale revision or incompatible operation.
     expected: Runtime rejects each invalid request before it reaches the provider.
+  - order: 3
+    action: Submit a registered model change and probe through signed AgentOS calls.
+    expected: Runtime uses the signed tenant for mutation and probe, and rejects client-supplied ownership fields.
   expected_results:
   - Metadata and inference traverse the signed transport with the configured tenant model.
   - Rejected requests produce no provider calls.
+  - Model management does not accept record ownership from the payload.
   forbidden_side_effects:
   - AgentOS metadata must not expose provider credentials.
   - The case must not leave temporary servers running.
@@ -52,3 +56,8 @@ case:
     steps: [2]
     expected_results: [2]
     forbidden_side_effects: [2]
+  - id: AC-03
+    description: Signed model management dispatches only within the actor tenant.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]

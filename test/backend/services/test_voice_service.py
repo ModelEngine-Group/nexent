@@ -57,8 +57,8 @@ _shared_tts = None
 
 def _reset_singleton():
     """Reset the voice service singleton between tests."""
-    import management.services.model.voice
-    management.services.model.voice._voice_service_instance = None
+    import runtime.model.voice
+    runtime.model.voice._voice_service_instance = None
 
 
 def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=None):
@@ -81,10 +81,10 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
         _shared_tts.generate_speech = AsyncMock(side_effect=tts_exc)
 
     patches = [
-        patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
-        patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
-        patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
-        patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
+        patch("runtime.model.voice.VolcSTTModel", return_value=_shared_stt),
+        patch("runtime.model.voice.AliSTTModel", return_value=_shared_stt),
+        patch("runtime.model.voice.VolcTTSModel", return_value=_shared_tts),
+        patch("runtime.model.voice.AliTTSModel", return_value=_shared_tts),
     ]
     return patches, _shared_stt, _shared_tts
 
@@ -92,8 +92,8 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
 # ---------------------------------------------------------------------------
 # Import voice_service (before any patches)
 # ---------------------------------------------------------------------------
-import management.services.model.voice
-from management.services.model.voice import VoiceService, get_voice_service
+import runtime.model.voice
+from runtime.model.voice import VoiceService, get_voice_service
 
 
 # ---------------------------------------------------------------------------
@@ -330,10 +330,10 @@ class TestStreamTTSToWebSocket:
         _shared_tts = DisconnectingTTS()
 
         patches = [
-            patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
-            patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
-            patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
-            patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
+            patch("runtime.model.voice.VolcSTTModel", return_value=_shared_stt),
+            patch("runtime.model.voice.AliSTTModel", return_value=_shared_stt),
+            patch("runtime.model.voice.VolcTTSModel", return_value=_shared_tts),
+            patch("runtime.model.voice.AliTTSModel", return_value=_shared_tts),
         ]
         for p in patches:
             p.start()

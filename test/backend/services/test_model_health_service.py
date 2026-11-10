@@ -43,7 +43,7 @@ _MOCKED_MODULE_NAMES = (
     "nexent.core.models.rerank_model",
     "nexent.monitor",
     "services",
-    "management.services.model.voice",
+    "runtime.model.voice",
     "management.services.model.adapter",
 )
 _MISSING_MODULE = object()
@@ -109,7 +109,7 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 
 # Mock services packages
 sys.modules['services'] = MockModule()
-sys.modules['management.services.model.voice'] = MockModule()
+sys.modules['runtime.model.voice'] = MockModule()
 # model_health_service imports build_adapter_fresh
 # from the real management.services.model.adapter since the gateway bridge landed;
 # the blanket ``services`` mock above shadows it, so expose a mock submodule
@@ -136,12 +136,12 @@ class ModelResponse:
 
 
 # Now import the module under test
-from management.services.model.health import (
+from runtime.model.health import (
     _perform_connectivity_check,
     check_model_connectivity,
     verify_model_config_connectivity,
 )
-from management.services.model.probe import _embedding_dimension_check, embedding_dimension_check
+from runtime.model.probe import _embedding_dimension_check, embedding_dimension_check
 
 # Keep the imported service bound to the doubles above, then restore the
 # process-wide module registry so this file cannot alter sibling test modules.
@@ -155,7 +155,7 @@ for _module_name, _saved_module in _SAVED_MODULES.items():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_embedding():
     # Setup
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
         mock_build.return_value = mock_adapter
@@ -185,7 +185,7 @@ async def test_perform_connectivity_check_embedding_ignores_custom_json():
         "metadata": {"tenant": "demo"},
         "flags": [True, False],
     }
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
         mock_build.return_value = mock_adapter
@@ -205,7 +205,7 @@ async def test_perform_connectivity_check_embedding_ignores_custom_json():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
     # Setup
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
         mock_build.return_value = mock_adapter
@@ -231,8 +231,8 @@ async def test_perform_connectivity_check_multi_embedding():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_llm():
     # Setup
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -266,8 +266,8 @@ async def test_perform_connectivity_check_llm():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm():
     # Setup
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -296,8 +296,8 @@ async def test_perform_connectivity_check_vlm():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm4_modelengine_passes_factory_and_slot():
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -329,13 +329,13 @@ async def test_perform_connectivity_check_vlm4_modelengine_passes_factory_and_sl
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_dashscope_multimodal_uses_provider_catalog():
-    model_provider_service = types.ModuleType("management.services.model.provider")
+    model_provider_service = types.ModuleType("runtime.model.provider")
     model_provider_service.get_provider_models = mock.AsyncMock(return_value=[
         {"id": "qwen-image-max", "model_type": "vlm2"},
     ])
 
-    with mock.patch.dict(sys.modules, {"management.services.model.provider": model_provider_service}), \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch.dict(sys.modules, {"runtime.model.provider": model_provider_service}), \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         result = await _perform_connectivity_check(
             "qwen-image-max",
             "vlm2",
@@ -372,8 +372,8 @@ async def test_perform_connectivity_check_vlm2_probes_images_endpoint():
     """vlm2 (image generation) must probe /images/generations, not the chat VLM adapter."""
     client_cls, client_instance = _mock_httpx_image_client(200)
 
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.health.httpx.AsyncClient", client_cls):
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.health.httpx.AsyncClient", client_cls):
         result = await _perform_connectivity_check(
             "baidu/ERNIE-Image-Turbo",
             "vlm2",
@@ -395,8 +395,8 @@ async def test_perform_connectivity_check_vlm2_images_endpoint_error():
     """A non-200 response from /images/generations means unavailable."""
     client_cls, client_instance = _mock_httpx_image_client(400)
 
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.health.httpx.AsyncClient", client_cls):
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.health.httpx.AsyncClient", client_cls):
         result = await _perform_connectivity_check(
             "baidu/ERNIE-Image-Turbo",
             "vlm2",
@@ -419,8 +419,8 @@ async def test_perform_connectivity_check_vlm2_images_endpoint_network_error():
     )
     client_cls.return_value.__aexit__ = mock.AsyncMock(return_value=False)
 
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.health.httpx.AsyncClient", client_cls):
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.health.httpx.AsyncClient", client_cls):
         result = await _perform_connectivity_check(
             "baidu/ERNIE-Image-Turbo",
             "vlm2",
@@ -434,14 +434,14 @@ async def test_perform_connectivity_check_vlm2_images_endpoint_network_error():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_falls_back_to_probe():
-    model_provider_service = types.ModuleType("management.services.model.provider")
+    model_provider_service = types.ModuleType("runtime.model.provider")
     model_provider_service.get_provider_models = mock.AsyncMock(return_value=[
         {"_error": "authentication_failed", "_message": "Invalid API key"},
     ])
 
-    with mock.patch.dict(sys.modules, {"management.services.model.provider": model_provider_service}), \
-            mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch.dict(sys.modules, {"runtime.model.provider": model_provider_service}), \
+            mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -477,7 +477,7 @@ async def test_perform_connectivity_check_tokenpony_multimodal_catalog_error_fal
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_stt():
     # Setup
-    with mock.patch("management.services.model.health.get_voice_service") as mock_get_voice_service:
+    with mock.patch("runtime.model.health.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
         # Fix: make check_voice_connectivity return an awaitable coroutine instead of a bool
         async_mock = mock.AsyncMock()
@@ -508,7 +508,7 @@ async def test_perform_connectivity_check_stt():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_rerank():
     # Setup - mock the bridge adapter builder
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.health_check = mock.AsyncMock(return_value=True)
         mock_build.return_value = mock_adapter
@@ -534,8 +534,8 @@ async def test_perform_connectivity_check_rerank():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_base_url_normalization_localhost():
     # Setup
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -569,8 +569,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_base_url_normalization_127001():
     # Setup
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -618,10 +618,10 @@ async def test_perform_connectivity_check_unsupported_type():
 @pytest.mark.asyncio
 async def test_check_model_connectivity_success():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check, \
-            mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update_model, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update_model, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -646,9 +646,9 @@ async def test_check_model_connectivity_success():
         mock_get_model.assert_called_once_with("GPT-4", tenant_id="tenant456", model_type="embedding")
         # Detecting first, then available
         mock_update_model.assert_any_call(
-            "model123", {"connect_status": "detecting"})
+            "model123", {"connect_status": "detecting"}, tenant_id="tenant456")
         mock_update_model.assert_any_call(
-            "model123", {"connect_status": "available"})
+            "model123", {"connect_status": "available"}, tenant_id="tenant456")
         mock_connectivity_check.assert_called_once_with(
             "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
             None, None, None, "GPT-4", None,
@@ -658,7 +658,7 @@ async def test_check_model_connectivity_success():
 @pytest.mark.asyncio
 async def test_check_model_connectivity_model_not_found():
     # Setup
-    with mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model:
+    with mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model:
 
         mock_get_model.return_value = None
 
@@ -670,10 +670,10 @@ async def test_check_model_connectivity_model_not_found():
 @pytest.mark.asyncio
 async def test_check_model_connectivity_failure():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check, \
-            mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update_model, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update_model, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -697,16 +697,16 @@ async def test_check_model_connectivity_failure():
 
         # Check that we updated the model status to unavailable
         mock_update_model.assert_any_call(
-            "model123", {"connect_status": "unavailable"})
+            "model123", {"connect_status": "unavailable"}, tenant_id="tenant456")
 
 
 @pytest.mark.asyncio
 async def test_check_model_connectivity_exception():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check, \
-            mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update_model, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update_model, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -728,15 +728,15 @@ async def test_check_model_connectivity_exception():
 
         # Check that we updated the model status to unavailable
         mock_update_model.assert_any_call(
-            "model123", {"connect_status": "unavailable"})
+            "model123", {"connect_status": "unavailable"}, tenant_id="tenant456")
 
 
 @pytest.mark.asyncio
 async def test_check_model_connectivity_probe_exception_returns_unavailable():
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check, \
-            mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update_model, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check, \
+            mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update_model, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -757,15 +757,15 @@ async def test_check_model_connectivity_probe_exception_returns_unavailable():
         assert response["model_name"] == "gpt-4"
         assert response["error"] == "connection refused"
         mock_update_model.assert_any_call(
-            "model123", {"connect_status": "unavailable"})
+            "model123", {"connect_status": "unavailable"}, tenant_id="tenant456")
 
 
 @pytest.mark.asyncio
 async def test_check_model_connectivity_general_exception():
     # Setup
-    with mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update_model, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum:
+    with mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update_model, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -784,7 +784,7 @@ async def test_check_model_connectivity_general_exception():
 @pytest.mark.asyncio
 async def test_verify_model_config_connectivity_success():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check:
 
         mock_connectivity_check.return_value = True
 
@@ -815,7 +815,7 @@ async def test_verify_model_config_connectivity_success():
 @pytest.mark.asyncio
 async def test_verify_model_config_connectivity_failure():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check:
 
         mock_connectivity_check.return_value = False
 
@@ -841,7 +841,7 @@ async def test_verify_model_config_connectivity_failure():
 @pytest.mark.asyncio
 async def test_verify_model_config_connectivity_validation_error():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check:
 
         mock_connectivity_check.side_effect = ValueError("Invalid model type")
 
@@ -866,7 +866,7 @@ async def test_verify_model_config_connectivity_validation_error():
 @pytest.mark.asyncio
 async def test_verify_model_config_connectivity_exception():
     # Setup
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity_check:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity_check:
 
         mock_connectivity_check.side_effect = Exception("Unexpected error")
 
@@ -897,7 +897,7 @@ async def test_save_config_with_error():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_embedding_success():
-    with mock.patch("management.services.model.probe.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.probe.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3]])
@@ -917,7 +917,7 @@ async def test_embedding_dimension_check_embedding_success():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_success():
-    with mock.patch("management.services.model.probe.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.probe.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[[0.1, 0.2, 0.3, 0.4]])
@@ -945,7 +945,7 @@ async def test_embedding_dimension_check_unsupported_type():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_empty_return():
-    with mock.patch("management.services.model.probe.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.probe.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[])
@@ -959,8 +959,8 @@ async def test_embedding_dimension_check_empty_return():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_wrapper_success():
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name:
         mock_internal_check.return_value = 1536
         mock_get_name.return_value = "openai/text-embedding-ada-002"
         model_config = {
@@ -981,9 +981,9 @@ async def test_embedding_dimension_check_wrapper_success():
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_wrapper_exception():
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name, \
-            mock.patch("management.services.model.probe.logger") as mock_logger:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name, \
+            mock.patch("runtime.model.probe.logger") as mock_logger:
         mock_internal_check.side_effect = Exception("test error")
         mock_get_name.return_value = "openai/text-embedding-ada-002"
         model_config = {
@@ -1002,8 +1002,8 @@ async def test_embedding_dimension_check_wrapper_exception():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_empty_response():
     """Test multi_embedding dimension check with an empty response."""
-    with mock.patch("management.services.model.probe.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.probe.logging") as mock_logging:
+    with mock.patch("runtime.model.probe.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.probe.logging") as mock_logging:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(
             return_value=[])
@@ -1020,9 +1020,9 @@ async def test_embedding_dimension_check_multi_embedding_empty_response():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_wrapper_value_error():
     """Test embedding_dimension_check wrapper with ValueError (covers line 249-250)"""
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name, \
-            mock.patch("management.services.model.probe.logger") as mock_logger:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name, \
+            mock.patch("runtime.model.probe.logger") as mock_logger:
         mock_internal_check.side_effect = ValueError("Unsupported model type")
         mock_get_name.return_value = "test-model"
         model_config = {
@@ -1050,8 +1050,8 @@ async def test_embedding_dimension_check_wrapper_value_error():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_ssl_verify_fallback():
     """Test that embedding_dimension_check falls back to ssl_verify=False when first check returns 0"""
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name:
         mock_internal_check.side_effect = [0, 1536]  # First call returns 0, second returns valid dimension
         mock_get_name.return_value = "openai/text-embedding-ada-002"
         model_config = {
@@ -1081,8 +1081,8 @@ async def test_embedding_dimension_check_ssl_verify_fallback():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_ssl_verify_fallback_with_timeout():
     """Test that embedding_dimension_check passes timeout_seconds to fallback check"""
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name:
         mock_internal_check.side_effect = [0, 768]  # First call fails, second returns valid dimension
         mock_get_name.return_value = "jina/jina-embeddings-v2-base-en"
         model_config = {
@@ -1112,8 +1112,8 @@ async def test_embedding_dimension_check_ssl_verify_fallback_with_timeout():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_no_fallback_when_ssl_verify_false():
     """Test that no fallback occurs when ssl_verify is already False"""
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name:
         mock_internal_check.return_value = 1024  # Returns valid dimension directly
         mock_get_name.return_value = "local/embedding-model"
         model_config = {
@@ -1138,8 +1138,8 @@ async def test_embedding_dimension_check_no_fallback_when_ssl_verify_false():
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_fallback_still_fails():
     """Test that dimension returns 0 when both ssl_verify=True and ssl_verify=False fail"""
-    with mock.patch("management.services.model.probe._embedding_dimension_check") as mock_internal_check, \
-            mock.patch("management.services.model.probe.get_model_name_from_config") as mock_get_name:
+    with mock.patch("runtime.model.probe._embedding_dimension_check") as mock_internal_check, \
+            mock.patch("runtime.model.probe.get_model_name_from_config") as mock_get_name:
         mock_internal_check.return_value = 0  # Both calls return 0
         mock_get_name.return_value = "unreachable/embedding-model"
         model_config = {
@@ -1159,9 +1159,9 @@ async def test_embedding_dimension_check_fallback_still_fails():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_llm_sets_monitoring_operation():
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.health.set_monitoring_operation") as mock_set_op:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.health.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -1181,9 +1181,9 @@ async def test_perform_connectivity_check_llm_sets_monitoring_operation():
 
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_vlm_sets_monitoring_operation():
-    with mock.patch("management.services.model.health.MessageObserver") as mock_observer, \
-            mock.patch("management.services.model.health.build_adapter_fresh") as mock_build, \
-            mock.patch("management.services.model.health.set_monitoring_operation") as mock_set_op:
+    with mock.patch("runtime.model.health.MessageObserver") as mock_observer, \
+            mock.patch("runtime.model.health.build_adapter_fresh") as mock_build, \
+            mock.patch("runtime.model.health.set_monitoring_operation") as mock_set_op:
         mock_observer_instance = mock.MagicMock()
         mock_observer.return_value = mock_observer_instance
 
@@ -1203,11 +1203,11 @@ async def test_perform_connectivity_check_vlm_sets_monitoring_operation():
 
 @pytest.mark.asyncio
 async def test_check_model_connectivity_sets_monitoring_context():
-    with mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record"), \
-            mock.patch("management.services.model.health._perform_connectivity_check",
+    with mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record"), \
+            mock.patch("runtime.model.health._perform_connectivity_check",
                        new=mock.AsyncMock(return_value=True)), \
-            mock.patch("management.services.model.health.set_monitoring_context") as mock_set_ctx:
+            mock.patch("runtime.model.health.set_monitoring_context") as mock_set_ctx:
         mock_get_model.return_value = {
             "model_id": 1, "model_repo": "openai", "model_name": "gpt-4",
             "model_type": "llm", "base_url": "https://api.openai.com",
@@ -1222,7 +1222,7 @@ async def test_check_model_connectivity_sets_monitoring_context():
 @pytest.mark.asyncio
 async def test_normalize_embedding_url_already_has_suffix():
     """_normalize_embedding_url returns early when URL already contains /embeddings, so the adapter receives the unmodified URL."""
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2]])
         mock_build.return_value = mock_adapter
@@ -1244,7 +1244,7 @@ async def test_normalize_embedding_url_already_has_suffix():
 @pytest.mark.asyncio
 async def test_infer_model_factory_dashscope():
     """L47: _infer_model_factory returns DASHSCOPE_MODEL_FACTORY for dashscope URLs"""
-    from management.services.model.probe import _infer_model_factory
+    from runtime.model.probe import _infer_model_factory
     result = _infer_model_factory("embedding", "https://dashscope.aliyuncs.com/v1/", None)
     assert result == "dashscope"
 
@@ -1252,7 +1252,7 @@ async def test_infer_model_factory_dashscope():
 @pytest.mark.asyncio
 async def test_infer_model_factory_siliconflow():
     """L47: _infer_model_factory returns SILICONFLOW_MODEL_FACTORY for siliconflow URLs"""
-    from management.services.model.probe import _infer_model_factory
+    from runtime.model.probe import _infer_model_factory
     result = _infer_model_factory("multi_embedding", "https://api.siliconflow.cn/v1/", None)
     assert result == "silicon"
 
@@ -1260,7 +1260,7 @@ async def test_infer_model_factory_siliconflow():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding_dashscope():
     """multi_embedding with model_factory=dashscope routes through build_adapter_fresh"""
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3]])
         mock_build.return_value = mock_adapter
@@ -1286,7 +1286,7 @@ async def test_perform_connectivity_check_multi_embedding_dashscope():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_stt_volc():
     """L249: STT with volcengine factory uses appid/access_token path"""
-    with mock.patch("management.services.model.health.get_voice_service") as mock_get_voice_service:
+    with mock.patch("runtime.model.health.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
         async_mock = mock.AsyncMock(return_value=True)
         mock_service_instance.check_voice_connectivity = async_mock
@@ -1312,7 +1312,7 @@ async def test_perform_connectivity_check_stt_volc():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_tts_success():
     """L268-294: TTS connectivity check with Ali TTS (default)"""
-    with mock.patch("management.services.model.health.get_voice_service") as mock_get_voice_service:
+    with mock.patch("runtime.model.health.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
         async_mock = mock.AsyncMock(return_value=True)
         mock_service_instance.check_voice_connectivity = async_mock
@@ -1336,7 +1336,7 @@ async def test_perform_connectivity_check_tts_success():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_tts_volc():
     """L274-284: TTS with volcengine factory uses appid/access_token path"""
-    with mock.patch("management.services.model.health.get_voice_service") as mock_get_voice_service:
+    with mock.patch("runtime.model.health.get_voice_service") as mock_get_voice_service:
         mock_service_instance = mock.MagicMock()
         async_mock = mock.AsyncMock(return_value=True)
         mock_service_instance.check_voice_connectivity = async_mock
@@ -1362,7 +1362,7 @@ async def test_perform_connectivity_check_tts_volc():
 @pytest.mark.asyncio
 async def test_provider_catalog_connectivity_check_unknown_factory():
     """L117: _provider_catalog_connectivity_check returns False for unknown factory"""
-    from management.services.model.health import _provider_catalog_connectivity_check
+    from runtime.model.health import _provider_catalog_connectivity_check
     result = await _provider_catalog_connectivity_check(
         "some-model", "vlm", "test-key", model_factory="unknown_provider",
     )
@@ -1372,10 +1372,10 @@ async def test_provider_catalog_connectivity_check_unknown_factory():
 @pytest.mark.asyncio
 async def test_check_model_connectivity_ssl_verify_fallback():
     """L334-335, L355: ssl_verify_fallback triggers second connectivity check with ssl_verify=False"""
-    with mock.patch("management.services.model.health.get_model_by_display_name") as mock_get_model, \
-            mock.patch("management.services.model.health.update_model_record") as mock_update, \
-            mock.patch("management.services.model.health.ModelConnectStatusEnum") as mock_enum, \
-            mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity:
+    with mock.patch("runtime.model.health.get_model_by_display_name") as mock_get_model, \
+            mock.patch("runtime.model.health.update_model_record") as mock_update, \
+            mock.patch("runtime.model.health.ModelConnectStatusEnum") as mock_enum, \
+            mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity:
 
         mock_enum.AVAILABLE.value = "available"
         mock_enum.UNAVAILABLE.value = "unavailable"
@@ -1408,13 +1408,13 @@ async def test_check_model_connectivity_ssl_verify_fallback():
             None, None, None, "GPT-4", None,
         )
         # Verify ssl_verify=False was saved to the record
-        mock_update.assert_any_call("model123", {"connect_status": "available", "ssl_verify": False})
+        mock_update.assert_any_call("model123", {"connect_status": "available", "ssl_verify": False}, tenant_id="tenant456")
 
 
 @pytest.mark.asyncio
 async def test_embedding_dimension_check_multi_embedding_dashscope():
     """_embedding_dimension_check routes dashscope multi_embedding through build_adapter_fresh"""
-    with mock.patch("management.services.model.probe.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.probe.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]])
         mock_build.return_value = mock_adapter
@@ -1433,7 +1433,7 @@ async def test_embedding_dimension_check_multi_embedding_dashscope():
 @pytest.mark.asyncio
 async def test_verify_model_config_connectivity_ssl_verify_fallback():
     """verify_model_config_connectivity falls back to ssl_verify=False on failure"""
-    with mock.patch("management.services.model.health._perform_connectivity_check") as mock_connectivity:
+    with mock.patch("runtime.model.health._perform_connectivity_check") as mock_connectivity:
         # First call fails, second succeeds
         mock_connectivity.side_effect = [False, True]
 
@@ -1463,14 +1463,14 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
 
 def test_embedding_url_candidates_empty_base_url():
     """_embedding_url_candidates has no probe target when base_url is empty."""
-    from management.services.model.probe import _embedding_url_candidates
+    from runtime.model.probe import _embedding_url_candidates
 
     assert _embedding_url_candidates("") == []
 
 
 def test_embedding_url_candidates_orders_endpoint_first():
     """_embedding_url_candidates probes the /embeddings endpoint before the URL as given."""
-    from management.services.model.probe import _embedding_url_candidates
+    from runtime.model.probe import _embedding_url_candidates
 
     assert _embedding_url_candidates("https://api.openai.com/v1") == [
         "https://api.openai.com/v1/embeddings",
@@ -1484,7 +1484,7 @@ def test_embedding_url_candidates_orders_endpoint_first():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_embedding_falls_back_to_given_url():
     """Connectivity succeeds on the given URL when the /embeddings endpoint does not answer."""
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(side_effect=[[], [[0.1, 0.2]]])
         mock_build.return_value = mock_adapter
@@ -1505,7 +1505,7 @@ async def test_perform_connectivity_check_embedding_falls_back_to_given_url():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_embedding_all_candidates_fail():
     """Connectivity is False when no candidate URL serves embeddings."""
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         mock_adapter = mock.MagicMock()
         mock_adapter.dimension_check = mock.AsyncMock(return_value=[])
         mock_build.return_value = mock_adapter
@@ -1524,7 +1524,7 @@ async def test_perform_connectivity_check_embedding_all_candidates_fail():
 @pytest.mark.asyncio
 async def test_perform_connectivity_check_embedding_empty_base_url():
     """Connectivity is False without probing when base_url is empty."""
-    with mock.patch("management.services.model.health.build_adapter_fresh") as mock_build:
+    with mock.patch("runtime.model.health.build_adapter_fresh") as mock_build:
         result = await _perform_connectivity_check(
             "text-embedding-ada-002",
             "embedding",

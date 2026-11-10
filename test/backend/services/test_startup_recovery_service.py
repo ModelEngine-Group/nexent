@@ -82,11 +82,6 @@ def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     )
     _install_module(
         monkeypatch,
-        "management.db.model.repository",
-        fail_detecting_models_on_startup=MagicMock(return_value=5),
-    )
-    _install_module(
-        monkeypatch,
         "management.db.memory.dreaming",
         recover_stale=MagicMock(return_value=6),
     )
@@ -95,7 +90,6 @@ def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
         "agent_evaluation_setups": 2,
         "evaluation_set_generations": 3,
         "orphaned_virtual_sets": 4,
-        "model_connectivity_checks": 5,
         "dreaming_runs": 6,
     }
 

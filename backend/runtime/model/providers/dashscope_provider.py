@@ -6,7 +6,7 @@ from typing import Dict, List
 import httpx
 from contracts.constants.constants import DEFAULT_LLM_MAX_TOKENS
 from contracts.constants.constants import DASHSCOPE_GET_URL
-from management.services.model.providers.base import (
+from runtime.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,

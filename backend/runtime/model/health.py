@@ -5,15 +5,15 @@ from typing import Optional
 import httpx
 from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
 from contracts.model import ModelConnectStatusEnum
-from management.db.model.repository import get_model_by_display_name, update_model_record
-from management.services.model.adapter import build_adapter_fresh
-from management.services.model.probe import (
+from infrastructure.rdb.model_records import get_model_by_display_name, update_model_record
+from infrastructure.model_adapter import build_adapter_fresh
+from runtime.model.probe import (
     _embedding_url_candidates,
     _infer_model_factory,
 )
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from management.services.model.voice import get_voice_service
+from runtime.model.voice import get_voice_service
 
 logger = logging.getLogger("model_health_service")
 
@@ -39,7 +39,7 @@ async def _provider_catalog_connectivity_check(
     if provider not in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES:
         return False
 
-    from management.services.model.provider import get_provider_models
+    from runtime.model.provider import get_provider_models
 
     model_list = await get_provider_models(
         {
@@ -343,7 +343,7 @@ async def check_model_connectivity(
         model_name = f"{repo}/{name}" if repo else name
 
         update_data = {"connect_status": ModelConnectStatusEnum.DETECTING.value}
-        update_model_record(model["model_id"], update_data)
+        update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
 
         model_type = model["model_type"]
         model_base_url = model["base_url"]
@@ -400,7 +400,7 @@ async def check_model_connectivity(
         except Exception as e:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
             logger.error(f"Error checking model connectivity: {str(e)}")
-            update_model_record(model["model_id"], update_data)
+            update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
             if isinstance(e, ValueError):
                 raise e
             return {
@@ -421,7 +421,7 @@ async def check_model_connectivity(
         update_data = {"connect_status": connect_status}
         if ssl_verify_fallback:
             update_data["ssl_verify"] = False
-        update_model_record(model["model_id"], update_data)
+        update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
         result = {
             "connectivity": connectivity,
             "model_name": model_name,
@@ -431,7 +431,7 @@ async def check_model_connectivity(
         logger.error(f"Error checking model connectivity: {str(e)}")
         if "model" in locals() and model:
             update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
-            update_model_record(model["model_id"], update_data)
+            update_model_record(model["model_id"], update_data, tenant_id=tenant_id)
         raise e
 
 

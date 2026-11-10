@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Generic OpenAI-compatible provider.
 
 Used as the fallback for any provider that is not covered by a dedicated
@@ -10,7 +11,7 @@ import logging
 from typing import Dict, List
 
 import httpx
-from management.services.model.providers.base import (
+from runtime.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,

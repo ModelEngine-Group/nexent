@@ -5,8 +5,8 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
-from management.services.model.adapter import build_adapter_fresh
-from management.services.model.names import get_model_name_from_config
+from infrastructure.model_adapter import build_adapter_fresh
+from contracts.model_names import get_model_name_from_config
 
 logger = logging.getLogger("model_health_service")
 DASHSCOPE_MODEL_FACTORY = "dashscope"
@@ -56,7 +56,7 @@ def _infer_model_factory(
 
     # Non-embedding types (VLM, etc): use extended inference
     try:
-        from management.services.model.capacity import pick_provider_from_base_url
+        from infrastructure.model_provider import pick_provider_from_base_url
 
         inferred_provider = pick_provider_from_base_url(base_url)
     except Exception:
