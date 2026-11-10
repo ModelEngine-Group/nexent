@@ -2,6 +2,7 @@
 """Materialize a prepared synthetic evaluation inside Runtime."""
 
 import asyncio
+from hmac import compare_digest
 from functools import partial
 from uuid import uuid4
 from datetime import datetime
@@ -13,9 +14,13 @@ from contracts.agentos import EvaluationAgentResult, EvaluationFileTool, FileToo
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED,
 )
+from infrastructure.a2a_execution import (
+    build_external_agent_config, external_agent_execution_revision, extract_url_from_card,
+)
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.object_storage.read_access import require_s3_read_access
+from infrastructure.rdb.a2a_execution_records import read_external_agent_bindings
 from infrastructure.rdb.model_records import get_model_by_model_id
 from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo, ToolConfig
@@ -73,6 +78,33 @@ def _agent_options(resource):
     return options
 
 
+def _materialize_external_agents(resource, actor):
+    bindings = resource.external_a2a
+    if not bindings:
+        return []
+    ids = [binding.agent_id for binding in bindings]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate external A2A execution binding")
+    rows = read_external_agent_bindings(resource.agent_id, actor.tenant_id, ids)
+    agents = []
+    for binding in bindings:
+        row = rows.get(binding.agent_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail={"code": "AGENTOS_EXTERNAL_AGENT_NOT_FOUND"})
+        try:
+            url = row.get("agent_url") or extract_url_from_card(row.get("raw_card"))
+            if not url:
+                raise ValueError("Missing external A2A endpoint")
+            config = build_external_agent_config(row, url).model_copy(update={"invocation_name": binding.invocation_name})
+            revision = external_agent_execution_revision(config, actor.tenant_id, resource.agent_id)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_EXTERNAL_AGENT_REVISION_MISMATCH"}) from exc
+        if not compare_digest(revision, binding.revision):
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_EXTERNAL_AGENT_REVISION_MISMATCH"})
+        agents.append(config)
+    return agents
+
+
 def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, *, root_alias=None):
     if any((
         resource.skill_refs, resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -95,6 +127,7 @@ def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_
         max_steps=resource.max_steps, origin=resource.origin,
         invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}" if legacy_root else resource.invocation_name,
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
+        external_a2a_agents=_materialize_external_agents(resource, actor),
         worker_agents=[
             _materialize_agent(child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases)
             for child in resource.subagents

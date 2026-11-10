@@ -7,10 +7,12 @@ from pydantic_core import PydanticSerializationError
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, FileToolDescription,
+    AgentResource, EvaluationAgentOptions, EvaluationAgentRun, EvaluationFileTool, ExternalA2AExecutionBinding,
+    FileToolDescription,
     ModelBindings, PreparedEvaluationRun, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides, ToolBinding,
 )
 from contracts.constants.environment import NEXENT_SANDBOX_DEFAULT_LEVEL
+from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.rdb.model_records import get_model_records
 
@@ -47,9 +49,9 @@ def _file_tool_binding(tool):
     return ToolBinding(tool_id=builtin.value, version="1", parameters=description.model_dump(mode="json"))
 
 
-def _export_resource(agent, aliases):
+def _export_resource(agent, aliases, tenant_id):
     if any((
-        agent.external_a2a_agents, agent.pre_run_tool_events,
+        agent.pre_run_tool_events,
         agent.sandbox_policy is not None, agent.enable_planning,
     )):
         raise ValueError("Unsupported evaluation resource")
@@ -77,7 +79,14 @@ def _export_resource(agent, aliases):
         max_steps=agent.max_steps, tools=tools, model_alias=agent.model_name,
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
         evaluation_options=EvaluationAgentOptions(**profile),
-        subagents=[_export_resource(child, aliases) for child in agent.worker_agents],
+        subagents=[_export_resource(child, aliases, tenant_id) for child in agent.worker_agents],
+        external_a2a=[
+            ExternalA2AExecutionBinding(
+                agent_id=int(external.agent_id), invocation_name=external.invocation_name,
+                revision=external_agent_execution_revision(external, tenant_id, agent.agent_id),
+            )
+            for external in agent.external_a2a_agents
+        ],
     )
 
 
@@ -108,7 +117,7 @@ def _export_model(alias, models, tenant_id):
 def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id, language):
     try:
         aliases = {}
-        resource = _export_resource(agent, aliases)
+        resource = _export_resource(agent, aliases, tenant_id)
         bindings = [_export_model(alias, models, tenant_id) for alias in aliases]
         return PreparedEvaluationRun(
             mode="nexent", language=language, conversation_id=conversation_id, resource=resource,

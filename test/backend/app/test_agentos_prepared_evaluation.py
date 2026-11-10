@@ -281,3 +281,70 @@ def test_runtime_rejects_child_model_scope_or_revision_before_worker_creation(mo
     assert error.value.status_code == status
     assert [call.args for call in lookup.call_args_list] == [(11, "tenant-a"), (12, "tenant-a")]
     build.assert_not_called()
+
+
+@pytest.mark.parametrize(("change", "expected"), [
+    ("none", None), ("unlinked", 404), ("tenant", 404),
+    ("credentials", 409), ("endpoint", 409), ("duplicate", 422),
+])
+def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, expected):
+    from fastapi import HTTPException
+
+    from infrastructure.a2a_execution import build_external_agent_config
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+
+    mocker.patch("contracts.constants.environment.JWT_SECRET", "synthetic-agentos-a2a-key")
+    row = {
+        "external_agent_id": 19, "name": "Peer", "description": "External peer",
+        "agent_url": "https://external.example/private-endpoint",
+        "security_schemes": {"auth": {"scheme": "Bearer"}},
+        "security_requirements": [{"schemes": {"auth": []}}],
+        "security_credentials": {"auth": "credential-stays-in-runtime"},
+        "raw_card": {"skills": [{"name": "Peer skill"}]},
+    }
+    configured = build_external_agent_config(row, row["agent_url"]).model_copy(update={"invocation_name": "remote_peer"})
+    model_row = model_record(model_id=11)
+    model = create_model_config_from_record(model_row)
+    child = AgentConfig(
+        agent_id=7, version_no=2, name="child", description="", tools=[], model_name=model.cite_name,
+        external_a2a_agents=[configured],
+    )
+    root = AgentConfig(
+        agent_id=8, version_no=1, name="root", description="", tools=[], model_name=model.cite_name,
+        worker_agents=[child],
+    )
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[model_row])
+    snapshot = export_snapshot(root, [model], "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
+    assert snapshot is not None
+    encoded = snapshot.model_dump_json()
+    for sensitive in (row["agent_url"], "credential-stays-in-runtime", "raw_card", "security_credentials", "custom_headers"):
+        assert sensitive not in encoded
+    restored = PreparedEvaluationRun.model_validate_json(encoded)
+    model_lookup = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id", return_value=model_row)
+    tenant = "tenant-b" if change == "tenant" else "tenant-a"
+    rows = {19: row}
+    if change in {"unlinked", "tenant"}:
+        rows = {}
+    elif change == "credentials":
+        rows = {19: row | {"security_credentials": {"auth": "rotated"}}}
+    elif change == "endpoint":
+        rows = {19: row | {"agent_url": "https://replacement.example"}}
+    elif change == "duplicate":
+        restored.resource.subagents[0].external_a2a *= 2
+    reader = mocker.patch("runtime.agentos.prepared_evaluation.read_external_agent_bindings", return_value=rows)
+
+    if expected is None:
+        info = prepare_evaluation_run(restored, ServicePrincipal("user-a", tenant))
+        assert info.agent_config.worker_agents[0].external_a2a_agents == [configured]
+        model_lookup.assert_called_once_with(11, tenant)
+    else:
+        with pytest.raises(HTTPException) as error:
+            prepare_evaluation_run(restored, ServicePrincipal("user-a", tenant))
+        assert error.value.status_code == expected
+        model_lookup.assert_not_called()
+    if change == "duplicate":
+        reader.assert_not_called()
+    else:
+        reader.assert_called_once_with(7, tenant, [19])

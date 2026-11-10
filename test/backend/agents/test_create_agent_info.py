@@ -6121,7 +6121,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://external.com/a2a"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6147,7 +6147,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://default.com/agent"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6176,7 +6176,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://raw.com"
 
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             call_kwargs = MockConfig.call_args[1]
@@ -6187,7 +6187,7 @@ class TestBuildExternalAgentConfig:
 
 @pytest.mark.parametrize("value", [True, False])
 def test_build_external_config_preserves_ssl_preference(value):
-    with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as config:
+    with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as config:
         _build_external_agent_config({"external_agent_id": 1, "ssl_verify": value}, "https://peer")
         assert config.call_args.kwargs["ssl_verify"] is value
 
@@ -8426,7 +8426,7 @@ class TestBuildSecurityHeaders:
             "security_requirements": [{"schemes": {"k": {}}}],
             "security_credentials": {"k": "secret-token"},
         }
-        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
+        with patch('infrastructure.a2a_execution.ExternalA2AAgentConfig') as MockConfig:
             _build_external_agent_config(agent, "http://test/a2a")
             call_kwargs = MockConfig.call_args[1]
             assert call_kwargs["custom_headers"] == {"X-Token": "secret-token"}

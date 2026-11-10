@@ -227,6 +227,12 @@ class EvaluationAgentOptions(RunSpecModel):
     verification_config: dict[str, JsonValue] | None = None
 
 
+class ExternalA2AExecutionBinding(RunSpecModel):
+    agent_id: PositiveInt
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    invocation_name: str | None = Field(default=None, min_length=1)
+
+
 class AgentResource(RunSpecModel):
     agent_id: PositiveInt
     version_no: Annotated[int, Field(ge=0)]
@@ -244,6 +250,7 @@ class AgentResource(RunSpecModel):
     knowledge_base_refs: list[str] = Field(default_factory=list)
     memory_ref: str | None = None
     subagents: list["AgentResource"] = Field(default_factory=list)
+    external_a2a: list[ExternalA2AExecutionBinding] = Field(default_factory=list)
     sandbox_policy: dict[str, JsonValue] | None = None
     evaluation_options: EvaluationAgentOptions | None = None
 

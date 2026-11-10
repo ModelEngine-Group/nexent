@@ -200,6 +200,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     from infrastructure.agent_model_config import create_model_config_from_record
     from management.services.agent import runtime_client
     from management.services.agent.preparation import evaluation_snapshot
+    from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
     from runtime.agentos import prepared_evaluation
     from runtime.executions import LocalExecutionRegistry
@@ -224,6 +225,22 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         "base_url": "https://provider.example/v1", "update_time": "revision-1",
     }
 
+    external_row = {
+        "external_agent_id": 19, "name": "External", "description": "Authorized peer",
+        "agent_url": "https://external.example/private",
+        "security_schemes": {"auth": {"scheme": "Bearer"}},
+        "security_requirements": [{"schemes": {"auth": []}}],
+        "security_credentials": {"auth": "local-peer-token"},
+    }
+    external = build_external_agent_config(external_row, external_row["agent_url"])
+    external_reads = []
+
+    def read_external(parent_id, tenant_id, ids):
+        external_reads.append((parent_id, tenant_id, ids))
+        return {19: external_row} if tenant_id == "tenant-a" else {}
+
+    monkeypatch.setattr(prepared_evaluation, "read_external_agent_bindings", read_external)
+
     async def run(info, thread_manager):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.model_config_list[0].api_key == "only-in-runtime"
@@ -233,6 +250,9 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         assert (child.agent_id, child.version_no, child.invocation_name, child.model_name) == (
             8, 5, "child_lookup", "evaluation_llm",
         )
+        peer, = child.external_a2a_agents
+        assert peer.url == "https://external.example/private"
+        assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
         access = info.agent_config.tools[0].metadata["validate_url_access"]
         access(["s3://bucket/attachments/user-a/allowed.txt"])
         with pytest.raises(PermissionError):
@@ -255,7 +275,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         prompt_templates={"system_prompt": "Answer the query"}, model_name=model.cite_name,
         worker_agents=[AgentConfig(
             agent_id=8, version_no=5, name="child", invocation_name="child_lookup",
-            description="Static child", model_name=model.cite_name, tools=[],
+            description="Static child", model_name=model.cite_name, tools=[], external_a2a_agents=[external],
         )],
         tools=[ToolConfig(
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
@@ -271,6 +291,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     assert isinstance(prepared, PreparedEvaluationRun)
     assert "/management/workspace" not in prepared.model_dump_json()
     assert "only-in-runtime" not in prepared.model_dump_json()
+    assert external_row["agent_url"] not in prepared.model_dump_json()
+    assert "local-peer-token" not in prepared.model_dump_json()
 
     async def prepare(payload, user_id, tenant_id):
         assert (payload, user_id, tenant_id) == (case, "user-a", "tenant-a")
@@ -289,6 +311,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         with pytest.raises(RuntimeUpstreamError) as refused:
             await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-b")
         assert refused.value.status_code == 404
+        external_row["security_credentials"] = {"auth": "rotated-token"}
+        with pytest.raises(RuntimeUpstreamError) as changed:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed.value.status_code == 409
+        assert "AGENTOS_EXTERNAL_AGENT_REVISION_MISMATCH" in changed.value.content.decode()
 
         async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
             response = await client.post(
@@ -296,7 +323,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
             )
             assert response.status_code == 401
 
-    assert lookups == [(11, "tenant-a"), (11, "tenant-b")]
+    assert lookups == [(11, "tenant-a")]
+    assert external_reads == [(8, "tenant-a", [19]), (8, "tenant-b", [19]), (8, "tenant-a", [19])]
     assert invocations == [("user-a", "tenant-a", -42)]
     assert registry.get_agent_run_info(-42, "user-a") is None
 
