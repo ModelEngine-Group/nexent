@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from contracts.agent import AgentInfoRequest, ExportAndImportAgentInfo, ExportAndImportDataFormat
 from contracts.authentication import AuthenticatedIdentity
-from tool_collection.mcp.nl2agent_mcp_tools import AgentDraftFields
+from management.services.agent.nl2agent_tools import AgentDraftFields
 
 
 @pytest.mark.parametrize("name", ["agent_one", "中文助手", "a" * 100])

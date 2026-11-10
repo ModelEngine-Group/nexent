@@ -36,7 +36,7 @@ from management.services.agent.nl2agent import (
     validate_agent_generation_complete_impl,
 )
 from runtime.agentos.prepared_agent_creator import _Nl2AgentBoundaryObserver
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,

@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 from contracts.agent_prompt import normalize_imported_agent_prompt
 
 

@@ -113,27 +113,17 @@ stub_uvicorn.run = MagicMock()
 sys.modules['uvicorn'] = stub_uvicorn
 
 # Stub tool_collection.mcp.local_mcp_service
-stub_nl2agent_mcp_tools = types.ModuleType(
-    "tool_collection.mcp.nl2agent_mcp_tools"
-)
-stub_nl2agent_mcp_tools.SEARCH_INSTALLED_MCP_TOOLS_NAME = (
-    "nl2a_search_installed_mcp_tools"
-)
-stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME = "nl2a_wrapper"
 stub_local_mcp = types.ModuleType("tool_collection.mcp.local_mcp_service")
 mock_local_service = MagicMock()
 mock_local_service.name = "local_mcp"
 stub_local_mcp.local_mcp_service = mock_local_service
 stub_local_mcp.LOCAL_MCP_TOOL_NAME_OVERRIDES = {
-    stub_nl2agent_mcp_tools.SEARCH_INSTALLED_MCP_TOOLS_NAME:
-        stub_nl2agent_mcp_tools.SEARCH_INSTALLED_MCP_TOOLS_NAME,
-    stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME:
-        stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME,
+    "nl2a_search_installed_mcp_tools": "nl2a_search_installed_mcp_tools",
+    "nl2a_wrapper": "nl2a_wrapper",
 }
 sys.modules['tool_collection'] = types.ModuleType("tool_collection")
 sys.modules['tool_collection.mcp'] = types.ModuleType("tool_collection.mcp")
 sys.modules['tool_collection.mcp.local_mcp_service'] = stub_local_mcp
-sys.modules['tool_collection.mcp.nl2agent_mcp_tools'] = stub_nl2agent_mcp_tools
 
 # Stub logging.config so that mcp_service.py line 22
 #   logging.config.dictConfig(get_uvicorn_logging_config(...))

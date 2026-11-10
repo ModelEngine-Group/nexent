@@ -15,7 +15,6 @@ from infrastructure.nl2agent_tool_config import (
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
-    create_nl2agent_mcp_tool_configs,
 )
 
 NL2AGENT_NAME = "__nl2agent_runtime__"
@@ -46,11 +45,11 @@ def build_nl2agent_system_prompt(
     )
 
 
-def create_nl2agent_agent_config(language: str, tools: list[ToolConfig] | None = None) -> AgentConfig:
+def create_nl2agent_agent_config(language: str, tools: list[ToolConfig]) -> AgentConfig:
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
     system_prompt = build_nl2agent_system_prompt(language)
-    tools = create_nl2agent_mcp_tool_configs() if tools is None else list(tools)
+    tools = list(tools)
     tools.append(
         ToolConfig(
             class_name=ParallelExecutorTool.__name__,

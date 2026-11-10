@@ -10,7 +10,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from infrastructure.redis.client import get_redis_client
 from nexent.core.concurrency import run_blocking
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 
 _GRANT_TTL_SECONDS = 3600
 _TOOL_ARGUMENTS = {

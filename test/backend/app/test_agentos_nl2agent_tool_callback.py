@@ -13,7 +13,7 @@ from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.api.agent import nl2agent_callback as api
 from management.services.agent import nl2agent_callback as service
 from management.services.agent import nl2agent
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 
 _ACTOR = ServicePrincipal("user-a", "tenant-a")
 _RUN_ID = "a" * 32

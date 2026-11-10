@@ -13,7 +13,7 @@ from pydantic import ConfigDict, Field, WithJsonSchema, create_model
 from contracts.agentos import MAX_REQUEST_BYTES, ManagementOperation, NL2AgentToolCall, PreparedAgentCreatorRun
 from contracts.constants.environment import MANAGEMENT_AGENTOS_URL
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
-from infrastructure.nl2agent_agent_config import create_nl2agent_agent_config
+from runtime.agentos.agent_creator_config import create_nl2agent_agent_config
 from infrastructure.nl2agent_tool_config import (
     NL2A_WRAPPER_NAME, RECOMMEND_RESOURCES_NAME, SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME, SEARCH_UNINSTALLED_RESOURCES_NAME, create_nl2agent_mcp_tool_configs,

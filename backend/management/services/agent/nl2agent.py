@@ -25,7 +25,7 @@ from management.services.knowledge_base.recommendation import (
 from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.concurrency import run_blocking
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from management.services.agent.nl2agent_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,

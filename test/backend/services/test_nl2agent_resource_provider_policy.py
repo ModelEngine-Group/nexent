@@ -7,7 +7,7 @@ from management.services.agent.nl2agent import (
     _score_resource_requirement,
     search_installed_resources_impl,
 )
-from tool_collection.mcp.nl2agent_mcp_tools import ResourceRequirement
+from management.services.agent.nl2agent_tools import ResourceRequirement
 
 
 @pytest.fixture

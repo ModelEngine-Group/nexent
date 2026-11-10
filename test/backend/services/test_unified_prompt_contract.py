@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from infrastructure.nl2agent_agent_config import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from contracts.agent import AgentImportRequest, AgentInfoRequest, ExportAndImportAgentInfo
 from infrastructure.rdb.orm import as_dict, filter_property
 from management.db.agent.models import AgentInfo
@@ -16,7 +16,7 @@ from contracts.agent_prompt import normalize_imported_agent_bundle, normalize_im
 from management.services.repository.agent.listing import _extract_root_agent_from_snapshot
 from nexent.core.utils.observer import MessageObserver
 from management.services.agent import nl2agent as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 
 
 def test_request_and_tool_accept_only_canonical_prompt():

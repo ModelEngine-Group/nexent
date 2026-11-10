@@ -193,7 +193,7 @@ async def test_recommendation_enriches_real_card_and_preserves_current_binding(
     mocker, tool_name
 ):
     from management.services.agent import nl2agent as service
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate
+    from management.services.agent.nl2agent_tools import ResourceCandidate
 
     field = "kds_list" if tool_name == "aidp_search" else "index_names"
     actual = {
@@ -261,7 +261,7 @@ async def test_recommendation_enriches_real_card_and_preserves_current_binding(
 @pytest.mark.asyncio
 async def test_no_match_keeps_generic_and_provider_error_is_retryable(mocker):
     from management.services.agent import nl2agent as service
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceCandidate
+    from management.services.agent.nl2agent_tools import ResourceCandidate
 
     actual = {
         "candidate_ref": "tool:7",
@@ -330,7 +330,7 @@ async def test_installed_search_carries_matched_intent_to_concrete_recommendatio
     mocker,
 ):
     from management.services.agent import nl2agent as service
-    from tool_collection.mcp.nl2agent_mcp_tools import ResourceRequirement
+    from management.services.agent.nl2agent_tools import ResourceRequirement
 
     actual = {
         "candidate_ref": "tool:7",

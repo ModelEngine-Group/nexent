@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from infrastructure.nl2agent_agent_config import build_nl2agent_system_prompt
+from runtime.agentos.agent_creator_config import build_nl2agent_system_prompt
 from management.services.agent import nl2agent as service
-from tool_collection.mcp import nl2agent_mcp_tools as tools
+from management.services.agent import nl2agent_tools as tools
 
 FIELD = "enable_protocol_repair_retry"
 
