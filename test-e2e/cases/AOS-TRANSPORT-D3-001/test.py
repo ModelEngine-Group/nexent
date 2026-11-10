@@ -1586,10 +1586,12 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock, Mock
 
     from contracts.agent import AgentRequest
+    from contracts.agentos import AgentMemoryReceipt, PreparedMemorySearch
     from contracts.conversation import MessageSource
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
     from management.services.automation import runner as automation
     from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.agent_tool_config import build_store_memory_tool
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
@@ -1598,8 +1600,9 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
     from nexent.core.tools.run_skill_script_tool import RunSkillScriptTool
+    from nexent.core.tools.store_memory_tool import StoreMemoryTool
     from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool
-    from runtime.agentos import prepared_evaluation, prepared_run, resume
+    from runtime.agentos import prepared_evaluation, prepared_memory, prepared_run, resume
 
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     actor = ServicePrincipal("user-a", "tenant-a")
@@ -1609,6 +1612,9 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
     finished = threading.Event()
     persisted = []
     uploaded = []
+    search = PreparedMemorySearch(query="question", result="Found 1 memory")
+    local_store = AsyncMock(return_value=AgentMemoryReceipt(memory_id=17, event="ADD"))
+    monkeypatch.setattr(prepared_memory, "get_memory_store_service", lambda: SimpleNamespace(store=local_store))
 
     def owns(conversation_id, *, user_id, tenant_id):
         return (conversation_id, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id)
@@ -1656,9 +1662,16 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
     async def compile_agent(**kwargs):
         assert kwargs["portable_evaluation"] and kwargs["version_no"] == 3
+        assert kwargs["allow_memory_search"] is True
         return AgentConfig(
             name="agent", description="", agent_id=7, version_no=3,
-            model_name="test-model", prompt_templates={"system_prompt": "Answer"}, tools=[],
+            model_name="test-model", prompt_templates={"system_prompt": "Answer"},
+            tools=[build_store_memory_tool({"memory_service": object()})],
+            context_items=[{
+                "id": "memory:0", "type": "memory", "content": {"memory": "authorized preference"},
+                "metadata": {"authority": "retrieved"},
+            }],
+            pre_run_tool_events=search.observer_events(),
         )
 
     def read_conversation(conversation_id, *, user_id, tenant_id):
@@ -1668,7 +1681,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
     monkeypatch.setattr(evaluation_snapshot, "run_blocking", control_io)
     monkeypatch.setattr(evaluation_snapshot, "get_conversation", read_conversation)
-    monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda _user: False)
+    monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda user: user == actor.user_id)
 
     def read_history(conversation_id, boundary_id, user_id, tenant_id):
         assert (conversation_id, boundary_id, user_id, tenant_id) == (42, 23, actor.user_id, actor.tenant_id)
@@ -1696,9 +1709,12 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             generation_config={"temperature": 0.45},
         ),
         reference, actor.user_id, actor.tenant_id, language="en", current_user_message_id=23,
+        allow_prepared_memory=True,
     )
     assert isinstance(request, PreparedAgentRun)
     assert request.resource.version_no == 3
+    assert request.resource.memory_search == search
+    assert request.resource.tools[0].parameters == {}
     assert "synthetic-provider-secret" not in request.model_dump_json()
 
     async def hydrate(payload, signed_actor, materialize):
@@ -1713,6 +1729,14 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         assert info.model_config_list[0].enable_thinking is True
         assert "temperature" not in info.model_config_list[0].extra_body
         assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
+        memory_item = next(item for item in info.context_input.items if item.id == "memory:0")
+        assert memory_item.content["memory"] == "authorized preference"
+        store, = info.agent_config.tools
+        tool = StoreMemoryTool(**store.metadata)
+        assert "Stored successfully" in await asyncio.to_thread(tool.forward, "remembered")
+        local_store.assert_awaited_once()
+        scoped, owner = local_store.await_args.args
+        assert (owner, scoped.agent_id, scoped.conversation_id, scoped.content) == (actor, 7, 42, "remembered")
         calls.append("started")
         yield '{"type":"thought","content":"step"}'
         yield '{"type":"final_answer","content":"answer"}'
@@ -1826,14 +1850,18 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id)
         assert duplicate.value.status_code == 409
 
-        cursor = AgentResume(**reference.model_dump(), after_event_id=f"{reference.run_id}:1")
+        original = await agentos.resume(AgentResume(**reference.model_dump()), actor.user_id, actor.tenant_id)
+        events = b"".join([chunk async for chunk in original.body_iterator]).decode()
+        assert [json.loads(line.removeprefix("data: ")) for line in events.splitlines()
+                if line.startswith("data: ")][:2] == search.observer_events()
+        cursor = AgentResume(**reference.model_dump(), after_event_id=f"{reference.run_id}:3")
         replay = await agentos.resume(cursor, actor.user_id, actor.tenant_id)
         body = b"".join([chunk async for chunk in replay.body_iterator]).decode()
         assert body.startswith(
-            f"id: {reference.run_id}:2\nevent: agentos_observer\n"
+            f"id: {reference.run_id}:4\nevent: agentos_observer\n"
             'data: {"type":"final_answer","content":"answer"}\n\n'
         )
-        assert body.endswith(f'id: {reference.run_id}:5\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
+        assert body.endswith(f'id: {reference.run_id}:7\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
         assert "absolute_path" not in body and '"type":"file_artifact"' in body
 
         def sign_outputs(artifacts):
@@ -1859,12 +1887,12 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             )
         assert public.status_code == 200 and public.headers["X-AgentOS-Run-ID"] == reference.run_id
         assert public.text.startswith(
-            f'id: {reference.run_id}:2\ndata: {{"type":"final_answer","content":"answer"}}\n\n'
+            f'id: {reference.run_id}:4\ndata: {{"type":"final_answer","content":"answer"}}\n\n'
         )
-        assert f"id: {reference.run_id}:3\ndata: " in public.text
+        assert f"id: {reference.run_id}:5\ndata: " in public.text
         assert '"type":"files"' in public.text and "https://synthetic.test/ready" in public.text
         assert all(label not in public.text for label in ("agentos_observer", "file_artifact", "absolute_path"))
-        assert public.text.endswith(f'id: {reference.run_id}:5\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
+        assert public.text.endswith(f'id: {reference.run_id}:7\nevent: agentos_terminal\ndata: {{"status": "completed"}}\n\n')
         assert foreign_public.status_code == 404 and foreign_public.json()["detail"]["code"] == "AGENTOS_RUN_NOT_FOUND"
 
         def persist(**fields):
@@ -1904,8 +1932,11 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             "object_name": key, "name": "report.txt", "type": "file",
             "size": 6, "url": f"s3://bucket/{key}", "description": "",
         }]
-        assert [(unit["unit_index"], unit["unit_content"]) for unit in batch["message_units"]] == [
-            (0, "step"), (1, "answer"),
+        assert [(unit["unit_index"], unit["unit_type"]) for unit in batch["message_units"]] == [
+            (0, "tool"), (1, "execution_logs"), (2, "thought"), (3, "final_answer"),
+        ]
+        assert [(unit["unit_index"], unit["unit_content"]) for unit in batch["message_units"][1:]] == [
+            (1, search.result), (2, "step"), (3, "answer"),
         ]
 
         denied = await agentos.resume(cursor, "user-b", actor.tenant_id)

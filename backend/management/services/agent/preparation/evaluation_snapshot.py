@@ -14,7 +14,7 @@ from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
-    SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
+    PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
 )
 from contracts.constants import environment
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
@@ -30,8 +30,8 @@ from infrastructure.agent_model_overrides import (
     apply_turn_model_generation, get_provider_body_patch, merge_provider_body, overlay_root_model, provider_body_revision,
 )
 from infrastructure.agent_tool_config import (
-    AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, build_automation_proposal_tool,
-    build_parallel_executor_tool_config, build_plan_tool_configs,
+    AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, STORE_MEMORY_TOOL, build_automation_proposal_tool,
+    build_parallel_executor_tool_config, build_plan_tool_configs, build_store_memory_tool,
 )
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
@@ -260,6 +260,7 @@ async def prepare_conversation_snapshot(
     before_message_index: int | None = None, new_conversation: bool = False,
     allow_metadata_update: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
+    allow_prepared_memory: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -285,9 +286,10 @@ async def prepare_conversation_snapshot(
         ),
     )):
         return None
-    if await run_blocking(
+    memory_enabled = await run_blocking(
         "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
-    ):
+    )
+    if memory_enabled and not allow_prepared_memory:
         return None
 
     compile_options = {}
@@ -358,7 +360,7 @@ async def prepare_conversation_snapshot(
     return await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(request.query, timezone, language=language), history=request.history,
-        tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False,
+        tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=memory_enabled,
         override_version_no=request.version_no, override_model_id=request.model_id,
         reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
@@ -467,9 +469,28 @@ def _export_skill_bindings(agent, tenant_id, context_items):
     ]
 
 
-def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False):
-    if agent.pre_run_tool_events or agent.sandbox_policy is not None:
+def _export_memory_search(agent, allow_memory):
+    events = agent.pre_run_tool_events
+    if not events:
+        return None
+    if not allow_memory or len(events) != 2:
         raise ValueError("Unsupported prepared resource")
+    tool, result = events
+    arguments = tool.get("tool_arguments")
+    if not isinstance(arguments, dict):
+        raise ValueError("Invalid prepared Memory search")
+    search = PreparedMemorySearch(query=arguments.get("query"), result=result.get("content"))
+    if events != search.observer_events():
+        raise ValueError("Invalid prepared Memory search")
+    return search
+
+
+def _export_resource(
+    agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
+):
+    if agent.sandbox_policy is not None:
+        raise ValueError("Unsupported prepared resource")
+    memory_search = _export_memory_search(agent, allow_memory)
     plan_tools = [tool for tool in agent.tools if tool.name in PLAN_TOOL_NAMES]
     if plan_tools or agent.enable_planning:
         if not (allow_public_tools and agent.enable_planning and len(plan_tools) == len(PLAN_TOOL_NAMES)):
@@ -543,6 +564,8 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in PLAN_TOOL_NAMES or tool.name == AUTOMATION_PROPOSAL_TOOL:
             binding = ToolBinding(tool_id=tool.name, version="1")
+        elif tool.name == STORE_MEMORY_TOOL and allow_memory and tool == build_store_memory_tool(tool.metadata):
+            binding = ToolBinding(tool_id=STORE_MEMORY_TOOL, version="1")
         elif tool.name in set(EvaluationSkillTool):
             binding = _builtin_binding(tool)
         else:
@@ -556,7 +579,9 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
         for key in ("history_summary_sink", "history_summary_status_sink"):
             if context_config.pop(key, None) is not None:
                 raise ValueError("Unsupported evaluation callback")
-    if any(item["type"] in {"memory", "long_term_memory"} for item in profile.get("context_items") or []):
+    if memory_search is None and any(
+        item["type"] in {"memory", "long_term_memory"} for item in profile.get("context_items") or []
+    ):
         raise ValueError("Unsupported evaluation context")
 
     aliases.setdefault(agent.model_name, None)
@@ -565,8 +590,12 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
         description=agent.description, prompt_templates=agent.prompt_templates or {},
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
+        memory_search=memory_search,
         evaluation_options=EvaluationAgentOptions(**profile),
-        subagents=[_export_resource(child, aliases, tenant_id, language, read_servers, tool_servers) for child in agent.worker_agents],
+        subagents=[
+            _export_resource(child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory)
+            for child in agent.worker_agents
+        ],
         external_a2a=[
             ExternalA2AExecutionBinding(
                 agent_id=int(external.agent_id), invocation_name=external.invocation_name,
@@ -630,6 +659,7 @@ def export_snapshot(
         resource = _export_resource(
             agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {},
             allow_public_tools=prepared_conversation is not None,
+            allow_memory=prepared_conversation is not None,
         )
         bindings = [
             _export_model(

@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pydantic import ValidationError
 
-from contracts.agentos import AgentMemoryStore
+from contracts.agentos import AgentMemoryReceipt, AgentMemoryStore, AgentResource, PreparedMemorySearch, ToolBinding
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.memory.embedding_model import EmbeddingModelInfo
-from runtime.agentos import memory
+from runtime.agentos import memory, prepared_memory
 
 
 @pytest.fixture
@@ -98,3 +98,42 @@ async def test_embedding_and_index_errors_preserve_database_receipt(store):
 def test_request_rejects_unsigned_scope_and_nonfinite_vectors(extra):
     with pytest.raises(ValidationError):
         AgentMemoryStore(agent_id=7, content="remember", idempotency_key="one", **extra)
+
+
+@pytest.mark.asyncio
+async def test_prepared_store_ignores_identity_in_sdk_payload(monkeypatch):
+    local = AsyncMock(return_value=AgentMemoryReceipt(memory_id=17, event="ADD"))
+    monkeypatch.setattr(prepared_memory, "get_memory_store_service", lambda: SimpleNamespace(store=local))
+    actor = ServicePrincipal("user-a", "tenant-a")
+    search = PreparedMemorySearch(query="question", result="Found 1 memory")
+    resource = AgentResource(
+        agent_id=8, version_no=1, name="child", description="", prompt_templates={},
+        memory_search=search, tools=[ToolBinding(tool_id="store_memory", version="1")],
+    )
+
+    tools, events = prepared_memory.materialize_memory(resource, actor, 42)
+    bound = tools["store_memory"]
+    result = await bound.metadata["memory_service"].backend_store({
+        "agent_id": "7", "conversation_id": "99", "user_id": "foreign", "tenant_id": "foreign",
+        "content": "remember", "idempotency_key": "one",
+    })
+
+    assert events == search.observer_events()
+    assert result["memory_id"] == 17
+    assert local.await_args.args == (
+        AgentMemoryStore(agent_id=8, conversation_id=42, content="remember", idempotency_key="one"), actor,
+    )
+
+
+@pytest.mark.parametrize("conversation_id, credentials, params, error", [
+    (None, None, {}, "persistent conversation"),
+    (42, "not-allowed", {}, "store binding"),
+    (42, None, {"agent_id": 7}, "store binding"),
+])
+def test_prepared_memory_rejects_ephemeral_and_tool_overrides(conversation_id, credentials, params, error):
+    resource = AgentResource(
+        agent_id=8, version_no=1, name="child", description="", prompt_templates={},
+        tools=[ToolBinding(tool_id="store_memory", version="1", credential_ref=credentials, parameters=params)],
+    )
+    with pytest.raises(ValueError, match=error):
+        prepared_memory.materialize_memory(resource, ServicePrincipal("user-a", "tenant-a"), conversation_id)

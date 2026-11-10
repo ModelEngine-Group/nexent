@@ -429,6 +429,18 @@ class ExternalA2AExecutionBinding(RunSpecModel):
     invocation_name: str | None = Field(default=None, min_length=1)
 
 
+class PreparedMemorySearch(RunSpecModel):
+    query: str = Field(max_length=65536)
+    result: str = Field(max_length=131072)
+
+    def observer_events(self) -> list[dict[str, JsonValue]]:
+        return [
+            {"type": "tool", "content": "", "tool_name": "search_memory",
+             "tool_arguments": {"query": self.query, "top_k": 5}},
+            {"type": "execution_logs", "content": self.result},
+        ]
+
+
 class AgentResource(RunSpecModel):
     agent_id: PositiveInt
     version_no: Annotated[int, Field(ge=0)]
@@ -445,6 +457,7 @@ class AgentResource(RunSpecModel):
     mcp_server_refs: list[str] = Field(default_factory=list)
     knowledge_base_refs: list[str] = Field(default_factory=list)
     memory_ref: str | None = None
+    memory_search: PreparedMemorySearch | None = None
     subagents: list["AgentResource"] = Field(default_factory=list)
     external_a2a: list[ExternalA2AExecutionBinding] = Field(default_factory=list)
     sandbox_policy: dict[str, JsonValue] | None = None

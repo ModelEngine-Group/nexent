@@ -3,7 +3,7 @@
 
 import logging
 import math
-from functools import partial
+from functools import cache, partial
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
@@ -15,6 +15,7 @@ from contracts.agentos import (
 from contracts.constants import environment
 from infrastructure.agent_model_config import model_record_revision
 from infrastructure.agentos_identity import ServicePrincipal
+from infrastructure.model_adapter import get_adapter_from_config
 from infrastructure.rdb.memory_store import (
     MemoryStoreConflictError, MemoryStoreScopeError, find_existing_memory, mirror_current_memory,
     read_memory_embedding_model_id, write_agent_memory,
@@ -24,6 +25,7 @@ from infrastructure.vdb.client import create_elasticsearch_core
 from infrastructure.vdb.memory_index import MemoryIndexService
 from nexent.core.concurrency import run_blocking
 from nexent.memory.embedding_model import EmbeddingModelInfo
+from runtime.model.service import ModelService
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +106,23 @@ class MemoryStoreModelError(ValueError):
     """The Memory store cannot use the selected embedding model or supplied vector."""
 
 
-def create_memory_store_router(model_service, index_service=None) -> APIRouter:
+def _build_memory_store_service(model_service, index_service=None):
     if index_service is None:
         index_service = MemoryIndexService(create_core=lambda: create_elasticsearch_core(
             host=environment.ES_HOST, api_key=environment.ES_API_KEY,
         ))
-    service = AgentMemoryStoreService(model_service, index_service)
+    return AgentMemoryStoreService(model_service, index_service)
+
+
+@cache
+def get_memory_store_service() -> AgentMemoryStoreService:
+    return _build_memory_store_service(ModelService(get_model_by_model_id, get_adapter_from_config))
+
+
+def create_memory_store_router(model_service=None, index_service=None) -> APIRouter:
+    service = get_memory_store_service() if model_service is None else _build_memory_store_service(
+        model_service, index_service,
+    )
     router = APIRouter()
 
     @router.post(MemoryOperation.STORE.value, include_in_schema=False)

@@ -60,3 +60,43 @@ def build_automation_proposal_tool(callback=None) -> ToolConfig:
         usage="builtin",
         metadata={"create_proposal": callback} if callback is not None else None,
     )
+
+
+STORE_MEMORY_TOOL = "store_memory"
+
+
+def build_store_memory_tool(memory_metadata: dict | None) -> ToolConfig:
+    return ToolConfig(
+        class_name="StoreMemoryTool",
+        name=STORE_MEMORY_TOOL,
+        description=(
+            "Store one model-selected and summarized short-term memory extracted only "
+            "from the conversation between the user and the current agent. Eligible "
+            "information is limited to process-level observations made during intermediate "
+            "action steps: user preferences, task goals, action plans and latest progress, "
+            "or reflections on user feedback and errors. Do not store whole conversations, "
+            "transient calculations, unverified guesses, duplicates, secrets, or information "
+            "the user asks to forget. Call this tool only during intermediate action steps, "
+            "not when generating the final answer."
+        ),
+        inputs=json.dumps(
+            {
+                "content": {
+                    "type": "string",
+                    "description": (
+                        "One concise, reusable short-term memory entry already judged, "
+                        "summarized, and deduplicated by the model"
+                    ),
+                    "description_zh": (
+                        "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                    ),
+                }
+            },
+            ensure_ascii=False,
+        ),
+        output_type="string",
+        params={},
+        source="local",
+        usage=None,
+        metadata=memory_metadata,
+    )

@@ -126,9 +126,8 @@ app.include_router(create_background_router(
     run_agentos_background, inspect_agentos_conversation, tracked_run=run_agentos_tracked_background,
 ))
 
-model_service = ModelService(get_model_by_model_id, get_adapter_from_config)
-app.include_router(create_model_router(model_service))
-app.include_router(create_memory_store_router(model_service))
+app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
+app.include_router(create_memory_store_router())
 app.include_router(create_model_administration_router())
 app.include_router(agent_router)
 app.include_router(create_evaluation_router())

@@ -111,6 +111,9 @@ case:
   - order: 28
     action: Store Agent Memory through the Management SDK bridge, retry, and try an unauthorized conversation and unsigned request.
     expected: Runtime uses the signed scope for one Model invocation and one write. Replay keeps the original ID and rejected calls do not write.
+  - order: 29
+    action: Submit a signed prepared conversation containing authorized Memory and execute its bound SDK store tool.
+    expected: Runtime reconstructs the tool for the signed owner and journals search events before model events.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -141,6 +144,7 @@ case:
   - A debug run has no persistent conversation and releases its worker and temporary resources after scoped cancellation.
   - Native knowledge scope preserves the public warning without leaking the revoked index into Runtime.
   - Agent Memory store preserves the receipt on replay and does not dispatch untrusted or out-of-scope writes.
+  - Prepared Memory preserves retrieved context, search event order and the signed scope of a local store.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -348,4 +352,9 @@ case:
     description: The Management SDK bridge stores Agent Memory through the signed Runtime endpoint with scoped idempotency.
     steps: [28]
     expected_results: [29]
+    forbidden_side_effects: [1, 2]
+  - id: AC-38
+    description: Signed prepared runs carry authorized Memory context and locally bind the store tool to the conversation actor.
+    steps: [29]
+    expected_results: [30]
     forbidden_side_effects: [1, 2]

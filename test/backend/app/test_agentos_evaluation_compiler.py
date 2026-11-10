@@ -305,7 +305,8 @@ def test_parallel_executor_rejects_nonpositive_or_coerced_timeout(mocker, value)
 
 
 @pytest.mark.asyncio
-async def test_prepared_conversation_scope_is_checked_before_compilation(mocker):
+@pytest.mark.parametrize("allow_prepared_memory", [False, True])
+async def test_prepared_conversation_scope_is_checked_before_compilation(mocker, allow_prepared_memory):
     from contracts.errors.exceptions import ForbiddenError
 
     read = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value=None)
@@ -314,7 +315,9 @@ async def test_prepared_conversation_scope_is_checked_before_compilation(mocker)
     request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
 
     with pytest.raises(ForbiddenError):
-        await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "foreign")
+        await evaluation_snapshot.prepare_conversation_snapshot(
+            request, reference, "actor", "foreign", allow_prepared_memory=allow_prepared_memory,
+        )
     read.assert_called_once_with(42, user_id="actor", tenant_id="foreign")
     compile_run.assert_not_called()
 

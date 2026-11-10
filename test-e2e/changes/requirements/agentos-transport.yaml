@@ -25,6 +25,7 @@ change:
     behaviors:
     - Service credential binds the exact operation and payload and expires.
     - Agent Memory stores validate the signed scope and idempotency before invoking the Runtime model or writing.
+    - Prepared runs accept typed Memory only in a persistent conversation and bind writes to the local signed Agent and owner.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.

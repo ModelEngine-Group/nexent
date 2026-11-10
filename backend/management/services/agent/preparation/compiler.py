@@ -2,7 +2,6 @@
 
 """Compile the current Nexent configuration from Management-owned resources."""
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +12,9 @@ from contracts.constants.environment import (
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import WorkbenchError
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_tool_config import build_automation_proposal_tool, build_parallel_executor_tool_config
+from infrastructure.agent_tool_config import (
+    build_automation_proposal_tool, build_parallel_executor_tool_config, build_store_memory_tool,
+)
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -447,41 +448,7 @@ async def create_agent_config(
                     )
 
             if memory_service is not None:
-                store_tool_config = ToolConfig(
-                    class_name="StoreMemoryTool",
-                    name="store_memory",
-                    description=(
-                        "Store one model-selected and summarized short-term memory extracted only "
-                        "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to process-level observations made during intermediate "
-                        "action steps: user preferences, task goals, action plans and latest progress, "
-                        "or reflections on user feedback and errors. Do not store whole conversations, "
-                        "transient calculations, unverified guesses, duplicates, secrets, or information "
-                        "the user asks to forget. Call this tool only during intermediate action steps, "
-                        "not when generating the final answer."
-                    ),
-                    inputs=json.dumps(
-                        {
-                            "content": {
-                                "type": "string",
-                                "description": (
-                                    "One concise, reusable short-term memory entry already judged, "
-                                    "summarized, and deduplicated by the model"
-                                ),
-                                "description_zh": (
-                                    "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                                ),
-                            }
-                        },
-                        ensure_ascii=False,
-                    ),
-                    output_type="string",
-                    params={},
-                    source="local",
-                    usage=None,
-                    metadata=memory_metadata,
-                )
-                tool_list.append(store_tool_config)
+                tool_list.append(build_store_memory_tool(memory_metadata))
 
             if memory_context_service is not None:
                 fixed_search_tool = _create_fixed_search_memory_tool()

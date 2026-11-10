@@ -58,6 +58,7 @@ from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
+from runtime.agentos.prepared_memory import materialize_memory
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
@@ -161,7 +162,7 @@ def _materialize_external_agents(resource, actor):
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
-    root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False,
+    root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False, memory_conversation_id=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -189,6 +190,8 @@ def _materialize_agent(
         resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
     )
     local_tools.update(materialize_automation_tool(resource, actor, public_reference))
+    memory_tools, pre_run_tool_events = materialize_memory(resource, actor, memory_conversation_id)
+    local_tools.update(memory_tools)
     if plan_bindings:
         local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
     local_tools.update(materialize_local_tools(
@@ -223,6 +226,7 @@ def _materialize_agent(
         name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
         agent_id=resource.agent_id, version_no=resource.version_no, tools=tools, model_name=alias,
         max_steps=resource.max_steps, origin=resource.origin, enable_planning=bool(plan_bindings),
+        pre_run_tool_events=pre_run_tool_events,
         invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}" if legacy_root else resource.invocation_name,
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
         external_a2a_agents=_materialize_external_agents(resource, actor),
@@ -231,6 +235,7 @@ def _materialize_agent(
                 child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
                 language=language, sandbox_enabled=sandbox_enabled, publish_skill_artifacts=publish_skill_artifacts,
                 root_only_alias=root_only_alias, native_knowledge=native_knowledge,
+                memory_conversation_id=memory_conversation_id,
             )
             for child in resource.subagents
         ],
@@ -352,6 +357,7 @@ def prepare_run_snapshot(
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,
+                memory_conversation_id=payload.conversation_id if isinstance(payload, PreparedAgentRun) else None,
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")

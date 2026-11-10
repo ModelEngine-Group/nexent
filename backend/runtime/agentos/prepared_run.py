@@ -40,6 +40,14 @@ async def _wait_for_stop(identity):
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
+async def _snapshot_chunks(info):
+    for event in info.agent_config.pre_run_tool_events:
+        yield json.dumps(event, ensure_ascii=False)
+    async with aclosing(agent_run(info, thread_manager=runtime_thread_manager)) as chunks:
+        async for chunk in chunks:
+            yield chunk
+
+
 async def _run_snapshot(payload, actor, identity, journal):
     info = await load_prepared_run(payload, actor, prepare_run_snapshot)
     try:
@@ -70,7 +78,7 @@ async def _run_snapshot(payload, actor, identity, journal):
             status = "stopped"
             return status
         index = 0
-        async with aclosing(agent_run(info, thread_manager=runtime_thread_manager)) as chunks:
+        async with aclosing(_snapshot_chunks(info)) as chunks:
             async for chunk in chunks:
                 # Re-encode JSON to keep each payload within one SSE data line.
                 observer_event = json.loads(chunk)
