@@ -722,6 +722,7 @@ from management.services.agent.service import (
     clear_agent_new_mark_impl,
 )
 from management.services.agent.run import save_messages, prepare_agent_run, stop_agent_tasks
+from contracts.constants.constants import STREAM_STATUS_EVENT
 from management.services.agent.subscription import run_agent_stream, _resolve_user_tenant_language
 from test.backend.services.agent_legacy_helpers import (
     delete_related_agent_impl,
@@ -15543,7 +15544,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
     assert result.headers['X-Stream-Status'] == 'resumed'
     assert result.headers['X-Accel-Buffering'] == 'no'
     assert result.headers['X-Last-Unit-Index'] == '5'
-    assert chunks[0] == agent_subscription.STREAM_STATUS_EVENT
+    assert chunks[0] == STREAM_STATUS_EVENT
     assert '"replay_chunk_count": 2' in chunks[1]
     assert 'old' in ''.join(chunks)
     assert 'new' in ''.join(chunks)
@@ -15579,7 +15580,7 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
         async for chunk in result.body_iterator:
             chunks.append(chunk)
     assert result.status_code == 200
-    assert chunks[0] == agent_subscription.STREAM_STATUS_EVENT
+    assert chunks[0] == STREAM_STATUS_EVENT
     assert '"replay_chunk_count": 0' in chunks[1]
     assert '"status": "stopped"' in chunks[-1]
 
@@ -15614,10 +15615,10 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
         async for chunk in result.body_iterator:
             chunks.append(chunk)
     assert result.status_code == 200
-    assert chunks[0] == agent_subscription.STREAM_STATUS_EVENT
+    assert chunks[0] == STREAM_STATUS_EVENT
     assert '"replay_chunk_count": 1' in chunks[1]
     assert 'from-channel' in chunks[2]
-    assert chunks[-2] == agent_subscription.STREAM_STATUS_EVENT
+    assert chunks[-2] == STREAM_STATUS_EVENT
     assert '"status": "completed"' in chunks[-1]
 
 
