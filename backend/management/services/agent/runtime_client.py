@@ -1,27 +1,72 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management AgentOS calls for Agent execution."""
 
+import logging
 from collections.abc import Awaitable, Callable
 
+from anyio import CancelScope
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from redis.exceptions import RedisError
 
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResume, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
+    WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError, WorkbenchError
+from infrastructure.agentos_identity import ServicePrincipal
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
     active_run_error_response, knowledge_scope_event_content, present_ephemeral_stream, present_public_resume,
 )
+from management.services.agent.workbench_debug_grant import (
+    WorkbenchDebugGrantUnavailable, close_workbench_debug_grant, open_workbench_debug_grant,
+)
+from nexent.core.concurrency import run_blocking
+
+logger = logging.getLogger(__name__)
 
 
 def _agentos_client() -> AgentOSClient:
     return AgentOSClient(RUNTIME_SERVICE_URL, create_httpx_client)
+
+
+async def _run_prepared_debug(client, prepared, user_id, tenant_id):
+    payload = prepared.payload
+    if prepared.workbench is None or not payload.resource.workbench_skill_refs:
+        return await client.run_ephemeral(payload, user_id, tenant_id)
+
+    scope = WorkbenchDebugSkillLookup(
+        run_id=payload.run_id, agent_id=payload.resource.agent_id, agent_version=payload.resource.version_no,
+    )
+    mounts = WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in prepared.workbench.skill_mounts])
+    granted = False
+    try:
+        with CancelScope(shield=True):
+            try:
+                await run_blocking(
+                    "open-workbench-debug-grant", open_workbench_debug_grant,
+                    scope, ServicePrincipal(user_id, tenant_id), mounts, lane="control-io", owner="management",
+                )
+            except (RedisError, WorkbenchDebugGrantUnavailable) as exc:
+                raise HTTPException(status_code=503, detail={"code": "AGENTOS_WORKBENCH_SCOPE_UNAVAILABLE"}) from exc
+            granted = True
+        # Runtime resolves the mounted files and tool bindings before opening the SSE response.
+        return await client.run_ephemeral(payload, user_id, tenant_id)
+    finally:
+        if granted:
+            with CancelScope(shield=True):
+                try:
+                    await run_blocking(
+                        "close-workbench-debug-grant", close_workbench_debug_grant,
+                        payload.run_id, lane="control-io", owner="management",
+                    )
+                except (RedisError, WorkbenchDebugGrantUnavailable):
+                    logger.warning("Workbench debug grant will expire run_id=%s", payload.run_id)
 
 
 async def forward_agent_run(
@@ -95,7 +140,7 @@ async def forward_conversation_run(
         except WorkbenchError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if prepared is not None:
-            response = await client.run_ephemeral(prepared.payload, user_id, tenant_id)
+            response = await _run_prepared_debug(client, prepared, user_id, tenant_id)
             opening = []
             if prepared.workbench is not None:
                 opening.append({"type": "workbench_config_resolved", "content": {

@@ -233,6 +233,47 @@ async def test_debug_scope_does_not_mask_runtime_rejection():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_workbench_debug_skill_grant_wraps_runtime_preparation(mocker, failed):
+    from contracts.agent import WorkbenchSessionConfig
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+
+    scope_calls = []
+    prepare = SimpleNamespace(
+        payload=SimpleNamespace(
+            run_id=CURSOR.run_id, resource=SimpleNamespace(agent_id=7, version_no=3, workbench_skill_refs=[object()]),
+        ),
+        workbench=WorkbenchSessionConfig(mode="generic_chat", skill_mounts=[{"skill_id": 5}]),
+    )
+
+    async def grant_io(_task, function, *args, **kwargs):
+        scope_calls.append((function, args))
+
+    mocker.patch.object(runtime_client, "run_blocking", side_effect=grant_io)
+
+    async def dispatch(payload, user, tenant):
+        assert payload is prepare.payload
+        assert len(scope_calls) == 1
+        fn, (scope, actor, mounts) = scope_calls[0]
+        assert fn is runtime_client.open_workbench_debug_grant
+        assert (scope.run_id, scope.agent_id, scope.agent_version) == (CURSOR.run_id, 7, 3)
+        assert (actor.user_id, actor.tenant_id) == (user, tenant)
+        assert mounts.mounts[0].skill_id == 5
+        if failed:
+            raise RuntimeServiceUnavailableError("upstream failed")
+        return result
+
+    result = response(b"data: {}\n\n")
+    client = SimpleNamespace(run_ephemeral=dispatch)
+    if failed:
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await runtime_client._run_prepared_debug(client, prepare, "actor", "tenant")
+    else:
+        assert await runtime_client._run_prepared_debug(client, prepare, "actor", "tenant") is result
+    assert scope_calls[1:] == [(runtime_client.close_workbench_debug_grant, (CURSOR.run_id,))]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("resume,is_debug", [(False, False), (False, True), (True, False)])
 async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, resume, is_debug):
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", False)

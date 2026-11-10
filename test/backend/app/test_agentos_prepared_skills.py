@@ -263,7 +263,7 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
 
     calls = []
 
-    def materialize_skills(resource, actor, path, *, publish_artifacts, public_reference, workbench_version):
+    def materialize_skills(resource, actor, path, *, publish_artifacts, public_reference, workbench_version, debug_run_id):
         calls.append(publish_artifacts)
         return {}, []
 
@@ -284,7 +284,8 @@ def test_prepared_skill_tools_only_enable_artifact_publication_for_conversations
 @pytest.mark.parametrize(("change", "status"), [
     ("none", None), ("revoked", 404), ("config", 409), ("file", 409),
 ])
-def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status):
+@pytest.mark.parametrize("debug", [False, True])
+def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tmp_path, change, status, debug):
     from infrastructure.skill_execution import capture_skill_files
     from management.services.agent.workbench import ResolvedSkillMount
     from runtime.agentos import prepared_skills
@@ -306,6 +307,9 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
     assert not resource.skill_refs and "tenant-secret-value" not in resource.model_dump_json()
     actor = ServicePrincipal("user-a", "tenant-a")
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    lookup_options = {"debug_run_id": reference.run_id} if debug else {
+        "public_reference": reference, "workbench_version": 3,
+    }
     mounts = {53: {"value": "tenant-secret-value"}}
     fetch = mocker.patch.object(prepared_skills, "fetch_workbench_skill_mounts", return_value=mounts)
     read = mocker.patch.object(prepared_skills, "read_workbench_skill_rows", return_value={53: catalog})
@@ -321,7 +325,7 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
     try:
         if status is None:
             tools, verified = prepared_skills.materialize_skill_tools(
-                resource, actor, workspace, public_reference=reference, workbench_version=3,
+                resource, actor, workspace, **lookup_options,
             )
             assert tools["read_skill_config"].params["config_overrides"] == {"summarize": row["config"]}
             assert tools["read_skill_md"].params["authorized_skill_names"] == ["summarize"]
@@ -329,11 +333,14 @@ def test_workbench_skills_pin_the_owned_configuration(skill_snapshot, mocker, tm
         else:
             with pytest.raises(HTTPException) as error:
                 prepared_skills.materialize_skill_tools(
-                    resource, actor, workspace, public_reference=reference, workbench_version=3,
+                    resource, actor, workspace, **lookup_options,
                 )
             assert error.value.status_code == status
         scope, principal = fetch.call_args.args
-        assert scope.model_dump() == {**reference.model_dump(), "agent_id": 7, "agent_version": 2, "workbench_version": 3}
+        expected = {"run_id": reference.run_id, "agent_id": 7, "agent_version": 2}
+        if not debug:
+            expected.update(conversation_id=42, workbench_version=3)
+        assert scope.model_dump() == expected
         assert principal == actor
         read.assert_called_once_with(7, 2, actor, mounts, {53})
         ordinary.assert_not_called()

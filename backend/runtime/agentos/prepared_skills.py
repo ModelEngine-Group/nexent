@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from contracts.agentos import EvaluationSkillTool, FileToolDescription, WorkbenchSkillLookup
+from contracts.agentos import EvaluationSkillTool, FileToolDescription, WorkbenchDebugSkillLookup, WorkbenchSkillLookup
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.rdb.workbench_skill_records import read_workbench_skill_rows
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, skill_path_segment, validate_skill_context
@@ -40,12 +40,13 @@ def skill_stage_path(workspace_path: str, *, create: bool = False) -> Path | Non
 def materialize_skill_tools(
     resource, actor, workspace_path: str, *, publish_artifacts: bool = False,
     public_reference=None, workbench_version: int | None = None,
+    debug_run_id: str | None = None,
 ) -> tuple[dict[str, ToolConfig], list[dict]]:
     bindings = [binding for binding in resource.tools if binding.tool_id in set(EvaluationSkillTool)]
     context_items = resource.evaluation_options.context_items if resource.evaluation_options is not None else None
     workbench_refs = resource.workbench_skill_refs
-    if workbench_refs and (resource.skill_refs or public_reference is None or workbench_version is None
-                           or resource.origin != "SYSTEM"):
+    persisted_scope = public_reference is not None and workbench_version is not None
+    if workbench_refs and (resource.skill_refs or not (persisted_scope or debug_run_id) or resource.origin != "SYSTEM"):
         raise ValueError("Workbench Skills require the admitted Workbench root")
     refs = workbench_refs or resource.skill_refs
     if not refs and not bindings:
@@ -60,10 +61,14 @@ def materialize_skill_tools(
     tenant = actor.tenant_id
     if workbench_refs:
         try:
-            mounts = fetch_workbench_skill_mounts(WorkbenchSkillLookup(
-                **public_reference.model_dump(), agent_id=resource.agent_id, agent_version=resource.version_no,
-                workbench_version=workbench_version,
-            ), actor)
+            root = {"agent_id": resource.agent_id, "agent_version": resource.version_no}
+            if debug_run_id is not None:
+                lookup = WorkbenchDebugSkillLookup(run_id=debug_run_id, **root)
+            else:
+                lookup = WorkbenchSkillLookup(
+                    **public_reference.model_dump(), **root, workbench_version=workbench_version,
+                )
+            mounts = fetch_workbench_skill_mounts(lookup, actor)
             rows = read_workbench_skill_rows(resource.agent_id, resource.version_no, actor, mounts, ids)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_SKILL_REVISION_MISMATCH"}) from exc
