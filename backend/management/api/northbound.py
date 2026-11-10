@@ -436,8 +436,8 @@ async def run_chat(
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail=str(e)) from e
     except RuntimeServiceUnavailableError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(e)) from e
-    except HTTPException as e:
-        raise e
+    except (AppException, HTTPException):
+        raise
     except Exception as e:
         logging.error(f"Failed to run chat: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Internal Server Error")

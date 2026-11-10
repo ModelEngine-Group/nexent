@@ -465,6 +465,29 @@ def test_run_chat_maps_runtime_transport_errors(error, expected_status):
         assert response.json() == {"detail": "invalid"}
 
 
+def test_run_chat_preserves_metadata_version_conflict():
+    from backend.http.server.app_factory import register_exception_handlers
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
+
+    local_app = FastAPI()
+    local_app.include_router(router)
+    register_exception_handlers(local_app)
+    error = AppException(ErrorCode.CHAT_METADATA_VERSION_CONFLICT, details={"current_version": 8})
+    with patch(
+        "management.api.northbound._get_northbound_context", new_callable=AsyncMock,
+    ), patch(
+        "management.api.northbound.start_streaming_chat", new_callable=AsyncMock, side_effect=error,
+    ), TestClient(local_app) as caller:
+        response = caller.post(
+            "/nb/v1/chat/run", json={"agent_name": "general-assistant", "query": "Hello", "metadata": {}},
+            headers=_build_headers(),
+        )
+    assert response.status_code == 409
+    assert response.json()["code"] == ErrorCode.CHAT_METADATA_VERSION_CONFLICT.value
+    assert response.json()["details"] == {"current_version": 8}
+
+
 # =============================================================================
 # Stop Chat Tests
 # =============================================================================

@@ -20,7 +20,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
@@ -81,10 +81,16 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                                     "user_message_id": 21, "assistant_message_id": 22, "attachments": None}],
         })
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+        metadata = {"project": "replacement"} if kind == "metadata" else {} if kind == "clear_metadata" else None
+        request = AgentRequest(
+            query="hello", agent_id=7, conversation_id=42,
+            enable_automation_tool=kind in {"default", "new"}, enable_plan=planning, metadata=metadata,
+        )
+        if metadata is not None:
+            assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant) is None
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
-            AgentRequest(query="hello", agent_id=7, conversation_id=42,
-                         enable_automation_tool=kind in {"default", "new"}, enable_plan=planning),
-            reference, user, tenant, language="en", timezone="Asia/Shanghai",
+            request, reference, user, tenant, language="en", timezone="Asia/Shanghai",
+            allow_metadata_update=metadata is not None,
             **({"new_conversation": True} if new else {"current_user_message_id": 23}),
         )
         assert isinstance(prepared, PreparedAgentRun)
@@ -98,8 +104,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert info.runtime_metadata == {} and info.runtime_metadata_version == 0
             assert prepared.historical_context is None
         else:
-            assert info.runtime_metadata == {"project": "test"}
-            assert info.runtime_metadata_version == 4
+            assert info.runtime_metadata == ({"project": "test"} if metadata is None else metadata)
+            assert info.runtime_metadata_version == (4 if metadata is None else 5)
             read_history.assert_called_once_with(42, 23, user, tenant)
             assert [item.id for item in info.context_input.items][-2:] == ["history_summary:51", "conversation_turn:21:22"]
     else:

@@ -14,7 +14,7 @@ from contracts.agentos import (
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
-from contracts.errors.exceptions import ForbiddenError
+from contracts.errors.exceptions import ForbiddenError, RuntimeMetadataVersionConflict
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
@@ -113,6 +113,7 @@ async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
     before_message_index: int | None = None, new_conversation: bool = False,
+    allow_metadata_update: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -131,7 +132,7 @@ async def prepare_conversation_snapshot(
             raise ForbiddenError("Conversation is not accessible to the current identity")
     if any((
         request.agent_id is None, request.is_debug, request.entrypoint,
-        request.generation_config, request.metadata is not None,
+        request.generation_config, request.metadata is not None and (not allow_metadata_update or new_conversation),
         request.clarification_response is not None, request.knowledge_scope is not None,
         conversation.get("workbench_config") is not None, conversation.get("knowledge_scope") is not None,
     )):
@@ -154,11 +155,18 @@ async def prepare_conversation_snapshot(
         if history is None:
             raise ForbiddenError("Conversation history boundary is not accessible")
         historical_context = _prepare_conversation_history(history, user_id, tenant_id)
+    metadata = conversation.get("runtime_metadata") or {}
+    metadata_version = conversation.get("runtime_metadata_version") or 0
+    if request.metadata is not None:
+        if request.expected_metadata_version is not None and request.expected_metadata_version != metadata_version:
+            raise RuntimeMetadataVersionConflict(metadata_version)
+        metadata = request.metadata
+        metadata_version += 1
     scope = PreparedConversationScope(
         **reference.model_dump(),
         historical_context=historical_context,
-        runtime_metadata=conversation.get("runtime_metadata") or {},
-        runtime_metadata_version=conversation.get("runtime_metadata_version") or 0,
+        runtime_metadata=metadata,
+        runtime_metadata_version=metadata_version,
     )
     return await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,

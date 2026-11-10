@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 
 from contracts.agentos import AgentRunReference
+from contracts.errors.exceptions import RuntimeMetadataVersionConflict
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
@@ -88,6 +89,12 @@ def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> Prepared
         return _view(row) if row is not None else None
 
 
+def _require_metadata_version(conversation: ConversationRecord, expected: int) -> None:
+    current = conversation.runtime_metadata_version or 0
+    if current != expected:
+        raise RuntimeMetadataVersionConflict(current)
+
+
 def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
     *, initial_title: str | None = None,
@@ -99,11 +106,14 @@ def stage_turn(
                 raise AdmissionScopeError
             # Keep the legacy order of quota lock followed by conversation row.
             _enforce_conversation_turn_limit(session, reference.conversation_id, "user", user_id)
-            if _owned(session, reference.conversation_id, user_id, tenant_id, lock=True) is None:
+            conversation = _owned(session, reference.conversation_id, user_id, tenant_id, lock=True)
+            if conversation is None:
                 raise AdmissionScopeError
             if (session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None
                     or _next_index(session, reference.conversation_id) != message_index):
                 raise PreparedTurnConflict
+            if (metadata_update := user_turn.get("metadata_update")) is not None:
+                _require_metadata_version(conversation, metadata_update["expected_version"])
         elif not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
         row = session.scalar(select(admission).where(
@@ -156,6 +166,13 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             if _next_index(session, conversation_id) != row.prepared_message_index - 1:
                 raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
+            if (metadata_update := user_turn.get("metadata_update")) is not None:
+                expected = metadata_update["expected_version"]
+                _require_metadata_version(conversation, expected)
+                conversation.runtime_metadata = metadata_update["value"]
+                conversation.runtime_metadata_version = expected + 1
+                conversation.updated_by = turn.user_id
+                conversation.update_time = func.now()
             source_message_id = create_conversation_message({
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index - 1,
                 "role": "user", "content": user_turn["query"], "minio_files": user_turn["minio_files"],

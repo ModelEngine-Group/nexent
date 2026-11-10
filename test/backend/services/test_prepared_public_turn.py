@@ -9,7 +9,8 @@ from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
-from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.services.agent import prepared_turn, runtime_client
 
 
@@ -199,6 +200,8 @@ async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(
         start.return_value = None
     if outcome == "ambiguous":
         start.side_effect = RuntimeServiceUnavailableError("lost acknowledgement")
+    if outcome == "active":
+        start.side_effect = prepared_turn.active_turn_conflict()
     release = mocker.patch.object(prepared_turn, "reject_unstaged_turn")
     mocker.patch.object(prepared_turn, "find_pending_turn", return_value=REFERENCE if outcome == "active" else None)
 
@@ -221,11 +224,12 @@ async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(
             frames = [chunk async for chunk in response.body_iterator]
             assert len(frames) == 1 and frames[0].startswith('data: {"type": "error"')
         else:
-            assert response is (fallback.return_value if outcome in {"unsupported", "metadata"} else prepared)
+            assert response is (fallback.return_value if outcome == "unsupported" else prepared)
 
-    assert start.await_count == (0 if metadata_request else 1)
+    assert start.await_count == 1
+    assert start.await_args.kwargs.get("allow_metadata_update", False) == metadata_request
     assert release.await_count == (1 if outcome == "unsupported" else 0)
-    assert fallback.await_count == (1 if outcome in {"unsupported", "metadata"} else 0)
+    assert fallback.await_count == (1 if outcome == "unsupported" else 0)
 
 
 @pytest.mark.asyncio
@@ -243,3 +247,48 @@ async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
     client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
     client.stop.assert_not_awaited()
     assert result["message"] == "successfully stopped agent run for user_id actor, run_id 42"
+
+
+@pytest.mark.asyncio
+async def test_northbound_stages_metadata_and_keeps_the_snapshot_version_header(flow):
+    operations, compile_snapshot, client, _ = flow
+    request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {}})
+
+    response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, allow_metadata_update=True)
+
+    assert operations == ["stage", "start", "confirm"]
+    assert compile_snapshot.await_args.kwargs["allow_metadata_update"] is True
+    assert prepared_turn.store.stage_turn.call_args.args[5]["metadata_update"] == {
+        "expected_version": 1, "value": {},
+    }
+    assert response.headers["X-Runtime-Metadata-Version"] == "2"
+    await response.body_iterator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_northbound_metadata_conflict_after_admission_fences_the_run(flow):
+    operations, _, client, _ = flow
+    prepared_turn.store.confirm_turn.side_effect = RuntimeMetadataVersionConflict(8)
+    client.stop_run = AsyncMock()
+    request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {"project": "new"}})
+
+    with pytest.raises(AppException) as error:
+        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, allow_metadata_update=True)
+
+    assert error.value.error_code == ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+    assert error.value.details == {"current_version": 8}
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
+    assert operations == ["stage", "start", "close"]
+    client.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_discards_run_stopped_before_runtime_admission(flow):
+    operations, _, client, staged = flow
+    client.inspect_run = AsyncMock(return_value=SimpleNamespace(
+        **REFERENCE.model_dump(), status="stopped", latest_event_id=None,
+        cancellation_requested=True, resource_versions=None,
+    ))
+    await prepared_turn.reconcile_turn(staged, client)
+    assert operations == ["close"]
+    client.resume.assert_not_awaited()

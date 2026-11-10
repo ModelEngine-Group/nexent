@@ -14,8 +14,10 @@ from starlette.responses import JSONResponse
 from contracts.agentos import AgentResume, AgentRunLookup, AgentRunReference, AgentStop
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.conversation import MessageSource
+from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import (
-    ForbiddenError, RunModelControlsError, RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError,
+    AppException, ForbiddenError, RunModelControlsError, RuntimeMetadataVersionConflict,
+    RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError,
 )
 from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
@@ -60,6 +62,10 @@ def active_turn_conflict():
     )
 
 
+def _metadata_conflict(error):
+    return AppException(ErrorCode.CHAT_METADATA_VERSION_CONFLICT, details={"current_version": error.current_version})
+
+
 def _definitive_rejection(error):
     if error.status_code in _REJECTED_STATUS:
         return True
@@ -78,7 +84,9 @@ async def reject_unstaged_turn(payload, user_id, tenant_id):
               conversation_id=None, journal_available=False)
 
 
-async def start_turn(payload, request, user_id, tenant_id, client, *, include_journal_controls=True):
+async def start_turn(
+    payload, request, user_id, tenant_id, client, *, include_journal_controls=True, allow_metadata_update=False,
+):
     run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
     initial_title = None
@@ -94,6 +102,8 @@ async def start_turn(payload, request, user_id, tenant_id, client, *, include_jo
             boundary = await _io("prepared-turn-boundary", store.next_message_index,
                                  conversation_id, user_id, tenant_id)
             options = {"before_message_index": boundary}
+        if allow_metadata_update:
+            options["allow_metadata_update"] = True
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
             request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
@@ -115,17 +125,25 @@ async def start_turn(payload, request, user_id, tenant_id, client, *, include_jo
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
-        turn = await _io("prepared-turn-stage", store.stage_turn, scope, reference, user_id, tenant_id, boundary, {
+        user_turn = {
             "query": strip_current_time_prefix(request.query), "minio_files": request.minio_files,
             "chat_mode": "planning" if request.enable_plan else "execution", "agent_id": request.agent_id,
             "automation": automation,
-        }, **creation)
+        }
+        if allow_metadata_update and request.metadata is not None:
+            user_turn["metadata_update"] = {
+                "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
+            }
+        turn = await _io("prepared-turn-stage", store.stage_turn, scope, reference, user_id, tenant_id, boundary,
+                         user_turn, **creation)
     except Exception as exc:
         await reject_unstaged_turn(payload, user_id, tenant_id)
         if isinstance(exc, (AdmissionScopeError, ForbiddenError)):
             raise _not_owned() from exc
         if isinstance(exc, store.PreparedTurnConflict):
             raise active_turn_conflict() from exc
+        if isinstance(exc, RuntimeMetadataVersionConflict):
+            raise _metadata_conflict(exc) from exc
         if isinstance(exc, RunModelControlsError):
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
             raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
@@ -145,10 +163,12 @@ async def start_turn(payload, request, user_id, tenant_id, client, *, include_jo
         raise RuntimeServiceUnavailableError("AgentOS returned a different conversation run")
     try:
         confirmed = await _io("prepared-turn-confirm", store.confirm_turn, turn)
-    except (AdmissionScopeError, store.PreparedTurnConflict) as exc:
+    except (AdmissionScopeError, store.PreparedTurnConflict, RuntimeMetadataVersionConflict) as exc:
         await _cancel_unbound_turn(client, turn)
         if isinstance(exc, AdmissionScopeError):
             raise _not_owned() from exc
+        if isinstance(exc, RuntimeMetadataVersionConflict):
+            raise _metadata_conflict(exc) from exc
         raise active_turn_conflict() from exc
     if confirmed is None:
         raise RuntimeServiceUnavailableError("Prepared conversation admission is no longer pending")
@@ -249,7 +269,9 @@ async def reconcile_turn(turn, client):
     if (state.run_id, state.conversation_id) != (reference.run_id, reference.conversation_id):
         raise RuntimeServiceUnavailableError("AgentOS returned a different conversation run")
     if turn.assistant_message_id is None:
-        if fenced_missing_run and state.status == "stopped" and state.latest_event_id is None:
+        if state.status == "stopped" and state.latest_event_id is None and (
+            fenced_missing_run or (state.cancellation_requested and state.resource_versions is None)
+        ):
             await _io("prepared-turn-unstarted", store.close_turn, turn)
             return
         if state.status == "starting" and state.latest_event_id is None:
@@ -261,7 +283,7 @@ async def reconcile_turn(turn, client):
         except AdmissionScopeError:
             await _io("prepared-turn-outside-scope", store.close_turn, turn, failure_status="failed")
             return
-        except store.PreparedTurnConflict:
+        except (store.PreparedTurnConflict, RuntimeMetadataVersionConflict):
             await _cancel_unbound_turn(client, turn)
             return
         if turn is None:

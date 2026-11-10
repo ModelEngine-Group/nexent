@@ -58,12 +58,13 @@ async def forward_conversation_run(
     request = AgentRequest.model_validate(payload.request)
     conversation_id = request.conversation_id
     northbound = northbound_fallback is not None
-    candidate = prepared_turn.is_prepared_candidate(payload, request) and (not northbound or request.metadata is None)
+    candidate = prepared_turn.is_prepared_candidate(payload, request)
 
     async def dispatch(claimed, owner, tenant):
         if candidate:
             response = await prepared_turn.start_turn(
                 claimed, request, owner, tenant, client, include_journal_controls=not northbound,
+                allow_metadata_update=northbound and request.metadata is not None,
             )
             if response is not None:
                 return response

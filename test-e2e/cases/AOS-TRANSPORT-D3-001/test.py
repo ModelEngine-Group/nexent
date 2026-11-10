@@ -238,6 +238,10 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(new_turn_patches, new_conversation=True)
     with monkeypatch.context() as northbound_patches:
         await _assert_public_prepared_turn_over_signed_http(northbound_patches, northbound=True)
+    with monkeypatch.context() as metadata_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            metadata_patches, northbound=True, metadata={"project": "replacement"},
+        )
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -1835,7 +1839,9 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
 
 
-async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conversation=False, northbound=False):
+async def _assert_public_prepared_turn_over_signed_http(
+    monkeypatch, *, new_conversation=False, northbound=False, metadata=None,
+):
     from contracts.constants.constants import DEFAULT_EN_TITLE
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
@@ -1848,6 +1854,7 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
+        **({"runtime_metadata": metadata, "runtime_metadata_version": 6} if metadata is not None else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
                      "prompt_templates": {"system_prompt": "Answer"},
                      "tools": [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]},
@@ -1873,6 +1880,8 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
         assert turn["query"] == "test"
         if northbound:
             assert turn["automation"] is None
+            if metadata is not None:
+                assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
         else:
             assert turn["automation"] == {
                 "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
@@ -1931,6 +1940,8 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
+        assert request.metadata == metadata
+        assert kwargs.get("allow_metadata_update", False) == (metadata is not None)
         return snapshot
 
     monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", compile_snapshot)
@@ -1960,7 +1971,7 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
         monkeypatch.setattr(runtime_client, "_agentos_client",
                             lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
         if northbound:
-            await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor)
+            await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata)
             assert calls == ["stage", "start", "confirm", "project", "close"]
             return
 
@@ -1987,7 +1998,7 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch, *, new_conv
     assert calls == ["stage", "start", "confirm", "project", "close"]
 
 
-async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor):
+async def _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata):
     from unittest.mock import AsyncMock, Mock
 
     from contracts.authentication import NorthboundContext
@@ -2032,7 +2043,7 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
         "conversation_id": reference.conversation_id, "status": "stopped", "cancellation_requested": True,
     })
 
-    body = {"query": "test", "agent_name": "test-agent"}
+    body = {"query": "test", "agent_name": "test-agent", "metadata": metadata}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management), base_url="http://management") as caller:
         response = await caller.post("/nb/v1/chat/run", json=body,
                                      headers={"Authorization": actor.tenant_id, "Idempotency-Key": "external-key"})
@@ -2053,6 +2064,8 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
     assert response.headers["conversation_id"] == str(reference.conversation_id)
     assert response.headers["X-Accel-Buffering"] == "no"
     assert "X-AgentOS-Run-ID" not in response.headers and "run_id" not in response.headers
+    if metadata is not None:
+        assert response.headers["X-Runtime-Metadata-Version"] == "6"
     created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
     assert response.text == (
         f"data: {json.dumps(created)}\n\n"

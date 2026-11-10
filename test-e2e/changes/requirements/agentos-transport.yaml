@@ -62,6 +62,7 @@ change:
     - Skill-derived independent AIDP signs the contributing binding for the image proxy, which rechecks that binding before downloading.
     - Runtime compatibility ingress requires a signed Gateway session, and compatibility inspect and stop use the Runtime registry with user and tenant ownership checks.
     - Northbound dispatches supported turns once, preserves public stream framing, falls back only before dispatch, and stops the scoped pending run.
+    - Northbound replaces or clears metadata with an owned prepared run, preserves its version, and rejects stale or unadmitted updates.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:
