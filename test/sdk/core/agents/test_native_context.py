@@ -1,8 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Native context never turns estimates into an admission policy."""
 
+import json
 from copy import deepcopy
 
+import pytest
 from native_runtime_fixtures import agent_for, call
 from nexent.core.agents.context import (
     ContextManager,
@@ -54,3 +56,45 @@ def test_native_originals_are_bound_to_messages_even_if_provider_reuses_call_id(
     items = native_context_items(messages, {0: "first-original", 1: "second-original"}, {1})
     assert [item.content["execution_key"] for item in items] == ["first-original", "second-original"]
     assert not items[0].content["loaded_result"] and items[1].content["loaded_result"]
+
+
+def test_native_owned_result_can_be_read_and_loaded_range_is_protected():
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    from nexent.core.utils.observer import MessageObserver, ProcessType
+
+    class BindingObserver(MessageObserver):
+        def __init__(self):
+            super().__init__(lang="en")
+            self.execution_history = ExecutionHistory()
+            self.bound = []
+
+        def add_message(self, name, kind, content, **kwargs):
+            super().add_message(name, kind, content, **kwargs)
+            if kind == ProcessType.EXECUTION_RESULT:
+                key = json.loads(content)["execution_key"]
+                self.execution_history.bind(key, 7, len(self.bound))
+                self.bound.append(key)
+
+    from native_runtime_fixtures import EchoTool, ScriptedModel
+    from nexent.core.agents.native_runtime import NativeToolCallingAgent
+
+    observer = BindingObserver()
+    model = ScriptedModel([
+        {"role": "assistant", "tool_calls": [call("original")]},
+        {"role": "assistant", "tool_calls": [call("load", "read_execution_output",
+            '{"output_ref":"message:7/unit-index:0","offset":0,"max_chars":100}')]},
+        {"role": "assistant", "content": "Done"},
+    ])
+    runtime = ManagedContextRuntime(ContextManager(ContextManagerConfig(effective_input_limit_tokens=1)))
+    agent = NativeToolCallingAgent(model=model, tools=[EchoTool()], observer=observer,
+                                  context_runtime=runtime, verbosity_level=0)
+    assert str(agent.run("Read the actual original.")) == "Done"
+    assert len(observer.bound) == 2 and len(agent._native_records) == 2
+    loaded = model.requests[2][-1]
+    assert loaded["tool_call_id"] == "load" and "hello" in loaded["content"]
+    assert agent._native_loaded_messages
+    assert "read_execution_output" in agent.programmatic_tool_names
+    with pytest.raises(PermissionError):
+        observer.execution_history.read("another-owner", "message:7/unit-index:0")
+    original = observer.execution_history.get(observer.bound[0])
+    assert original.owner == agent._execution_owner and original.fields == {"OUTPUT": "hello"}

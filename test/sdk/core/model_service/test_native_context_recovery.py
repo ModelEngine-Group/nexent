@@ -3,10 +3,11 @@
 
 from contextlib import contextmanager
 
+import pytest
 from nexent.core.agents.native_model_service import NativeServiceModel
+from nexent.core.context_runtime.usage import request_characters
 from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
 from nexent.core.model_service.contracts import AssistantMessage, ModelEvent, TokenUsage
-from nexent.core.context_runtime.usage import request_characters
 from test_native_service_model import native_profile as native_profile  # noqa: PLC0414
 
 
@@ -33,3 +34,23 @@ def test_native_service_rebuild_and_usage_are_bound_to_replacement(native_profil
     observation = delegate.last_context_observation
     assert observation.input_tokens == 17 and observation.attempt == 2
     assert observation.input_characters == request_characters(rebuilt, [])
+
+
+@pytest.mark.parametrize("callback", [42, "invalid"])
+def test_native_rebuild_callback_is_runtime_control_not_provider_parameter(native_profile, callback):
+    class NoInference:
+        def stream(self, *args, **kwargs):
+            raise AssertionError("Invalid control must be rejected before inference")
+
+    model = NativeServiceModel(LegacyChatModel(native_profile, NoInference()))
+    with pytest.raises(TypeError, match="synchronous callback"):
+        model.generate([{"role": "user", "content": "Task"}], context_rebuild=callback)
+
+
+def test_native_rebuild_rejects_async_callback(native_profile):
+    async def rebuild():
+        return []
+
+    model = NativeServiceModel(LegacyChatModel(native_profile, object()))
+    with pytest.raises(TypeError, match="synchronous callback"):
+        model.generate([{"role": "user", "content": "Task"}], context_rebuild=rebuild)
