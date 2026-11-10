@@ -389,3 +389,50 @@ async def test_a2a_metadata_requires_permission_on_published_version(mocker):
     assert error.value.error_code == ErrorCode.CHAT_METADATA_NOT_ALLOWED
     lookup.assert_called_once_with(7, "tenant-a", 2)
     compile_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("version", "member_group", "permission", "allowed"), [
+    (0, 9, "EDIT", True),
+    (0, 8, "EDIT", False),
+    (0, 9, "READ_ONLY", False),
+    (2, 9, "READ_ONLY", True),
+])
+async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilation(
+    mocker, version, member_group, permission, allowed,
+):
+    from contracts.errors.exceptions import ForbiddenError
+    from management.services.agent import authorization
+    from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
+
+    draft = {"tenant_id": "tenant-a", "created_by": "someone-else", "group_ids": "9", "ingroup_permission": permission}
+    read = mocker.patch.object(authorization, "search_agent_info_by_agent_id", return_value=draft)
+    mocker.patch.object(authorization, "get_user_role_by_tenant", return_value="MEMBER")
+    groups = mocker.patch.object(authorization, "query_group_ids_by_user_in_tenant", return_value=[member_group])
+    mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+    mocker.patch("management.services.model.run_controls.preflight_turn_controls")
+    fields = evaluation_payload()
+    fields["resource"]["version_no"] = version
+    compile_run = mocker.patch.object(run, "create_agent_run_info", return_value=PreparedEvaluationRun.model_validate(fields))
+    request = AgentRequest(
+        agent_id=7, is_debug=True, query="hello", version_no=version if version else None,
+        generation_config={"temperature": 0.4},
+    )
+    if allowed:
+        snapshot = await evaluation_snapshot.prepare_debug_snapshot(
+            request, "actor", "tenant-a", language="en", timezone="Asia/Shanghai",
+        )
+        assert snapshot.debug is True and snapshot.resource.version_no == version
+        assert "conversation_id" not in snapshot.model_dump()
+        options = compile_run.await_args.kwargs
+        assert options["override_version_no"] == version and options["is_debug"]
+        assert options["turn_generation"].model_dump() == {"settings": {"temperature": 0.4}}
+        assert options["allow_memory_search"] is False and options["enable_automation_tool"] is False
+    else:
+        with pytest.raises(ForbiddenError):
+            await evaluation_snapshot.prepare_debug_snapshot(
+                request, "actor", "tenant-a", language="en", timezone="Asia/Shanghai",
+            )
+        compile_run.assert_not_awaited()
+    read.assert_called_once_with(7, "tenant-a", version)
+    groups.assert_called_once_with("actor", "tenant-a")

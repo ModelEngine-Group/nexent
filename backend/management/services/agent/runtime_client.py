@@ -13,7 +13,7 @@ from contracts.agentos import (
     EvaluationAgentRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import RUNTIME_SERVICE_URL
-from contracts.errors.exceptions import RuntimeUpstreamError, ValidationError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import active_run_error_response, present_ephemeral_stream, present_public_resume
 
@@ -66,6 +66,20 @@ async def forward_conversation_run(
     from management.services.agent.conversation_submission import submit_conversation
 
     request = AgentRequest.model_validate(payload.request)
+    if request.is_debug and not payload.resume and northbound_fallback is None:
+        from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
+
+        try:
+            snapshot = await prepare_debug_snapshot(
+                request, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
+            )
+        except RunModelControlsError as exc:
+            status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+            raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+        if snapshot is not None:
+            response = await client.run_ephemeral(snapshot, user_id, tenant_id)
+            return present_ephemeral_stream(response, user_id, snapshot.run_id)
+
     conversation_id = request.conversation_id
     northbound = northbound_fallback is not None
     temporary_workbench_claim = request.entrypoint == "workbench" and payload.idempotency_key is None

@@ -102,6 +102,9 @@ case:
   - order: 25
     action: Submit a clarification response for an owned conversation and retry with the same key.
     expected: Management stages the structured response locally and sends only the prepared execution input to Runtime. The retry keeps the original run ID and another tenant receives 404.
+  - order: 26
+    action: Start a public debug run, try stopping it from a second tenant, then stop it from its owner.
+    expected: Management sends a signed debug snapshot and the public response retains the debug run ID. Only the owned scope emits a cancellation signal and the worker releases its resources.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -129,6 +132,7 @@ case:
   - Workbench carries a scoped shared AIDP catalog binding and Runtime enforces the narrowed KDS scope.
   - A clarification response produces one signed prepared run and stays in Management history.
   - Runtime applies the explicit temperature from the signed root model while reading provider credentials locally.
+  - A debug run has no persistent conversation and releases its worker and temporary resources after scoped cancellation.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -321,4 +325,9 @@ case:
     description: Signed native conversation execution reconstructs the explicit root sampling settings.
     steps: [11]
     expected_results: [26]
+    forbidden_side_effects: [1, 2]
+  - id: AC-35
+    description: Public debug uses signed ephemeral execution and only its owner can signal cancellation.
+    steps: [26]
+    expected_results: [27]
     forbidden_side_effects: [1, 2]

@@ -310,9 +310,12 @@ def prepare_run_snapshot(
     workbench_version = payload.workbench_config_version if isinstance(payload, PreparedAgentRun) else None
     root_generation = payload.models.llm.root_generation
     turn_generation = payload.models.llm.turn_generation
+    native_run = isinstance(payload, PreparedAgentRun) or (
+        isinstance(payload, PreparedEphemeralRun) and payload.debug is True
+    )
     if (
         (root_generation is not None) != (workbench_version is not None)
-        or (turn_generation is not None and (workbench_version is not None or not isinstance(payload, PreparedAgentRun)))
+        or (turn_generation is not None and (workbench_version is not None or not native_run))
         or any(binding.root_generation is not None or binding.turn_generation is not None
                for binding in payload.models.additional_llms)
     ):

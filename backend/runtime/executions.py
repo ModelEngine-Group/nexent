@@ -218,9 +218,10 @@ class AgentRunManager(LocalExecutionRegistry):
         super().register_agent_run(
             conversation_id, agent_run_info, user_id, reservation_token
         )
-        runtime_state_service.register_run(
-            user_id=user_id, conversation_id=conversation_id
-        )
+        options = {}
+        if isinstance(conversation_id, str) and conversation_id.startswith("debug-"):
+            options["tenant_id"] = getattr(agent_run_info, "tenant_id", None)
+        runtime_state_service.register_run(user_id=user_id, conversation_id=conversation_id, **options)
 
     def unregister_agent_run(
         self, conversation_id, user_id, status="completed", agent_run_info=None
@@ -244,9 +245,8 @@ class AgentRunManager(LocalExecutionRegistry):
 agent_run_manager = AgentRunManager()
 
 
-def stop_registered_run(run_id: int | str, user_id: str) -> dict:
-    """Cancel Runtime's live run while preserving the legacy response shape."""
-    stopped = agent_run_manager.stop_agent_run(run_id, user_id)
+def registered_stop_response(run_id: int | str, user_id: str, stopped: bool) -> dict:
+    """Present the public stop result without exposing an internal registry key."""
     if stopped:
         message = f"successfully stopped agent run for user_id {user_id}, run_id {run_id}"
     else:
@@ -256,3 +256,8 @@ def stop_registered_run(run_id: int | str, user_id: str) -> dict:
     if not stopped:
         result["already_stopped"] = True
     return result
+
+
+def stop_registered_run(run_id: int | str, user_id: str) -> dict:
+    """Cancel Runtime's live run while preserving the legacy response shape."""
+    return registered_stop_response(run_id, user_id, agent_run_manager.stop_agent_run(run_id, user_id))

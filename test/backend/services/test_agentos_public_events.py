@@ -159,3 +159,43 @@ async def test_a2a_falls_back_only_before_prepared_dispatch(mocker, mode):
             await runtime_client.forward_a2a_run(request, "actor", "tenant")
         client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
         fallback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["prepared", "unsupported", "denied", "upstream_error"])
+async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
+    from fastapi import HTTPException
+
+    from contracts.agentos import CompatibilityConversationRun
+    from contracts.errors.exceptions import RuntimeServiceUnavailableError
+    from management.services.agent.preparation import evaluation_snapshot
+
+    payload = CompatibilityConversationRun(request={"agent_id": 7, "query": "hello", "is_debug": True}, language="en")
+    snapshot = mocker.Mock(run_id=CURSOR.run_id)
+    compile_debug = mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", create=True, new_callable=AsyncMock)
+    compile_debug.return_value = None if mode == "unsupported" else snapshot
+    upstream = response(b'data: {"type":"final_answer","content":"answer"}\n\n')
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    client.run_ephemeral = AsyncMock(return_value=upstream)
+    client.run_conversation = AsyncMock(return_value=upstream)
+    if mode == "denied":
+        compile_debug.side_effect = HTTPException(status_code=403)
+        with pytest.raises(HTTPException) as exc:
+            await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+        assert exc.value.status_code == 403
+    elif mode == "upstream_error":
+        client.run_ephemeral.side_effect = RuntimeServiceUnavailableError("lost response")
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+    else:
+        result = await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+        assert result.status_code == 200
+
+    if mode == "unsupported":
+        client.run_conversation.assert_awaited_once_with(payload, "actor", "tenant")
+    else:
+        client.run_conversation.assert_not_awaited()
+    if mode in {"prepared", "upstream_error"}:
+        client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
+    else:
+        client.run_ephemeral.assert_not_awaited()

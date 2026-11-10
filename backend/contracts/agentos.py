@@ -517,6 +517,14 @@ class PreparedEphemeralRun(AgentRunSpec):
 
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    debug: Literal[True] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_debug(self, handler):
+        data = handler(self)
+        if self.debug is None:
+            data.pop("debug", None)
+        return data
 
     @field_validator("runtime_metadata")
     @classmethod

@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Signed request-owned execution for prepared ephemeral AgentOS runs."""
 
+import asyncio
 import json
 import logging
 from contextlib import aclosing
@@ -11,21 +12,31 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedEphemeralRun
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
+from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from contracts.errors.exceptions import RuntimeQueueTimeoutError
-from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut
+from infrastructure.redis.run_state import runtime_state_service
+from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
 from runtime.agentos.compatibility import run_until_disconnect
+from runtime.agentos.debug import debug_owner
 from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load_prepared_run, prepare_run_snapshot
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
-from runtime.thread_management import runtime_thread_manager
+from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
 logger = logging.getLogger(__name__)
 
 
 def _sse(event: dict) -> str:
     return "data: " + json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+
+
+async def _watch_debug_stop(run_id, owner, info):
+    while not info.stop_event.is_set():
+        if await runtime_state_service.is_cancelled_async(owner, run_id):
+            agent_run_manager.stop_local_run(run_id, owner, expected_run=info)
+            return
+        await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
 async def _observer_stream(info, execution, deferred):
@@ -37,6 +48,10 @@ async def _observer_stream(info, execution, deferred):
                 event = json.loads(chunk)
                 if isinstance(event, dict) and event.get("type") != "skill_artifact":
                     yield _sse(event)
+    except asyncio.CancelledError:
+        # Explicit cancellation ends the stream. Preserve ASGI task cancellation on disconnect.
+        if not info.stop_event.is_set() or asyncio.current_task().cancelling():
+            raise
     except Exception:
         logger.exception("Ephemeral AgentOS execution failed")
         yield _sse({"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE})
@@ -52,19 +67,41 @@ def _close_execution(execution, deferred):
 
 
 class _EphemeralResponse(StreamingResponse):
-    def __init__(self, info, execution, deferred, metadata: AgentRunMetadata):
+    def __init__(self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None):
+        headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
+        if self.debug_run_id is not None:
+            headers["run_id"] = self.debug_run_id
         super().__init__(
-            _observer_stream(info, execution, deferred), media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            _observer_stream(info, execution, deferred), media_type="text/event-stream", headers=headers,
         )
         self.info = info
         self.execution = execution
         self.deferred = deferred
         self.metadata = metadata
+        self.debug_owner = debug_owner
 
     async def stream_response(self, send):
-        with agent_monitoring_context(self.metadata):
-            await super().stream_response(send)
+        watcher = None
+        try:
+            if self.debug_run_id is not None:
+                registration = asyncio.create_task(run_blocking(
+                    "agentos-register-debug", agent_run_manager.register_agent_run,
+                    self.debug_run_id, self.info, self.debug_owner, lane="control-io", owner="runtime",
+                ))
+                try:
+                    await asyncio.shield(registration)
+                except asyncio.CancelledError:
+                    await asyncio.gather(registration, return_exceptions=True)
+                    raise
+                if runtime_state_service.enabled:
+                    watcher = asyncio.create_task(_watch_debug_stop(self.debug_run_id, self.debug_owner, self.info))
+            with agent_monitoring_context(self.metadata):
+                await super().stream_response(send)
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
 
     async def __call__(self, scope, receive, send):
         try:
@@ -76,7 +113,15 @@ class _EphemeralResponse(StreamingResponse):
                 try:
                     _close_execution(self.execution, self.deferred)
                 finally:
-                    discard_prepared_workspace(self.info)
+                    try:
+                        if self.debug_run_id is not None:
+                            status = "stopped" if self.info.stop_event.is_set() else self.info.attempt_outcome or "completed"
+                            await run_blocking(
+                                "agentos-release-debug", unregister_after_worker_exit, agent_run_manager,
+                                self.debug_run_id, self.debug_owner, status, self.info, lane="control-io", owner="runtime",
+                            )
+                    finally:
+                        discard_prepared_workspace(self.info)
 
 
 async def _open_ephemeral(payload, actor):
@@ -102,13 +147,15 @@ async def _open_ephemeral(payload, actor):
             _close_execution(execution, deferred)
         raise
     info.thread_future = execution.future
+    info.thread_manager = runtime_thread_manager
+    info.thread_execution_id = execution.execution_id
     metadata = AgentRunMetadata(
         user_id=actor.user_id, tenant_id=actor.tenant_id, agent_id=payload.resource.agent_id,
         query=payload.input.query, language=payload.language, is_debug=True, memory_enabled=False,
         history_count=len(payload.input.history), minio_files_count=len(payload.input.attachment_refs),
         extra_metadata={"agentos_run_id": payload.run_id},
     )
-    return _EphemeralResponse(info, execution, deferred, metadata)
+    return _EphemeralResponse(info, execution, deferred, metadata, debug_owner=debug_owner(actor) if payload.debug else None)
 
 
 def create_ephemeral_run_router() -> APIRouter:

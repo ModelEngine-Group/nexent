@@ -140,6 +140,60 @@ async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: s
     )
 
 
+def _turn_model_generation(request: AgentRequest) -> TurnModelGeneration | None:
+    if any((
+        request.generation_config is not None and request.generation_config.model_fields_set,
+        request.reasoning_effort is not None, request.reasoning_budget_tokens is not None,
+    )):
+        return TurnModelGeneration(
+            settings=request.generation_config, reasoning_effort=request.reasoning_effort,
+            reasoning_budget_tokens=request.reasoning_budget_tokens,
+        )
+    return None
+
+
+async def prepare_debug_snapshot(
+    request: AgentRequest, user_id: str, tenant_id: str, *, language: str, timezone: str | None,
+) -> PreparedEphemeralRun | None:
+    from management.services.agent.authorization import authorize_debug_version
+    from management.services.agent.preparation.run import create_agent_run_info
+    from management.services.model.run_controls import preflight_turn_controls
+
+    if request.entrypoint or not request.agent_id:
+        return None
+    version = request.version_no if request.version_no is not None else 0
+    agent = await run_blocking(
+        "snapshot-debug-authorization", authorize_debug_version, request.agent_id, version, user_id, tenant_id,
+        lane="control-io", owner="management",
+    )
+    if any((request.conversation_id is not None, request.enable_plan, request.workbench, request.knowledge_scope)):
+        return None
+    if await run_blocking(
+        "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
+    ):
+        return None
+    if request.metadata is not None:
+        await _authorize_prepared_metadata(request.model_copy(update={"version_no": version}), tenant_id)
+    await run_blocking(
+        "snapshot-debug-model-controls", preflight_turn_controls, request, tenant_id, agent,
+        lane="control-io", owner="management",
+    )
+    snapshot = await create_agent_run_info(
+        agent_id=request.agent_id, minio_files=request.minio_files,
+        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
+        override_version_no=version, override_model_id=request.model_id, tool_params=request.tool_params,
+        requested_output_tokens=request.requested_output_tokens, context_policy=request.context_policy,
+        enable_automation_tool=False, export_evaluation=True, turn_generation=_turn_model_generation(request),
+    )
+    if snapshot is None:
+        return None
+    return PreparedEphemeralRun(
+        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
+        runtime_metadata=request.metadata or {}, debug=True,
+    )
+
+
 def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConversationHistory:
     summary = history.get("history_summary")
     checkpoint = None
@@ -223,14 +277,8 @@ async def prepare_conversation_snapshot(
             )
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
-    if workbench is None and any((
-        request.generation_config is not None and request.generation_config.model_fields_set,
-        request.reasoning_effort is not None, request.reasoning_budget_tokens is not None,
-    )):
-        compile_options["turn_generation"] = TurnModelGeneration(
-            settings=request.generation_config, reasoning_effort=request.reasoning_effort,
-            reasoning_budget_tokens=request.reasoning_budget_tokens,
-        )
+    if workbench is None and (generation := _turn_model_generation(request)) is not None:
+        compile_options["turn_generation"] = generation
     historical_context = None
     if current_user_message_id is not None or before_message_index is not None:
         boundary = {"before_message_index": before_message_index} if before_message_index is not None else {}

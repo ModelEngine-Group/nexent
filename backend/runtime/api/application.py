@@ -19,13 +19,13 @@ from runtime.api.agent.execution import (
     inspect_agentos_conversation,
     run_agentos_background,
     run_agentos_tracked_background,
-    stop_agentos_debug,
     run_agentos_compatibility,
     run_agentos_conversation,
     stop_agentos_compatibility,
 )
 from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
 from infrastructure.model_adapter import get_adapter_from_config
+from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.ephemeral import create_ephemeral_run_router
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router

@@ -2259,19 +2259,23 @@ async def _assert_northbound_prepared_turn(management, monkeypatch, reference, a
 
 
 async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
+    from contextlib import nullcontext
     from queue import Empty, SimpleQueue
     from threading import Event
     from unittest.mock import AsyncMock, Mock
 
     from contracts.agent import AgentRequest
     from contracts.agentos import PreparedEphemeralRun
+    from management.api.agent import conversation_run
     from management.services.agent import agentos_events, runtime_client
     from management.services.agent.preparation import evaluation_snapshot
     from nexent.core.agents import run_agent as sdk_runner
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
-    from runtime.agentos import ephemeral
+    from runtime.agentos import debug as debug_lifecycle, ephemeral
+    from runtime.agentos.compatibility import create_compatibility_router
     from runtime.agentos.prepared_skills import skill_stage_path
+    from runtime.executions import LocalExecutionRegistry
 
     actor = ServicePrincipal("ephemeral-user", "ephemeral-tenant")
     run_id = "d" * 32
@@ -2286,6 +2290,26 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     released = Mock()
     stages = []
     worker_stopped = Event()
+    debug_registry = LocalExecutionRegistry()
+    debug_states = {}
+    cancel_signals = set()
+
+    def register_debug(run, info, owner):
+        debug_registry.register_agent_run(run, info, owner)
+        debug_states[owner, run] = {"status": "running"}
+
+    def unregister_debug(run, owner, status, agent_run_info):
+        removed = debug_registry.unregister_agent_run(run, owner, status, agent_run_info)
+        if removed:
+            debug_states.pop((owner, run))
+        return removed
+
+    def publish_debug_stop(run, owner):
+        cancel_signals.add((owner, run))
+        return True
+
+    async def is_debug_cancelled(owner, run):
+        return (owner, run) in cancel_signals
 
     class Observer:
         def __init__(self):
@@ -2316,6 +2340,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         return SimpleNamespace(
             query=payload.input.query, workspace_path=str(workspace), workspace_run_id=run_id, conversation_id=None,
             runtime_metadata=payload.runtime_metadata, observer=Observer(), stop_event=Event(), cancellation_scope=None,
+            attempt_outcome=None,
         )
 
     manager = ThreadManager(
@@ -2349,12 +2374,40 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     reserve = Mock(return_value="capacity")
     monkeypatch.setattr(ephemeral, "agent_run_manager", SimpleNamespace(
         reserve_agent_capacity=reserve, release_agent_capacity=released,
+        register_agent_run=register_debug, unregister_agent_run=unregister_debug,
+        get_agent_run_info=lambda *_: None, stop_agent_run=publish_debug_stop,
+        stop_local_run=debug_registry.stop_local_run,
     ))
+    monkeypatch.setattr(ephemeral, "runtime_state_service", SimpleNamespace(
+        enabled=True, get_run_state=lambda owner, run: debug_states.get((owner, run), {}),
+        is_cancelled_async=is_debug_cancelled,
+    ))
+    monkeypatch.setattr(ephemeral, "RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", 0.02)
+    monkeypatch.setattr(debug_lifecycle, "agent_run_manager", ephemeral.agent_run_manager)
+    monkeypatch.setattr(debug_lifecycle, "runtime_state_service", ephemeral.runtime_state_service)
+    monkeypatch.setattr(debug_lifecycle, "get_db_session", nullcontext)
+    monkeypatch.setattr(debug_lifecycle, "tenant_membership_matches", lambda *_: True)
+
+    async def inline(_label, function, *args, lane=None, owner=None, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(ephemeral, "run_blocking", inline)
+    monkeypatch.setattr(debug_lifecycle, "run_blocking", inline)
     monkeypatch.setattr(manager, "submit", submit)
     monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
     monkeypatch.setattr(ephemeral, "load_prepared_run", load)
     monkeypatch.setattr(sdk_runner, "agent_run_thread", worker)
     monkeypatch.setattr(evaluation_snapshot, "prepare_a2a_snapshot", compile_snapshot)
+
+    async def compile_debug(request, user_id, tenant_id, *, language, timezone):
+        assert (user_id, tenant_id, language) == (actor.user_id, actor.tenant_id, "en")
+        assert request.is_debug and request.version_no is None and request.query == "wait"
+        resource = template.resource.model_copy(update={"version_no": 0})
+        return template.model_copy(update={
+            "debug": True, "resource": resource, "input": template.input.model_copy(update={"query": request.query}),
+        })
+
+    monkeypatch.setattr(evaluation_snapshot, "prepare_debug_snapshot", compile_debug)
     monkeypatch.setattr(runtime_client, "forward_agent_run", AsyncMock(side_effect=AssertionError("legacy dispatch")))
     signer = AsyncMock(return_value=[{"object_name": object_name, "presigned_url": "https://signed.invalid/report"}])
     monkeypatch.setattr(agentos_events, "run_blocking", signer)
@@ -2362,6 +2415,10 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     app = FastAPI(root_path="/api")
     app.add_middleware(AgentOSMiddleware)
     app.include_router(ephemeral.create_ephemeral_run_router())
+    app.include_router(create_compatibility_router(None, None, debug_stop=debug_lifecycle.stop_agentos_debug))
+    management = FastAPI()
+    management.include_router(conversation_run.router)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda tenant: (actor.user_id, tenant))
     manager.start()
     try:
         with serve(app) as base:
@@ -2402,6 +2459,29 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             assert overloaded.status_code == 429 and overloaded.headers["Retry-After"] == "1"
             assert "RUNTIME_CAPACITY_FULL" in b"".join([chunk async for chunk in overloaded.body_iterator]).decode()
             assert len(executions) == 2 and released.call_count == 2
+
+            reserve.side_effect = None
+            worker_stopped.clear()
+            headers = {"Authorization": actor.tenant_id, "Cookie": "NEXT_LOCALE=en"}
+            with serve(management) as public_url:
+                async with httpx.AsyncClient(base_url=public_url, trust_env=False, timeout=4) as browser:
+                    async with browser.stream("POST", "/agent/run", headers=headers, json={
+                        "query": "wait", "agent_id": 7, "is_debug": True,
+                    }) as debug:
+                        assert debug.status_code == 200 and debug.headers["run_id"] == f"debug-{run_id}"
+                        assert "conversation_id" not in debug.headers
+                        lines = debug.aiter_lines()
+                        assert json.loads((await anext(lines))[6:]) == frames[0]
+                        stop_url = f"/agent/stop/{debug.headers['run_id']}"
+                        foreign = await browser.get(stop_url, headers={"Authorization": "foreign"})
+                        assert foreign.json()["already_stopped"] is True and not cancel_signals
+                        stopped = await browser.get(stop_url, headers=headers)
+                        assert stopped.status_code == 200 and "already_stopped" not in stopped.json()
+                        assert cancel_signals == {(debug_lifecycle.debug_owner(actor), f"debug-{run_id}")}
+                        assert not [line async for line in lines if line]
+            assert worker_stopped.is_set() and len(executions) == 3 and all(item.future.done() for item in executions)
+            assert not debug_states and not stages[-1].exists()
+            assert released.call_count == 3 and reserve.call_count == 4
     finally:
         await manager.shutdown(timeout=2)
 

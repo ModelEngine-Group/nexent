@@ -28,8 +28,7 @@ from contracts.agentos import (
     AgentRunningState, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, TrackedBackgroundResult,
 )
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
-from infrastructure.rdb.client import get_db_session
-from infrastructure.rdb.conversation_state import tenant_membership_matches
+from runtime.agentos.debug import stop_agentos_debug
 from runtime.executions import agent_run_manager, stop_registered_run
 
 agent_runtime_router = APIRouter(prefix="/agent")
@@ -208,16 +207,6 @@ async def run_agentos_background(payload: dict, principal: ServicePrincipal) -> 
         agent_request=agent_request, user_id=principal.user_id, tenant_id=principal.tenant_id, skip_user_save=True,
     )
     return BackgroundAgentResult.model_validate(result)
-
-
-async def stop_agentos_debug(run_id: str, principal: ServicePrincipal):
-    def stop_debug():
-        with get_db_session() as session:
-            if not tenant_membership_matches(session, principal.user_id, principal.tenant_id):
-                raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
-        return stop_registered_run(run_id, principal.user_id)
-
-    return await run_blocking("agentos-stop-debug", stop_debug, lane="control-io", owner="runtime")
 
 
 async def run_agentos_tracked_background(payload: BackgroundRun, principal: ServicePrincipal) -> TrackedBackgroundResult:
