@@ -175,6 +175,109 @@ def test_exported_builtin_binding_reconstructs_run_scope_without_transmitting_cl
         tool.metadata["validate_url_access"](["s3://bucket/attachments/user-b/denied.txt"])
 
     assert export_snapshot(
-        agent, [model.model_copy(update={"temperature": 0.11})], "hello", None,
+        agent, [model.model_copy(update={"api_key": "management-only"})], "hello", None,
         tenant_id="tenant-a", conversation_id=-42, language="en",
     ) is None
+
+
+def test_exported_child_with_separate_model_and_explicit_overrides_round_trips(mocker):
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+
+    records = {
+        11: model_record(model_id=11, display_name="root_model"),
+        12: model_record(model_id=12, display_name="child_model", api_key="child-secret"),
+    }
+    models = [create_model_config_from_record(record) for record in records.values()]
+    models[1] = models[1].model_copy(update={"temperature": 0.11, "enable_thinking": False, "reasoning_effort": "low"})
+    child = AgentConfig(
+        agent_id=2, version_no=3, name="child", invocation_name="fetch_details",
+        runtime_ref="agent:2:v3", model_name="child_model", description="child", tools=[],
+    )
+    root = AgentConfig(
+        agent_id=1, version_no=4, name="root", model_name="root_model", description="root", tools=[],
+        worker_agents=[child],
+    )
+    mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", side_effect=(
+        lambda filters, tenant: [record for record in records.values() if record["display_name"] == filters["display_name"]]
+    ))
+    lookup = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id",
+                          side_effect=lambda model_id, tenant: records[model_id])
+    snapshot = export_snapshot(root, models, "hello", None, tenant_id="tenant-a", conversation_id=-42, language="en")
+    assert snapshot is not None
+    encoded = snapshot.model_dump_json()
+    assert "child-secret" not in encoded and "runtime-only" not in encoded and "base_url" not in encoded
+    restored = PreparedEvaluationRun.model_validate_json(encoded)
+    overrides = restored.models.additional_llms[0].overrides
+    assert overrides.model_dump(exclude_unset=True) == {"temperature": 0.11, "reasoning_effort": "low"}
+
+    info = prepare_evaluation_run(restored, ServicePrincipal("user-a", "tenant-a"))
+    assert [call.args for call in lookup.call_args_list] == [(11, "tenant-a"), (12, "tenant-a")]
+    assert info.model_config_list == models
+    rebuilt = info.agent_config.worker_agents[0]
+    assert (rebuilt.agent_id, rebuilt.version_no, rebuilt.invocation_name, rebuilt.runtime_ref, rebuilt.model_name) == (
+        2, 3, "fetch_details", "agent:2:v3", "child_model",
+    )
+
+
+@pytest.mark.parametrize("invalid", [{"api_key": "secret"}, {"temperature": 3.0}, {"enable_thinking": None}])
+def test_snapshot_rejects_unapproved_overrides(invalid):
+    payload = evaluation_payload()
+    payload["models"]["llm"]["overrides"] = invalid
+    with pytest.raises(ValidationError, match="overrides"):
+        PreparedEvaluationRun.model_validate(payload)
+
+
+def test_model_override_keeps_explicit_clear_and_false_through_json():
+    payload = evaluation_payload()
+    payload["models"]["llm"]["overrides"] = {"enable_thinking": False, "reasoning_effort": None}
+    encoded = PreparedEvaluationRun.model_validate(payload).model_dump_json()
+    restored = PreparedEvaluationRun.model_validate_json(encoded)
+    assert restored.models.llm.overrides.model_dump() == {"enable_thinking": False, "reasoning_effort": None}
+
+
+@pytest.mark.parametrize("invalid", ["duplicate", "missing", "wrong_root", "unused"])
+def test_runtime_rejects_inconsistent_tree_model_bindings(mocker, invalid):
+    from fastapi import HTTPException
+
+    lookup = mocker.patch("runtime.agentos.prepared_evaluation.get_model_by_model_id")
+    payload = evaluation_payload()
+    child = payload["resource"].copy()
+    child.update(agent_id=8, model_alias="child_llm")
+    if invalid == "duplicate":
+        payload["models"]["additional_llms"] = [payload["models"]["llm"].copy()]
+    elif invalid == "missing":
+        payload["resource"]["subagents"] = [child]
+    elif invalid == "wrong_root":
+        payload["resource"]["model_alias"] = "child_llm"
+    else:
+        payload["models"]["additional_llms"] = [{"model_id": 12, "alias": "child_llm", "revision": "r2"}]
+    with pytest.raises(HTTPException) as error:
+        prepare_evaluation_run(PreparedEvaluationRun.model_validate(payload), ServicePrincipal("user-a", "tenant-a"))
+    assert error.value.status_code == 422
+    lookup.assert_not_called()
+
+
+@pytest.mark.parametrize(("record_change", "status"), [
+    ({"tenant_id": "tenant-b"}, 404),
+    ({"update_time": "changed-child-revision"}, 409),
+])
+def test_runtime_rejects_child_model_scope_or_revision_before_worker_creation(mocker, record_change, status):
+    from fastapi import HTTPException
+
+    payload = evaluation_payload()
+    payload["resource"]["subagents"] = [payload["resource"].copy() | {"agent_id": 8, "model_alias": "child_llm"}]
+    payload["models"]["additional_llms"] = [{"model_id": 12, "alias": "child_llm", "revision": "revision-1"}]
+    lookup = mocker.patch(
+        "runtime.agentos.prepared_evaluation.get_model_by_model_id",
+        side_effect=[model_record(), model_record(**record_change)],
+    )
+    build = mocker.patch("runtime.agentos.prepared_evaluation.build_run_info")
+
+    with pytest.raises(HTTPException) as error:
+        prepare_evaluation_run(PreparedEvaluationRun.model_validate(payload), ServicePrincipal("user-a", "tenant-a"))
+
+    assert error.value.status_code == status
+    assert [call.args for call in lookup.call_args_list] == [(11, "tenant-a"), (12, "tenant-a")]
+    build.assert_not_called()

@@ -37,6 +37,7 @@ change:
     - Signed inspect and stop enforce actor ownership and scope cancellation to the exact run journal.
     - Durable runtime state fences a stopped automation admission and preserves a committed assistant outcome after an expired Runtime lease.
     - Public and automation cancellation use only their captured run identity and keep user and tenant authorization.
+    - Prepared evaluation preserves a static child callable and typed generation overrides, and rejects transport credential overrides.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

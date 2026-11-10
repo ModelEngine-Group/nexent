@@ -228,6 +228,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
         assert registry.get_agent_run_info(-42, "user-a") is info
         assert info.model_config_list[0].api_key == "only-in-runtime"
         assert info.agent_config.model_name == "evaluation_llm"
+        assert info.model_config_list[0].temperature == 0.17
+        child, = info.agent_config.worker_agents
+        assert (child.agent_id, child.version_no, child.invocation_name, child.model_name) == (
+            8, 5, "child_lookup", "evaluation_llm",
+        )
         access = info.agent_config.tools[0].metadata["validate_url_access"]
         access(["s3://bucket/attachments/user-a/allowed.txt"])
         with pytest.raises(PermissionError):
@@ -244,10 +249,14 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_evaluation_router())
 
-    model = create_model_config_from_record(record)
+    model = create_model_config_from_record(record).model_copy(update={"temperature": 0.17})
     agent = AgentConfig(
         agent_id=7, version_no=2, name="evaluation_agent", description="Prepared evaluation",
         prompt_templates={"system_prompt": "Answer the query"}, model_name=model.cite_name,
+        worker_agents=[AgentConfig(
+            agent_id=8, version_no=5, name="child", invocation_name="child_lookup",
+            description="Static child", model_name=model.cite_name, tools=[],
+        )],
         tools=[ToolConfig(
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},

@@ -41,7 +41,7 @@ case:
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
   - order: 5
     action: Send a prepared evaluation over signed HTTP and attempt unsigned and cross-tenant requests.
-    expected: Runtime rebuilds the SDK request and scoped file tool from the Management snapshot, preserves event order, and rejects unauthorized access.
+    expected: Runtime rebuilds the SDK request, scoped file tool, child Agent and revision-bound sampling override, preserves event order, and rejects unauthorized access.
   - order: 6
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.

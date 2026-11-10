@@ -73,32 +73,37 @@ def _agent_options(resource):
     return options
 
 
-def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
-    resource = payload.resource
+def _materialize_agent(resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, *, root_alias=None):
     if any((
         resource.skill_refs, resource.mcp_server_refs, resource.knowledge_base_refs,
-        resource.memory_ref is not None, resource.subagents, resource.sandbox_policy is not None,
-        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local",
-        payload.input.attachment_refs, payload.models.summary, payload.models.verifier,
-        payload.models.embedding, payload.models.rerank,
+        resource.memory_ref is not None, resource.sandbox_policy is not None,
     )):
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
+        raise ValueError("Unsupported evaluation resource")
+    if root_alias is not None and resource.model_alias not in (None, root_alias):
+        raise ValueError("Evaluation root model binding mismatch")
+    alias = resource.model_alias or root_alias
+    if alias not in model_aliases:
+        raise ValueError("Missing evaluation model binding")
+    used_aliases.add(alias)
 
-    workspace_run_id = uuid4().hex
-    workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
-    try:
-        tools = _materialize_file_tools(resource.tools, actor, workspace_path, workspace_run_id)
-        options = _agent_options(resource)
-        agent_config = AgentConfig(
-            name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
-            agent_id=resource.agent_id, version_no=resource.version_no, tools=tools, model_name=payload.models.llm.alias,
-            max_steps=resource.max_steps, invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}",
-            runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}", **options,
-        )
-    except (ValidationError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
+    tools = _materialize_file_tools(resource.tools, actor, workspace_path, workspace_run_id)
+    options = _agent_options(resource)
+    legacy_root = root_alias is not None and resource.model_alias is None
+    return AgentConfig(
+        name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
+        agent_id=resource.agent_id, version_no=resource.version_no, tools=tools, model_name=alias,
+        max_steps=resource.max_steps, origin=resource.origin,
+        invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}" if legacy_root else resource.invocation_name,
+        runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
+        worker_agents=[
+            _materialize_agent(child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases)
+            for child in resource.subagents
+        ],
+        **options,
+    )
 
-    binding = payload.models.llm
+
+def _materialize_model(binding, actor):
     record = get_model_by_model_id(binding.model_id, actor.tenant_id)
     if not record or record.get("tenant_id") != actor.tenant_id or record.get("delete_flag") != "N":
         raise HTTPException(status_code=404, detail={"code": "MODEL_NOT_FOUND"})
@@ -110,7 +115,35 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
     if (revision or "legacy") != binding.revision:
         raise HTTPException(status_code=409, detail={"code": "MODEL_REVISION_MISMATCH"})
 
-    model = create_model_config_from_record(record).model_copy(update={"cite_name": binding.alias})
+    updates = binding.overrides.model_dump(exclude_unset=True) if binding.overrides is not None else {}
+    return create_model_config_from_record(record).model_copy(update={"cite_name": binding.alias, **updates})
+
+
+def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
+    if any((
+        NEXENT_SANDBOX_DEFAULT_LEVEL.strip().lower() != "local", payload.input.attachment_refs,
+        payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
+    )):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
+
+    bindings = [payload.models.llm, *payload.models.additional_llms]
+    aliases = {binding.alias for binding in bindings}
+    workspace_run_id = uuid4().hex
+    workspace_path = create_run_workspace(actor.user_id, workspace_run_id, workspace_root=AGENT_WORKSPACE_ROOT)
+    try:
+        if len(aliases) != len(bindings):
+            raise ValueError("Duplicate evaluation model binding")
+        used_aliases = set()
+        agent_config = _materialize_agent(
+            payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases,
+            root_alias=payload.models.llm.alias,
+        )
+        if used_aliases != aliases:
+            raise ValueError("Unused evaluation model binding")
+    except (ValidationError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
+
+    models = [_materialize_model(binding, actor) for binding in bindings]
     info = build_run_info(
         query=payload.input.query,
         history=[AgentHistory(**message.model_dump()) for message in payload.input.history],
@@ -121,7 +154,7 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
         context_budget_snapshot=agent_config.context_budget_snapshot,
         tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
         tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
-        model_config_list=[model],
+        model_config_list=models,
         language=payload.language,
         conversation_id=payload.conversation_id,
         user_id=actor.user_id,

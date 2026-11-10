@@ -4,7 +4,7 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, model_serializer
 
 NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -148,10 +148,28 @@ class ToolBinding(RunSpecModel):
     credential_ref: str | None = None
 
 
+class RunModelOverrides(RunSpecModel):
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    enable_thinking: bool = False
+    reasoning_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = None
+    reasoning_budget_tokens: PositiveInt | None = None
+    context_window_tokens: PositiveInt | None = None
+    max_input_tokens: PositiveInt | None = None
+    max_output_tokens: PositiveInt | None = None
+    default_output_reserve_tokens: PositiveInt | None = None
+    tokenizer_family: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_serializer(mode="wrap")
+    def serialize_explicit_fields(self, handler):
+        return {name: value for name, value in handler(self).items() if name in self.model_fields_set}
+
+
 class RunModelBinding(RunSpecModel):
     model_id: PositiveInt
     alias: str = Field(min_length=1)
     revision: str = Field(min_length=1)
+    overrides: RunModelOverrides | None = None
 
 
 class ModelBindings(RunSpecModel):
@@ -160,6 +178,7 @@ class ModelBindings(RunSpecModel):
     verifier: RunModelBinding | None = None
     embedding: RunModelBinding | None = None
     rerank: RunModelBinding | None = None
+    additional_llms: list[RunModelBinding] = Field(default_factory=list)
 
 
 class RunHistoryMessage(RunSpecModel):
@@ -215,6 +234,10 @@ class AgentResource(RunSpecModel):
     description: str
     prompt_templates: dict[str, JsonValue]
     max_steps: PositiveInt = 15
+    model_alias: str | None = Field(default=None, min_length=1)
+    invocation_name: str | None = Field(default=None, min_length=1)
+    runtime_ref: str | None = Field(default=None, min_length=1)
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
     tools: list[ToolBinding] = Field(default_factory=list)
     skill_refs: list[str] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)

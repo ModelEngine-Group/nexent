@@ -39,7 +39,6 @@ from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
 from management.services.model.run_budget import _OPERATOR_OVERRIDE_FIELDS
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
-from runtime.adapters.nexent.factory import materialize_legacy_run
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -427,6 +426,7 @@ async def create_agent_run_info(
 
     # The compatibility path still invokes the materializer in-process.
     from management.services.agent.policy import build_sandbox_policy, get_sandbox_minio_client
+    from runtime.adapters.nexent.factory import materialize_legacy_run
 
     return materialize_legacy_run(
         workspace_root=AGENT_WORKSPACE_ROOT,
