@@ -792,8 +792,9 @@ def _export_model(
     effective = [model for model in models if model.cite_name == record_alias]
     reserved = record_alias in {"main_model", "sub_model"}
     profile = None
-    if len(candidates) == 1 and (len(effective) == 1 or (reserved and len(effective) == 2)):
-        # The SDK uses the first match, with catalog models preceding synthetic aliases.
+    if candidates and (len(effective) == len(candidates) or (reserved and len(effective) == len(candidates) + 1)):
+        # Both catalog reads use the same order. The SDK selects the first matching alias.
+        # Full configuration comparison below rejects a binding that changed between reads.
         record = candidates[0]
         selected = effective[0]
         base = create_model_config_from_record(record)

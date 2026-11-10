@@ -28,6 +28,27 @@ from runtime.agentos import prepared_evaluation
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_snapshot_pins_the_first_catalog_model_for_a_legacy_duplicate_alias(mocker, changed):
+    first = model_record(model_id=11, model_name="first", api_key="first-private-key")
+    second = model_record(model_id=12, model_name="second", api_key="second-private-key")
+    records = [first, second]
+    models = [create_model_config_from_record(record) for record in records]
+    lookup = mocker.patch.object(
+        evaluation_snapshot, "get_model_records", return_value=list(reversed(records)) if changed else records,
+    )
+    resource = SimpleNamespace(agent_id=7, version_no=2)
+
+    if changed:
+        with pytest.raises(ValueError, match="Unsupported evaluation model override"):
+            evaluation_snapshot._export_model(models[0].cite_name, models, "tenant-a", resource, {})
+    else:
+        binding = evaluation_snapshot._export_model(models[0].cite_name, models, "tenant-a", resource, {})
+        assert binding.model_id == 11
+        assert "first-private-key" not in binding.model_dump_json()
+    lookup.assert_called_once_with({"display_name": "Evaluation", "model_type": "llm"}, "tenant-a")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode,child_ids", [
     ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),
