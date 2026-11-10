@@ -284,13 +284,20 @@ class AnalysisToolBinding(RunSpecModel):
     usage: str | None = None
 
 
-class StoredLocalToolBinding(RunSpecModel):
-    instance_id: PositiveInt
+class LocalToolBinding(RunSpecModel):
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     description_zh: str | None = None
     inputs: str | None = None
     reranker: RevisionedModelBinding | None = None
     default_reranker: RevisionedModelBinding | None = None
+
+
+class StoredLocalToolBinding(LocalToolBinding):
+    instance_id: PositiveInt
+
+
+class SkillDerivedLocalToolBinding(LocalToolBinding):
+    tool_id: PositiveInt
 
 
 class KnowledgeSearchBinding(RunSpecModel):

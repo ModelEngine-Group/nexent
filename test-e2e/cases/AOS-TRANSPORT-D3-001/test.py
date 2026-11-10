@@ -303,6 +303,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.object_storage.client import minio_client
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+    from infrastructure.local_tool_execution import build_local_tool
     from management.services.agent import runtime_client
     from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search
     from management.services.model import adapter as management_model_adapter
@@ -312,7 +313,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.mcp_execution import build_mcp_tool
     from nexent.core.agents.nexent_agent import NexentAgent
     from runtime.agentos import (
-        prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge, prepared_mcp, prepared_skills,
+        prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge,
+        prepared_local_tool, prepared_mcp, prepared_skills,
     )
     from runtime.executions import LocalExecutionRegistry
 
@@ -427,6 +429,23 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(evaluation_snapshot, "read_bound_skills", read_skills)
     monkeypatch.setattr(prepared_skills, "read_bound_skills", read_skills)
 
+    derived_local = {
+        "tool_id": 54, "skill_instance_ids": [51], "name": "dify_search", "class_name": "DifySearchTool",
+        "source": "local", "description": "Skill lookup", "inputs": None, "usage": None, "output_type": "string",
+        "instance_params": {}, "params": [{"name": name, "default": value} for name, value in {
+            "server_url": "https://derived-provider.invalid/v1", "api_key": "private-skill-local-key",
+            "dataset_ids": '["derived-private-dataset"]', "top_k": 3,
+        }.items()],
+    }
+
+    def read_local_skill_tool(agent_id, version_no, tenant_id, names):
+        assert (agent_id, version_no, names) == (7, 2, ["dify_search"])
+        return [derived_local] if tenant_id == "tenant-a" else []
+
+    monkeypatch.setattr(evaluation_snapshot, "read_bound_local_tools", lambda *_: [])
+    for module in (evaluation_snapshot, prepared_local_tool):
+        monkeypatch.setattr(module, "read_skill_derived_local_tools", read_local_skill_tool)
+
     knowledge_row = {
         "knowledge_id": 90, "index_name": "kb-open", "knowledge_name": "Open", "tenant_id": "tenant-a",
         "created_by": "owner", "group_ids": "42", "ingroup_permission": "READ_ONLY", "embedding_model_id": 91,
@@ -506,7 +525,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
             "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", "knowledge_base_search",
-            "analyze_image",
+            "analyze_image", "dify_search",
         ]
         parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
@@ -520,6 +539,10 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert knowledge_queries == [{"index_names": ["kb-open"], "query_text": "facts", "top_k": 4}]
         image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["analyze_image"])
         assert image.selected_model_id == 93 and image.vlm_model is media_adapter
+        skill_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["dify_search"])
+        assert (skill_search.api_key, skill_search.dataset_ids, skill_search.top_k) == (
+            "private-skill-local-key", ["derived-private-dataset"], 3,
+        )
         with pytest.raises(PermissionError):
             image.forward(["s3:/bucket/attachments/user-b/denied.png"], "Inspect the image")
         reader = NexentAgent.create_builtin_tool(None, by_name["read_skill_md"])
@@ -572,7 +595,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
         ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools,
-               build_mcp_tool(derived_tool), kb_tool, image_tool],
+               build_mcp_tool(derived_tool), kb_tool, image_tool, build_local_tool(derived_local, "zh", None, None)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
     case = EvaluationAgentRun(agent_id=7, version_no=2, query="question", conversation_id=-42)
@@ -599,6 +622,9 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert next(tool for tool in prepared.resource.tools if tool.tool_id == "mcp" and tool.version == "2")
     assert "private-knowledge-embedding" not in prepared.model_dump_json()
     assert "private-image-model-key" not in prepared.model_dump_json()
+    assert "private-skill-local-key" not in prepared.model_dump_json()
+    assert "derived-private-dataset" not in prepared.model_dump_json()
+    assert next(tool for tool in prepared.resource.tools if tool.tool_id == "dify_search").version == "2"
     assert mcp_server["mcp_server"] not in prepared.model_dump_json()
     assert "local-secret" not in prepared.model_dump_json()
     assert "Runtime skill guide" not in prepared.model_dump_json()
@@ -654,6 +680,12 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert changed_derivation.value.status_code == 409
         assert "AGENTOS_MCP_REVISION_MISMATCH" in changed_derivation.value.content.decode()
         derived_tool["skill_instance_ids"] = [51]
+        derived_local["skill_instance_ids"] = [51, 53]
+        with pytest.raises(RuntimeUpstreamError) as changed_local_derivation:
+            await agentos.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed_local_derivation.value.status_code == 409
+        assert "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH" in changed_local_derivation.value.content.decode()
+        derived_local["skill_instance_ids"] = [51]
         original_guide = guide.read_bytes()
         guide.write_text("file revision changed", encoding="utf-8")
         with pytest.raises(RuntimeUpstreamError) as changed_skill:

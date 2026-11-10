@@ -2,6 +2,7 @@
 """Neutral persistence and authorized execution reads for MCP tools."""
 
 from itertools import groupby
+from typing import Literal
 
 from sqlalchemy import JSON, Boolean, Column, Integer, Sequence, String, Text, select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -134,6 +135,13 @@ def read_bound_mcp_tools(agent_id: int, version_no: int, tenant_id: str, names: 
 
 def read_skill_derived_mcp_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str]) -> list[dict]:
     """Resolve tenant-owned MCP tools contributed by active skills unless explicitly bound."""
+    return read_skill_derived_tools(agent_id, version_no, tenant_id, names, source="mcp")
+
+
+def read_skill_derived_tools(
+    agent_id: int, version_no: int, tenant_id: str, names: list[str], *, source: Literal["mcp", "local"],
+) -> list[dict]:
+    """Read active skill contributions for tools of one catalog source."""
     from infrastructure.rdb.client import get_db_session
 
     tool, instance = ToolInfo, ToolInstance
@@ -153,8 +161,9 @@ def read_skill_derived_mcp_tools(agent_id: int, version_no: int, tenant_id: str,
         .join(SkillInstance, SkillInstance.skill_id == SkillInfo.skill_id)
         .where(
             *bound_skill_predicates(agent_id, version_no, tenant_id),
-            tool.source == "mcp", tool.author == tenant_id, tool.name.in_(names),
+            tool.source == source, tool.name.in_(names),
             tool.delete_flag != "Y", tool.is_available.is_not(False), ~explicit,
+            *((tool.author == tenant_id,) if source == "mcp" else ()),
         )
         .order_by(tool.tool_id, SkillInstance.skill_instance_id)
     )

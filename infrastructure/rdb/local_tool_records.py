@@ -3,7 +3,7 @@
 
 from sqlalchemy import select
 
-from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance
+from infrastructure.rdb.mcp_execution_records import ToolInfo, ToolInstance, read_skill_derived_tools
 
 
 def read_bound_local_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str]) -> list[dict]:
@@ -20,3 +20,10 @@ def read_bound_local_tools(agent_id: int, version_no: int, tenant_id: str, names
             tool.source == "local", tool.name.in_(names), tool.delete_flag != "Y", tool.is_available.is_not(False),
         )).mappings()
         return [dict(row) for row in rows]
+
+
+def read_skill_derived_local_tools(agent_id: int, version_no: int, tenant_id: str, names: list[str]) -> list[dict]:
+    return [
+        {**row, "source": "local"}
+        for row in read_skill_derived_tools(agent_id, version_no, tenant_id, names, source="local")
+    ]

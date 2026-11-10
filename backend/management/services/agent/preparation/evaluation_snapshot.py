@@ -19,7 +19,7 @@ from infrastructure.agent_model_config import create_model_config_from_record, m
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
 from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES
 from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
-from infrastructure.rdb.local_tool_records import read_bound_local_tools
+from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
 )
@@ -188,15 +188,22 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
     mcp_names = [tool.name for tool in agent.tools if tool.source == "mcp"]
     candidates = read_bound_mcp_tools(agent.agent_id, agent.version_no, tenant_id, mcp_names) if mcp_names else []
     unresolved = sorted(set(mcp_names) - {row["name"] for row in candidates})
-    if unresolved and skill_refs:
-        authorized = {ref.instance_id for ref in skill_refs}
+    authorized = {ref.instance_id for ref in skill_refs}
+    if unresolved and authorized:
         candidates.extend(
             row for row in read_skill_derived_mcp_tools(agent.agent_id, agent.version_no, tenant_id, unresolved)
             if set(row["skill_instance_ids"]) <= authorized
         )
     mcp_servers = read_servers(tenant_id) if mcp_names else []
     local_names = [tool.name for tool in agent.tools if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES]
-    local_candidates = read_bound_local_tools(agent.agent_id, agent.version_no, tenant_id, local_names) if local_names else []
+    local_scope = (agent.agent_id, agent.version_no, tenant_id)
+    local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
+    unresolved_local = sorted(set(local_names) - {row["name"] for row in local_candidates})
+    if unresolved_local and authorized:
+        local_candidates.extend(
+            row for row in read_skill_derived_local_tools(*local_scope, unresolved_local)
+            if set(row["skill_instance_ids"]) <= authorized
+        )
     for tool in agent.tools:
         if tool.source == "mcp":
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)

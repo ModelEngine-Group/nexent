@@ -133,3 +133,54 @@ def test_local_tool_credential_override_is_rejected_before_repository_access(moc
             SimpleNamespace(agent_id=7, version_no=3, tools=[binding]), ServicePrincipal("user-a", "tenant-a"), "zh",
         )
     lookup.assert_not_called()
+
+
+@pytest.mark.parametrize(("change", "status"), [
+    (None, None), ("scope", 409), ("sources", 409), ("parameters", 409), ("conflict", 409), ("shadowed", 404),
+])
+def test_skill_derived_local_tool_is_pinned_to_authorized_contributors(mocker, stored_tool, change, status):
+    from contracts.errors.exceptions import ValidationError
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import local_tool
+    from runtime.agentos import prepared_local_tool
+
+    row = {
+        **{key: value for key, value in stored_tool.items() if key != "tool_instance_id"},
+        "skill_instance_ids": [5, 6], "instance_params": {},
+    }
+    tool = build_local_tool(row, "zh", None, None)
+    mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
+    binding = local_tool.export_local_tool(tool, [row], 7, 3, "tenant-a", "zh")
+    assert binding.version == "2"
+    assert binding.parameters["tool_id"] == 10
+    assert "local-only-dify-key" not in binding.model_dump_json()
+    explicit = mocker.patch.object(prepared_local_tool, "read_bound_local_tools")
+    derived = mocker.patch.object(prepared_local_tool, "read_skill_derived_local_tools", return_value=[row])
+    hydrate_rerank = mocker.patch.object(prepared_local_tool, "_reranker")
+    scope = [SimpleNamespace(instance_id=5), SimpleNamespace(instance_id=6)]
+    resource = SimpleNamespace(agent_id=7, version_no=3, tools=[binding], skill_refs=scope)
+    actor = ServicePrincipal("user-a", "tenant-a")
+
+    if change == "scope":
+        scope.pop()
+    elif change == "sources":
+        derived.return_value = [{**row, "skill_instance_ids": [5]}]
+    elif change == "parameters":
+        derived.return_value = [{**row, "params": [*row["params"], {"name": "search_method", "default": "keyword_search"}]}]
+    elif change == "conflict":
+        derived.side_effect = ValidationError("synthetic conflict")
+    elif change == "shadowed":
+        derived.return_value = []
+
+    if status is None:
+        rebound = prepared_local_tool.materialize_local_tools(resource, actor, "zh")[tool.name]
+        assert rebound.params == tool.params
+        assert rebound.metadata["rerank_model"] is hydrate_rerank.return_value
+    else:
+        with pytest.raises(HTTPException) as error:
+            prepared_local_tool.materialize_local_tools(resource, actor, "zh")
+        assert error.value.status_code == status
+        hydrate_rerank.assert_not_called()
+
+    explicit.assert_not_called()
+    derived.assert_called_once_with(7, 3, "tenant-a", ["dify_search"])

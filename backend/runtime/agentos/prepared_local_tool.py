@@ -5,34 +5,50 @@ from hmac import compare_digest
 
 from fastapi import HTTPException
 
-from contracts.agentos import AgentResource, StoredLocalToolBinding
+from contracts.agentos import AgentResource, SkillDerivedLocalToolBinding, StoredLocalToolBinding
+from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.local_tool_execution import (
     LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
 )
-from infrastructure.rdb.local_tool_records import read_bound_local_tools
+from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
 from nexent.core.agents.agent_model import ToolConfig
 from runtime.agentos.prepared_knowledge import _reranker
 
 
 def materialize_local_tools(resource: AgentResource, actor: ServicePrincipal, language: str) -> dict[str, ToolConfig]:
     references = {}
+    schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding}
     for binding in resource.tools:
         if binding.tool_id not in LOCAL_SDK_TOOL_CLASSES:
             continue
-        if binding.version != "1" or binding.credential_ref is not None or binding.tool_id in references:
+        if binding.version not in schemas or binding.credential_ref is not None or binding.tool_id in references:
             raise ValueError("Unsupported local SDK tool binding")
-        references[binding.tool_id] = StoredLocalToolBinding.model_validate(binding.parameters)
+        references[binding.tool_id] = schemas[binding.version].model_validate(binding.parameters)
     if not references:
         return {}
 
-    rows = read_bound_local_tools(resource.agent_id, resource.version_no, actor.tenant_id, list(references))
-    by_instance = {(row["tool_instance_id"], row["name"]): row for row in rows}
+    scope = (resource.agent_id, resource.version_no, actor.tenant_id)
+    direct_names = [name for name, ref in references.items() if isinstance(ref, StoredLocalToolBinding)]
+    derived_names = [name for name, ref in references.items() if isinstance(ref, SkillDerivedLocalToolBinding)]
+    direct = read_bound_local_tools(*scope, direct_names) if direct_names else []
+    try:
+        derived = read_skill_derived_local_tools(*scope, derived_names) if derived_names else []
+    except ValidationError as exc:
+        raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
+    by_instance = {(row["tool_instance_id"], row["name"]): row for row in direct}
+    by_tool = {(row["tool_id"], row["name"]): row for row in derived}
+    skill_ids = {ref.instance_id for ref in resource.skill_refs} if derived_names else set()
     tools = {}
     for name, reference in references.items():
-        row = by_instance.get((reference.instance_id, name))
+        if isinstance(reference, StoredLocalToolBinding):
+            row = by_instance.get((reference.instance_id, name))
+        else:
+            row = by_tool.get((reference.tool_id, name))
         if row is None:
             raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
+        if isinstance(reference, SkillDerivedLocalToolBinding) and not set(row["skill_instance_ids"]) <= skill_ids:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
         try:
             tool = build_local_tool(row, language, reference.description_zh, reference.inputs)
             revision = local_tool_revision(actor.tenant_id, resource.agent_id, resource.version_no, row, tool)
