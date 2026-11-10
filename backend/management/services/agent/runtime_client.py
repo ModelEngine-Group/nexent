@@ -100,7 +100,7 @@ async def forward_conversation_run(
         if candidate:
             response = await prepared_turn.start_turn(
                 claimed, request, owner, tenant, client, include_journal_controls=not northbound,
-                allow_metadata_update=northbound and request.metadata is not None,
+                metadata_from_northbound=northbound and request.metadata is not None,
             )
             if response is not None:
                 return response

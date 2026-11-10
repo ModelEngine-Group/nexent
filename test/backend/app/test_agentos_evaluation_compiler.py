@@ -26,7 +26,8 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 @pytest.mark.parametrize(("kind", "persisted_body"), [
     (kind, persisted_body)
     for kind in ("evaluation", "ordinary", "clarification", "turn_generation", "legacy_reasoning", "planning",
-                 "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope",
+                 "default", "new", "metadata", "clear_metadata", "first_metadata", "metadata_denied",
+                 "metadata_conflict", "northbound_metadata", "workbench", "workbench_scope",
                  "workbench_metadata", "workbench_first_metadata", "workbench_metadata_denied", "a2a", "debug_planning")
     for persisted_body in (False, True)
 ] + [("a2a_default_model", False)])
@@ -36,7 +37,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         kind = "a2a"
     debug_planning = kind == "debug_planning"
     planning = kind == "planning" or debug_planning
-    new = kind in {"new", "workbench_first_metadata"}
+    new = kind in {"new", "first_metadata", "workbench_first_metadata"}
     use_workbench = kind.startswith("workbench")
     workbench_metadata = use_workbench and "metadata" in kind
     redis = object()
@@ -99,7 +100,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         })
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
         metadata = None
-        if kind == "metadata" or workbench_metadata:
+        if kind in {"metadata", "first_metadata", "metadata_denied", "metadata_conflict", "northbound_metadata"} or workbench_metadata:
             metadata = {"project": "replacement"}
         elif kind == "clear_metadata":
             metadata = {}
@@ -119,10 +120,12 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             request.version_no = 2
             mocker.patch("management.db.agent.repository.search_agent_info_by_agent_id", side_effect=read_agent)
             mocker.patch("management.services.model.run_controls.get_model_by_model_id", return_value=record)
-        if metadata is not None:
-            assert await evaluation_snapshot.prepare_conversation_snapshot(
-                request, reference, user, tenant, new_conversation=new,
-            ) is None
+        if kind == "clear_metadata":
+            request.version_no = 2
+        if kind == "metadata_conflict":
+            request.expected_metadata_version = 3
+        if kind == "first_metadata":
+            request.expected_metadata_version = 99
         options = {}
         if use_workbench:
             knowledge = None
@@ -149,24 +152,33 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 config, plan, 0 if new else 3, 1 if new else 4,
                 knowledge=knowledge, knowledge_tools=[] if knowledge is not None else None,
             )
-        if workbench_metadata:
+        if metadata is not None:
             permission = mocker.patch(
                 "management.db.agent.repository.search_agent_info_by_agent_id",
-                return_value={"allow_chat_metadata": kind != "workbench_metadata_denied"},
+                return_value={"allow_chat_metadata": kind not in {"workbench_metadata_denied", "metadata_denied", "northbound_metadata"}},
             )
-        if kind == "workbench_metadata_denied":
+        if kind in {"workbench_metadata_denied", "metadata_denied"}:
             from contracts.errors.codes import ErrorCode
             from contracts.errors.exceptions import AppException
 
             with pytest.raises(AppException) as error:
                 await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant, **options)
             assert error.value.error_code == ErrorCode.CHAT_METADATA_NOT_ALLOWED
-            permission.assert_called_once_with(7, tenant, 2)
+            permission.assert_called_once_with(7, tenant, 2 if use_workbench else 0)
+            compile_tools.assert_not_awaited()
+            return
+        if kind == "metadata_conflict":
+            from contracts.errors.exceptions import RuntimeMetadataVersionConflict
+
+            with pytest.raises(RuntimeMetadataVersionConflict) as error:
+                await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant)
+            assert error.value.current_version == 4
+            permission.assert_called_once_with(7, tenant, 0)
             compile_tools.assert_not_awaited()
             return
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             request, reference, user, tenant, language="en", timezone="Asia/Shanghai", **options,
-            allow_metadata_update=metadata is not None and not use_workbench,
+            **({"metadata_from_northbound": True} if kind == "northbound_metadata" else {}),
             **({"new_conversation": True} if new else {"current_user_message_id": 23}),
         )
         assert isinstance(prepared, PreparedAgentRun)
@@ -203,11 +215,16 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
             assert info.model_config_list[0].temperature == 0.4
             assert info.model_config_list[0].explicit_sampling == ["temperature"]
             assert info.model_config_list[1].temperature == model.temperature
+        if metadata is not None and not use_workbench:
+            if kind == "northbound_metadata":
+                permission.assert_not_called()
+            else:
+                permission.assert_called_once_with(7, tenant, request.version_no or 0)
         if new:
             read_conversation.assert_not_called()
             read_history.assert_not_called()
             assert info.runtime_metadata == (metadata or {})
-            assert info.runtime_metadata_version == (1 if workbench_metadata else 0)
+            assert info.runtime_metadata_version == (1 if metadata is not None else 0)
             assert prepared.historical_context is None
         else:
             assert info.runtime_metadata == ({"project": "test"} if metadata is None else metadata)

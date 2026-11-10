@@ -144,6 +144,9 @@ case:
   - order: 39
     action: Run a scoped public debug request through AgentOS and wait for the scope event before allowing SDK output.
     expected: The resolved scope and warning arrive before the planning events without persisting a conversation.
+  - order: 40
+    action: Submit a first native conversation turn with metadata, then an existing native turn with an empty object.
+    expected: The signed snapshots carry the initial or cleared value and response revision, and retries do not admit another turn.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -185,6 +188,7 @@ case:
   - Workbench image retrieval is bound to the admitted conversation and current mounted tool and does not transport credentials in the signed URL.
   - The request-owned debug plan stays local and retains the original plan and plan step events.
   - Management emits the resolved debug scope before Runtime observer output and retains unavailable warnings locally.
+  - Native metadata follows the prepared admission path, remains scoped to its conversation, and keeps the public version header.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -447,4 +451,9 @@ case:
     description: A signed debug request preserves scoped knowledge warnings before model or tool events.
     steps: [39]
     expected_results: [40]
+    forbidden_side_effects: [1, 2]
+  - id: AC-49
+    description: First and existing native turns apply explicit metadata through AgentOS while preserving ownership and idempotency.
+    steps: [40]
+    expected_results: [41]
     forbidden_side_effects: [1, 2]

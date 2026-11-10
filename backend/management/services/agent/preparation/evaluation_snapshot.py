@@ -290,7 +290,7 @@ async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
     before_message_index: int | None = None, new_conversation: bool = False,
-    allow_metadata_update: bool = False, workbench: "PreparedWorkbench | None" = None,
+    metadata_from_northbound: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
@@ -311,7 +311,6 @@ async def prepare_conversation_snapshot(
     if any((
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug or (workbench is not None and request.generation_config is not None),
-        workbench is None and request.metadata is not None and (not allow_metadata_update or new_conversation),
         workbench is None and native_knowledge is None and (
             request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None
         ),
@@ -321,6 +320,7 @@ async def prepare_conversation_snapshot(
         "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
     )
     compile_options = {}
+    metadata_policy_version = request.version_no or 0
     if workbench is not None:
         from management.services.agent.workbench import runtime_skill_snapshot
 
@@ -357,6 +357,9 @@ async def prepare_conversation_snapshot(
         )
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
+    if request.metadata is not None and workbench is None and not metadata_from_northbound:
+        # Native requests check the specified version or the draft policy before compilation.
+        await _authorize_prepared_metadata(request.model_copy(update={"version_no": metadata_policy_version}), tenant_id)
     if workbench is None and (generation := _turn_model_generation(request)) is not None:
         compile_options["turn_generation"] = generation
     historical_context = None

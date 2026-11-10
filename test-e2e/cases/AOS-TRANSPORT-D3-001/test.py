@@ -251,6 +251,14 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         )
     with monkeypatch.context() as workbench_patches:
         await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True, use_root_skill=True)
+    with monkeypatch.context() as native_metadata_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            native_metadata_patches, metadata={},
+        )
+    with monkeypatch.context() as native_first_metadata_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            native_first_metadata_patches, metadata={"project": "initial"}, new_conversation=True,
+        )
     with monkeypatch.context() as joint_metadata_patches:
         await _assert_public_prepared_turn_over_signed_http(
             joint_metadata_patches, use_workbench=True, metadata={"project": "replacement"},
@@ -2333,6 +2341,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     from runtime.agentos import prepared_run, resume
 
     boundary = 0 if new_conversation else 4
+    metadata_version = 1 if new_conversation else 6
     actor = ServicePrincipal("public-user", "public-tenant")
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
     knowledge_scope = {
@@ -2360,7 +2369,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
         **({"memory_enabled": True} if use_memory else {}),
-        **({"runtime_metadata": metadata, "runtime_metadata_version": 6} if metadata is not None else {}),
+        **({"runtime_metadata": metadata, "runtime_metadata_version": metadata_version} if metadata is not None else {}),
         **({"workbench_config_version": 4} if use_workbench else {}),
         **({"native_knowledge": True} if native_scope else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
@@ -2403,7 +2412,7 @@ async def _assert_public_prepared_turn_over_signed_http(
             stored = config.knowledge_scope.model_dump(mode="json")
             assert turn["knowledge_update"] == {"expected": stored, "value": stored}
         if metadata is not None:
-            assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
+            assert turn["metadata_update"] == {"expected_version": metadata_version - 1, "value": metadata}
         if northbound:
             assert turn["automation"] is None
         else:
@@ -2506,7 +2515,7 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
         assert request.metadata == metadata
         assert request.clarification_response == response
-        assert kwargs.get("allow_metadata_update", False) == (metadata is not None and northbound)
+        assert kwargs.get("metadata_from_northbound", False) == (metadata is not None and northbound)
         if use_workbench:
             assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
         if native_scope:
@@ -2554,8 +2563,8 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
                 "expected_workbench_config_version": 3,
             }
-        if use_workbench and metadata is not None:
-            request.update(metadata=metadata, expected_metadata_version=5)
+        if metadata is not None:
+            request.update(metadata=metadata, expected_metadata_version=metadata_version - 1)
         if use_knowledge_scope:
             request["tool_params"] = {
                 "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
@@ -2593,8 +2602,8 @@ async def _assert_public_prepared_turn_over_signed_http(
             }}
             prefix = f"data: {json.dumps(event, separators=(',', ':'))}\n\n" + prefix
             assert first.headers["X-Workbench-Config-Version"] == "4"
-            if metadata is not None:
-                assert first.headers["X-Runtime-Metadata-Version"] == "6"
+        if metadata is not None:
+            assert first.headers["X-Runtime-Metadata-Version"] == str(metadata_version)
         assert first.text.startswith(prefix)
         assert "agentos_terminal" in first.text
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id

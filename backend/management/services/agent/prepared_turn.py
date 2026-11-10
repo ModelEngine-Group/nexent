@@ -106,7 +106,7 @@ async def reject_unstaged_turn(payload, user_id, tenant_id):
 
 
 async def start_turn(
-    payload, request, user_id, tenant_id, client, *, include_journal_controls=True, allow_metadata_update=False,
+    payload, request, user_id, tenant_id, client, *, include_journal_controls=True, metadata_from_northbound=False,
 ):
     run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
@@ -147,8 +147,8 @@ async def start_turn(
             options = {"before_message_index": boundary}
             if native_conversation is not None:
                 options["owned_conversation"] = native_conversation
-        if allow_metadata_update:
-            options["allow_metadata_update"] = True
+        if metadata_from_northbound:
+            options["metadata_from_northbound"] = True
         if workbench is not None:
             options["workbench"] = workbench
         if native_knowledge is not None:
@@ -202,7 +202,7 @@ async def start_turn(
                 knowledge.desired_scope if request.knowledge_scope is not None and knowledge is not None else previous_scope
             )
             user_turn["knowledge_update"] = {"expected": previous_scope, "value": desired_scope}
-        if request.metadata is not None and (allow_metadata_update or workbench is not None):
+        if request.metadata is not None:
             user_turn["metadata_update"] = {
                 "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
             }

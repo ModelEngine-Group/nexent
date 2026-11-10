@@ -267,7 +267,7 @@ async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(
             assert response is (fallback.return_value if outcome == "unsupported" else prepared)
 
     assert start.await_count == 1
-    assert start.await_args.kwargs.get("allow_metadata_update", False) == metadata_request
+    assert start.await_args.kwargs.get("metadata_from_northbound", False) == metadata_request
     assert release.await_count == (1 if outcome == "unsupported" else 0)
     assert fallback.await_count == (1 if outcome == "unsupported" else 0)
 
@@ -290,14 +290,15 @@ async def test_northbound_stop_fences_pending_run_without_legacy_stop(mocker):
 
 
 @pytest.mark.asyncio
-async def test_northbound_stages_metadata_and_keeps_the_snapshot_version_header(flow):
+@pytest.mark.parametrize("northbound", [False, True])
+async def test_prepared_turn_stages_metadata_and_keeps_the_snapshot_version_header(flow, northbound):
     operations, compile_snapshot, client, _ = flow
     request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {}})
 
-    response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, allow_metadata_update=True)
+    response = await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, metadata_from_northbound=northbound)
 
     assert operations == ["stage", "start", "confirm"]
-    assert compile_snapshot.await_args.kwargs["allow_metadata_update"] is True
+    assert compile_snapshot.await_args.kwargs.get("metadata_from_northbound", False) is northbound
     assert prepared_turn.store.stage_turn.call_args.args[5]["metadata_update"] == {
         "expected_version": 1, "value": {},
     }
@@ -306,14 +307,15 @@ async def test_northbound_stages_metadata_and_keeps_the_snapshot_version_header(
 
 
 @pytest.mark.asyncio
-async def test_northbound_metadata_conflict_after_admission_fences_the_run(flow):
+@pytest.mark.parametrize("northbound", [False, True])
+async def test_metadata_conflict_after_admission_fences_the_run(flow, northbound):
     operations, _, client, _ = flow
     prepared_turn.store.confirm_turn.side_effect = RuntimeMetadataVersionConflict(8)
     client.stop_run = AsyncMock()
     request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {"project": "new"}})
 
     with pytest.raises(AppException) as error:
-        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, allow_metadata_update=True)
+        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client, metadata_from_northbound=northbound)
 
     assert error.value.error_code == ErrorCode.CHAT_METADATA_VERSION_CONFLICT
     assert error.value.details == {"current_version": 8}
