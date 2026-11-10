@@ -301,3 +301,39 @@ async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, res
     assert error.value.status_code == 404
     assert error.value.detail == {"code": "WORKBENCH_DISABLED"}
     client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", ["completed", "running", "missing", "wrong_run", "wrong_conversation", "no_message"])
+async def test_background_recovers_only_matching_completed_run_after_lost_response(mocker, result):
+    from contracts.agent import AgentRequest
+    from contracts.agentos import AgentRunLookup
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeUpstreamError
+
+    original_error = RuntimeServiceTimeoutError("lost response")
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    client.run_tracked_background = AsyncMock(side_effect=original_error)
+    client.inspect_run = AsyncMock(return_value=SimpleNamespace(
+        run_id="b" * 32 if result == "wrong_run" else CURSOR.run_id,
+        conversation_id=43 if result == "wrong_conversation" else CURSOR.conversation_id,
+        status="running" if result == "running" else "completed",
+        assistant_message_id=None if result == "no_message" else 81,
+    ))
+    if result == "missing":
+        client.inspect_run.side_effect = RuntimeUpstreamError(status_code=404, content=b"", headers={})
+    request = AgentRequest(query="scheduled", conversation_id=CURSOR.conversation_id, agent_id=7)
+
+    if result == "completed":
+        recovered = await runtime_client.forward_tracked_background(request, CURSOR.run_id, "actor", "tenant")
+        assert recovered.model_dump() == {
+            "run_id": CURSOR.run_id, "conversation_id": CURSOR.conversation_id, "assistant_message_id": 81, "chunks": 0,
+        }
+    else:
+        with pytest.raises(RuntimeServiceTimeoutError) as error:
+            await runtime_client.forward_tracked_background(request, CURSOR.run_id, "actor", "tenant")
+        assert error.value is original_error
+
+    assert client.run_tracked_background.await_count == 1
+    client.inspect_run.assert_awaited_once_with(
+        AgentRunLookup(run_id=CURSOR.run_id, conversation_id=CURSOR.conversation_id), "actor", "tenant",
+    )

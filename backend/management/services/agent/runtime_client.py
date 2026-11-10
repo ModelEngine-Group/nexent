@@ -12,12 +12,15 @@ from redis.exceptions import RedisError
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResume, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
+    AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
     WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
-from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError, WorkbenchError
+from contracts.errors.exceptions import (
+    RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
+    ValidationError, WorkbenchError,
+)
 from infrastructure.agentos_identity import ServicePrincipal
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
@@ -253,4 +256,20 @@ async def forward_tracked_background(
     agent_request: AgentRequest, run_id: str, user_id: str, tenant_id: str,
 ) -> TrackedBackgroundResult:
     payload = BackgroundRun(run_id=run_id, request=agent_request.model_dump(mode="json"))
-    return await _agentos_client().run_tracked_background(payload, user_id, tenant_id)
+    client = _agentos_client()
+    try:
+        return await client.run_tracked_background(payload, user_id, tenant_id)
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+        if agent_request.conversation_id is not None and agent_request.conversation_id > 0:
+            lookup = AgentRunLookup(run_id=run_id, conversation_id=agent_request.conversation_id)
+            try:
+                state = await client.inspect_run(lookup, user_id, tenant_id)
+            except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError):
+                state = None
+            if (state is not None and state.status == "completed" and state.assistant_message_id is not None
+                    and (state.run_id, state.conversation_id) == (lookup.run_id, lookup.conversation_id)):
+                return TrackedBackgroundResult(
+                    run_id=run_id, conversation_id=lookup.conversation_id,
+                    assistant_message_id=state.assistant_message_id, chunks=0,
+                )
+        raise
