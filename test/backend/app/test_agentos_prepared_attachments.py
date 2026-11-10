@@ -50,6 +50,14 @@ def test_history_attachment_preserves_turn_and_uses_fresh_link_once(storage_boun
     storage_boundary.assert_called_once_with("attachments/actor/report.txt", "nexent")
 
 
+def test_non_dialogue_history_with_an_attachment_still_requires_compatibility():
+    history = [SimpleNamespace(role="tool", content="", minio_files=[
+        {"name": "report.txt", "url": "s3://nexent/attachments/actor/report.txt"},
+    ])]
+    with pytest.raises(ValueError, match="role"):
+        build_evaluation_input("latest", None, history, ACTOR.user_id, ACTOR.tenant_id)
+
+
 @pytest.mark.parametrize("url", [
     "s3://nexent/attachments/other/private.txt",
     "s3://other-bucket/attachments/actor/report.txt",

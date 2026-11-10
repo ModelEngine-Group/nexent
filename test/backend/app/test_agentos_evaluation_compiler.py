@@ -298,7 +298,10 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
 
         authorize = mocker.patch.object(authorization, "authorize_debug_version", return_value={})
         mocker.patch("management.services.model.run_controls.preflight_turn_controls")
-        request = AgentRequest(agent_id=7, is_debug=True, enable_plan=True, query="hello")
+        request = AgentRequest(
+            agent_id=7, is_debug=True, enable_plan=True, query="hello",
+            history=[{"role": "system", "content": "ignored client history"}],
+        )
         response = await runtime_client.forward_conversation_run(
             CompatibilityConversationRun(request=request.model_dump()), user, tenant,
         )
@@ -308,6 +311,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         assert (sent_user, sent_tenant) == (user, tenant)
         authorize.assert_called_once_with(7, 0, user, tenant)
         payload = PreparedEphemeralRun.model_validate_json(prepared.model_dump_json())
+        assert payload.input.history == []
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
         assert payload.debug is True and info.conversation_id is None and "conversation_id" not in payload.model_dump()
     elif kind == "a2a":
@@ -317,7 +321,12 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         )
         request = AgentRequest(
             agent_id=7, version_no=2, query="hello", is_debug=True, metadata={"ticket": "42"},
-            history=[{"role": "user", "content": "earlier"}],
+            history=[
+                {"role": "system", "content": "ignored client history"},
+                {"role": "user", "content": "earlier"},
+                {"role": "tool", "content": "ignored tool result"},
+                {"role": "assistant", "content": "answer"},
+            ],
         )
         prepared = await evaluation_snapshot.prepare_a2a_snapshot(request, user, tenant)
         lookup.assert_called_once_with(7, tenant, 2)
@@ -326,7 +335,9 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         assert "conversation_id" not in payload.model_dump()
         assert info.conversation_id is None and info.workspace_run_id == payload.run_id
         assert info.runtime_metadata == {"ticket": "42"}
-        assert payload.input.history[0].content == "earlier"
+        assert [(item.role, item.content) for item in payload.input.history] == [
+            ("user", "earlier"), ("assistant", "answer"),
+        ]
         if legacy_default:
             assert payload.models.llm.model_id == 11
             assert payload.models.llm.tenant_default_profile == "logprobs"

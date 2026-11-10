@@ -86,6 +86,8 @@ def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> R
         history=[
             RunHistoryMessage(role=item.role, content=item.content, attachment_refs=_export_attachments(item.minio_files))
             for item in (history or [])
+            # The legacy SDK ignores non-dialogue text, but its files can still affect the run.
+            if item.role in {"user", "assistant"} or item.minio_files
         ],
     )
     urls = {file.url for file in request.attachment_refs}
