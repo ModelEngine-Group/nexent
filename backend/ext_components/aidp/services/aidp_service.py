@@ -17,7 +17,6 @@ from nexent.utils.http_client_manager import http_client_manager
 from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from infrastructure.rdb.client import get_db_session
 
 
 logger = logging.getLogger("aidp_service")
@@ -1280,29 +1279,6 @@ def update_aidp_kb_impl(
         )
 
 
-def query_knowledge_binding_agents(*args, **kwargs):
-    from management.db.agent.repository import query_knowledge_binding_agents as operation
-
-    return operation(*args, **kwargs)
-
-
-def remove_conversation_knowledge_bindings(*args, **kwargs):
-    from management.db.conversation.repository import remove_conversation_knowledge_bindings as operation
-
-    return operation(*args, **kwargs)
-
-
-def remove_tool_knowledge_references(*args, **kwargs):
-    from management.db.tool.repository import remove_tool_knowledge_references as operation
-
-    return operation(*args, **kwargs)
-
-
-def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
-    """Preview agents affected by deleting the selected knowledge bases."""
-    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
-
-
 def delete_aidp_kb_impl(
     server_url: str,
     api_key: str,
@@ -1367,12 +1343,6 @@ def delete_aidp_kb_impl(
                 f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
             )
 
-    try:
-        with get_db_session() as session:
-            remove_tool_knowledge_references(session, kds_ids=[kds_id])
-            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
-    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
-        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
     return True
 
 
