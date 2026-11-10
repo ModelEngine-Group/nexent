@@ -74,7 +74,8 @@ class ModelService:
         set_monitoring_context(user_id=actor.user_id, tenant_id=actor.tenant_id)
         set_monitoring_operation(f"agentos_model_{payload.operation}", display_name=metadata.display_name)
         if isinstance(payload, ChatInvocation):
-            adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False)
+            options = payload.options.model_dump(exclude_none=True) if payload.options else {}
+            adapter = self.build_adapter(record, "llm", "llm", actor.tenant_id, stream=False, **options)
             output = await adapter.invoke(LLMRequest([message.model_dump() for message in payload.input]))
             output = {"content": output.content}
         elif isinstance(payload, EmbeddingInvocation):

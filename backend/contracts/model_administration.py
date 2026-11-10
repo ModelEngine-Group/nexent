@@ -30,6 +30,10 @@ class ModelRegistration(ModelRequest):
         return self.model_dump(include=_WRITE_FIELDS, exclude_unset=True)
 
 
+class ModelTenantDeactivation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ModelSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     display_name: str

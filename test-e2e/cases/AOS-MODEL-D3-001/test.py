@@ -14,9 +14,9 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from contracts.agentos import ChatInvocation, ChatMessage, EmbeddingInvocation, ModelAdministrationOperation
+from contracts.agentos import ChatInvocation, ChatMessage, ChatOptions, EmbeddingInvocation, ModelAdministrationOperation
 from contracts.constants import environment
-from contracts.model_administration import ModelHealthcheck, ModelRegistration
+from contracts.model_administration import ModelHealthcheck, ModelRegistration, ModelTenantDeactivation
 from contracts.errors.exceptions import RuntimeUpstreamError
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
@@ -111,6 +111,15 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
         def created_ids(names, tenant, model_type):
             return {records[(tenant, name)]["model_id"] for name in names}
 
+        retired = set()
+        records[("tenant-b", "other-model")] = {"model_id": 13}
+
+        def retire_tenant(actor, tenant):
+            assert actor == "user-a"
+            pending = {key for key in records if key[0] == tenant} - retired
+            retired.update(pending)
+            return len(pending)
+
         def load_saved(name, tenant_id, model_type):
             return records.get((tenant_id, name))
 
@@ -120,6 +129,7 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
             checked_keys.append(args[3])
             return True
 
+        monkeypatch.setattr("runtime.agentos.model_administration.deactivate_tenant_models", retire_tenant)
         monkeypatch.setattr(registry, "create_model_record", insert)
         monkeypatch.setattr(registry, "get_created_model_ids", created_ids)
         monkeypatch.setattr(registry, "get_models_by_display_name", lambda *args: [])
@@ -144,6 +154,7 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 model_id=11,
                 input=[ChatMessage(role="user", content="verify model")],
                 expected_revision=model.revision,
+                options=ChatOptions(temperature=0.3, top_p=0.95),
             )
             result = await agentos.invoke_model(request, "user-a", "tenant-a")
             assert result.output == {"content": "verified answer"}
@@ -185,10 +196,19 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 )
             assert failure.value.status_code == 422
 
-    assert set(records) == {("tenant-a", "new-model")}
+            cleanup = ModelTenantDeactivation()
+            for expected in (1, 0):
+                assert await agentos.model_command(
+                    ModelAdministrationOperation.DEACTIVATE_TENANT, cleanup, "user-a", "tenant-a",
+                ) == expected
+
+    assert set(records) == {("tenant-a", "new-model"), ("tenant-b", "other-model")}
+    assert retired == {("tenant-a", "new-model")}
     assert checked_keys == ["test-registration-key"]
     assert len(calls) == 1
     authorization, provider_input = calls[0]
     assert authorization == "Bearer provider-secret"
     assert provider_input["model"] == "test-model"
+    assert provider_input["temperature"] == 0.3
+    assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"

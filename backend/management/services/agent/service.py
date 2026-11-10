@@ -289,11 +289,8 @@ async def regenerate_agent_name_batch_impl(
                 exclude_agent_id=item.agent_id,
             ):
                 try:
-                    values[field_key] = await run_blocking(
-                        "regenerate-agent-value",
-                        regenerate_agent_value,
-                        lane="model-tool-io",
-                        owner="config",
+                    values[field_key] = await regenerate_agent_value(
+                        user_id=identity.user_id,
                         field_key=field_key,
                         original_value=value,
                         existing_values=list(existing_by_field[field_key]),

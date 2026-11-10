@@ -8203,7 +8203,7 @@ async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     monkeypatch.setattr('asyncio.to_thread', fake_to_thread, raising=False)
-    monkeypatch.setattr('management.services.agent.service.regenerate_agent_value', lambda **kwargs: 'regenerated_name' if kwargs['field_key'] == 'name' else 'Regenerated Display', raising=False)
+    monkeypatch.setattr('management.services.agent.service.regenerate_agent_value', AsyncMock(side_effect=lambda **kwargs: 'regenerated_name' if kwargs['field_key'] == 'name' else 'Regenerated Display'), raising=False)
     request = AgentNameBatchRegenerateRequest(items=[AgentNameBatchRegenerateItem(agent_id=1, name='dup_name', display_name='Dup', task_description='desc')])
     result = await agent_service.regenerate_agent_name_batch_impl(request, identity=AuthenticatedIdentity('test_user', 'test_tenant'))
     assert result == [{'name': 'regenerated_name', 'display_name': 'Regenerated Display'}]
@@ -8227,7 +8227,7 @@ async def test_regenerate_agent_name_batch_impl_llm_failure_fallback(monkeypatch
     async def run_in_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     monkeypatch.setattr('asyncio.to_thread', run_in_thread, raising=False)
-    monkeypatch.setattr('management.services.agent.service.regenerate_agent_value', lambda **kwargs: (_ for _ in ()).throw(Exception('llm-fail')), raising=False)
+    monkeypatch.setattr('management.services.agent.service.regenerate_agent_value', AsyncMock(side_effect=Exception('llm-fail')), raising=False)
     monkeypatch.setattr('management.services.agent.service.generate_unique_agent_value', lambda field_key, base_value, *args, **kwargs: f'{base_value}_fallback', raising=False)
     request = AgentNameBatchRegenerateRequest(items=[AgentNameBatchRegenerateItem(agent_id=1, name='dup', display_name='Dup', task_description='desc')])
     result = await agent_service.regenerate_agent_name_batch_impl(request, identity=AuthenticatedIdentity('test_user', 'test_tenant'))
@@ -18516,7 +18516,7 @@ def rebase_import_context(mocker):
     mocker.patch.object(management, '_get_user_group_ids', return_value='')
     mocker.patch.object(management, 'publish_version_impl', new_callable=AsyncMock)
     relations = mocker.patch.object(agent_transfer, 'insert_related_agent')
-    llm = mocker.patch.object(naming, 'call_llm_for_system_prompt')
+    llm = mocker.patch.object(naming, 'invoke_chat_prompt')
 
     def create_agent(agent_info, **kwargs):
         record = {**agent_info, 'agent_id': len(catalog) + 1}

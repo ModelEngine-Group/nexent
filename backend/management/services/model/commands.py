@@ -6,7 +6,7 @@ import json
 from backend.http.client import create_httpx_client
 from contracts.agentos import ModelAdministrationOperation as Operation
 from contracts.constants.environment import RUNTIME_SERVICE_URL
-from contracts.errors.exceptions import ModelProviderError, RuntimeUpstreamError
+from contracts.errors.exceptions import ModelProviderError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.model_administration import (
     ModelBatchUpdate,
     ModelHealthcheck,
@@ -16,6 +16,7 @@ from contracts.model_administration import (
     ModelProviderList,
     ModelRegistration,
     ModelSelection,
+    ModelTenantDeactivation,
     ModelUpdate,
 )
 from management.clients.agentos import AgentOSClient
@@ -74,6 +75,13 @@ async def batch_update_models_for_tenant(user_id, tenant_id, model_list):
 
 async def delete_model_for_tenant(user_id, tenant_id, display_name):
     return await _command(Operation.DEACTIVATE, ModelSelection(display_name=display_name), user_id, tenant_id)
+
+
+async def deactivate_tenant_models(user_id: str, tenant_id: str) -> int:
+    count = await _command(Operation.DEACTIVATE_TENANT, ModelTenantDeactivation(), user_id, tenant_id)
+    if type(count) is not int or count < 0:
+        raise RuntimeServiceUnavailableError("Invalid AgentOS model cleanup result")
+    return count
 
 
 async def create_provider_models_for_tenant(tenant_id, provider_request, *, user_id):

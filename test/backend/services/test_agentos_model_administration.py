@@ -63,3 +63,18 @@ def test_model_mutations_scope_sql_to_active_tenant(monkeypatch, operation):
     assert "tenant_id" not in update
     assert "tenant_id" in where and "delete_flag" in where and "model_id" in where
     assert statement.params["tenant_id_1"] == "tenant"
+
+
+def test_tenant_model_cleanup_uses_one_scoped_update(monkeypatch):
+    session = Mock()
+    session.execute.return_value.rowcount = 2
+    monkeypatch.setattr(model_records, "get_db_session", lambda: nullcontext(session))
+
+    assert model_records.deactivate_tenant_models("actor", "tenant") == 2
+    session.execute.assert_called_once()
+    statement = session.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+    values, where = str(statement).split(" WHERE ", maxsplit=1)
+    assert "tenant_id" not in values
+    assert "tenant_id" in where and "delete_flag" in where
+    assert statement.params["tenant_id_1"] == "tenant"
+    assert statement.params["updated_by"] == "actor"

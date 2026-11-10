@@ -602,6 +602,7 @@ class TestTenantEndpointMappings:
 
     @pytest.mark.asyncio
     async def test_delete_success_and_exception_mappings(self):
+        auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "SU")
         tenant_service_module.delete_tenant.return_value = True
         response = client.delete("/tenants/tenant-1")
         assert response.status_code == 200
@@ -654,6 +655,7 @@ class TestTenantEndpointMappings:
         tenant_service_module.delete_tenant.return_value = True
 
         with caplog.at_level(logging.INFO, logger="audit.security"):
+            auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "SU")
             response = client.delete("/tenants/tenant-1")
 
         assert response.status_code == 200
@@ -664,3 +666,14 @@ class TestTenantEndpointMappings:
         assert "user_id=user-1" in messages[0]
         assert "tenant_id=tenant-1" in messages[0]
         assert 'details={"tenant_id":"tenant-1"}' in messages[0]
+
+
+def test_tenant_delete_requires_super_admin():
+    auth_utils_module.get_current_user_context.side_effect = None
+    auth_utils_module.get_current_user_context.return_value = ("user-1", "tenant-1", "ADMIN")
+    tenant_service_module.delete_tenant.reset_mock()
+
+    response = client.delete("/tenants/tenant-2", headers={"Authorization": "Bearer token"})
+
+    assert response.status_code == 403
+    tenant_service_module.delete_tenant.assert_not_awaited()

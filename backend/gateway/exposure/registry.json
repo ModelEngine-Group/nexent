@@ -1259,7 +1259,7 @@
       "method": "POST",
       "path": "/api/conversation/generate_title",
       "transport": "http",
-      "target": "runtime",
+      "target": "management",
       "source": "backend/management/api/conversation/conversation_management.py",
       "route_id": "route-3d8ebe55e8062bad",
       "credential_kinds": [

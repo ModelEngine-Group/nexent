@@ -15,7 +15,7 @@ from management.db.configuration.tenant import create_tenant_with_default_group,
 from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
 from management.services.permission.identity.users import delete_user_and_cleanup
 from management.db.identity.group import query_groups_by_tenant, remove_group
-from management.db.model.repository import get_model_records, delete_model_record
+from management.services.model.commands import deactivate_tenant_models
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
 from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
 from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
@@ -499,6 +499,9 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
+        # Stop before the local cascade if Runtime cannot confirm model cleanup.
+        await deactivate_tenant_models(deleted_by or "system", tenant_id)
+
         # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
@@ -530,18 +533,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete group {group.get('group_id')}: {str(e)}")
 
-        # 3. Delete all models in the tenant
-        logger.info(f"Deleting models for tenant {tenant_id}")
-        models = get_model_records({"tenant_id": tenant_id}, tenant_id)
-        for model in models:
-            try:
-                delete_model_record(
-                    model["model_id"], deleted_by or "system", tenant_id)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete model {model.get('model_id')}: {str(e)}")
-
-        # 4. Delete all knowledge bases in the tenant
+        # 3. Delete all knowledge bases in the tenant
         logger.info(f"Deleting knowledge bases for tenant {tenant_id}")
         knowledge_list = get_knowledge_info_by_tenant_id(tenant_id)
         for kb in knowledge_list:
@@ -554,7 +546,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete knowledge base {kb.get('knowledge_id')}: {str(e)}")
 
-        # 5. Delete all agents in the tenant (including related data)
+        # 4. Delete all agents in the tenant (including related data)
         logger.info(f"Deleting agents for tenant {tenant_id}")
         agents = query_all_agent_info_by_tenant_id(tenant_id, version_no=0)
         for agent in agents:
@@ -610,7 +602,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         # 5b. Delete all skills, skill instances, and local skill files for the tenant
         _delete_skills_for_tenant(tenant_id, deleted_by or "system")
 
-        # 6. Delete all MCP configurations in the tenant
+        # 5. Delete all MCP configurations in the tenant
         logger.info(f"Deleting MCP records for tenant {tenant_id}")
         mcp_list = get_mcp_records_by_tenant(tenant_id)
         for mcp in mcp_list:
@@ -625,7 +617,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete MCP {mcp.get('mcp_id')}: {str(e)}")
 
-        # 7. Delete all invitation codes in the tenant
+        # 6. Delete all invitation codes in the tenant
         logger.info(f"Deleting invitations for tenant {tenant_id}")
         invitations = query_invitations_by_tenant(tenant_id)
         for invitation in invitations:
@@ -635,7 +627,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 logger.warning(
                     f"Failed to delete invitation {invitation.get('invitation_id')}: {str(e)}")
 
-        # 8. Delete all tenant configurations (must be done last)
+        # 7. Delete all tenant configurations (must be done last)
         logger.info(f"Deleting tenant configurations for tenant {tenant_id}")
         # Delete all config records for this tenant
         all_configs = get_all_configs_by_tenant_id(tenant_id)

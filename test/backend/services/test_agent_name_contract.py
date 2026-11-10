@@ -81,13 +81,14 @@ def test_duplicate_suffix_keeps_maximum_length_name_valid():
     assert AgentInfoRequest(name=name).name == name
 
 
-def test_regeneration_retries_invalid_model_output(mocker):
+@pytest.mark.asyncio
+async def test_regeneration_retries_invalid_model_output(mocker):
     from management.services.agent import naming
 
     mocker.patch.object(naming, "load_default_generation_prompt", return_value={})
     mocker.patch.object(naming, "compose_name_regeneration", return_value=SimpleNamespace(user="u", system="s"))
-    model = mocker.patch.object(naming, "call_llm_for_system_prompt", side_effect=["class", "bad-name", "中文助手"])
-    assert naming.regenerate_agent_value("name", "original", [], "task", 1, "tenant", agents_cache=[]) == "中文助手"
+    model = mocker.patch.object(naming, "invoke_chat_prompt", side_effect=["class", "bad-name", "中文助手"])
+    assert await naming.regenerate_agent_value("name", "original", [], "task", 1, "tenant", agents_cache=[], user_id="actor") == "中文助手"
     assert model.call_count == 3
 
 

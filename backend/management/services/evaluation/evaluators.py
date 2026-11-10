@@ -14,7 +14,8 @@ from management.services.agent.profile import (
     fetch_agent_profile,
     format_agent_profile_context,
 )
-from management.services.model.invocation import call_llm_for_system_prompt
+from contracts.agentos import ChatOptions
+from management.clients.model import invoke_chat_prompt
 from nexent.core.agents.prompt.evaluation import compose_evaluator_generation
 
 
@@ -199,12 +200,14 @@ def _validate_evaluator_fields(data: dict[str, Any]) -> str:
     return eval_type
 
 
-def generate_evaluator_by_llm_impl(
+async def generate_evaluator_by_llm_impl(
     description: str,
     tenant_id: str,
     model_id: int,
     agent_id: int | None = None,
     language: str = "zh",
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     """Generate evaluator config via LLM from a natural language description.
 
@@ -222,11 +225,13 @@ def generate_evaluator_by_llm_impl(
     prompt = compose_evaluator_generation(language, description)
 
     try:
-        response = call_llm_for_system_prompt(
+        response = await invoke_chat_prompt(
             model_id=model_id,
             user_prompt=user_prompt,
             system_prompt=prompt.system,
             tenant_id=tenant_id,
+            user_id=user_id,
+            options=ChatOptions(temperature=0.3, top_p=0.95),
         )
     except Exception as exc:
         logger.exception("LLM call failed for evaluator generation")

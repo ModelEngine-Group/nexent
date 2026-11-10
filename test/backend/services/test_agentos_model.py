@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 from contracts.agentos import (
     ChatInvocation,
     ChatMessage,
+    ChatOptions,
     EmbeddingInvocation,
     ModelInvocation,
     RerankInput,
@@ -117,3 +118,9 @@ async def test_model_invoke_uses_registered_model(model_type, request_body, prov
     assert result.revision == record["update_time"]
     assert build.call_args.args[0] is record
     adapter.invoke.assert_awaited_once()
+
+
+@pytest.mark.parametrize("options", [{"temperature": -1}, {"top_p": 2}, {"api_key": "secret"}])
+def test_chat_sampling_does_not_allow_connection_fields_or_unbounded_values(options):
+    with pytest.raises(ValidationError):
+        ChatOptions.model_validate(options)

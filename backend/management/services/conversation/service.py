@@ -11,7 +11,6 @@ from management.services.agent.context import (
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
 from contracts.constants.constants import LANGUAGE
@@ -23,7 +22,8 @@ from contracts.errors.exceptions import AppException, ConversationNotFoundError,
 from contracts.constants.constants import CHAT_MODE_VALUES
 from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from management.db.model.repository import get_model_by_model_id
-from management.services.model.adapter import get_llm_adapter_from_config
+from contracts.agentos import ChatOptions
+from management.clients.model import invoke_chat_prompt
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
@@ -291,23 +291,16 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
     )
 
 
-def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"],
-                       model_id: Optional[int] = None) -> str:
-    """
-    Call LLM to generate a title from a user question
-
-    Args:
-        question: User's question content
-        tenant_id: Tenant ID
-        language: Language code ('zh' for Chinese, 'en' for English)
-        model_id: Optional tenant-scoped LLM model ID
-
-    Returns:
-        str: Generated title
-    """
-    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
-    set_monitoring_context(tenant_id=tenant_id, user_id=None)
-
+async def call_llm_for_title(
+    question: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    model_id: Optional[int] = None,
+    *,
+    user_id: str,
+) -> str:
+    """Generate a title through the signed Runtime model interface."""
+    default_title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
     if model_id is not None:
         model_config = get_model_by_model_id(model_id, tenant_id)
         if not model_config:
@@ -316,40 +309,25 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
             raise ValidationError("Selected model is not an LLM model")
     else:
         model_config = tenant_config_manager.get_model_config(
-            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    display_name = model_config.get("display_name", "") if model_config else ""
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id,
+        )
+        model_id = (model_config or {}).get("model_id")
+        if not model_id:
+            return default_title
+
+    display_name = model_config.get("display_name") or ""
+    set_monitoring_context(tenant_id=tenant_id, user_id=user_id)
     set_monitoring_operation("title_generation", display_name=display_name or None)
-
-    timeout_seconds = model_config.get("timeout_seconds") if model_config else None
-
-    # Create OpenAIModel instance via the gateway
-    llm = get_llm_adapter_from_config(
-        model_config,
-        tenant_id,
-        temperature=0.7,
-        top_p=0.95,
-        stream=False,
-        timeout_seconds=timeout_seconds,
-        display_name=display_name or None,
+    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
+    content = await invoke_chat_prompt(
+        model_id=model_id,
+        system_prompt=prompt.system,
+        user_prompt=prompt.user,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        options=ChatOptions(temperature=0.7, top_p=0.95),
     )
-
-    # Build messages - use new template variable 'question' instead of 'content'
-    messages = [{"role": MESSAGE_ROLE["SYSTEM"],
-                 "content": prompt.system},
-                {"role": MESSAGE_ROLE["USER"],
-                 "content": prompt.user}]
-
-    # ModelEngine accepts role/content in a simple structure, ensure flattening before passing
-    if model_config.get("model_factory", "").lower() == "modelengine":
-        messages = [{"role": msg["role"], "content": str(msg.get("content", ""))} for msg in messages]
-
-    # Call the model (gateway adapter forwards to the wrapped OpenAIModel)
-    response = llm(messages)
-    if not response or not response.content or not response.content.strip():
-        title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
-    else:
-        title = remove_think_blocks(response.content.strip())
-
+    title = remove_think_blocks(content.strip()) if content and content.strip() else default_title
     logger.info("title_generation: %s -> %s", display_name or "unknown", title)
     return title
 
@@ -1156,17 +1134,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
             raise ConversationNotFoundError("Conversation does not exist or has been deleted")
         snapshot = {"conversation_title": initial["conversation_title"],
                     "title_version": initial["title_version"]}
-        # Call LLM to generate title from question in a separate thread to avoid blocking
-        title = await run_blocking(
-            "conversation-title",
-            call_llm_for_title,
-            question,
-            tenant_id,
-            language,
-            model_id,
-            lane="model-tool-io",
-            owner="runtime",
-        )
+        title = await call_llm_for_title(question, tenant_id, language, model_id, user_id=user_id)
 
         # A manual rename during the model call wins. No database lock is held
         # while waiting for the external model, and the response returns the

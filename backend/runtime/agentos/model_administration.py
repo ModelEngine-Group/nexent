@@ -19,9 +19,11 @@ from contracts.model_administration import (
     ModelProviderList,
     ModelRegistration,
     ModelSelection,
+    ModelTenantDeactivation,
     ModelUpdate,
 )
-from infrastructure.rdb.model_records import get_model_by_model_id
+from infrastructure.rdb.model_records import deactivate_tenant_models, get_model_by_model_id
+from nexent.core.concurrency import run_blocking
 from runtime.model import health, registry
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,17 @@ async def _probe(payload: ModelProbe, actor):
                 base_url=stored["base_url"],
             )
     return await health.verify_model_config_connectivity(config)
+
+
+async def _deactivate_tenant(_payload: ModelTenantDeactivation, actor):
+    return await run_blocking(
+        "agentos-model-deactivate-tenant",
+        deactivate_tenant_models,
+        actor.user_id,
+        actor.tenant_id,
+        lane="control-io",
+        owner="runtime.model",
+    )
 
 
 def _endpoint(schema, call):
@@ -91,6 +104,7 @@ def create_model_administration_router() -> APIRouter:
          lambda p, a: registry.update_single_model_for_tenant(a.user_id, a.tenant_id, p.display_name, p.patch)),
         (ModelAdministrationOperation.DEACTIVATE, ModelSelection,
          lambda p, a: registry.delete_model_for_tenant(a.user_id, a.tenant_id, p.display_name)),
+        (ModelAdministrationOperation.DEACTIVATE_TENANT, ModelTenantDeactivation, _deactivate_tenant),
         (ModelAdministrationOperation.IMPORT, ModelProviderImport,
          lambda p, a: registry.batch_create_models_for_tenant(a.user_id, a.tenant_id, p.model_dump())),
         (ModelAdministrationOperation.BATCH_UPDATE, ModelBatchUpdate,

@@ -154,6 +154,17 @@ def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
         return result.rowcount > 0
 
 
+def deactivate_tenant_models(user_id: str, tenant_id: str) -> int:
+    """Soft-delete the tenant's active models in one transaction."""
+    with get_db_session() as session:
+        stmt = (
+            update(ModelRecord)
+            .where(ModelRecord.tenant_id == tenant_id, ModelRecord.delete_flag == "N")
+            .values(delete_flag="Y", update_time=func.current_timestamp(), updated_by=user_id)
+        )
+        return session.execute(stmt).rowcount
+
+
 def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get a list of model records

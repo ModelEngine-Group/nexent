@@ -40,6 +40,7 @@ class ModelAdministrationOperation(str, Enum):
     REGISTER = NAMESPACE + "v1/model/register"
     UPDATE = NAMESPACE + "v1/model/update"
     DEACTIVATE = NAMESPACE + "v1/model/deactivate"
+    DEACTIVATE_TENANT = NAMESPACE + "v1/model/deactivate-tenant"
     IMPORT = NAMESPACE + "v1/model/provider-import"
     BATCH_UPDATE = NAMESPACE + "v1/model/batch-update"
     DISCOVER = NAMESPACE + "v1/model/provider-discover"
@@ -71,9 +72,16 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    temperature: Annotated[float, Field(ge=0, le=2)] | None = None
+    top_p: Annotated[float, Field(ge=0, le=1)] | None = None
+
+
 class ChatInvocation(ModelInvokeBase):
     operation: Literal["chat"] = "chat"
     input: Annotated[list[ChatMessage], Field(min_length=1)]
+    options: ChatOptions | None = None
 
 
 class EmbeddingInvocation(ModelInvokeBase):
