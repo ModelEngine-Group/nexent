@@ -4,7 +4,7 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, field_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer
 
 from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
@@ -564,16 +564,37 @@ class ModelAdministrationOperation(str, Enum):
     PROBE = NAMESPACE + "v1/model/probe"
 
 
+class MemoryOperation(str, Enum):
+    STORE = NAMESPACE + "v1/memory/store"
+
+
+class AgentMemoryStore(RunSpecModel):
+    agent_id: PositiveInt
+    conversation_id: PositiveInt | None = None
+    content: str = Field(min_length=1, max_length=65536)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    embedding: list[FiniteFloat] | None = Field(default=None, min_length=1, max_length=8192)
+
+
+class AgentMemoryReceipt(RunSpecModel):
+    memory_id: PositiveInt
+    layer: Literal["agent"] = "agent"
+    memory_type: Literal["short_term"] = "short_term"
+    event: Literal["ADD", "UPDATE", "UNCHANGED"]
+    indexed: bool = False
+
+
 class ManagementOperation(str, Enum):
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
 
 
 AgentOSOperation = (
-    CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation | ManagementOperation
+    CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation | MemoryOperation
+    | ManagementOperation
 )
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
-    for operations in (CompatibilityOperation, AgentOperation, ModelOperation, ModelAdministrationOperation)
+    for operations in (CompatibilityOperation, AgentOperation, ModelOperation, ModelAdministrationOperation, MemoryOperation)
     for operation in operations
 }
 

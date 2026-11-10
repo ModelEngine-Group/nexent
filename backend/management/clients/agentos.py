@@ -8,6 +8,8 @@ from starlette.responses import StreamingResponse
 from contracts.agentos import (
     MAX_REQUEST_BYTES,
     AgentActiveRun,
+    AgentMemoryReceipt,
+    AgentMemoryStore,
     AgentOperation,
     AgentRunLookup,
     AgentRunReference,
@@ -23,6 +25,7 @@ from contracts.agentos import (
     CompatibilityRun,
     CompatibilityStop,
     EvaluationAgentResult,
+    MemoryOperation,
     ModelInvocation,
     ModelMetadata,
     ModelOperation,
@@ -81,6 +84,12 @@ class AgentOSClient:
     async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
         result = await self._post_json(AgentOperation.RUN, payload, user_id, tenant_id)
         return self._validate_result(AgentRunReference, result)
+
+    async def store_agent_memory(
+        self, payload: AgentMemoryStore, user_id: str, tenant_id: str,
+    ) -> AgentMemoryReceipt:
+        result = await self._post_json(MemoryOperation.STORE, payload, user_id, tenant_id, timeout=_MODEL_TIMEOUT)
+        return self._validate_result(AgentMemoryReceipt, result)
 
     async def run_ephemeral(self, payload: PreparedEphemeralRun, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RUN_EPHEMERAL, payload, user_id, tenant_id)

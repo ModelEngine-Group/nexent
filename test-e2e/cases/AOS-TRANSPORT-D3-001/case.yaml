@@ -108,6 +108,9 @@ case:
   - order: 27
     action: Run an owned native conversation whose stored knowledge scope includes a revoked index.
     expected: Management stages the unchanged desired scope and signs only the authorized index. The public event preserves the warning and the journal streams once.
+  - order: 28
+    action: Store Agent Memory through the Management SDK bridge, retry, and try an unauthorized conversation and unsigned request.
+    expected: Runtime uses the signed scope for one Model invocation and one write. Replay keeps the original ID and rejected calls do not write.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -137,6 +140,7 @@ case:
   - Runtime applies the explicit temperature from the signed root model while reading provider credentials locally.
   - A debug run has no persistent conversation and releases its worker and temporary resources after scoped cancellation.
   - Native knowledge scope preserves the public warning without leaking the revoked index into Runtime.
+  - Agent Memory store preserves the receipt on replay and does not dispatch untrusted or out-of-scope writes.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -339,4 +343,9 @@ case:
     description: Native conversation scope is staged under its owner and only authorized index bindings are signed.
     steps: [27]
     expected_results: [28]
+    forbidden_side_effects: [1, 2]
+  - id: AC-37
+    description: The Management SDK bridge stores Agent Memory through the signed Runtime endpoint with scoped idempotency.
+    steps: [28]
+    expected_results: [29]
     forbidden_side_effects: [1, 2]

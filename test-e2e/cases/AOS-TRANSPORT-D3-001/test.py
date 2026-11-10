@@ -262,6 +262,81 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_signed_ephemeral_stream(ephemeral_patches, tmp_path)
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
+    with monkeypatch.context() as memory_patches:
+        await _assert_memory_store_over_signed_http(memory_patches)
+
+
+async def _assert_memory_store_over_signed_http(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from contracts.agentos import MemoryOperation
+    from management.services.memory import provider
+    from nexent.memory.embedding_model import EmbeddingModelInfo
+    from runtime.agentos import memory
+
+    actor = ServicePrincipal("user-a", "tenant-a")
+    model = EmbeddingModelInfo(
+        model_name="embed", dimension=2, base_url="", api_key="", model_id=11, revision="r1",
+    )
+    rows = {}
+
+    def find(tenant, user, agent, conversation, key, content):
+        if (tenant, user, agent, conversation) != ("tenant-a", "user-a", 7, 42):
+            raise memory.MemoryStoreScopeError
+        return rows.get((tenant, key, content))
+
+    def write(tenant, user, agent, conversation, key, content, index):
+        assert (tenant, user, agent, conversation, index) == ("tenant-a", "user-a", 7, 42, "mem_embed_2")
+        rows[tenant, key, content] = 17
+        return 17, "ADD"
+
+    async def controlled_io(_label, fn, *args, **_options):
+        return fn(*args)
+
+    model_service = AsyncMock()
+    model_service.invoke.return_value = SimpleNamespace(output=[[0.1, 0.2]])
+    index_service = Mock()
+    index_service.index_record.return_value = True
+    write_record = Mock(side_effect=write)
+    fanout = AsyncMock()
+    monkeypatch.setattr(memory, "run_blocking", controlled_io)
+    monkeypatch.setattr(memory, "_load_embedding", lambda tenant: model if tenant == actor.tenant_id else None)
+    monkeypatch.setattr(memory, "find_existing_memory", find)
+    monkeypatch.setattr(memory, "write_agent_memory", write_record)
+    monkeypatch.setattr(memory, "mirror_current_memory", lambda *args: args[-1]({"memory_id": 17}))
+    monkeypatch.setattr(provider, "_fanout_external_ingest", fanout)
+    monkeypatch.setattr(provider, "get_memory_record_service", Mock(side_effect=AssertionError("legacy store loaded")))
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(memory.create_memory_store_router(model_service, index_service))
+    payload = {
+        "tenant_id": actor.tenant_id, "user_id": actor.user_id, "agent_id": "7", "conversation_id": "42",
+        "content": "remember", "idempotency_key": "once",
+    }
+    with serve(runtime) as url:
+        monkeypatch.setattr(environment, "RUNTIME_SERVICE_URL", url)
+        async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
+            denied = await client.post(f"{url}/api{MemoryOperation.STORE.value}", json=payload)
+            assert denied.status_code == 401
+        for wrong_scope in ({"tenant_id": "tenant-b"}, {"user_id": "user-b"}, {"conversation_id": "43"}):
+            with pytest.raises(RuntimeUpstreamError) as denied:
+                await provider._backend_store_hook({**payload, **wrong_scope})
+            assert denied.value.status_code == 404
+        assert not rows
+        model_service.invoke.assert_not_awaited()
+        first = await provider._backend_store_hook(payload)
+        replay = await provider._backend_store_hook(payload)
+        assert (first["memory_id"], first["event"], first["indexed"]) == (17, "ADD", True)
+        assert (replay["memory_id"], replay["event"]) == (17, "UNCHANGED")
+        assert len(rows) == 1
+        write_record.assert_called_once()
+        index_service.index_record.assert_called_once()
+        model_service.invoke.assert_awaited_once()
+        invocation, signed_actor = model_service.invoke.await_args.args
+        assert (invocation.model_id, invocation.expected_revision, signed_actor) == (11, "r1", actor)
+        assert fanout.await_count == 2
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):

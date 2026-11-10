@@ -24,6 +24,7 @@ change:
     decision: strengthen
     behaviors:
     - Service credential binds the exact operation and payload and expires.
+    - Agent Memory stores validate the signed scope and idempotency before invoking the Runtime model or writing.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
@@ -112,6 +113,7 @@ change:
     - test/backend/agents/test_create_agent_info.py
     - test/backend/database/test_a2a_agent_db.py
     - test/backend/app/test_agentos_resume.py
+    - test/backend/app/test_agentos_memory_store.py
     - test/backend/app/test_agentos_tracked_background.py
     - test/backend/services/test_startup_recovery_service.py
     - test/backend/services/test_agent_subscription_lifecycle.py

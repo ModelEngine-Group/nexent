@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
 from runtime.agentos.compatibility import create_background_router, create_compatibility_router
+from runtime.agentos.memory import create_memory_store_router
 from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.agentos.model import create_model_router
 from runtime.agentos.model_administration import create_model_administration_router
@@ -125,7 +126,9 @@ app.include_router(create_background_router(
     run_agentos_background, inspect_agentos_conversation, tracked_run=run_agentos_tracked_background,
 ))
 
-app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
+model_service = ModelService(get_model_by_model_id, get_adapter_from_config)
+app.include_router(create_model_router(model_service))
+app.include_router(create_memory_store_router(model_service))
 app.include_router(create_model_administration_router())
 app.include_router(agent_router)
 app.include_router(create_evaluation_router())

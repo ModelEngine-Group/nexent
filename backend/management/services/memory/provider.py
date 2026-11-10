@@ -4,7 +4,7 @@
 The SDK does not depend on PostgreSQL or Elasticsearch. It accepts two
 async hooks (``backend_store`` / ``backend_search``) and dispatches the
 payloads through them. This module provides the backend-side adapter that
-bridges those hooks to ``management.services.memory.records`` and
+bridges Agent writes to Runtime through AgentOS and search to
 ``management.services.memory.retrieval``.
 
 Usage from the agent build path::
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 from nexent.core.concurrency import run_blocking
 from nexent.memory.embedding_model import EmbeddingModelInfo
@@ -48,11 +49,29 @@ from management.services.memory.ingestion import MemoryIngestionEventService
 logger = logging.getLogger("memory_backend_adapter")
 
 
+async def _store_agent_memory(payload: Dict[str, Any], agent_id: int) -> Dict[str, Any]:
+    from backend.http.client import create_httpx_client
+    from contracts.agentos import AgentMemoryStore
+    from contracts.constants import environment
+    from management.clients.agentos import AgentOSClient
+
+    conversation = payload.get("conversation_id")
+    request = AgentMemoryStore(
+        agent_id=agent_id,
+        conversation_id=int(conversation) if conversation not in (None, "") else None,
+        content=payload["content"],
+        idempotency_key=payload.get("idempotency_key") or str(uuid4()),
+        embedding=payload.get("embedding") or None,
+    )
+    client = AgentOSClient(environment.RUNTIME_SERVICE_URL, create_httpx_client)
+    result = await client.store_agent_memory(request, payload["user_id"], payload["tenant_id"])
+    return result.model_dump()
+
+
 async def _backend_store_hook(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Adapter for ``MemoryService.store_memory`` -> ``MemoryRecordService``."""
-    service = get_memory_record_service()
+    """Store bound Agent memory and relay the existing external-ingest notification."""
     layer_value = payload.get("layer", MemoryLayer.AGENT.value)
     if isinstance(layer_value, MemoryLayer):
         layer_value = layer_value.value
@@ -61,6 +80,31 @@ async def _backend_store_hook(
     if hasattr(memory_type_value, "value"):
         memory_type_value = memory_type_value.value
 
+    tenant_id = payload["tenant_id"]
+    agent_id = str(payload.get("agent_id"))
+    if (layer_value == MemoryLayer.AGENT.value and memory_type_value in (None, "short_term")
+            and len(agent_id) <= 10 and agent_id.isascii() and agent_id.isdecimal() and int(agent_id) > 0):
+        result = await _store_agent_memory(payload, int(agent_id))
+    else:
+        result = await _store_legacy_memory(payload, layer_value, memory_type_value)
+
+    try:
+        await _fanout_external_ingest(payload, result)
+    except Exception as exc:
+        logger.warning(
+            "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
+            "event_id=%s error_type=%s",
+            tenant_id,
+            result.get("memory_id", ""),
+            type(exc).__name__,
+            exc_info=True,
+        )
+
+    return result
+
+
+async def _store_legacy_memory(payload, layer_value, memory_type_value):
+    service = get_memory_record_service()
     tenant_id = payload["tenant_id"]
     embedding = payload.get("embedding")
     embedding_model_info = None
@@ -72,7 +116,7 @@ async def _backend_store_hook(
                 "Failed to store memory: tenant embedding model is not configured"
             )
 
-    result = await run_blocking(
+    return await run_blocking(
         "memory-store-record", service.create_memory, lane="background-service", owner="management.memory",
         tenant_id=tenant_id,
         user_id=payload["user_id"],
@@ -90,20 +134,6 @@ async def _backend_store_hook(
         embedding_model_info=embedding_model_info,
         actor="agent",
     )
-
-    try:
-        await _fanout_external_ingest(payload, result)
-    except Exception as exc:
-        logger.warning(
-            "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
-            "event_id=%s error_type=%s",
-            tenant_id,
-            result.get("memory_id", ""),
-            type(exc).__name__,
-            exc_info=True,
-        )
-
-    return result
 
 
 def _build_ingestion_event_service():

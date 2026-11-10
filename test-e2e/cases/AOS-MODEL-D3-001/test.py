@@ -328,7 +328,7 @@ async def _assert_memory_write_uses_signed_embedding(monkeypatch, model):
         for lane in ("model-tool-io", "background-service", "control-io", "model-embedding")
     })
     payload = {
-        "tenant_id": "tenant-a", "user_id": "worker-a", "agent_id": "7", "conversation_id": "42",
+        "tenant_id": "tenant-a", "user_id": "worker-a", "agent_id": "legacy-agent", "conversation_id": "42",
         "content": "store memory", "idempotency_key": "store-once",
     }
 
