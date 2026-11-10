@@ -83,6 +83,7 @@ const fixture = vi.hoisted(() => {
     getById: vi.fn(),
     historyLoad: vi.fn(),
     thread: vi.fn(),
+    creatorControls: vi.fn(),
     remoteRun: vi.fn(async function* (_options: ChatModelRunOptions) {
       yield { content: [] };
     }),
@@ -131,7 +132,10 @@ vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: { stt: {} } }),
 }));
 vi.mock("@/features/model-controls/useCreatorModelControls", () => ({
-  useCreatorModelControls: () => fixture.controls,
+  useCreatorModelControls: (...args: unknown[]) => {
+    fixture.creatorControls(...args);
+    return fixture.controls;
+  },
 }));
 vi.mock("@/app/newchat/adapter/attachment-adapter", () => ({
   compositeAttachmentAdapter: {},
@@ -433,6 +437,8 @@ it("shows scoped history count, restores a turn and starts another conversation 
     expect(fixture.runtime.thread.import).toHaveBeenCalledWith(saved)
   );
   expect(conversationChanged).toHaveBeenCalledExactlyOnceWith(42);
+  expect(fixture.thread.mock.calls.at(-1)![0].conversationId).toBe(12);
+  expect(fixture.creatorControls.mock.calls.at(-1)![3]).toBe(12);
   async function send() {
     const result = fixture.adapter!.run({
       messages: [],
@@ -453,6 +459,8 @@ it("shows scoped history count, restores a turn and starts another conversation 
     expect(fixture.runtime.thread.reset).toHaveBeenCalledOnce()
   );
   expect(conversationChanged).toHaveBeenCalledTimes(2);
+  expect(fixture.thread.mock.calls.at(-1)![0].conversationId).toBeUndefined();
+  expect(fixture.creatorControls.mock.calls.at(-1)![3]).toBeUndefined();
   await act(send);
   expect(
     fixture.remoteRun.mock.calls.at(-1)?.[0].runConfig?.custom?.agentId
@@ -460,6 +468,42 @@ it("shows scoped history count, restores a turn and starts another conversation 
   expect(
     fixture.remoteRun.mock.calls.at(-1)?.[0].runConfig?.custom?.threadId
   ).toBeUndefined();
+});
+
+it("AC-005 binds first-turn server preferences and drops the binding when the Agent target changes", async () => {
+  const view = render(<Nl2AgentChatPanel agentId={42} />);
+  await act(async () => {
+    const result = fixture.adapter!.run({
+      messages: [],
+      runConfig: {},
+    } as never);
+    for await (const chunk of result as AsyncIterable<unknown>) void chunk;
+    const onId = fixture.remoteRun.mock.calls.at(-1)![0].runConfig?.custom
+      ?.onServerConversationId as (id: string) => void;
+    onId("511");
+  });
+  expect(fixture.thread.mock.calls.at(-1)![0].conversationId).toBe(511);
+  expect(fixture.creatorControls.mock.calls.at(-1)![3]).toBe(511);
+  view.rerender(<Nl2AgentChatPanel agentId={43} />);
+  expect(fixture.thread.mock.calls.at(-1)![0].conversationId).toBeUndefined();
+  expect(fixture.creatorControls.mock.calls.at(-1)![3]).toBeUndefined();
+});
+
+it("AC-005 ignores an old Agent target's delayed server conversation binding", async () => {
+  const view = render(<Nl2AgentChatPanel agentId={42} />);
+  await act(async () => {
+    const result = fixture.adapter!.run({
+      messages: [],
+      runConfig: {},
+    } as never);
+    for await (const chunk of result as AsyncIterable<unknown>) void chunk;
+  });
+  const onId = fixture.remoteRun.mock.calls.at(-1)![0].runConfig?.custom
+    ?.onServerConversationId as (id: string) => void;
+  view.rerender(<Nl2AgentChatPanel agentId={43} />);
+  await act(async () => onId("512"));
+  expect(fixture.thread.mock.calls.at(-1)![0].conversationId).toBeUndefined();
+  expect(fixture.creatorControls.mock.calls.at(-1)![3]).toBeUndefined();
 });
 
 it("blocks history switching during generation", () => {

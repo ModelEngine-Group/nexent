@@ -2,6 +2,7 @@
 
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
+import { expectReadableLabel } from "../../infra/automation/d4/fixtures/selector-interaction";
 import { creatorEntries, prepareControls, enter, chooseModel, thinking, send, input, trigger, openControls, settings, labels } from "../../infra/automation/d4/fixtures/model-controls";
 
 journey("CHAT-MODEL-CONTROLS-D4-001", async ({ page, contract }) => {
@@ -24,8 +25,43 @@ journey("CHAT-MODEL-CONTROLS-D4-001", async ({ page, contract }) => {
       await page.keyboard.press("Escape");
       await openControls(page);
       await expect(settings(page).locator(".ant-select")).toContainText("极高");
+      await expectReadableLabel(settings(page).locator(".ant-select"), "极高");
       await page.keyboard.press("Escape");
     }
+    state.omitEffortDefault = true;
+    await page.setViewportSize({ width: 908, height: 608 });
+    for (const entry of creatorEntries) {
+      await enter(page, entry); await chooseModel(page, "Effort B"); await thinking(page, true);
+      await openControls(page);
+      const select = settings(page).locator(".ant-select");
+      await select.click();
+      const popup = page.locator("[data-model-effort-popup]");
+      for (const label of labels) await expectReadableLabel(popup.getByRole("option", { name: label, exact: true }), label);
+      await popup.getByText("最高", { exact: true }).click();
+      await expectReadableLabel(select, "最高");
+      await settings(page).getByRole("button", { name: "继承 Agent / 出口配置", exact: true }).click();
+      await expectReadableLabel(select, "服务默认");
+      await expect(trigger(page)).toContainText("服务默认");
+      await expect(settings(page).getByRole("combobox")).toBeEnabled();
+      await page.keyboard.press("Escape");
+    }
+    await page.goto(`${process.env.NEXENT_BASE_URL ?? "http://localhost:3000"}/en/workbench`);
+    await expect(input(page)).toBeVisible();
+    await chooseModel(page, "Effort B"); await openControls(page);
+    const englishToggle = settings(page).getByRole("switch");
+    await expect(englishToggle).toBeEnabled();
+    if (await englishToggle.getAttribute("aria-checked") !== "true") await englishToggle.click();
+    const englishSelect = settings(page).locator(".ant-select");
+    await englishSelect.click();
+    await page.locator("[data-model-effort-popup]").getByText("Extra high", { exact: true }).click();
+    await expectReadableLabel(englishSelect, "Extra high");
+    await expectReadableLabel(settings(page), "Thinking intensity");
+    await settings(page).getByRole("button", { name: /Inherit Agent/ }).click();
+    await expectReadableLabel(englishSelect, "Service default");
+    await expect(trigger(page)).toContainText("Service default");
+    await page.keyboard.press("Escape");
+    state.omitEffortDefault = false;
+    await page.setViewportSize({ width: 1441, height: 1244 });
   });
   await contract.step(contract.expectedIds("steps")[1], async () => {
     for (const entry of creatorEntries) {

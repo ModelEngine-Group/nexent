@@ -4,6 +4,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -91,7 +92,15 @@ export const Nl2AgentChatPanel = forwardRef<
   });
   if (historyRef.current.agentId !== agentId) historyRef.current = { agentId };
   const history = useCreatorHistories("agent", agentId);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selection, setSelection] = useState<{
+    agentId: number | null;
+    id?: string;
+  }>({ agentId });
+  const selectedId = selection.agentId === agentId ? selection.id : undefined;
+  const setSelectedId = useCallback(
+    (id?: string) => setSelection({ agentId, id }),
+    [agentId]
+  );
   const [restoring, setRestoring] = useState(false);
   const loadGeneration = useRef(0);
   useEffect(
@@ -100,10 +109,12 @@ export const Nl2AgentChatPanel = forwardRef<
     },
     [agentId]
   );
+  const conversationId = selectedId ? Number(selectedId) : undefined;
   const modelControls = useCreatorModelControls(
     NL2AGENT_DISPLAY_BASE,
     `nl2agent:${agentId ?? "new"}`,
-    "agent:create"
+    "agent:create",
+    conversationId
   );
   const adapters = useMemo(
     () => ({
@@ -116,6 +127,8 @@ export const Nl2AgentChatPanel = forwardRef<
     () => ({
       async *run(options) {
         if (!modelControls.canSend || restoring) return;
+        const currentHistory = historyRef.current;
+        const generation = loadGeneration.current;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -124,9 +137,14 @@ export const Nl2AgentChatPanel = forwardRef<
               custom: {
                 ...options.runConfig?.custom,
                 runtimeMode: "nl2agent",
-                threadId: historyRef.current.id,
+                threadId: currentHistory.id,
                 onServerConversationId: (id: string) => {
-                  historyRef.current.id = id;
+                  if (
+                    historyRef.current !== currentHistory ||
+                    loadGeneration.current !== generation
+                  )
+                    return;
+                  currentHistory.id = id;
                   setSelectedId(id);
                   void history.refresh();
                 },
@@ -156,6 +174,7 @@ export const Nl2AgentChatPanel = forwardRef<
       onStopped,
       modelControls.snapshot,
       modelControls.canSend,
+      setSelectedId,
       history.refresh,
       restoring,
     ]
@@ -289,6 +308,7 @@ export const Nl2AgentChatPanel = forwardRef<
           />
           <div className="min-h-0 flex-1 [&>div]:!bg-transparent">
             <Thread
+              conversationId={conversationId}
               agent={nl2AgentDisplay}
               generatedTitle={assistantTitle}
               chatMode="execution"

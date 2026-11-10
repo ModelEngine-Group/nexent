@@ -61,7 +61,9 @@ export function useConversationModelControls(
   const selectedId =
     controlledModelId ??
     (persisted
-      ? selection.data?.selected_model_id?.toString()
+      ? selection.data
+        ? selection.data.selected_model_id?.toString()
+        : readModelSelectionDraft(sessionKey)
       : readModelSelectionDraft(sessionKey)) ??
     (models.some((model) => model.id === defaultModelId)
       ? defaultModelId

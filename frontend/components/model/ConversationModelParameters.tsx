@@ -6,7 +6,6 @@ import {
   parameterIsActive,
   MODEL_TOKEN_LIMIT_KEYS,
 } from "@/lib/modelParameterLayers";
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Form, Spin, Button } from "antd";
 import { useTranslation } from "react-i18next";
@@ -60,7 +59,8 @@ function usePreferenceView({
         issues: [],
         output_limit: outlet.profile.capabilities?.context?.output_limit,
         reasoning_status: outlet.profile.capabilities?.reasoning?.status,
-        reasoning_can_disable: outlet.profile.capabilities?.reasoning?.can_disable,
+        reasoning_can_disable:
+          outlet.profile.capabilities?.reasoning?.can_disable,
       } satisfies ConversationModelPreferenceView;
     },
     enabled: Boolean(conversationId || draftScope),
@@ -126,7 +126,9 @@ export function ConversationModelParameterSummary({
       ? t(`modelProfile.thinkingLevel.${effort}`, { defaultValue: effort })
       : typeof budget === "number"
         ? `${budget} Token`
-        : undefined;
+        : degree
+          ? t("modelProfile.thinkingModeOption.default")
+          : undefined;
   return text ? (
     <span className="shrink-0 text-muted-foreground">{text}</span>
   ) : null;
@@ -148,7 +150,6 @@ export function ConversationModelParameters({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const client = useQueryClient();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const { query, queryKey } = usePreferenceView({
     conversationId,
     draftScope,
@@ -224,7 +225,9 @@ export function ConversationModelParameters({
         delete_parameters: reset ? [key] : removed,
       });
     },
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: () => {
+      message.error(t("modelProfile.preferencesFailed"));
+    },
   });
   const saved = query.data;
   const defaults = { ...saved?.defaults, ...agentDefaults };
@@ -251,6 +254,7 @@ export function ConversationModelParameters({
   const enabled = state.enabled;
   return (
     <div
+      className="shrink-0"
       onKeyDown={(event) => {
         if (event.key === "Enter") event.stopPropagation();
       }}
@@ -270,7 +274,6 @@ export function ConversationModelParameters({
             state.alwaysOn ||
             (saved?.reasoning_can_disable === false && enabled) ||
             pending ||
-            advancedOpen ||
             (!conversationId && !draftScope) ||
             (!thinkingRule && !effortRule) ||
             !!saved?.issues.length
@@ -302,7 +305,7 @@ export function ConversationModelParameters({
               fallbackValues={defaults}
               scope="conversation"
               inModelSelector
-              pending={pending || advancedOpen}
+              pending={pending}
               onChange={(key, value) => quick.mutate({ key, value })}
               resetLabel={t("modelProfile.useInheritedDefault")}
               onReset={(key) => quick.mutate({ key, reset: true })}
@@ -312,7 +315,6 @@ export function ConversationModelParameters({
       </div>
       <ModelParameterPopover
         disabled={pending || (!conversationId && !draftScope)}
-        onOpenChange={setAdvancedOpen}
       >
         {() =>
           query.isPending ? (
@@ -352,7 +354,9 @@ function PreferenceEditor({
       parameter_values: Record<string, unknown>;
       delete_parameters: string[];
     }) => onSave(patch),
-    onError: () => message.error(t("modelProfile.preferencesFailed")),
+    onError: () => {
+      message.error(t("modelProfile.preferencesFailed"));
+    },
   });
   const update = (key: string, value?: unknown) =>
     save.mutate({

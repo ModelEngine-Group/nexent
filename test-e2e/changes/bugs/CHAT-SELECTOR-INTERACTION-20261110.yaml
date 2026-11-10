@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SELECTOR-INTERACTION-20261110
+  change_type: bugfix
+  bug_id: CHAT-SELECTOR-INTERACTION-20261110
+  title: Keep model parameter menus readable and consistent after reset
+  description: Repair compact reasoning presentation and nested advanced sampling controls without persisting display defaults.
+  observed_behavior: Recorded effort labels truncate and become blank after reset; unset sampling renders an inert track. Browser reproduction must distinguish real overflow and nested interaction defects from recording crop.
+  expected_behavior: Show complete choices, consistent inherited or service-default reasoning and effective sampling; keep controls reachable by pointer and keyboard, with reset deleting only overrides.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing reset fixtures supply an effort default and browser journeys use wide viewports with explicit sampling defaults; unset values and nested panels at viewport edges lack assertions.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen React field, summary, reset and async/error regressions; preserve existing backend contracts and native omitted-parameter behavior; do not infer legacy SDK numeric defaults.
+    behaviors:
+    - Reset with no inherited degree displays service default without creating an override; summary and picker agree.
+    - Quick controls recover after nested panel dismissal and save failure or refetch.
+    - Known sampling preserves inherited values, zero and decimals; missing/null values show Service default with an operable neutral slider, without filling saved values.
+    test_selectors:
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    - frontend/tests/workbench/Nl2SkillPanelControls.test.tsx
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-MODEL-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [CHAT-MODEL-CONTROLS-D4-001, CHAT-MODEL-CONTROLS-D4-003, CHAT-MODEL-CONTROLS-D4-002]
+    added: []
+    retired: []
+  notes: Approved SPEC in nexent-doc/docs/Developing/model-access-native-agent/followups/20261110-selector-interaction-fixes. Six entries share these controls. Existing ownership routing remains applicable. D4 preparation is self-contained with mock HTTP identities, page-local state and isolated browser contexts; no shared factories, anchors, special assets or real provider calls. Runner teardown releases contexts/routes; verify cleanup during execution. Runtime proof uses disposable resources and Phoenix; preserve baseline users/models. No new duplicate D1 or unrelated coverage reconstruction. Implementation and execution evidence remain pending.

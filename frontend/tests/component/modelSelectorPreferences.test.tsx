@@ -86,7 +86,11 @@ beforeEach(() => {
 });
 function setup(
   conversationId: number | undefined,
-  draftScope = "fresh-thread"
+  draftScope = "fresh-thread",
+  options: {
+    agentDefaults?: Record<string, unknown>;
+    showEffort?: boolean;
+  } = {}
 ) {
   return render(
     <QueryClientProvider
@@ -99,12 +103,15 @@ function setup(
           conversationId={conversationId}
           parameterSettingsScopeKey={draftScope}
           defaultOpen
+          showEffort={options.showEffort}
           models={[
             {
               id: "42",
               name: "Profile model",
               profileSchemaVersion: 1,
-              agentParameterDefaults: { temperature: 0.5 },
+              agentParameterDefaults: options.agentDefaults ?? {
+                temperature: 0.5,
+              },
             },
           ]}
           value="42"
@@ -197,9 +204,7 @@ it("UI-SESSION-15 edits unsent conversation drafts without creating server prefe
       temperature: 0.24,
     })
   );
-  fireEvent.keyDown(screen.getByRole("region", { name: advancedName }), {
-    key: "Escape",
-  });
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(await openAdvanced()).toHaveValue(0.24);
   expect(readModelDraft("another-thread", 42)).toEqual({});
   expect(readModelDraft("fresh-thread", 43)).toEqual({});
@@ -326,6 +331,83 @@ function effortOnlyProfile(values: string[] = ["low", "high", "max"]) {
   ];
 }
 
+it("AC-002 restores service-default effort without inventing a creation default", async () => {
+  effortOnlyProfile();
+  delete saved.defaults.reasoning_effort;
+  saved.field_specs[2].default_value = "low";
+  saved.parameter_values = { reasoning_effort: "high" };
+  setup(11, undefined, { showEffort: true });
+  const reset = await screen.findByRole("button", {
+    name: "modelProfile.useInheritedDefault",
+  });
+  await waitFor(() => expect(reset).toBeEnabled());
+  fireEvent.click(reset);
+  await waitFor(() => expect(saved.parameter_values).toEqual({}));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("combobox", {
+        name: "chat.modelSelector.reasoningEffort",
+      })
+    ).toBeEnabled()
+  );
+  expect(
+    screen.getAllByText("modelProfile.thinkingModeOption.default")
+  ).toHaveLength(2);
+  expect(
+    screen.queryByRole("button", { name: "modelProfile.useInheritedDefault" })
+  ).not.toBeInTheDocument();
+  expect(api.patchConversationModelPreferences).toHaveBeenCalledTimes(1);
+});
+
+it.each([undefined, null])(
+  "AC-004 displays service default for missing/null values (%s) with editable neutral sliders",
+  async (value) => {
+    saved.defaults = { temperature: value, top_p: value };
+    setup(11, undefined, { agentDefaults: {} });
+    const temperature = await openAdvanced();
+    expect(temperature).toHaveValue(null);
+    expect(temperature).toHaveAttribute(
+      "placeholder",
+      "modelProfile.thinkingModeOption.default"
+    );
+    expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(null);
+    for (const slider of screen.getAllByRole("slider")) {
+      expect(slider).toHaveAttribute(
+        "aria-valuetext",
+        "modelProfile.thinkingModeOption.default"
+      );
+      fireEvent.focus(slider);
+    }
+    expect(screen.getAllByRole("slider")).toHaveLength(2);
+    expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+  }
+);
+
+it("AC-004 keeps zero overrides and restores service default without injecting sampling", async () => {
+  saved.defaults = {};
+  saved.parameter_values = { temperature: 0, top_p: 0 };
+  setup(11, undefined, { agentDefaults: {} });
+  expect(await openAdvanced()).toHaveValue(0);
+  expect(screen.getByRole("spinbutton", { name: "Top P" })).toHaveValue(0);
+  fireEvent.click(
+    screen.getByRole("button", { name: "workbench.controls.restore" })
+  );
+  await waitFor(() => expect(saved.parameter_values).toEqual({}));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("spinbutton", { name: temperatureName })
+    ).toHaveValue(null)
+  );
+  expect(api.patchConversationModelPreferences).toHaveBeenLastCalledWith(
+    11,
+    42,
+    {
+      parameter_values: {},
+      delete_parameters: ["temperature", "top_p"],
+    }
+  );
+});
+
 it("TD-01 restores always-on GLM effort with a checked disabled switch and no preference write", async () => {
   effortOnlyProfile();
   setup(11);
@@ -419,3 +501,85 @@ it.each([false, true, null])(
     expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
   }
 );
+
+it("AC-005 keeps quick effort usable while advanced settings is open and after a failed save", async () => {
+  effortOnlyProfile();
+  setup(11);
+  await openAdvanced();
+  const effort = screen.getByRole("combobox", {
+    name: "chat.modelSelector.reasoningEffort",
+  });
+  await waitFor(() => expect(effort).toBeEnabled());
+  fireEvent.keyDown(screen.getByRole("region", { name: advancedName }), {
+    key: "Escape",
+  });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("region", { name: advancedName })
+    ).not.toBeInTheDocument()
+  );
+  api.patchConversationModelPreferences.mockRejectedValueOnce(
+    new Error("SAVE_FAILED")
+  );
+  fireEvent.mouseDown(effort);
+  fireEvent.click(await screen.findByText("modelProfile.thinkingLevel.high"));
+  await waitFor(() =>
+    expect(api.patchConversationModelPreferences).toHaveBeenCalledTimes(1)
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("combobox", {
+        name: "chat.modelSelector.reasoningEffort",
+      })
+    ).toBeEnabled()
+  );
+  expect(saved.parameter_values).toEqual({});
+  expect(
+    screen
+      .getByRole("combobox", {
+        name: "chat.modelSelector.reasoningEffort",
+      })
+      .closest(".ant-select")
+  ).toHaveTextContent("modelProfile.thinkingLevel.low");
+});
+
+it("AC-005 ignores a delayed hover reopen after Escape until a new pointer interaction", async () => {
+  setup(11);
+  await openAdvanced();
+  const advanced = screen.getByRole("button", { name: advancedName });
+  fireEvent.mouseEnter(advanced);
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(advanced).toHaveAttribute("aria-expanded", "false");
+  expect(
+    screen.queryByRole("region", { name: advancedName })
+  ).not.toBeInTheDocument();
+  fireEvent.pointerMove(advanced);
+  fireEvent.mouseEnter(advanced);
+  await waitFor(() =>
+    expect(advanced).toHaveAttribute("aria-expanded", "true")
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("region", { name: advancedName })).toBeVisible()
+  );
+});
+
+it("AC-004 lets a keyboard edit create the first explicit sampling value from service default", async () => {
+  saved.defaults = {};
+  setup(11, undefined, { agentDefaults: {} });
+  const temperature = await openAdvanced();
+  const slider = screen.getByRole("slider", {
+    name: "workbench.controls.temperature workbench.controls.slider",
+  });
+  fireEvent.focus(slider);
+  expect(api.patchConversationModelPreferences).not.toHaveBeenCalled();
+  fireEvent.keyDown(slider, { key: "ArrowRight", keyCode: 39 });
+  fireEvent.keyUp(slider, { key: "ArrowRight", keyCode: 39 });
+  await waitFor(() =>
+    expect(saved.parameter_values).toEqual({ temperature: 0.1 })
+  );
+  expect(temperature).toHaveValue(0.1);
+  expect(slider).toHaveAttribute("aria-valuenow", "0.1");
+});

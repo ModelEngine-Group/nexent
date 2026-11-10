@@ -2,7 +2,13 @@
 
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Button, Popover, Slider } from "antd";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -64,37 +70,57 @@ export function ParameterLevel({
     <div className="space-y-1">
       <label className="text-sm">{label}</label>
       <div className="flex items-center gap-3">
-        {sliderValue != null ? (
-          <Slider
-            min={min}
-            max={max}
-            step={0.1}
-            value={sliderValue}
-            marks={{
-              [sliderValue]: { label: <span />, style: { display: "none" } },
-            }}
-            disabled={disabled}
-            className="!m-0 min-w-0 flex-1 [&_.ant-slider-dot]:hidden"
-            ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
-            onChange={(next) => {
-              setText(String(next));
-              setError(false);
-              setDirty(true);
-            }}
-            onChangeComplete={onChange}
-          />
-        ) : (
-          <div
-            aria-hidden="true"
-            className="h-1 min-w-0 flex-1 rounded bg-muted"
-          />
-        )}
+        <Slider
+          min={min}
+          max={max}
+          step={0.1}
+          value={sliderValue ?? min}
+          marks={
+            sliderValue == null
+              ? undefined
+              : {
+                  [sliderValue]: {
+                    label: <span />,
+                    style: { display: "none" },
+                  },
+                }
+          }
+          styles={
+            sliderValue == null
+              ? {
+                  handle: { opacity: 0 },
+                  track: { opacity: 0 },
+                }
+              : undefined
+          }
+          tooltip={
+            sliderValue == null
+              ? {
+                  formatter: () => t("modelProfile.thinkingModeOption.default"),
+                }
+              : undefined
+          }
+          disabled={disabled}
+          className="!m-0 min-w-0 flex-1 focus-within:ring-2 focus-within:ring-ring/50 [&_.ant-slider-dot]:hidden"
+          ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
+          ariaValueTextFormatterForHandle={(next) =>
+            sliderValue == null
+              ? t("modelProfile.thinkingModeOption.default")
+              : String(next)
+          }
+          onChange={(next) => {
+            setText(String(next));
+            setError(false);
+            setDirty(true);
+          }}
+          onChangeComplete={onChange}
+        />
         <input
           type="number"
           min={min}
           max={max}
           step={0.1}
-          placeholder="—"
+          placeholder={t("modelProfile.thinkingModeOption.default")}
           aria-label={label}
           aria-invalid={error}
           disabled={disabled}
@@ -111,7 +137,7 @@ export function ParameterLevel({
               commit();
             }
           }}
-          className="h-8 w-16 rounded border border-border px-2 text-sm"
+          className="h-8 w-36 shrink-0 rounded border border-border px-2 text-sm"
         />
       </div>
       {error && (
@@ -139,6 +165,7 @@ export function ModelParameterPopover({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const suppressHoverOpen = useRef(false);
   const changeOpen = useCallback(
     (next: boolean) => {
       setOpen(next);
@@ -157,24 +184,30 @@ export function ModelParameterPopover({
       )
         changeOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      suppressHoverOpen.current = true;
+      changeOpen(false);
+    };
     document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
   }, [open, changeOpen]);
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (
-          !next &&
-          document.activeElement?.closest(
-            "[data-model-parameter-panel], [data-model-parameter-trigger]"
-          )
-        )
-          return;
+        if (next && suppressHoverOpen.current) return;
         changeOpen(next);
       }}
       trigger={["hover", "click"]}
-      placement="rightTop"
+      placement="right"
+      autoAdjustOverflow
       zIndex={1130}
       mouseEnterDelay={0.15}
       mouseLeaveDelay={0.25}
@@ -183,7 +216,7 @@ export function ModelParameterPopover({
           data-model-parameter-panel
           role="region"
           aria-label={t("workbench.controls.advanced", "高级设置")}
-          className="w-64 space-y-3"
+          className="max-h-[calc(100dvh-48px)] w-64 max-w-[calc(100vw-48px)] space-y-3 overflow-y-auto"
           onKeyDown={(event) => {
             event.stopPropagation();
             if (event.key === "Escape") changeOpen(false);
@@ -200,11 +233,18 @@ export function ModelParameterPopover({
         type="button"
         disabled={disabled}
         aria-expanded={open}
-
+        onPointerMove={() => {
+          suppressHoverOpen.current = false;
+        }}
+        onClick={() => {
+          suppressHoverOpen.current = open;
+          changeOpen(!open);
+        }}
         onKeyDown={(event) => {
           if (["Enter", "ArrowRight", " "].includes(event.key)) {
             event.preventDefault();
             event.stopPropagation();
+            suppressHoverOpen.current = false;
             changeOpen(true);
           }
           if (event.key === "Escape") changeOpen(false);

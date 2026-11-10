@@ -16,7 +16,10 @@ import {
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { automaticModelId } from "@/lib/modelSelection";
-import { ConversationModelParameters, ConversationModelParameterSummary } from "@/components/model/ConversationModelParameters";
+import {
+  ConversationModelParameters,
+  ConversationModelParameterSummary,
+} from "@/components/model/ConversationModelParameters";
 import type { ModelParameterValue } from "@/types/modelParameterSettings";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
@@ -276,10 +279,16 @@ function ModelSelectorValue({
       className={cn("flex min-w-0 items-center gap-2", className)}
     >
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
-      <span className="truncate font-medium" title={selectedModel.name}>{selectedModel.name}</span>
+      <span className="truncate font-medium" title={selectedModel.name}>
+        {selectedModel.name}
+      </span>
       {showEffort && selectedModel.profileSchemaVersion && (
-        <ConversationModelParameterSummary conversationId={conversationId} draftScope={draftScope}
-          modelId={Number(selectedModel.id)} agentDefaults={selectedModel.agentParameterDefaults} />
+        <ConversationModelParameterSummary
+          conversationId={conversationId}
+          draftScope={draftScope}
+          modelId={Number(selectedModel.id)}
+          agentDefaults={selectedModel.agentParameterDefaults}
+        />
       )}
     </span>
   );
@@ -299,19 +308,31 @@ function ModelSelectorContent({
   ...props
 }: ModelSelectorContentProps) {
   const { value } = useModelSelectorContext();
+  const contentRef = useRef<HTMLDivElement>(null);
 
   return (
     <PopoverContent
+      ref={contentRef}
       data-slot="model-selector-content"
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "z-[1100] bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
+        "z-[1100] bg-popover/95 w-80 max-w-[calc(100vw-24px)] min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
         className
       )}
       {...props}
       onEscapeKeyDown={(event) => {
-        event.stopPropagation();
+        if (
+          contentRef.current?.querySelector(
+            "[data-model-parameter-trigger][aria-expanded=true]"
+          ) ||
+          (event.target instanceof Element &&
+            event.target.closest(
+              "[data-model-parameter-panel], [data-model-effort-popup], [data-slot=model-selector-effort] .ant-select-open"
+            ))
+        )
+          event.preventDefault();
+        else event.stopPropagation();
         onEscapeKeyDown?.(event);
       }}
       onInteractOutside={(event) => {
@@ -327,7 +348,7 @@ function ModelSelectorContent({
       {/* Seeding cmdk with the selected id makes it the active item, which
           cmdk scrolls into view when the popover opens. */}
       <Command
-        className="bg-transparent"
+        className="max-h-(--radix-popover-content-available-height) bg-transparent"
         {...(value !== undefined ? { defaultValue: value } : {})}
       >
         {children ?? (
@@ -374,7 +395,7 @@ function ModelSelectorList({
     <CommandList
       data-slot="model-selector-list"
       className={cn(
-        "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "min-h-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className
       )}
       {...props}
@@ -562,7 +583,11 @@ const ModelSelectorBody = ({
         size={size}
         className={className}
       >
-        <ModelSelectorValue showEffort={showEffort} conversationId={conversationId} draftScope={parameterSettingsScopeKey} />
+        <ModelSelectorValue
+          showEffort={showEffort}
+          conversationId={conversationId}
+          draftScope={parameterSettingsScopeKey}
+        />
       </ModelSelectorTrigger>
       <ModelSelectorContent align="end" className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
