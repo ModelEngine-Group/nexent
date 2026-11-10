@@ -12,7 +12,8 @@ from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import CompatibilityConversationRun, AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
-from contracts.errors.exceptions import WorkbenchError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, WorkbenchError
 from contracts.model import WorkbenchGenerationConfig
 from contracts.knowledge import ResolvedKnowledgeScope
 from contracts.tool import ToolParamsRequest
@@ -36,6 +37,7 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     mounts = [{"agent_id": child_id, "version_no": 5} for child_id in child_ids]
     request = AgentRequest(
         query="hello", is_debug=True, entrypoint="workbench",
+        metadata={"project": "fixture"} if scoped else None,
         workbench={
             "mode": mode, "agent_mounts": mounts, "generation_config": {"temperature": 0.4},
             "knowledge_scope": {"local": {"mode": "disabled"}} if scoped else None,
@@ -55,6 +57,10 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     if scoped:
         from management.services.knowledge_base import mount, scope
 
+        metadata_policy = mocker.patch(
+            "management.db.agent.repository.search_agent_info_by_agent_id",
+            return_value={"allow_chat_metadata": True},
+        )
         mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
             {"agent_id": 7, "tools": []}, {"agent_id": 8, "tools": []},
         ])
@@ -99,6 +105,7 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     assert options["override_version_no"] == 2
     assert options["runtime_sub_agent_mounts"] == [asdict(child) for child in children]
     if scoped:
+        metadata_policy.assert_called_once_with(7, "tenant-a", 2)
         authorize_scope.assert_called_once_with(
             scope=config.knowledge_scope, agent_id=7, tenant_id="tenant-a", user_id="actor", version_no=2,
             is_debug=True, request_tool_params=None, runtime_agent_tree=[{"agent_id": 7, "tools": mounted_tools}],
@@ -108,6 +115,8 @@ async def test_workbench_debug_runs_through_agentos(mocker, mode, child_ids, sco
     snapshot = client.run_ephemeral.await_args.args[0]
     info = prepared_evaluation.prepare_run_snapshot(snapshot, ServicePrincipal("actor", "tenant-a"))
     assert info.conversation_id is None
+    assert info.runtime_metadata == ({"project": "fixture"} if scoped else {})
+    assert info.runtime_metadata_version is None
     assert info.model_config_list[0].temperature == 0.4
     assert [(child.agent_id, child.version_no, child.model_name) for child in info.agent_config.worker_agents] == [
         (child_id, 5, "child_model") for child_id in child_ids
@@ -138,6 +147,35 @@ async def test_workbench_debug_denies_mount_without_dispatch(mocker):
 
     assert denied.value.status_code == 403
     assert denied.value.detail == {"code": "AGENT_NOT_RUNNABLE"}
+    client.run_ephemeral.assert_not_called()
+    client.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_workbench_debug_checks_root_metadata_policy_before_dispatch(mocker):
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    root = workbench.RuntimeAgentIdentity("agent:7:v2", 7, 2, "workbench_main", "Workbench", "SYSTEM")
+    plan = workbench.ResolvedAgentPlan(
+        workbench.PublishedRootDescriptor(root, {}), workbench.RootRuntimeOverlay(None, None, (), None), (),
+    )
+    config = WorkbenchSessionConfig(mode="generic_chat")
+    mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
+    policy = mocker.patch(
+        "management.db.agent.repository.search_agent_info_by_agent_id", return_value={"allow_chat_metadata": False},
+    )
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    payload = CompatibilityConversationRun(request={
+        "query": "hello", "is_debug": True, "entrypoint": "workbench", "agent_id": 999,
+        "metadata": {}, "workbench": config.model_dump(mode="json"),
+    })
+
+    with pytest.raises(AppException) as denied:
+        await runtime_client.forward_conversation_run(payload, "actor", "tenant-a")
+
+    assert denied.value.error_code == ErrorCode.CHAT_METADATA_NOT_ALLOWED
+    policy.assert_called_once_with(7, "tenant-a", 2)
+    compile_run.assert_not_called()
     client.run_ephemeral.assert_not_called()
     client.run_conversation.assert_not_called()
 

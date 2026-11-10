@@ -181,7 +181,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
 
     config = request.workbench
     if (config is None or config.mode in {"skill_create", "agent_create"} or config.skill_mounts
-            or request.metadata is not None or request.reasoning_effort is not None
+            or request.reasoning_effort is not None
             or request.reasoning_budget_tokens is not None):
         return None
 
@@ -207,6 +207,8 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         "snapshot-debug-model-controls", preflight_agent_turn_controls, request, tenant_id,
         search_agent_info_by_agent_id, lane="control-io", owner="management",
     )
+    if request.metadata is not None:
+        await _authorize_prepared_metadata(request, tenant_id)
     knowledge = None
     compile_options = {}
     if config.knowledge_scope is not None:
@@ -238,7 +240,8 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
     if snapshot is None:
         return None
     return PreparedDebug(PreparedEphemeralRun(
-        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex, debug=True,
+        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
+        runtime_metadata=request.metadata or {}, debug=True,
     ), knowledge=knowledge, workbench=config)
 
 
