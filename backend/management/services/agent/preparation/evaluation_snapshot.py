@@ -175,15 +175,13 @@ async def prepare_debug_snapshot(
     from management.services.agent.preparation.run import create_agent_run_info
     from management.services.model.run_controls import preflight_turn_controls
 
-    if request.entrypoint or not request.agent_id:
+    if request.entrypoint or request.workbench is not None or not request.agent_id:
         return None
     version = request.version_no if request.version_no is not None else 0
     agent = await run_blocking(
         "snapshot-debug-authorization", authorize_debug_version, request.agent_id, version, user_id, tenant_id,
         lane="control-io", owner="management",
     )
-    if request.conversation_id is not None or request.workbench is not None:
-        return None
     if request.metadata is not None:
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": version}), tenant_id)
     await run_blocking(

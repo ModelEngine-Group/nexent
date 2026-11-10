@@ -4,20 +4,21 @@
 import json
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agentos import (
     BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentOperation, AgentResume, AgentRunLookup,
-    AgentRunReference, AgentRunState, AgentStop, CompatibilityStop,
+    AgentRunReference, AgentRunState, AgentStop, CompatibilityStop, DebugRunReference,
 )
 from infrastructure.rdb.agent_execution import active_execution, read_execution
 from infrastructure.rdb.conversation_state import conversation_belongs_to
 from infrastructure.redis.agent_events import START, RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
+from runtime.agentos import debug
 
 
 async def _control_io(task, function, *args, **kwargs):
@@ -154,19 +155,27 @@ async def resume_run(payload: AgentResume, actor):
     })
 
 
+async def stop_run(payload: AgentStop | DebugRunReference, actor):
+    if isinstance(payload, DebugRunReference):
+        return await debug.stop_agentos_debug(payload.run_id, actor)
+    return await run_state(payload, actor, request_stop=True)
+
+
 def create_run_lifecycle_router():
     router = APIRouter()
 
-    def handler(schema, command, **options):
+    def handler(schema, command):
+        validate = TypeAdapter(schema).validate_json
+
         async def handle(request: Request):
             actor = request.scope.get(PRINCIPAL_KEY)
             if actor is None:
                 return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
             try:
-                payload = schema.model_validate_json(request.scope[BODY_KEY])
+                payload = validate(request.scope[BODY_KEY])
             except ValidationError:
                 return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-            return await command(payload, actor, **options)
+            return await command(payload, actor)
 
         return handle
 
@@ -177,7 +186,7 @@ def create_run_lifecycle_router():
         AgentOperation.INSPECT.value, handler(AgentRunLookup, run_state), methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
-        AgentOperation.STOP.value, handler(AgentStop, run_state, request_stop=True),
+        AgentOperation.STOP.value, handler(AgentStop | DebugRunReference, stop_run),
         methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(

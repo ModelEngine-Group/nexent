@@ -165,6 +165,9 @@ case:
   - order: 46
     action: Compile a local search override and an ignored LangChain request parameter, then send the prepared run over signed HTTP.
     expected: The search provider receives the requested result count with the stored credential. The plugin keeps its invocation behavior, and a signed attempt to override a credential is refused.
+  - order: 47
+    action: Submit a public debug request with a client conversation correlation ID and cancel the debug run through the standard AgentOS lifecycle endpoint.
+    expected: Management echoes the client ID and Runtime receives only the temporary run ID. The original planning and scoped cancellation behavior is preserved.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -213,6 +216,7 @@ case:
   - Management preserves the terminal and empty conversation JSON without using the compatibility execution route.
   - MCP snapshots carry explicit invocation overrides and keep persisted defaults and connection configuration in Runtime.
   - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
+  - Debug correlation is kept at the public boundary and debug cancellation uses signed Agent.stop.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -510,4 +514,9 @@ case:
     description: Local search tuning and ignored LangChain request configuration are supported through signed AgentOS.
     steps: [46]
     expected_results: [47]
+    forbidden_side_effects: [1, 2]
+  - id: AC-56
+    description: Debug correlation and cancellation use the standard signed AgentOS lifecycle without accessing the correlated conversation.
+    steps: [47]
+    expected_results: [48]
     forbidden_side_effects: [1, 2]

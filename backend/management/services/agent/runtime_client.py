@@ -96,7 +96,10 @@ async def forward_conversation_run(
             opening = None
             if prepared.knowledge is not None:
                 opening = {"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)}
-            return present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
+            public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
+            if public.status_code == 200 and request.conversation_id is not None:
+                public.headers["conversation_id"] = str(request.conversation_id)
+            return public
 
     conversation_id = request.conversation_id
     northbound = northbound_fallback is not None

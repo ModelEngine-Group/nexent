@@ -2893,15 +2893,15 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     from contracts.knowledge import ResolvedKnowledgeScope
     from contracts.tool import ToolParamsRequest
     from management.api.agent import conversation_run
-    from management.services.agent import agentos_events, runtime_client
-    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.agent import agentos_events, authorization, runtime_client
+    from management.services.agent.preparation import evaluation_snapshot, run as compile_run
+    from management.services.model import run_controls
     from nexent.core.agents import run_agent as sdk_runner
     from nexent.core.agents.nexent_agent import NexentAgent
     from nexent.core.agents.plan_repo import PlanRepo
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.monitor import get_agent_monitoring_context
-    from runtime.agentos import debug as debug_lifecycle, ephemeral
-    from runtime.agentos.compatibility import create_compatibility_router
+    from runtime.agentos import debug as debug_lifecycle, ephemeral, resume
     from runtime.agentos.prepared_skills import skill_stage_path
     from runtime.executions import LocalExecutionRegistry
 
@@ -3074,28 +3074,43 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     monkeypatch.setattr(sdk_runner, "agent_run_thread", worker)
     monkeypatch.setattr(evaluation_snapshot, "prepare_a2a_snapshot", compile_snapshot)
 
-    async def compile_debug(request, user_id, tenant_id, *, language, timezone):
-        assert (user_id, tenant_id, language) == (actor.user_id, actor.tenant_id, "en")
-        assert request.is_debug and request.version_no is None and request.query == "wait" and request.enable_plan
+    async def compile_debug(**options):
+        assert (options["user_id"], options["tenant_id"], options["language"]) == (actor.user_id, actor.tenant_id, "en")
+        assert options["is_debug"] and options["override_version_no"] == 0 and options["enable_planning"]
+        assert "wait" in options["query"] and "conversation_id" not in options
         from contracts.agentos import ToolBinding
 
         resource = template.resource.model_copy(update={
             "version_no": 0,
             "tools": [ToolBinding(tool_id=name, version="1") for name in ("create_plan", "update_plan_step")],
         })
-        assert request.knowledge_scope is not None
-        payload = template.model_copy(update={
-            "debug": True, "native_knowledge": True, "resource": resource,
-            "input": template.input.model_copy(update={"query": request.query}),
+        fields = template.model_dump(exclude={"run_id", "runtime_metadata"})
+        return PreparedEvaluationRun.model_validate(fields | {
+            "resource": resource, "input": template.input.model_copy(update={"query": options["query"]}),
+            "conversation_id": 0,
         })
+
+    def scoped_knowledge(request, conversation, user_id, tenant_id):
+        assert request.conversation_id == 123 and conversation is None
+        assert request.knowledge_scope is not None
+        assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
         knowledge = ResolvedKnowledgeScope(
             desired_scope=request.knowledge_scope.model_dump(), tool_params=ToolParamsRequest(agents={}),
             local_knowledge_ids=["7"], local_display_names=["Allowed"], aidp_disabled=True,
             warnings=[{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1}],
         )
-        return evaluation_snapshot.PreparedDebug(payload, knowledge)
+        return evaluation_snapshot.PreparedNativeKnowledge(knowledge, 0, {(7, 0): {}})
 
-    monkeypatch.setattr(evaluation_snapshot, "prepare_debug_snapshot", compile_debug)
+    authorize = Mock(return_value={})
+    conversation_read = Mock(side_effect=AssertionError("Debug accessed the correlated conversation"))
+    monkeypatch.setattr(authorization, "authorize_debug_version", authorize)
+    monkeypatch.setattr(run_controls, "preflight_turn_controls", Mock())
+    monkeypatch.setattr(evaluation_snapshot, "get_conversation", conversation_read)
+    monkeypatch.setattr(evaluation_snapshot, "run_blocking", inline)
+    monkeypatch.setattr(evaluation_snapshot, "_authorize_prepared_metadata", AsyncMock())
+    monkeypatch.setattr(evaluation_snapshot, "prepare_native_knowledge", scoped_knowledge)
+    monkeypatch.setattr(evaluation_snapshot, "uuid4", lambda: SimpleNamespace(hex=run_id))
+    monkeypatch.setattr(compile_run, "create_agent_run_info", compile_debug)
     monkeypatch.setattr(runtime_client, "forward_agent_run", AsyncMock(side_effect=AssertionError("legacy dispatch")))
     signer = AsyncMock(return_value=[{"object_name": object_name, "presigned_url": "https://signed.invalid/report"}])
     monkeypatch.setattr(agentos_events, "run_blocking", signer)
@@ -3103,7 +3118,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     app = FastAPI(root_path="/api")
     app.add_middleware(AgentOSMiddleware)
     app.include_router(ephemeral.create_ephemeral_run_router())
-    app.include_router(create_compatibility_router(None, None, debug_stop=debug_lifecycle.stop_agentos_debug))
+    app.include_router(resume.create_run_lifecycle_router())
     management = FastAPI()
     management.include_router(conversation_run.router)
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda tenant: (actor.user_id, tenant))
@@ -3154,12 +3169,13 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             with serve(management) as public_url:
                 async with httpx.AsyncClient(base_url=public_url, trust_env=False, timeout=4) as browser:
                     async with browser.stream("POST", "/agent/run", headers=headers, json={
-                        "query": "wait", "agent_id": 7, "is_debug": True, "enable_plan": True,
+                        "query": "wait", "agent_id": 7, "is_debug": True, "enable_plan": True, "conversation_id": 123,
+                        "metadata": {"ticket": "42"},
                         "knowledge_scope": {"local": {"mode": "override", "knowledge_ids": ["7", "8"]},
                                             "aidp": {"mode": "disabled"}},
                     }) as debug:
                         assert debug.status_code == 200 and debug.headers["run_id"] == f"debug-{run_id}"
-                        assert "conversation_id" not in debug.headers
+                        assert debug.headers["conversation_id"] == "123"
                         lines = debug.aiter_lines()
                         scope_event = json.loads((await anext(lines))[6:])
                         assert scope_event["type"] == "knowledge_scope_resolved"
@@ -3189,6 +3205,8 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             assert not debug_states and not stages[-1].exists()
             assert released.call_count == 3 and reserve.call_count == 4
             redis.assert_not_called()
+            authorize.assert_called_once_with(7, 0, actor.user_id, actor.tenant_id)
+            conversation_read.assert_not_called()
     finally:
         await manager.shutdown(timeout=2)
 

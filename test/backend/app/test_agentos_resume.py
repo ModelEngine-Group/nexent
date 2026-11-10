@@ -15,6 +15,45 @@ RUN_ID = "a" * 32
 ACTOR = ServicePrincipal("actor", "tenant")
 
 
+@pytest.mark.asyncio
+async def test_standard_stop_dispatches_signed_debug_id_without_conversation_scope(mocker):
+    import httpx
+    from fastapi import FastAPI
+
+    from contracts.agentos import AgentOperation
+    from contracts.constants import environment
+    from infrastructure.agentos_identity import sign_call
+    from management.clients.agentos import AgentOSClient
+    from runtime.agentos import debug
+    from runtime.agentos.middleware import AgentOSMiddleware
+
+    mocker.patch.object(environment, "JWT_SECRET", "synthetic-debug-stop-key")
+    stopped = {"status": "success", "message": "stopped"}
+    cancel = mocker.patch.object(debug, "stop_agentos_debug", return_value=stopped)
+    persisted = mocker.patch.object(resume, "read_execution")
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(resume.create_run_lifecycle_router())
+    transport = httpx.ASGITransport(app=app)
+    agentos = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs))
+    debug_id = f"debug-{RUN_ID}"
+    assert await agentos.stop_debug_run(debug_id, ACTOR.user_id, ACTOR.tenant_id) == stopped
+    cancel.assert_awaited_once_with(debug_id, ACTOR)
+    persisted.assert_not_called()
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://runtime") as client:
+        path = f"/api{AgentOperation.STOP.value}"
+        unsigned = await client.post(path, json={"run_id": debug_id})
+        assert unsigned.status_code == 401
+        for invalid in ('"conversation_id":42', '"prevent_start":true'):
+            body = f'{{"run_id":"{debug_id}",{invalid}}}'.encode()
+            token = sign_call(AgentOperation.STOP, body, ACTOR)
+            result = await client.post(path, content=body, headers={"Authorization": f"Bearer {token}"})
+            assert result.status_code == 422
+    cancel.assert_awaited_once()
+    persisted.assert_not_called()
+
+
 @pytest.fixture
 def journal(mocker):
     async def control_io(_task, function, *args, **kwargs):

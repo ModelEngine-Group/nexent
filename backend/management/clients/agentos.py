@@ -161,7 +161,7 @@ class AgentOSClient:
 
     async def stop_debug_run(self, run_id: str, user_id: str, tenant_id: str) -> dict:
         return await self._post_json(
-            CompatibilityOperation.DEBUG_STOP, DebugRunReference(run_id=run_id), user_id, tenant_id,
+            AgentOperation.STOP, DebugRunReference(run_id=run_id), user_id, tenant_id,
         )
 
     async def inspect_run(self, payload: AgentRunLookup, user_id: str, tenant_id: str) -> AgentRunState:

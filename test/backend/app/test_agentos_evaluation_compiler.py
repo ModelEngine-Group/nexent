@@ -495,6 +495,7 @@ async def test_a2a_metadata_requires_permission_on_published_version(mocker):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("correlation_id", [None, 42])
 @pytest.mark.parametrize(("version", "member_group", "permission", "allowed"), [
     (0, 9, "EDIT", True),
     (0, 8, "EDIT", False),
@@ -502,7 +503,7 @@ async def test_a2a_metadata_requires_permission_on_published_version(mocker):
     (2, 9, "READ_ONLY", True),
 ])
 async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilation(
-    mocker, version, member_group, permission, allowed, scoped,
+    mocker, version, member_group, permission, allowed, scoped, correlation_id,
 ):
     from contracts.errors.exceptions import ForbiddenError
     from management.services.agent import authorization
@@ -513,6 +514,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     mocker.patch.object(authorization, "get_user_role_by_tenant", return_value="MEMBER")
     groups = mocker.patch.object(authorization, "query_group_ids_by_user_in_tenant", return_value=[member_group])
     memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
+    conversation = mocker.patch.object(evaluation_snapshot, "get_conversation")
     mocker.patch("management.services.model.run_controls.preflight_turn_controls")
     fields = evaluation_payload()
     fields["resource"]["version_no"] = version
@@ -529,6 +531,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     resolve = mocker.patch.object(scope, "resolve_knowledge_scope", return_value=result)
     request = AgentRequest(
         agent_id=7, is_debug=True, query="hello", version_no=version if version else None,
+        conversation_id=correlation_id,
         generation_config={"temperature": 0.4},
         knowledge_scope={"local": {"mode": "disabled"}, "aidp": {"mode": "disabled"}} if scoped else None,
     )
@@ -541,6 +544,7 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
         assert snapshot.debug is True and snapshot.resource.version_no == version
         assert "conversation_id" not in snapshot.model_dump()
         options = compile_run.await_args.kwargs
+        assert "conversation_id" not in options
         assert options["override_version_no"] == version and options["is_debug"]
         assert options["turn_generation"].model_dump() == {"settings": {"temperature": 0.4}}
         assert options["allow_memory_search"] is False and options["enable_automation_tool"] is False
@@ -568,3 +572,4 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     read.assert_called_once_with(7, "tenant-a", version)
     groups.assert_called_once_with("actor", "tenant-a")
     memory.assert_not_called()
+    conversation.assert_not_called()
