@@ -120,7 +120,10 @@ def prepare_skill_creator_run(payload: PreparedSkillCreatorRun, actor: ServicePr
         model_config_list=[model], enable_planning=False, sandbox_config=None, redis_client=None,
         capacity_snapshot=payload.capacity_snapshot, context_budget_snapshot=budget,
         workspace_run_id=payload.run_id, user_id=actor.user_id, tenant_id=actor.tenant_id,
-        history=[AgentHistory(role=item.role, content=item.content) for item in payload.input.history],
+        history=[
+            AgentHistory(role=item.role, content=item.content)
+            for item in payload.input.history if item.role != "attachment"
+        ],
     )
     info.context_input = build_authorized_context_input(
         info, historical_context={"conversation_turns": _skill_history_turns(info.history)},

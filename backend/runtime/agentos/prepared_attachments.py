@@ -46,6 +46,6 @@ def materialize_evaluation_input(run_input, actor, language):
     effective = _collect_run_minio_files(current, history)
     return (
         render_query_with_attachments(current, run_input.query, history, language=language),
-        _convert_history_with_minio_files(history, language=language),
+        _convert_history_with_minio_files([turn for turn in history if turn.role != "attachment"], language=language),
         effective,
     )

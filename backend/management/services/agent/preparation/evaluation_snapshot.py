@@ -13,7 +13,7 @@ from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
-    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
+    PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunAttachmentHistory, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
     WorkbenchSkillBinding,
 )
@@ -81,14 +81,16 @@ def _export_attachments(files):
 
 
 def build_evaluation_input(query, minio_files, history, user_id, tenant_id) -> RunInput:
+    turns = []
+    for item in history or []:
+        refs = _export_attachments(item.minio_files)
+        if item.role in {"user", "assistant"}:
+            turns.append(RunHistoryMessage(role=item.role, content=item.content, attachment_refs=refs))
+        elif refs:
+            turns.append(RunAttachmentHistory(role="attachment", attachment_refs=refs))
     request = RunInput(
         query=query, attachment_refs=_export_attachments(minio_files),
-        history=[
-            RunHistoryMessage(role=item.role, content=item.content, attachment_refs=_export_attachments(item.minio_files))
-            for item in (history or [])
-            # The legacy SDK ignores non-dialogue text, but its files can still affect the run.
-            if item.role in {"user", "assistant"} or item.minio_files
-        ],
+        history=turns,
     )
     urls = {file.url for file in request.attachment_refs}
     urls.update(file.url for message in request.history for file in message.attachment_refs)

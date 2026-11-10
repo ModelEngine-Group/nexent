@@ -50,23 +50,47 @@ def test_history_attachment_preserves_turn_and_uses_fresh_link_once(storage_boun
     storage_boundary.assert_called_once_with("attachments/actor/report.txt", "nexent")
 
 
-def test_non_dialogue_history_with_an_attachment_still_requires_compatibility():
-    history = [SimpleNamespace(role="tool", content="", minio_files=[
-        {"name": "report.txt", "url": "s3://nexent/attachments/actor/report.txt"},
-    ])]
-    with pytest.raises(ValueError, match="role"):
-        build_evaluation_input("latest", None, history, ACTOR.user_id, ACTOR.tenant_id)
+def test_non_dialogue_history_retains_attachment_order_without_its_text():
+    def file(name):
+        return {"name": name, "url": f"s3://nexent/attachments/actor/{name}"}
+
+    history = [
+        SimpleNamespace(role="tool", content="private tool transcript", minio_files=[file("first.txt")]),
+        SimpleNamespace(role="user", content="earlier", minio_files=[file("second.txt"), file("first.txt")]),
+    ]
+    request = build_evaluation_input("latest", [file("current.txt")], history, ACTOR.user_id, ACTOR.tenant_id)
+    encoded = request.model_dump_json()
+    assert "private tool transcript" not in encoded
+    assert request.history[0].role == "attachment"
+
+    query, restored, files = prepared_attachments.materialize_evaluation_input(
+        RunInput.model_validate_json(encoded), ACTOR, "en",
+    )
+    assert [entry.name for entry in request.history[0].attachment_refs] == ["first.txt"]
+    assert [entry["name"] for entry in files] == ["current.txt", "first.txt", "second.txt"]
+    assert query.count("s3://nexent/attachments/actor/first.txt") == 1
+    assert [entry.role for entry in restored] == ["user"]
+    assert restored[0].content.startswith("earlier")
+
+
+def test_attachment_only_history_rejects_text():
+    with pytest.raises(ValueError, match="content"):
+        RunInput.model_validate({"query": "query", "history": [{
+            "role": "attachment", "content": "unexpected text",
+            "attachment_refs": [{"name": "x", "url": "s3://nexent/attachments/actor/x"}],
+        }]})
 
 
 @pytest.mark.parametrize("url", [
     "s3://nexent/attachments/other/private.txt",
     "s3://other-bucket/attachments/actor/report.txt",
 ])
-def test_all_attachment_references_are_checked_before_any_signing(storage_boundary, url):
+@pytest.mark.parametrize("role", ["user", "attachment"])
+def test_all_attachment_references_are_checked_before_any_signing(storage_boundary, url, role):
     first = {"name": "ok", "url": "s3://nexent/attachments/actor/report.txt", "presign": True}
     request = RunInput.model_validate({
         "query": "query", "attachment_refs": [first],
-        "history": [{"role": "user", "content": "", "attachment_refs": [{"name": "bad", "url": url, "presign": True}]}],
+        "history": [{"role": role, "content": "", "attachment_refs": [{"name": "bad", "url": url, "presign": True}]}],
     })
     with pytest.raises(HTTPException) as error:
         prepared_attachments.materialize_evaluation_input(request, ACTOR, "en")

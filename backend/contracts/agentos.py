@@ -240,9 +240,17 @@ class RunHistoryMessage(RunSpecModel):
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
 
 
+class RunAttachmentHistory(RunSpecModel):
+    """Retain a legacy history position that contributes files only."""
+
+    role: Literal["attachment"]
+    content: Literal[""] = ""
+    attachment_refs: list[RunAttachment] = Field(min_length=1)
+
+
 class RunInput(RunSpecModel):
     query: str
-    history: list[RunHistoryMessage] = Field(default_factory=list)
+    history: list[RunHistoryMessage | RunAttachmentHistory] = Field(default_factory=list)
     attachment_refs: list[RunAttachment] = Field(default_factory=list)
 
 
