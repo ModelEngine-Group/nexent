@@ -52,7 +52,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             )
         ).first():
             raise AccountConflictError(
-                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
+                "An SU membership already exists. Verify its account and email; if not migrated, run bash deploy/sql/tools/supabase_to_postgres/migrate.sh --apply against this PostgreSQL database first"
             )
         # Historical inactive associations intentionally have no local account.
         # Only an available account can reserve the current SU identity.

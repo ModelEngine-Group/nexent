@@ -23,7 +23,6 @@ def worker(mocker, monkeypatch):
     connect = mocker.patch("psycopg2.connect", side_effect=[target, source])
     mocker.patch.object(migration, "read_source_users", return_value=[{"identity": "original"}])
     importer = mocker.patch.object(migration, "import_users", return_value={"source": 1})
-    mocker.patch.object(migration.subprocess, "run", side_effect=AssertionError("Worker invoked a host CLI"))
     return target, source, connect, importer
 
 

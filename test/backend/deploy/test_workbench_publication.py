@@ -66,7 +66,7 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 prepare_core_service_deployment() { return 0; }
-stop_old_business_services() { return 0; }
+stop_legacy_workbench_writers() { return 0; }
 publish_shared_workbench() { echo PUBLISH; return ''' + str(1 if failure else 0) + r'''; }
 container_command() { echo START_CORE; }
 deploy_core_services
@@ -197,57 +197,77 @@ COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 failed_stage="''' + failed_stage + r'''"
 prepare_core_service_deployment() { echo EVENT:PREPARE; [ "$failed_stage" != prepare ]; }
-stop_old_business_services() { echo "EVENT:STOP:$*"; [ "$failed_stage" != stop ]; }
+stop_legacy_workbench_writers() { echo EVENT:GUARD; [ "$failed_stage" != stop ]; }
 publish_shared_workbench() { echo EVENT:PUBLISH; [ "$failed_stage" != publish ]; }
 container_command() { echo EVENT:START; }
 deploy_core_services
 ''')
     events = [line for line in result.stdout.splitlines() if line.startswith("EVENT:")]
-    expected = ["EVENT:PREPARE", "EVENT:STOP:", "EVENT:PUBLISH", "EVENT:START"]
+    expected = ["EVENT:PREPARE", "EVENT:GUARD", "EVENT:PUBLISH", "EVENT:START"]
     if failed_stage:
         expected = expected[:{"prepare": 1, "stop": 2, "publish": 3}[failed_stage]]
     assert events == expected
     assert result.returncode == (1 if failed_stage else 0), result.stderr
 
 
-@pytest.mark.parametrize("failure", ["", "query", "stop"])
-@pytest.mark.parametrize("fresh", [False, True])
-def test_stop_targets_only_existing_project_business_containers(failure, fresh):
-    result = run_shell(shell_function("docker", "stop_old_business_services") + r'''
-failure="''' + failure + r'''"
-fresh="''' + str(fresh).lower() + r'''"
-docker() {
-  if [ "$1" = ps ]; then
-    printf 'QUERY:%s\n' "$*" >&2
-    [ "$failure" != query ] || return 12
-    [ "$fresh" != true ] || return 0
-    case "${!#}" in
-      *service=nexent-config) printf 'config-a\nconfig-b\n' ;;
-      *service=nexent-runtime) printf 'runtime-a\n' ;;
-    esac
-  elif [ "$1" = stop ]; then
-    printf 'STOP:%s\n' "$*"
-    [ "$failure" != stop ] || return 13
-  else
-    echo UNEXPECTED_COMMAND >&2
-    return 14
-  fi
+@pytest.mark.parametrize("running,state,failure,queries,stopped", [
+    ("none", "pending", "", False, False),
+    ("shared", "pending", "", False, False),
+    ("mixed", "complete", "", True, False),
+    ("mixed", "pending", "", True, True),
+    ("mixed", "pending", "list", False, False),
+    ("mixed", "pending", "inspect", False, False),
+    ("mixed", "pending", "query", True, False),
+    ("mixed", "invalid", "", True, False),
+    ("mixed", "pending", "stop", True, True),
+])
+def test_workbench_guard_stops_only_legacy_config_when_migration_is_pending(running, state, failure, queries, stopped):
+    env = {**os.environ, "TEST_SCRIPT_DIR": (REPO / "deploy/docker").as_posix(),
+           "TEST_RUNNING": running, "TEST_STATE": state, "TEST_FAILURE": failure}
+    result = run_shell(shell_function("docker", "stop_legacy_workbench_writers") + r'''
+SCRIPT_DIR="$TEST_SCRIPT_DIR"
+ROOT_ENV_FILE=/deployment/.env
+COMPOSE_DIR=/deployment/compose
+COMPOSE_FILE_SUFFIX=.yml
+docker_compose_command=container_command
+container_command() {
+    printf 'PROBE:%s\n' "$*" >&2
+    cat >&2
+    [ "$TEST_FAILURE" != query ] || return 16
+    printf '%s\n' "$TEST_STATE"
 }
-stop_old_business_services
-''')
-    failed = failure == "query" or (failure == "stop" and not fresh)
-    assert result.returncode == (1 if failed else 0), result.stderr
-    queries = [line for line in result.stderr.splitlines() if line.startswith("QUERY:")]
-    assert queries
-    assert all("label=com.docker.compose.project=nexent" in line for line in queries)
-    if failure != "query":
-        services = [line.split("service=")[-1] for line in queries]
-        assert services == ["nexent-config", "nexent-runtime", "nexent-mcp", "nexent-northbound", "nexent-web", "nexent-data-process"]
-    if fresh or failure == "query":
-        assert "STOP:" not in result.stdout
-    else:
-        assert "STOP:stop --time 60 config-a config-b runtime-a" in result.stdout
-    assert "UNEXPECTED_COMMAND" not in result.stderr
+docker() {
+    case "$1" in
+      ps)
+        printf 'LIST:%s\n' "$*" >&2
+        [ "$TEST_FAILURE" != list ] || return 12
+        case "$TEST_RUNNING" in
+          shared) echo shared-config ;;
+          mixed) printf 'legacy-a\nshared-config\nlegacy-b\n' ;;
+        esac
+        ;;
+      exec)
+        [ "$TEST_FAILURE" != inspect ] || return 13
+        if [ "$2" = shared-config ]; then echo shared; else echo legacy; fi
+        ;;
+      stop)
+        printf 'STOP:%s\n' "$*"
+        [ "$TEST_FAILURE" != stop ] || return 14
+        ;;
+      *) return 15 ;;
+    esac
+}
+stop_legacy_workbench_writers
+''', env=env)
+    assert result.returncode == (1 if failure or state == "invalid" else 0), result.stderr
+    assert "LIST:ps -q --filter label=com.docker.compose.project=nexent --filter label=com.docker.compose.service=nexent-config" in result.stderr
+    assert ("PROBE:" in result.stderr) is queries
+    if queries:
+        assert "run --rm --no-deps -T --entrypoint sh nexent-config" in result.stderr
+        assert "__once_shared_system_agents_v1" in result.stderr
+    assert [line for line in result.stdout.splitlines() if line.startswith("STOP:")] == (
+        ["STOP:stop --time 60 legacy-a legacy-b"] if stopped else []
+    )
 
 
 @pytest.mark.parametrize("failed_stage", ["", "config", "pull", "modules", "local_missing"])
@@ -316,7 +336,7 @@ prepare_core_service_deployment nexent-config nexent-runtime
     assert result.stdout.index("PULL:") < result.stdout.index("run --rm")
 
 
-def test_web_only_deployment_stops_only_selected_service_without_migration():
+def test_web_only_deployment_does_not_stop_or_run_migration():
     result = run_shell(shell_function("docker", "deploy_core_services") + r'''
 DEPLOYMENT_SELECTED_DOCKER_SERVICES=nexent-web
 docker_compose_command=container_command
@@ -324,12 +344,12 @@ ROOT_ENV_FILE=/deployment/.env
 COMPOSE_DIR=/deployment/compose
 COMPOSE_FILE_SUFFIX=.yml
 prepare_core_service_deployment() { echo PREPARE; }
-stop_old_business_services() { echo "STOP:$*"; }
+stop_legacy_workbench_writers() { echo UNEXPECTED_GUARD; return 1; }
 publish_shared_workbench() { case " $DEPLOYMENT_SELECTED_DOCKER_SERVICES " in *" nexent-config "*) echo MIGRATE ;; esac; }
 container_command() { echo START; }
 deploy_core_services
 ''')
     assert result.returncode == 0, result.stderr
-    assert "STOP:nexent-web" in result.stdout
+    assert "UNEXPECTED_GUARD" not in result.stdout
     assert "MIGRATE" not in result.stdout
-    assert result.stdout.index("STOP:") < result.stdout.index("START")
+    assert "START" in result.stdout

@@ -1184,27 +1184,53 @@ prepare_core_service_deployment() {
   esac
 }
 
-stop_old_business_services() {
-  local service matches container_id
-  local containers=()
-  if [ "$#" -eq 0 ]; then
-    set -- nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process
+stop_legacy_workbench_writers() {
+  local matches container_id capability state
+  local writers=()
+  # Before shared Workbench, Config created tenant drafts from Agent and tenant requests.
+  matches="$(docker ps -q \
+    --filter "label=com.docker.compose.project=nexent" \
+    --filter "label=com.docker.compose.service=nexent-config")" || return 1
+  while IFS= read -r container_id; do
+    [ -n "$container_id" ] || continue
+    if ! capability="$(docker exec "$container_id" sh -c '
+      if [ -r /opt/backend/management/services/agent/system_initialize.py ] &&
+         [ -r /opt/backend/management/services/agent/system_release.py ]; then
+        printf shared
+      else
+        printf legacy
+      fi')"; then
+      echo "Error: could not inspect the running Config service; migration will not run." >&2
+      return 1
+    fi
+    case "$capability" in
+      shared) ;;
+      legacy) writers+=("$container_id") ;;
+      *) echo "Error: unexpected Config capability; migration will not run." >&2; return 1 ;;
+    esac
+  done <<< "$matches"
+  [ "${#writers[@]}" -gt 0 ] || return 0
+
+  # Use the planned Config service's connection settings without its migration entrypoint.
+  if ! state="$(
+    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+      run --rm --no-deps -T --entrypoint sh nexent-config -ec '
+        PGPASSWORD="${NEXENT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}" PGCONNECT_TIMEOUT=5 \
+          exec psql -XqAt -v ON_ERROR_STOP=1 -h "${POSTGRES_HOST:-nexent-postgresql}" \
+            -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-root}" -d "${POSTGRES_DB:-nexent}"
+      ' < "$SCRIPT_DIR/../sql/tools/check_shared_workbench.sql"
+  )"; then
+    echo "Error: could not check shared Workbench migration state." >&2
+    return 1
   fi
-  for service in "$@"; do
-    matches=$(docker ps -q \
-      --filter "label=com.docker.compose.project=nexent" \
-      --filter "label=com.docker.compose.service=$service") || return 1
-    while IFS= read -r container_id; do
-      [ -z "$container_id" ] || containers+=("$container_id")
-    done <<< "$matches"
-  done
-  if [ "${#containers[@]}" -eq 0 ]; then
-    echo "No old business services are running."
-    return 0
-  fi
-  echo "Stopping old business services; infrastructure remains running..."
-  if ! docker stop --time 60 "${containers[@]}"; then
-    echo "Error: old business services could not be stopped; migration will not run." >&2
+  case "$state" in
+    complete) return 0 ;;
+    pending) ;;
+    *) echo "Error: unexpected shared Workbench migration state." >&2; return 1 ;;
+  esac
+  echo "Stopping legacy Config writers for the pending shared Workbench migration..."
+  if ! docker stop --time 60 "${writers[@]}"; then
+    echo "Error: legacy Config writers could not be stopped; migration will not run." >&2
     return 1
   fi
 }
@@ -1247,8 +1273,7 @@ deploy_core_services() {
 
   prepare_core_service_deployment "${core_services[@]}" || return 1
   case " ${core_services[*]} " in
-    *" nexent-config "*) stop_old_business_services || return 1 ;;
-    *) stop_old_business_services "${core_services[@]}" || return 1 ;;
+    *" nexent-config "*) stop_legacy_workbench_writers || return 1 ;;
   esac
   publish_shared_workbench || return 1
 
