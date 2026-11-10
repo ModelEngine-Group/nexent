@@ -10,7 +10,7 @@ from ...monitor.monitoring import (
 )
 from ..utils.token_estimation import estimate_tokens_text
 from .response_diagnostics import ResponseDiagnostics
-from .context_usage import InputUsageObservation, context_model_key
+from ..context_runtime.usage import InputUsageObservation, context_model_key
 from types import SimpleNamespace
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
