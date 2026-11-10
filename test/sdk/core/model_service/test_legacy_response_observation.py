@@ -66,7 +66,7 @@ def test_failed_next_invocation_never_reuses_previous_response_usage_or_diagnost
 
 
 def test_completed_observation_pairs_provider_input_with_actual_request(setup):
-    from nexent.core.models.context_usage import context_model_key, request_characters
+    from nexent.core.context_runtime.usage import context_model_key, request_characters
     model, state, calls, _observer = setup
     state["usage"] = TokenUsage(input_tokens=10, output_tokens=0, origin="provider")
     messages = [{'role': 'user', 'content': 'request body'}]

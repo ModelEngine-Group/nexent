@@ -45,6 +45,10 @@ change:
     - test/sdk/core/model_service/test_legacy_context_budget.py
     - test/sdk/core/models/test_openai_llm.py
     - test/sdk/monitor/test_monitoring.py
+    - test/sdk/core/context_runtime/test_runtimes.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_nexent_agent_context_runtime_factory.py
+    - test/sdk/core/agents/test_execution_history_review_regressions.py
   notes: Existing runtime/model ownership mappings apply. Transport preparation is
     self-contained with owned loopback server/client cleanup; real Agent acceptance
     retains separate Phoenix evidence. No new D1 duplicates UT.
