@@ -84,6 +84,7 @@ class ConversationMessage(TableBase):
         String(16), nullable=False, server_default=text("'CHAT'"),
         comment="Trusted message origin: CHAT consumes the ordinary user-turn quota; AUTOMATION is exempt",
     )
+    streaming_owner = Column(String(16), doc="Service responsible for terminal repair of the streaming assistant.")
     message_content = Column(String, doc="The complete content of the message")
     minio_files = Column(
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")

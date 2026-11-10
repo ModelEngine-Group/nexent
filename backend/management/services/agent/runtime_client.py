@@ -30,11 +30,29 @@ async def forward_agent_run(
 
 async def forward_conversation_run(payload: CompatibilityConversationRun, user_id: str, tenant_id: str):
     client = _agentos_client()
-    if payload.idempotency_key is not None:
-        from management.services.agent.conversation_submission import submit_conversation
+    from management.services.agent import prepared_turn
+    from management.services.agent.conversation_submission import submit_conversation
 
-        return await submit_conversation(payload, user_id, tenant_id, client.run_conversation)
-    return await client.run_conversation(payload, user_id, tenant_id)
+    request = AgentRequest.model_validate(payload.request)
+    conversation_id = request.conversation_id
+    candidate = prepared_turn.is_prepared_candidate(payload, request)
+
+    async def dispatch(claimed, owner, tenant):
+        if candidate:
+            response = await prepared_turn.start_turn(claimed, request, owner, tenant, client)
+            if response is not None:
+                return response
+        if conversation_id and conversation_id > 0 and not request.is_debug:
+            pending = await prepared_turn.find_pending_turn(conversation_id, owner, tenant)
+            if pending is not None:
+                if claimed.resume:
+                    return await prepared_turn.resume_turn(pending, client)
+                raise prepared_turn.active_turn_conflict()
+        return await client.run_conversation(claimed, owner, tenant)
+
+    if candidate or payload.idempotency_key is not None:
+        return await submit_conversation(prepared_turn.with_submission_key(payload), user_id, tenant_id, dispatch)
+    return await dispatch(payload, user_id, tenant_id)
 
 
 async def forward_conversation_resume(payload: AgentResume, user_id: str, tenant_id: str):

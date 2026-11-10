@@ -116,13 +116,14 @@ def _project_event(projection, files, checkpoints, data, payload, run_id, user_i
 
 async def resume_assistant_projection(
     resume, reference: AgentRunReference, user_id: str, tenant_id: str, *,
-    message_index: int, message_source: MessageSource,
+    message_index: int, message_source: MessageSource, assistant_message_id: int | None = None,
 ) -> ProjectedRun:
     """Commit only a complete projection and let duplicate replays reuse its receipt."""
     projection = AssistantMessageProjection(persist_units=True)
     files, checkpoints = {}, []
     status, chunks = await _consume_projection(resume, reference, user_id, tenant_id, projection, files, checkpoints)
     answer, _ = canonicalize_assistant_units(projection.units)
+    target = {"assistant_message_id": assistant_message_id} if assistant_message_id is not None else {}
     message_id = await run_blocking(
         "persist-prepared-assistant-projection", persist_prepared_assistant_projection,
         lane="control-io", owner="management", projection_run_id=reference.run_id,
@@ -130,6 +131,6 @@ async def resume_assistant_projection(
         user_id=user_id, tenant_id=tenant_id, message_content=answer, terminal_status=status,
         message_units=projection.units, search_records=projection.search_records, image_urls=projection.image_urls,
         skill_files=transform_skill_files_to_standard_format(list(files.values())),
-        automation_proposals=projection.automation_proposals, history_checkpoints=checkpoints,
+        automation_proposals=projection.automation_proposals, history_checkpoints=checkpoints, **target,
     )
     return ProjectedRun(message_id, status, chunks)

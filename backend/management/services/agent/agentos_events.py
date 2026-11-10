@@ -13,6 +13,7 @@ from management.services.agent.artifacts import enrich_file_uploads_with_presign
 from nexent.core.concurrency import run_blocking
 
 _OBSERVER_LINE = b"event: agentos_observer"
+_PUBLIC_ERROR = b"data: " + json.dumps({"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE}).encode("utf-8")
 
 
 async def iter_sse_frames(response):
@@ -60,7 +61,7 @@ async def _present_observer(data, request, user_id):
     if not isinstance(payload, dict) or payload.get("type") == "skill_artifact":
         raise ValueError("Unsupported AgentOS observer data")
     if payload.get("type") != "file_artifact":
-        return data
+        return data, payload.get("type") == "error"
     artifacts = _output_artifacts(payload.get("content"), user_id, request.run_id)
     if artifacts:
         artifacts = await run_blocking(
@@ -68,19 +69,27 @@ async def _present_observer(data, request, user_id):
             lane="control-io", owner="management",
         )
     public = {"type": "files", "content": json.dumps({"file_uploads": artifacts}, ensure_ascii=False)}
-    return b"data: " + json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return b"data: " + json.dumps(public, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), False
 
 
-def present_public_resume(response: StreamingResponse, request: AgentResume, user_id: str) -> StreamingResponse:
+def present_public_resume(
+    response: StreamingResponse, request: AgentResume, user_id: str, *, on_terminal=None,
+) -> StreamingResponse:
     if response.status_code != 200:
         return response
 
     async def events():
+        error_presented = False
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
                 cursor, _, body = frame.partition(b"\n")
                 kind, _, data = body.partition(b"\n")
                 if kind != _OBSERVER_LINE:
+                    if (on_terminal is not None and kind == b"event: agentos_terminal"
+                            and cursor.startswith(f"id: {request.run_id}:".encode())):
+                        await on_terminal()
+                        if not error_presented and json.loads(data.removeprefix(b"data: ")).get("status") == "failed":
+                            yield _PUBLIC_ERROR + b"\n\n"
                     yield frame + b"\n\n"
                     continue
                 cursor_id = cursor.removeprefix(b"id: ").decode("ascii", errors="replace")
@@ -89,11 +98,10 @@ def present_public_resume(response: StreamingResponse, request: AgentResume, use
                     # Do not give the client a cursor it cannot safely resume.
                     return
                 try:
-                    data = await _present_observer(data, request, user_id)
+                    data, is_error = await _present_observer(data, request, user_id)
                 except (TypeError, ValueError):
-                    data = b"data: " + json.dumps({
-                        "type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE,
-                    }).encode("utf-8")
+                    data, is_error = _PUBLIC_ERROR, True
+                error_presented |= is_error
                 yield cursor + b"\n" + data + b"\n\n"
 
     headers = {name: value for name, value in response.headers.items() if name != "content-length"}

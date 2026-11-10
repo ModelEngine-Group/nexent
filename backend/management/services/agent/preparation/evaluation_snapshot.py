@@ -111,6 +111,7 @@ def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConver
 async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
+    before_message_index: int | None = None,
 ) -> PreparedAgentRun | None:
     """Compile an existing authorized conversation without constructing Runtime SDK objects."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -140,11 +141,12 @@ async def prepare_conversation_snapshot(
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
     historical_context = None
-    if current_user_message_id is not None:
+    if current_user_message_id is not None or before_message_index is not None:
+        boundary = {"before_message_index": before_message_index} if before_message_index is not None else {}
         history = await run_blocking(
             "snapshot-conversation-history", get_historical_context,
             reference.conversation_id, current_user_message_id, user_id, tenant_id,
-            lane="control-io", owner="management",
+            lane="control-io", owner="management", **boundary,
         )
         if history is None:
             raise ForbiddenError("Conversation history boundary is not accessible")

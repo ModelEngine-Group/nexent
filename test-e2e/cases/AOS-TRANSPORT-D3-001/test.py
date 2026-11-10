@@ -232,6 +232,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_prepared_run_over_signed_http(run_patches, tmp_path)
     with monkeypatch.context() as planning_patches:
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
+    with monkeypatch.context() as turn_patches:
+        await _assert_public_prepared_turn_over_signed_http(turn_patches)
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
@@ -1083,7 +1085,7 @@ async def _assert_resume_over_signed_http(monkeypatch):
 async def _assert_public_conversation_over_signed_http(monkeypatch):
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
     from management.api.agent import conversation_run
-    from management.services.agent import conversation_submission, runtime_client
+    from management.services.agent import conversation_submission, prepared_turn, runtime_client
     from runtime.agentos import admission
     from runtime.api.agent import execution
 
@@ -1106,6 +1108,7 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
         return AdmissionClaim(run_id, status, 42, True, False)
 
     monkeypatch.setattr(conversation_submission, "_control_io", control_io)
+    monkeypatch.setattr(prepared_turn, "find_pending_turn", lambda *_: asyncio.sleep(0, result=None))
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(
         conversation_submission, "conversation_belongs_to",
@@ -1823,3 +1826,126 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[0] for call in redis.setex.call_args_list] == ["plan:47:planning-user"] * 2
     assert json.loads(redis.setex.call_args.args[2])["steps"][0]["status"] == "completed"
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
+
+
+async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from infrastructure.rdb.agent_admission import AdmissionClaim
+    from infrastructure.redis.agent_events import START
+    from management.api.agent import conversation_run
+    from management.services.agent import conversation_submission, prepared_projection, prepared_turn, runtime_client
+    from runtime.agentos import prepared_run, resume
+
+    actor = ServicePrincipal("public-user", "public-tenant")
+    reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
+    snapshot = PreparedAgentRun.model_validate({
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
+        "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
+                     "prompt_templates": {"system_prompt": "Answer"}},
+        "models": {"llm": {"model_id": 11, "alias": "demo", "revision": "revision"}},
+    })
+    state = {"status": "pending"}
+    calls = []
+    fields = reference.model_dump()
+    pending = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
+                              message_index=5, assistant_message_id=None)
+    confirmed = SimpleNamespace(**{**vars(pending), "assistant_message_id": 81})
+
+    def claim(_scope, _fingerprint, user_id, tenant_id):
+        assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+        if state.get("claimed"):
+            return AdmissionClaim(reference.run_id, state["status"], 55, True, False)
+        state["claimed"] = True
+        return AdmissionClaim(reference.run_id, "pending", None, False, True)
+
+    def stage(_scope, ref, user_id, tenant_id, index, turn):
+        assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, 4)
+        assert turn["query"] == "test"
+        calls.append("stage")
+        return pending
+
+    def confirm(turn):
+        assert turn is pending and calls == ["stage", "start"]
+        calls.append("confirm")
+        state["status"] = "admitted"
+        return confirmed
+
+    def persist(**fields):
+        assert calls == ["stage", "start", "confirm"]
+        assert fields["assistant_message_id"] == 81 and fields["projection_run_id"] == reference.run_id
+        assert fields["message_content"] == "answer"
+        calls.append("project")
+        return 81
+
+    def close(turn):
+        assert turn is confirmed and calls[-1] == "project"
+        calls.append("close")
+
+    async def start(payload, signed_actor):
+        assert payload == snapshot and signed_actor == actor and calls == ["stage"]
+        calls.append("start")
+        return reference
+
+    async def inline(_label, function, *args, lane=None, owner=None, **kwargs):
+        return function(*args, **kwargs)
+
+    def owned(cid, *, user_id, tenant_id):
+        return (cid, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id)
+
+    class Journal:
+        def __init__(self, tenant_id, user_id, cid, run_id):
+            assert owned(cid, user_id=user_id, tenant_id=tenant_id) and run_id == reference.run_id
+            assert "confirm" in calls
+
+        def replay(self, anchor):
+            assert anchor == START
+            terminal = ("2-0", {"kind": "terminal", "status": "completed"})
+            return [(START, {"kind": "start"})], [
+                ("1-0", {"kind": "chunk",
+                         "data": 'event: agentos_observer\ndata: {"type":"final_answer","content":"answer"}\n\n'}),
+                terminal,
+            ], [terminal]
+
+    monkeypatch.setattr(conversation_submission, "_control_io", inline)
+    monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
+    monkeypatch.setattr(conversation_submission, "conversation_belongs_to", owned)
+    monkeypatch.setattr(prepared_turn, "run_blocking", inline)
+    monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", AsyncMock(return_value=snapshot))
+    monkeypatch.setattr(prepared_turn.store, "next_message_index", lambda *_: 4)
+    monkeypatch.setattr(prepared_turn.store, "stage_turn", stage)
+    monkeypatch.setattr(prepared_turn.store, "confirm_turn", confirm)
+    monkeypatch.setattr(prepared_turn.store, "close_turn", close)
+    monkeypatch.setattr(prepared_turn, "get_prepared_projection_receipt", lambda **_: None)
+    monkeypatch.setattr(prepared_projection, "run_blocking", inline)
+    monkeypatch.setattr(prepared_projection, "persist_prepared_assistant_projection", persist)
+    monkeypatch.setattr(prepared_run, "start_prepared_run", start)
+    monkeypatch.setattr(resume, "_control_io", inline)
+    monkeypatch.setattr(resume, "conversation_belongs_to", owned)
+    monkeypatch.setattr(resume, "active_execution", lambda *_: None)
+    monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=True))
+    monkeypatch.setattr(resume, "RunJournal", Journal)
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(prepared_run.create_prepared_run_router())
+    runtime.include_router(resume.create_run_lifecycle_router())
+    management = FastAPI()
+    management.include_router(conversation_run.router)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda token: (actor.user_id, token))
+    with serve(runtime) as runtime_url:
+        monkeypatch.setattr(runtime_client, "_agentos_client",
+                            lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+        request = {**fields, "query": "test", "agent_id": 7, "enable_automation_tool": False}
+        headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
+                                     base_url="http://management") as browser:
+            first = await browser.post("/agent/run", json=request, headers=headers)
+            retry = await browser.post("/agent/run", json=request, headers=headers)
+            denied = await browser.post("/agent/run", json=request, headers={**headers, "Authorization": "foreign"})
+        assert first.status_code == 200 and first.headers["run_id"] == reference.run_id
+        assert first.text.startswith(f'id: {reference.run_id}:1\ndata: {{"type":"final_answer","content":"answer"}}\n\n')
+        assert "agentos_terminal" in first.text
+        assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
+        assert denied.status_code == 404
+    assert calls == ["stage", "start", "confirm", "project", "close"]

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, Integer, String, func, select, text, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from infrastructure.rdb.base import SCHEMA, TableBase
 from infrastructure.rdb.client import get_db_session
@@ -25,6 +25,9 @@ class ConversationRunAdmission(TableBase):
     status = Column(String(30), nullable=False, server_default=text("'pending'"), doc="Admission outcome.")
     conversation_id = Column(Integer, doc="Conversation bound to the admitted run.")
     journal_available = Column(Boolean, nullable=False, server_default=text("false"), doc="Run output journal opened.")
+    prepared_user_turn = Column(JSONB(none_as_null=True), doc="Uncommitted user message and settings until Runtime admission.")
+    prepared_message_index = Column(Integer, doc="Assistant message index while Management projection is outstanding.")
+    prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
 
 
 class AdmissionScopeError(ValueError):

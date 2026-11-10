@@ -259,7 +259,8 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *,
-                                 message_source: MessageSource = MessageSource.CHAT, execution_identity=None) -> int:
+                                 message_source: MessageSource = MessageSource.CHAT, execution_identity=None,
+                                 streaming_owner: str | None = None, db_session=None) -> int:
     """
     Create a conversation message record
 
@@ -277,7 +278,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -307,6 +308,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_role,
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
                 "delete_flag": 'N', "status": status, "message_source": message_source.value}
+        if streaming_owner is not None:
+            data["streaming_owner"] = streaming_owner
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -474,7 +477,7 @@ def get_prepared_projection_receipt(
 
 def persist_prepared_assistant_projection(
     *, projection_run_id: str, conversation_id: int, message_index: int, message_source: MessageSource,
-    user_id: str, tenant_id: str, **batch,
+    user_id: str, tenant_id: str, assistant_message_id: int | None = None, **batch,
 ) -> int:
     """Create or replay a remote projection in the same transaction as its receipt."""
     from infrastructure.rdb.conversation_state import tenant_membership_matches
@@ -500,6 +503,18 @@ def persist_prepared_assistant_projection(
             if (existing.message_index, existing.message_source) != (message_index, source):
                 raise ValueError("Assistant projection conflicts with the original message index or source")
             message_id = existing.message_id
+            if assistant_message_id is not None and assistant_message_id != message_id:
+                raise ValueError("Assistant projection does not match the reserved message")
+        elif assistant_message_id is not None:
+            message_id = session.scalar(select(ConversationMessage.message_id).where(
+                ConversationMessage.message_id == assistant_message_id,
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.created_by == user_id, ConversationMessage.delete_flag == "N",
+                ConversationMessage.message_role == "assistant", ConversationMessage.message_source == source,
+                ConversationMessage.message_index == message_index, ConversationMessage.streaming_owner == "management",
+            ))
+            if message_id is None:
+                raise ValueError("Assistant projection does not match the reserved message")
         else:
             message_id = session.scalar(insert(ConversationMessage).values(
                 conversation_id=conversation_id, message_index=message_index, message_role="assistant",
@@ -2696,9 +2711,10 @@ def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any
 
 def get_historical_context(
     conversation_id: int,
-    current_user_message_id: int,
+    current_user_message_id: int | None,
     user_id: str,
     tenant_id: str,
+    *, before_message_index: int | None = None,
 ) -> Optional[Dict[str, Any]]:
     """Load authorized completed and stopped turns after the latest valid checkpoint."""
     if not user_id or not tenant_id:
@@ -2707,25 +2723,32 @@ def get_historical_context(
     if not user_tenant or _get_effective_tenant_id(user_tenant) != tenant_id:
         return None
     conversation_id = int(conversation_id)
-    current_user_message_id = int(current_user_message_id)
+    if (current_user_message_id is None) == (before_message_index is None):
+        raise ValueError("Historical context requires one message boundary")
     with get_db_session() as session:
-        current = session.execute(
-            select(
-                ConversationMessage.message_id,
-                ConversationMessage.message_index,
-            )
-            .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
-            .where(
-                ConversationMessage.message_id == current_user_message_id,
-                ConversationMessage.conversation_id == conversation_id,
-                ConversationMessage.message_role == "user",
-                ConversationMessage.delete_flag == "N",
-                ConversationRecord.created_by == user_id,
-                ConversationRecord.delete_flag == "N",
-            )
-        ).first()
-        if not current:
-            return None
+        if before_message_index is None:
+            current = session.execute(
+                select(ConversationMessage.message_id, ConversationMessage.message_index)
+                .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+                .where(
+                    ConversationMessage.message_id == int(current_user_message_id),
+                    ConversationMessage.conversation_id == conversation_id,
+                    ConversationMessage.message_role == "user",
+                    ConversationMessage.delete_flag == "N",
+                    ConversationRecord.created_by == user_id,
+                    ConversationRecord.delete_flag == "N",
+                )
+            ).first()
+            if current is None:
+                return None
+            before_message_index = current.message_index
+        else:
+            owned = session.scalar(select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+            ))
+            if owned is None:
+                return None
 
         candidates = session.execute(
             select(
@@ -2742,7 +2765,7 @@ def get_historical_context(
                 ConversationMessageUnit.delete_flag == "N",
                 ConversationMessage.status == "completed",
                 ConversationMessage.delete_flag == "N",
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
             )
             .order_by(desc(ConversationMessage.message_index), desc(ConversationMessageUnit.unit_index))
         ).all()
@@ -2770,7 +2793,7 @@ def get_historical_context(
                 and boundary.message_role == "assistant"
                 and boundary.status == "completed"
                 and boundary.message_index == candidate.message_index
-                and boundary.message_index < current.message_index
+                and boundary.message_index < before_message_index
             ):
                 summary_record, summary_payload = candidate, payload
                 boundary_index = boundary.message_index
@@ -2788,7 +2811,7 @@ def get_historical_context(
             .where(
                 ConversationMessage.conversation_id == conversation_id,
                 ConversationMessage.message_index > boundary_index,
-                ConversationMessage.message_index < current.message_index,
+                ConversationMessage.message_index < before_message_index,
                 ConversationMessage.status.in_(["completed", "stopped"]),
                 ConversationMessage.delete_flag == "N",
                 ConversationMessage.message_role.in_(["user", "assistant"]),

@@ -69,6 +69,9 @@ case:
   - order: 14
     action: Deliver a prepared planning snapshot through the signed Agent.run operation.
     expected: Runtime rebuilds the built-in plan tools and injects its own Redis client. Creating a plan and completing a step emit the original SDK events and update the conversation-scoped plan.
+  - order: 15
+    action: Start an eligible public conversation with an idempotency key and repeat the submission.
+    expected: Management stages the user input, dispatches one signed Agent.run, confirms the turn, and projects the signed journal into the reserved assistant message. Retry returns the original run ID and the other tenant receives 404.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -84,6 +87,7 @@ case:
   - The prepared automation runner recovers the same scoped run and commits its assistant message after the lost acknowledgement.
   - The public route retains the signed cursor and presents the prepared output without exposing internal artifact paths.
   - Planning runs use built-in tool bindings and Runtime-managed plan storage.
+  - One prepared public submission creates one Runtime execution and one assistant projection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -217,3 +221,8 @@ case:
     steps: [14]
     expected_results: [14]
     forbidden_side_effects: [2]
+  - id: AC-23
+    description: The public prepared conversation path preserves ownership and idempotency through signed admission and journal projection.
+    steps: [15]
+    expected_results: [15]
+    forbidden_side_effects: [1, 2]

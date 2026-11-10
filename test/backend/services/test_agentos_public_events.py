@@ -97,3 +97,16 @@ async def test_closing_the_public_response_closes_the_upstream_subscription():
     assert b"thought" in await anext(iterator)
     await iterator.aclose()
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_failed_prepared_turn_presents_an_error_before_the_terminal_frame():
+    terminal = f'id: {CURSOR.run_id}:2\nevent: agentos_terminal\ndata: {{"status":"failed"}}\n\n'.encode()
+    on_terminal = AsyncMock()
+    output = public_events.present_public_resume(response(terminal), CURSOR, "actor", on_terminal=on_terminal)
+
+    frames = [chunk async for chunk in output.body_iterator]
+
+    assert json.loads(frames[0].removeprefix(b"data: "))["type"] == "error"
+    assert frames[1:] == [terminal]
+    on_terminal.assert_awaited_once_with()

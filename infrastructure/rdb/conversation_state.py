@@ -64,6 +64,7 @@ def fail_streaming_assistant_messages() -> list[dict]:
             .filter(
                 ConversationMessage.message_role == "assistant",
                 ConversationMessage.status == "streaming",
+                ConversationMessage.streaming_owner.is_distinct_from("management"),
                 ConversationMessage.delete_flag == "N",
                 ~tracked_message,
             )
