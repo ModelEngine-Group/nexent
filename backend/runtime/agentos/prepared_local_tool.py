@@ -16,7 +16,8 @@ from infrastructure.ind_aidp_images import (
     create_ind_aidp_image_url_builder, ind_aidp_skill_revision, ind_aidp_workbench_revision,
 )
 from infrastructure.local_tool_execution import (
-    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
+    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, apply_local_search_overrides, build_local_tool,
+    local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
 from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
@@ -136,6 +137,7 @@ def materialize_local_tools(
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
         if not compare_digest(revision, reference.revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
+        tool = apply_local_search_overrides(tool, reference.search_overrides)
         rerank_name = local_tool_rerank_name(tool)
         if not rerank_name and (reference.reranker or reference.default_reranker):
             raise ValueError("Unexpected local SDK tool reranker binding")

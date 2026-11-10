@@ -325,12 +325,21 @@ class AnalysisToolBinding(RunSpecModel):
     usage: str | None = None
 
 
+class LocalSearchOverrides(RunSpecModel):
+    top_k: int | None = Field(default=None, ge=1, le=100)
+    max_results: int | None = Field(default=None, ge=1, le=100)
+    threshold: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    similarity_threshold: float | None = Field(default=None, le=1, allow_inf_nan=False)
+    score_threshold: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+
+
 class LocalToolBinding(RunSpecModel):
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     description_zh: str | None = None
     inputs: str | None = None
     reranker: RevisionedModelBinding | None = None
     default_reranker: RevisionedModelBinding | None = None
+    search_overrides: LocalSearchOverrides | None = None
 
 
 class StoredLocalToolBinding(LocalToolBinding):

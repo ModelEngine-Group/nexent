@@ -28,7 +28,8 @@ def stored_tool(mocker):
 
 
 @pytest.mark.asyncio
-async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields(mocker, stored_tool):
+@pytest.mark.parametrize("requested", [None, {"top_k": 7}, {"top_k": True}, {"top_k": 101}, {"api_key": "request-key"}])
+async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields(mocker, stored_tool, requested):
     from management.services.agent.preparation import local_tool, tools
     from runtime.agentos import prepared_local_tool
 
@@ -37,13 +38,25 @@ async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields
     mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[
         {**stored_tool, "params": params, "description_zh": "检索"},
     ])
-    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={})
+    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
     legacy = mocker.patch.object(tools, "get_rerank_model")
-    tool, = await tools.create_tool_config_list(7, "tenant-a", "user-a", version_no=3, portable_evaluation=True)
+    tool, = await tools.create_tool_config_list(
+        7, "tenant-a", "user-a", version_no=3, portable_evaluation=True,
+        tool_params={"agents": {"agent": {"tools": {"dify_search": requested}}}} if requested else None,
+    )
     legacy.assert_not_called()
 
     rerank = mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
+    if requested and requested != {"top_k": 7}:
+        with pytest.raises(ValueError):
+            local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
+        rerank.assert_not_called()
+        return
     exported = local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
+    if requested:
+        assert exported.parameters["search_overrides"] == {"top_k": 7}
+    else:
+        assert "search_overrides" not in exported.parameters
     rerank.assert_called_once_with("tenant-a", "Reranker")
     encoded = exported.model_dump_json()
     for secret in ("https://private-dify.invalid/v1", "local-only-dify-key", "dataset-a"):
@@ -57,11 +70,11 @@ async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields
     assert rebound.params == tool.params
     instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
     assert instance.dataset_ids == ["dataset-a"]
-    assert instance.top_k == 2
+    assert instance.top_k == (7 if requested else 2)
     assert instance.rerank_model is hydrate_rerank.return_value
 
 
-@pytest.mark.parametrize(("change", "status"), [("revoked", 404), ("changed", 409)])
+@pytest.mark.parametrize(("change", "status"), [("revoked", 404), ("changed", 409), ("covered_default", 409)])
 def test_local_tool_refuses_removed_or_changed_binding(mocker, stored_tool, change, status):
     from management.services.agent.preparation import local_tool
     from runtime.agentos import prepared_local_tool
@@ -72,6 +85,8 @@ def test_local_tool_refuses_removed_or_changed_binding(mocker, stored_tool, chan
     )
     mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
     binding = local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
+    if change == "covered_default":
+        binding.parameters["search_overrides"] = {"top_k": 7}
     rows = [] if change == "revoked" else [{**stored_tool, "instance_params": {"top_k": 9}}]
     mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=rows)
     hydrate_rerank = mocker.patch.object(prepared_local_tool, "_reranker")
@@ -84,6 +99,52 @@ def test_local_tool_refuses_removed_or_changed_binding(mocker, stored_tool, chan
 
     assert error.value.status_code == status
     hydrate_rerank.assert_not_called()
+
+
+@pytest.mark.parametrize("overrides", [{"api_key": "injected"}, {"max_results": 7}])
+def test_local_tool_rejects_unsupported_signed_search_overrides(mocker, stored_tool, overrides):
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import local_tool
+    from runtime.agentos import prepared_local_tool
+
+    tool = build_local_tool(stored_tool, "zh", None, None)
+    mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
+    binding = local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
+    binding.parameters["search_overrides"] = overrides
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[stored_tool])
+    hydrate_rerank = mocker.patch.object(prepared_local_tool, "_reranker")
+
+    with pytest.raises(ValueError):
+        prepared_local_tool.materialize_local_tools(
+            SimpleNamespace(agent_id=7, version_no=3, tools=[binding]), ServicePrincipal("user-a", "tenant-a"), "zh",
+        )
+    hydrate_rerank.assert_not_called()
+
+
+@pytest.mark.parametrize(("name", "values", "accepted"), [
+    ("datamate_search", {"threshold": 0.6}, True),
+    ("ragflow_search", {"similarity_threshold": -0.1}, False),
+    ("idata_search", {"similarity_threshold": -10}, True),
+    ("haotian_search", {"score_threshold": None}, True),
+    ("deepseek_search", {"max_results": 50}, True),
+    ("deepseek_search", {"max_results": 51}, False),
+    ("exa_search", {"max_results": 100}, True),
+    ("dify_search", {"top_k": None}, False),
+    ("ind_aidp_search", {"top_k": 7}, False),
+])
+def test_search_override_rules_follow_the_tool(name, values, accepted):
+    from contracts.agentos import LocalSearchOverrides
+    from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES, apply_local_search_overrides
+
+    tool = ToolConfig(name=name, class_name=LOCAL_SDK_TOOL_CLASSES[name], params={"api_key": "stored"})
+    overrides = LocalSearchOverrides.model_validate(values)
+
+    if accepted:
+        assert apply_local_search_overrides(tool, overrides).params == {"api_key": "stored", **values}
+    else:
+        with pytest.raises(ValueError):
+            apply_local_search_overrides(tool, overrides)
+    assert tool.params == {"api_key": "stored"}
 
 
 def test_local_tool_export_rejects_request_overrides(stored_tool):

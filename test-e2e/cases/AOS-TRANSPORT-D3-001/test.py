@@ -537,7 +537,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.local_tool_execution import build_local_tool
-    from management.services.agent.preparation import evaluation_snapshot
+    from management.services.agent.preparation import evaluation_snapshot, tools
     from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
     from nexent.core.agents.agent_model import AgentConfig
     from nexent.core.agents.nexent_agent import NexentAgent
@@ -659,6 +659,18 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             "class_name": "fixture_double", "source": "langchain", "description": "Double the input",
             "instance_params": {}, "params": [], "output_type": "integer",
         }
+        effective_row = {**row, "params": [
+            {**param, "default": row["instance_params"].get(param["name"], param["default"])}
+            for param in row["params"]
+        ]}
+        monkeypatch.setattr(tools, "_resolve_runtime_tool_records", lambda **_: [effective_row, plugin_row])
+        monkeypatch.setattr(tools, "search_agent_info_by_agent_id", lambda **_: {"name": "eval"})
+        dify_tool, plugin_tool = await tools.create_tool_config_list(
+            8, "tenant-a", "user-a", version_no=4, language="en", portable_evaluation=True,
+            tool_params={"agents": {"eval": {"tools": {
+                "dify_search": {"top_k": 7}, "fixture_double": {"value": 99},
+            }}}},
+        )
 
         def read_plugin(agent_id, version_no, tenant_id, names):
             assert (agent_id, version_no, names) == (8, 4, ["fixture_double"])
@@ -687,7 +699,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             agent_id=8, version_no=4, name="eval", description="Scoped tool",
             prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
             tools=[
-                build_local_tool(row, "en", None, None), langchain_plugins.build_langchain_tool(plugin_row),
+                dify_tool, plugin_tool,
                 build_local_tool(aidp_row, "en", None, None), build_local_tool(file_row, "en", None, None),
             ],
         )
@@ -696,6 +708,8 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             agent_model_overrides=model_overrides,
         )
         assert isinstance(prepared, PreparedEvaluationRun)
+        search = next(tool for tool in prepared.resource.tools if tool.tool_id == "dify_search")
+        assert search.parameters["search_overrides"] == {"top_k": 7}
         for secret in (
             provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset",
             "synthetic-private-aidp-key", "private-aidp-kb", "provider-fixture", "return value * 2",
@@ -713,6 +727,12 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         image = await independent_aidp_proxy.fetch_ind_aidp_image_impl(image_url.rsplit("/", 1)[-1])
         assert image == (b"fixture-png", "image/png", "private, max-age=3600")
         assert next(tool for tool in prepared.resource.tools if tool.tool_id == "langchain").version == "1"
+        invalid = prepared.model_copy(deep=True)
+        tuning = next(tool for tool in invalid.resource.tools if tool.tool_id == "dify_search")
+        tuning.parameters["search_overrides"]["api_key"] = "invalid-request-key"
+        with pytest.raises(RuntimeUpstreamError) as invalid_override:
+            await client.run_prepared_evaluation(invalid, "user-a", "tenant-a")
+        assert invalid_override.value.status_code == 422
         plugin.write_text('raise AssertionError("changed plugin must not execute")\n', encoding="utf-8")
         with pytest.raises(RuntimeUpstreamError) as changed_plugin:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
@@ -732,7 +752,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert changed_body.value.status_code == 409
         assert "AGENTOS_MODEL_BODY_REVISION_MISMATCH" in changed_body.value.content.decode()
         body["provider_setting"] = "local-private-model-body"
-        row["instance_params"]["top_k"] = 4
+        row["instance_params"]["top_k"] = 9
         with pytest.raises(RuntimeUpstreamError) as changed:
             await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
         assert changed.value.status_code == 409
@@ -746,7 +766,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert disabled.value.status_code == 404
         assert "AGENTOS_LOCAL_TOOL_NOT_FOUND" in disabled.value.content.decode()
 
-    assert calls == [("Bearer synthetic-runtime-dify-key", "fixture query", 2)]
+    assert calls == [("Bearer synthetic-runtime-dify-key", "fixture query", 7)]
     assert aidp_calls == [
         ("search", "Bearer synthetic-private-aidp-key", ["private-aidp-kb"]),
         ("image", "Bearer synthetic-private-aidp-key"),

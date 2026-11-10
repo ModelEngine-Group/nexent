@@ -10,10 +10,11 @@ from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.nexent_agent import NexentAgent
 
 
-@pytest.mark.parametrize("change", [None, "derived", "config", "revoked", "missing", "plugin", "path", "scope"])
-def test_prepared_langchain_pins_plugin_and_authorized_binding(mocker, tmp_path, change):
+@pytest.mark.parametrize("change", [None, "request", "derived", "config", "revoked", "missing", "plugin", "path", "scope"])
+@pytest.mark.asyncio
+async def test_prepared_langchain_pins_plugin_and_authorized_binding(mocker, tmp_path, change):
     from infrastructure import langchain_plugins
-    from management.services.agent.preparation import langchain_tool
+    from management.services.agent.preparation import langchain_tool, tools
     from runtime.agentos import prepared_langchain
 
     mocker.patch.object(environment, "JWT_SECRET", "synthetic-langchain-key")
@@ -36,7 +37,15 @@ def test_prepared_langchain_pins_plugin_and_authorized_binding(mocker, tmp_path,
     if change in {"derived", "scope"}:
         row.pop("tool_instance_id")
         row["skill_instance_ids"] = [22]
-    tool = langchain_plugins.build_langchain_tool(row)
+    if change == "request":
+        mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[row])
+        mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
+        tool, = await tools.create_tool_config_list(
+            8, "tenant-a", "user-a", version_no=3, portable_evaluation=True,
+            tool_params={"agents": {"agent": {"tools": {"fixture_double": {"value": 99}}}}},
+        )
+    else:
+        tool = langchain_plugins.build_langchain_tool(row)
     artifacts = langchain_plugins.discover_langchain_plugin_refs({"fixture_double"})
     binding = langchain_tool.export_langchain_tool(tool, [row], artifacts, 8, 3, "tenant-a")
     assert binding.tool_id == "langchain"
@@ -63,7 +72,7 @@ def test_prepared_langchain_pins_plugin_and_authorized_binding(mocker, tmp_path,
     if change == "path":
         with pytest.raises(ValueError):
             prepared_langchain.materialize_langchain_tools(resource, ServicePrincipal("user-a", "tenant-a"))
-    elif change not in {None, "derived"}:
+    elif change not in {None, "request", "derived"}:
         with pytest.raises(HTTPException) as error:
             prepared_langchain.materialize_langchain_tools(resource, ServicePrincipal("user-a", "tenant-a"))
         assert error.value.status_code == (404 if change in {"revoked", "missing"} else 409)

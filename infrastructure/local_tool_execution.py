@@ -4,6 +4,7 @@
 import hmac
 import json
 
+from contracts.agentos import LocalSearchOverrides
 from contracts.constants import environment
 from infrastructure.shared_aidp_tool import shared_aidp_parameters
 from nexent.core.agents.agent_model import ToolConfig
@@ -35,6 +36,18 @@ LOCAL_SDK_TOOL_CLASSES = {
     "terminal": "TerminalTool",
 }
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
+LOCAL_SEARCH_TUNING_METADATA = "agentos_local_search_overrides"
+LOCAL_SEARCH_TUNING_FIELDS = {
+    "dify_search": {"top_k"},
+    "datamate_search": {"top_k", "threshold"},
+    "ragflow_search": {"top_k", "similarity_threshold"},
+    "haotian_search": {"top_k", "score_threshold"},
+    "idata_search": {"top_k", "similarity_threshold"},
+    "deepseek_search": {"max_results"},
+    "exa_search": {"max_results"},
+    "linkup_search": {"max_results"},
+    "tavily_search": {"max_results"},
+}
 
 
 def catalog_tool_parameters(row: dict) -> dict:
@@ -66,6 +79,21 @@ def local_tool_rerank_name(tool: ToolConfig) -> str | None:
     if tool.class_name in LOCAL_RERANK_TOOL_CLASSES and tool.params.get("rerank"):
         return tool.params.get("rerank_model_name") or None
     return None
+
+
+def apply_local_search_overrides(tool: ToolConfig, overrides: LocalSearchOverrides | None) -> ToolConfig:
+    if overrides is None:
+        return tool
+    values = overrides.model_dump(exclude_unset=True)
+    if values.keys() - LOCAL_SEARCH_TUNING_FIELDS.get(tool.name, set()):
+        raise ValueError("Unsupported local search override")
+    if any(value is None for name, value in values.items() if name != "score_threshold"):
+        raise ValueError("Local search override requires a value")
+    if tool.name == "deepseek_search" and values.get("max_results", 0) > 50:
+        raise ValueError("DeepSeek search supports up to 50 results")
+    if tool.name == "ragflow_search" and values.get("similarity_threshold", 0) < 0:
+        raise ValueError("RAGFlow similarity threshold must be nonnegative")
+    return tool.model_copy(update={"params": {**tool.params, **values}})
 
 
 def local_tool_revision(tenant_id: str, agent_id: int, version_no: int, row: dict, tool: ToolConfig) -> str:

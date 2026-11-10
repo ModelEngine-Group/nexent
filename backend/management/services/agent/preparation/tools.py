@@ -19,7 +19,7 @@ from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
 from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
-from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
+from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES, LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA
 from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
 from infrastructure.object_storage.client import minio_client
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, restrict_aidp_access, shared_aidp_parameters
@@ -395,6 +395,9 @@ async def create_tool_config_list(
             if tool.get("class_name") == "IndependentAidpSearchTool"
             else override_params
         )
+        if portable_evaluation and tool.get("source") == "langchain" and tool.get("class_name") != "AidpSearchTool":
+            # The SDK invokes the plugin directly and does not use ToolConfig.params.
+            effective_override_params = None
         param_dict = _merge_tool_params(tool, effective_override_params)
         if tool.get("class_name") == "DeepSeekSearchTool":
             param_dict.pop("localization", None)
@@ -450,6 +453,9 @@ async def create_tool_config_list(
         )
         if portable_evaluation and tool_config.source == "mcp" and effective_override_params:
             tool_config.metadata = {MCP_ARGUMENT_OVERRIDES: effective_override_params}
+        if (portable_evaluation and tool_config.source == "local" and effective_override_params
+                and tool_config.name in LOCAL_SEARCH_TUNING_FIELDS):
+            tool_config.metadata = {LOCAL_SEARCH_TUNING_METADATA: effective_override_params}
 
         if is_shared_aidp and portable_evaluation and (runtime_knowledge_tools is not None or scoped_knowledge_tool):
             tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}
