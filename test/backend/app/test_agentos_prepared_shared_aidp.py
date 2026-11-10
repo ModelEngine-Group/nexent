@@ -155,11 +155,13 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
 
 
 @pytest.mark.asyncio
-async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_rechecks(mocker, tmp_path):
+@pytest.mark.parametrize("debug", [False, True])
+async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_rechecks(mocker, tmp_path, debug):
     from fastapi import HTTPException
+    from pydantic import ValidationError as PayloadValidationError
 
     from contracts.agent import AgentRequest
-    from contracts.agentos import PreparedConversationScope
+    from contracts.agentos import PreparedConversationScope, PreparedEphemeralRun
     from contracts.errors.exceptions import ValidationError
     from ext_components.aidp.services import aidp_access_service
     from infrastructure.agent_model_config import create_model_config_from_record
@@ -188,7 +190,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
     mocker.patch.object(scope, "_resolve_aidp_access_snapshot", return_value=SimpleNamespace(
         accessible_id_set={"kb1", "kb2"}, name_to_id={"One": "kb1", "Two": "kb2"},
     ))
-    request = AgentRequest(query="query", agent_id=8, knowledge_scope={
+    request = AgentRequest(query="query", agent_id=8, is_debug=debug, knowledge_scope={
         "local": {"mode": "disabled"}, "aidp": {"mode": "override", "kds_ids": ["kb1", "kb2", "denied"]},
     }, tool_params={"agents": {"child": {"tools": {"aidp_search": {"kds_list": ["forged"]}}}}})
     with pytest.raises(ValidationError, match="unavailable or inaccessible"):
@@ -220,10 +222,17 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
         agent_id=8, version_no=3, name="root", description="", model_name=selected.cite_name, tools=[], worker_agents=[child],
     )
     snapshot = evaluation_snapshot.export_snapshot(
-        root, [selected], "query", None, tenant_id="tenant-a", conversation_id=42, language="zh",
-        prepared_conversation=PreparedConversationScope(conversation_id=42, run_id="a" * 32, native_knowledge=True),
+        root, [selected], "query", None, tenant_id="tenant-a", conversation_id=None if debug else 42, language="zh",
+        prepared_conversation=None if debug else PreparedConversationScope(
+            conversation_id=42, run_id="a" * 32, native_knowledge=True,
+        ),
     )
     assert snapshot is not None
+    if debug:
+        fields = snapshot.model_dump(exclude={"conversation_id"})
+        with pytest.raises(PayloadValidationError, match="only for debug"):
+            PreparedEphemeralRun(**fields, run_id="a" * 32, native_knowledge=True)
+        snapshot = PreparedEphemeralRun(**fields, run_id="a" * 32, debug=True, native_knowledge=True)
     for private in ("forged", "denied", "original", "fixture-key"):
         assert private not in snapshot.model_dump_json()
     actor = ServicePrincipal("user-a", "tenant-a")
@@ -239,6 +248,7 @@ async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_reche
 
     bound.return_value = [row]
     runtime = prepared_evaluation.prepare_run_snapshot(snapshot, actor)
+    assert runtime.conversation_id == (None if debug else 42)
     mounted = runtime.agent_config.worker_agents[0].tools[0]
     assert mounted.params["api_key"] == "fixture-key" and mounted.metadata["allowed_kds_set"] == ["kb1"]
     catalog.assert_called_once_with(7, "tenant-a")

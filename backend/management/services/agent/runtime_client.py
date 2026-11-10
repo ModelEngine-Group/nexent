@@ -15,7 +15,9 @@ from contracts.agentos import (
 from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError
 from management.clients.agentos import AgentOSClient
-from management.services.agent.agentos_events import active_run_error_response, present_ephemeral_stream, present_public_resume
+from management.services.agent.agentos_events import (
+    active_run_error_response, knowledge_scope_event_content, present_ephemeral_stream, present_public_resume,
+)
 
 
 def _agentos_client() -> AgentOSClient:
@@ -76,15 +78,18 @@ async def forward_conversation_run(
         from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 
         try:
-            snapshot = await prepare_debug_snapshot(
+            prepared = await prepare_debug_snapshot(
                 request, user_id, tenant_id, language=payload.language, timezone=payload.timezone,
             )
         except RunModelControlsError as exc:
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
             raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
-        if snapshot is not None:
-            response = await client.run_ephemeral(snapshot, user_id, tenant_id)
-            return present_ephemeral_stream(response, user_id, snapshot.run_id)
+        if prepared is not None:
+            response = await client.run_ephemeral(prepared.payload, user_id, tenant_id)
+            opening = None
+            if prepared.knowledge is not None:
+                opening = {"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)}
+            return present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
 
     conversation_id = request.conversation_id
     northbound = northbound_fallback is not None

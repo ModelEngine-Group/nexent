@@ -108,15 +108,22 @@ def knowledge_scope_event_content(resolved) -> dict:
     }
 
 
-def present_ephemeral_stream(response: StreamingResponse, user_id: str, run_id: str) -> StreamingResponse:
+def present_ephemeral_stream(
+    response: StreamingResponse, user_id: str, run_id: str, *, opening_event: dict | None = None,
+) -> StreamingResponse:
     """Preserve complete observer frames and publish only run-owned file references."""
     if response.status_code != 200:
         return response
 
     async def events():
         outputs = {}
+        prefix = _public_sse(opening_event) if opening_event is not None else None
         async with aclosing(iter_sse_frames(response)) as frames:
             async for frame in frames:
+                if prefix is not None:
+                    # Enter the Runtime iterator before emitting so a disconnect also closes upstream.
+                    yield prefix
+                    prefix = None
                 if not frame.startswith(b"data: "):
                     continue
                 try:
@@ -131,16 +138,22 @@ def present_ephemeral_stream(response: StreamingResponse, user_id: str, run_id: 
                     continue
                 yield frame + b"\n\n"
 
+        if prefix is not None:
+            yield prefix
         if outputs:
             files = await run_blocking(
                 "agentos-ephemeral-sign-outputs", enrich_file_uploads_with_presigned_urls, list(outputs.values()),
                 lane="control-io", owner="management",
             )
             event = {"type": "files", "content": json.dumps({"file_uploads": files}, ensure_ascii=False)}
-            yield b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
+            yield _public_sse(event)
 
     headers = {name: value for name, value in response.headers.items() if name != "content-length"}
     return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)
+
+
+def _public_sse(event: dict) -> bytes:
+    return b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
 
 
 def present_public_resume(

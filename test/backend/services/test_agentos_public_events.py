@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
+from contextlib import aclosing
 from unittest.mock import AsyncMock
 
 import pytest
@@ -172,8 +173,9 @@ async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
 
     payload = CompatibilityConversationRun(request={"agent_id": 7, "query": "hello", "is_debug": True}, language="en")
     snapshot = mocker.Mock(run_id=CURSOR.run_id)
+    prepared = mocker.Mock(payload=snapshot, knowledge=None)
     compile_debug = mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", create=True, new_callable=AsyncMock)
-    compile_debug.return_value = None if mode == "unsupported" else snapshot
+    compile_debug.return_value = None if mode == "unsupported" else prepared
     upstream = response(b'data: {"type":"final_answer","content":"answer"}\n\n')
     client = mocker.patch.object(runtime_client, "_agentos_client").return_value
     client.run_ephemeral = AsyncMock(return_value=upstream)
@@ -199,3 +201,30 @@ async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
         client.run_ephemeral.assert_awaited_once_with(snapshot, "actor", "tenant")
     else:
         client.run_ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_debug_scope_precedes_observers_and_disconnect_closes_runtime():
+    closed = False
+
+    async def body():
+        nonlocal closed
+        try:
+            yield b": agentos-ready\n\n"
+            raise AssertionError("The browser disconnected before reading the model stream")
+        finally:
+            closed = True
+
+    source = StreamingResponse(body())
+    event = {"type": "knowledge_scope_resolved", "content": {"warnings": []}}
+    output = public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_event=event)
+    async with aclosing(output.body_iterator) as events:
+        assert json.loads((await anext(events))[6:]) == event
+    assert closed
+
+
+@pytest.mark.asyncio
+async def test_debug_scope_does_not_mask_runtime_rejection():
+    source = response(b'{"code":"AGENTOS_RESOURCE_UNSUPPORTED"}', status_code=422)
+    event = {"type": "knowledge_scope_resolved", "content": {"warnings": []}}
+    assert public_events.present_ephemeral_stream(source, "actor", CURSOR.run_id, opening_event=event) is source

@@ -159,9 +159,15 @@ def _turn_model_generation(request: AgentRequest) -> TurnModelGeneration | None:
     return None
 
 
+@dataclass(frozen=True)
+class PreparedDebug:
+    payload: PreparedEphemeralRun
+    knowledge: ResolvedKnowledgeScope | None = None
+
+
 async def prepare_debug_snapshot(
     request: AgentRequest, user_id: str, tenant_id: str, *, language: str, timezone: str | None,
-) -> PreparedEphemeralRun | None:
+) -> PreparedDebug | None:
     from management.services.agent.authorization import authorize_debug_version
     from management.services.agent.preparation.run import create_agent_run_info
     from management.services.model.run_controls import preflight_turn_controls
@@ -173,7 +179,7 @@ async def prepare_debug_snapshot(
         "snapshot-debug-authorization", authorize_debug_version, request.agent_id, version, user_id, tenant_id,
         lane="control-io", owner="management",
     )
-    if any((request.conversation_id is not None, request.workbench, request.knowledge_scope)):
+    if request.conversation_id is not None or request.workbench is not None:
         return None
     if request.metadata is not None:
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": version}), tenant_id)
@@ -181,21 +187,39 @@ async def prepare_debug_snapshot(
         "snapshot-debug-model-controls", preflight_turn_controls, request, tenant_id, agent,
         lane="control-io", owner="management",
     )
+    knowledge = None
+    compile_options = {}
+    if request.knowledge_scope is not None:
+        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+
+        scope = await run_blocking(
+            "snapshot-debug-knowledge", prepare_native_knowledge,
+            request.model_copy(update={"version_no": version}), None, user_id, tenant_id,
+            lane="control-io", owner="management",
+        )
+        knowledge = scope.resolution
+        compile_options = {
+            "authorized_knowledge_tools": scope.authorized_tools,
+            "runtime_knowledge_context": {"scope": build_runtime_knowledge_resources(knowledge)},
+        }
     snapshot = await create_agent_run_info(
         agent_id=request.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(request.query, timezone, language=language), history=request.history,
         tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
-        override_version_no=version, override_model_id=request.model_id, tool_params=request.tool_params,
+        override_version_no=version, override_model_id=request.model_id,
+        tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
         requested_output_tokens=request.requested_output_tokens, context_policy=request.context_policy,
         enable_automation_tool=False, enable_planning=bool(request.enable_plan), export_evaluation=True,
         export_debug_planning=bool(request.enable_plan), turn_generation=_turn_model_generation(request),
+        **compile_options,
     )
     if snapshot is None:
         return None
-    return PreparedEphemeralRun(
+    payload = PreparedEphemeralRun(
         **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,
-        runtime_metadata=request.metadata or {}, debug=True,
+        runtime_metadata=request.metadata or {}, debug=True, native_knowledge=True if knowledge is not None else None,
     )
+    return PreparedDebug(payload, knowledge)
 
 
 def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConversationHistory:
@@ -243,10 +267,11 @@ def prepare_native_knowledge(
     if selection is None or request.agent_id is None:
         return None
 
-    version = resolve_root_version(request.agent_id, tenant_id, request.version_no, is_debug=False)
+    debug = bool(request.is_debug)
+    version = resolve_root_version(request.agent_id, tenant_id, request.version_no, is_debug=debug)
     tree = snapshot_runtime_knowledge_tree(request.agent_id, tenant_id, version)
     resolved = resolve_knowledge_scope(
-        selection, request.agent_id, tenant_id, user_id, version, False, request.tool_params,
+        selection, request.agent_id, tenant_id, user_id, version, debug, request.tool_params,
         runtime_agent_tree=tree,
     )
     if conversation is not None and request.knowledge_scope is not None:

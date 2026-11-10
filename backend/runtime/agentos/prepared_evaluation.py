@@ -340,11 +340,11 @@ def prepare_run_snapshot(
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
     workbench_version = payload.workbench_config_version if isinstance(payload, PreparedAgentRun) else None
-    native_knowledge = isinstance(payload, PreparedAgentRun) and payload.native_knowledge is True
     root_generation = payload.models.llm.root_generation
     turn_generation = payload.models.llm.turn_generation
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug is True
     native_run = isinstance(payload, PreparedAgentRun) or debug
+    native_knowledge = native_run and payload.native_knowledge is True
     if (
         (root_generation is not None) != (workbench_version is not None)
         or (native_knowledge and workbench_version is not None)

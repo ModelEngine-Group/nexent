@@ -4,7 +4,7 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, PositiveInt, field_validator, model_serializer, model_validator
 
 from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
@@ -541,12 +541,20 @@ class PreparedEphemeralRun(AgentRunSpec):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
     debug: Literal[True] | None = None
+    native_knowledge: Literal[True] | None = None
+
+    @model_validator(mode="after")
+    def validate_ephemeral_scope(self):
+        if self.native_knowledge is True and self.debug is not True:
+            raise ValueError("Scoped ephemeral knowledge is supported only for debug runs")
+        return self
 
     @model_serializer(mode="wrap")
-    def serialize_optional_debug(self, handler):
+    def serialize_optional_scope(self, handler):
         data = handler(self)
-        if self.debug is None:
-            data.pop("debug", None)
+        for name in ("debug", "native_knowledge"):
+            if data.get(name) is None:
+                data.pop(name, None)
         return data
 
     @field_validator("runtime_metadata")

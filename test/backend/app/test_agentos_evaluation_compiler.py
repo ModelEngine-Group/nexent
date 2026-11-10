@@ -434,6 +434,7 @@ async def test_a2a_metadata_requires_permission_on_published_version(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scoped", [False, True])
 @pytest.mark.parametrize(("version", "member_group", "permission", "allowed"), [
     (0, 9, "EDIT", True),
     (0, 8, "EDIT", False),
@@ -441,7 +442,7 @@ async def test_a2a_metadata_requires_permission_on_published_version(mocker):
     (2, 9, "READ_ONLY", True),
 ])
 async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilation(
-    mocker, version, member_group, permission, allowed,
+    mocker, version, member_group, permission, allowed, scoped,
 ):
     from contracts.errors.exceptions import ForbiddenError
     from management.services.agent import authorization
@@ -456,26 +457,54 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     fields = evaluation_payload()
     fields["resource"]["version_no"] = version
     compile_run = mocker.patch.object(run, "create_agent_run_info", return_value=PreparedEvaluationRun.model_validate(fields))
+    from management.services.knowledge_base import scope
+
+    tree = mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
+        {"agent_id": 7, "version_no": version, "agent_name": "root", "tools": []},
+    ])
+    result = ResolvedKnowledgeScope(
+        desired_scope={}, tool_params=ToolParamsRequest(agents={}),
+        warnings=[{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1}],
+    )
+    resolve = mocker.patch.object(scope, "resolve_knowledge_scope", return_value=result)
     request = AgentRequest(
         agent_id=7, is_debug=True, query="hello", version_no=version if version else None,
         generation_config={"temperature": 0.4},
+        knowledge_scope={"local": {"mode": "disabled"}, "aidp": {"mode": "disabled"}} if scoped else None,
     )
     if allowed:
-        snapshot = await evaluation_snapshot.prepare_debug_snapshot(
+        prepared = await evaluation_snapshot.prepare_debug_snapshot(
             request, "actor", "tenant-a", language="en", timezone="Asia/Shanghai",
         )
+        assert prepared is not None
+        snapshot = prepared.payload
         assert snapshot.debug is True and snapshot.resource.version_no == version
         assert "conversation_id" not in snapshot.model_dump()
         options = compile_run.await_args.kwargs
         assert options["override_version_no"] == version and options["is_debug"]
         assert options["turn_generation"].model_dump() == {"settings": {"temperature": 0.4}}
         assert options["allow_memory_search"] is False and options["enable_automation_tool"] is False
+        if scoped:
+            tree.assert_called_once_with(7, "tenant-a", version)
+            resolve.assert_called_once_with(
+                request.knowledge_scope, 7, "tenant-a", "actor", version, True, None,
+                runtime_agent_tree=tree.return_value,
+            )
+            assert prepared.knowledge is result and snapshot.native_knowledge is True
+            assert options["authorized_knowledge_tools"] == {(7, version): {}}
+            assert options["tool_params"] is result.tool_params
+            assert "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE" not in snapshot.model_dump_json()
+        else:
+            assert prepared.knowledge is None and "native_knowledge" not in snapshot.model_dump_json()
     else:
         with pytest.raises(ForbiddenError):
             await evaluation_snapshot.prepare_debug_snapshot(
                 request, "actor", "tenant-a", language="en", timezone="Asia/Shanghai",
             )
         compile_run.assert_not_awaited()
+    if not scoped or not allowed:
+        tree.assert_not_called()
+        resolve.assert_not_called()
     read.assert_called_once_with(7, "tenant-a", version)
     groups.assert_called_once_with("actor", "tenant-a")
     memory.assert_not_called()

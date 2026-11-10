@@ -2698,6 +2698,8 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
 
     from contracts.agent import AgentRequest
     from contracts.agentos import PreparedEphemeralRun
+    from contracts.knowledge import ResolvedKnowledgeScope
+    from contracts.tool import ToolParamsRequest
     from management.api.agent import conversation_run
     from management.services.agent import agentos_events, runtime_client
     from management.services.agent.preparation import evaluation_snapshot
@@ -2734,6 +2736,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     released = Mock()
     stages = []
     worker_stopped = Event()
+    permit_plan = Event()
     debug_registry = LocalExecutionRegistry()
     debug_states = {}
     cancel_signals = set()
@@ -2776,6 +2779,9 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         assert principal == actor and materializer is ephemeral.prepare_run_snapshot
         assert payload.runtime_metadata == {"ticket": "42"} and "conversation_id" not in payload.model_dump()
         calls.append(payload.input.query)
+        if payload.debug:
+            assert payload.native_knowledge is True
+            assert "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE" not in payload.model_dump_json()
         info = materializer(payload, principal) if payload.debug else None
         workspace = info.workspace_path if info is not None else tmp_path / "ephemeral" / f"{run_id}-{payload.input.query}"
         stage = skill_stage_path(str(workspace), create=True)
@@ -2810,6 +2816,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
         assert (context.user_id, context.tenant_id, context.agent_id) == (actor.user_id, actor.tenant_id, 7)
         assert context.conversation_id is None
         if getattr(getattr(info, "agent_config", None), "enable_planning", False):
+            assert permit_plan.wait(4), "Management did not publish scope before SDK execution"
             create, update = [NexentAgent.create_local_tool(
                 SimpleNamespace(observer=info.observer), tool,
             ) for tool in info.agent_config.tools]
@@ -2884,9 +2891,17 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
             "version_no": 0,
             "tools": [ToolBinding(tool_id=name, version="1") for name in ("create_plan", "update_plan_step")],
         })
-        return template.model_copy(update={
-            "debug": True, "resource": resource, "input": template.input.model_copy(update={"query": request.query}),
+        assert request.knowledge_scope is not None
+        payload = template.model_copy(update={
+            "debug": True, "native_knowledge": True, "resource": resource,
+            "input": template.input.model_copy(update={"query": request.query}),
         })
+        knowledge = ResolvedKnowledgeScope(
+            desired_scope=request.knowledge_scope.model_dump(), tool_params=ToolParamsRequest(agents={}),
+            local_knowledge_ids=["7"], local_display_names=["Allowed"], aidp_disabled=True,
+            warnings=[{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1}],
+        )
+        return evaluation_snapshot.PreparedDebug(payload, knowledge)
 
     monkeypatch.setattr(evaluation_snapshot, "prepare_debug_snapshot", compile_debug)
     monkeypatch.setattr(runtime_client, "forward_agent_run", AsyncMock(side_effect=AssertionError("legacy dispatch")))
@@ -2948,10 +2963,19 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
                 async with httpx.AsyncClient(base_url=public_url, trust_env=False, timeout=4) as browser:
                     async with browser.stream("POST", "/agent/run", headers=headers, json={
                         "query": "wait", "agent_id": 7, "is_debug": True, "enable_plan": True,
+                        "knowledge_scope": {"local": {"mode": "override", "knowledge_ids": ["7", "8"]},
+                                            "aidp": {"mode": "disabled"}},
                     }) as debug:
                         assert debug.status_code == 200 and debug.headers["run_id"] == f"debug-{run_id}"
                         assert "conversation_id" not in debug.headers
                         lines = debug.aiter_lines()
+                        scope_event = json.loads((await anext(lines))[6:])
+                        assert scope_event["type"] == "knowledge_scope_resolved"
+                        assert scope_event["content"]["effective"]["local"]["knowledge_ids"] == ["7"]
+                        assert scope_event["content"]["warnings"] == [
+                            {"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1},
+                        ]
+                        permit_plan.set()
                         debug_events = []
                         async for line in lines:
                             if line.startswith("data: "):

@@ -45,8 +45,10 @@ async def _watch_debug_stop(run_id, owner, info):
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
-async def _observer_stream(info, execution, deferred, *, creator_mode=None):
+async def _observer_stream(info, execution, deferred, *, creator_mode=None, announce_ready=False):
     try:
+        if announce_ready:
+            yield b": agentos-ready\n\n"
         async with aclosing(agent_run(
             info, thread_manager=runtime_thread_manager, execution=execution, deferred_run=deferred,
         )) as events:
@@ -91,13 +93,17 @@ def _close_execution(execution, deferred):
 
 
 class _EphemeralResponse(StreamingResponse):
-    def __init__(self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None):
+    def __init__(
+        self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None,
+        announce_ready=False,
+    ):
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
         if self.debug_run_id is not None:
             headers["run_id"] = self.debug_run_id
         super().__init__(
-            _observer_stream(info, execution, deferred, creator_mode=creator_mode), media_type="text/event-stream", headers=headers,
+            _observer_stream(info, execution, deferred, creator_mode=creator_mode, announce_ready=announce_ready),
+            media_type="text/event-stream", headers=headers,
         )
         self.info = info
         self.execution = execution
@@ -191,6 +197,7 @@ async def _open_ephemeral(payload, actor):
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug
     return _EphemeralResponse(
         info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, creator_mode=creator_mode,
+        announce_ready=bool(debug and payload.native_knowledge),
     )
 
 

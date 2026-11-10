@@ -141,6 +141,9 @@ case:
   - order: 38
     action: Start a public planning debug run through the signed ephemeral Runtime endpoint and stop it using the debug run ID.
     expected: The two planning events preserve their order, the worker is released, and no conversation or shared plan key is written.
+  - order: 39
+    action: Run a scoped public debug request through AgentOS and wait for the scope event before allowing SDK output.
+    expected: The resolved scope and warning arrive before the planning events without persisting a conversation.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -181,6 +184,7 @@ case:
   - NL2Agent uses signed bidirectional transport for execution and tools. Closing the stream revokes draft access.
   - Workbench image retrieval is bound to the admitted conversation and current mounted tool and does not transport credentials in the signed URL.
   - The request-owned debug plan stays local and retains the original plan and plan step events.
+  - Management emits the resolved debug scope before Runtime observer output and retains unavailable warnings locally.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -438,4 +442,9 @@ case:
     description: A signed debug run executes its built-in planning tools locally and forwards the planning SSE events.
     steps: [38]
     expected_results: [39]
+    forbidden_side_effects: [1, 2]
+  - id: AC-48
+    description: A signed debug request preserves scoped knowledge warnings before model or tool events.
+    steps: [39]
+    expected_results: [40]
     forbidden_side_effects: [1, 2]
