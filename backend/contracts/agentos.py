@@ -408,6 +408,7 @@ class MCPBindingReference(RunSpecModel):
     tool_name: str = Field(min_length=1)
     server_id: PositiveInt | None = None
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    argument_overrides: dict[str, JsonValue] | None = None
 
 
 class MCPExecutionBinding(MCPBindingReference):

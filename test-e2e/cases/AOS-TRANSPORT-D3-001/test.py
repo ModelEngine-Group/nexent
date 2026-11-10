@@ -763,12 +763,11 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     from infrastructure.local_tool_execution import build_local_tool
     from management.services.knowledge_base.providers import aidp as independent_aidp_proxy
     from management.services.agent import runtime_client
-    from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search
+    from management.services.agent.preparation import analysis, evaluation_snapshot, knowledge_search, tools
     from management.services.model import adapter as management_model_adapter
     from management.services.knowledge_base import permission as knowledge_permission
     from infrastructure.a2a_execution import build_external_agent_config
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-    from infrastructure.mcp_execution import build_mcp_tool
     from nexent.core.agents.nexent_agent import NexentAgent
     from runtime.agentos import (
         prepared_analysis, prepared_attachments, prepared_evaluation, prepared_knowledge,
@@ -828,7 +827,9 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     mcp_tool = {
         "tool_instance_id": 27, "name": "catalog_lookup", "class_name": "catalog_lookup",
         "origin_name": "catalog_lookup", "description": "Catalog", "inputs": None, "output_type": "object",
-        "usage": "catalog", "params": [{"name": "scope", "default": "private-tool-default"}], "instance_params": {},
+        "usage": "catalog", "params": [
+            {"name": "scope", "default": "private-tool-default"}, {"name": "limit", "default": 3},
+        ], "instance_params": {},
     }
     mcp_server = {
         "mcp_id": 32, "mcp_name": "catalog", "mcp_server": "https://mcp.example/private",
@@ -854,7 +855,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     derived_tool = {
         **mcp_tool, "tool_id": 52, "skill_instance_ids": [51], "name": "skill_lookup",
         "class_name": "skill_lookup", "origin_name": "skill_lookup",
-        "params": [{"name": "scope", "default": "private-skill-tool-value"}],
+        "params": [{"name": "scope", "default": "private-skill-tool-value"}, {"name": "limit", "default": 5}],
     }
 
     def read_derived(agent_id, version_no, tenant_id, names):
@@ -863,6 +864,17 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
 
     for module in (evaluation_snapshot, prepared_mcp):
         monkeypatch.setattr(module, "read_skill_derived_mcp_tools", read_derived)
+
+    monkeypatch.setattr(tools, "_resolve_runtime_tool_records", lambda **_: [
+        {**row, "source": "mcp"} for row in (mcp_tool, derived_tool)
+    ])
+    monkeypatch.setattr(tools, "search_agent_info_by_agent_id", lambda **_: {"name": "evaluation_agent"})
+    catalog_lookup, skill_lookup = await tools.create_tool_config_list(
+        7, "tenant-a", "user-a", version_no=2, portable_evaluation=True,
+        tool_params={"agents": {"evaluation_agent": {"tools": {
+            "catalog_lookup": {"limit": 8}, "skill_lookup": {"limit": 9},
+        }}}},
+    )
 
     skill_metadata = {"agent_id": 7, "version_no": 2, "tenant_id": "tenant-a"}
     skill_tools = [
@@ -987,7 +999,6 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         peer, = child.external_a2a_agents
         assert peer.url == "https://external.example/private"
         assert peer.custom_headers == {"Authorization": "Bearer local-peer-token"}
-        assert info.agent_config.tools[1].params == {"scope": "private-tool-default"}
         by_name = {tool.name: tool for tool in info.agent_config.tools}
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
@@ -998,7 +1009,15 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         assert parallel.default_timeout_seconds == 47
         assert parallel.inputs["timeout"]["default"] == 47
         assert parallel.forward([]) == []
-        assert by_name["skill_lookup"].params == {"scope": "private-skill-tool-value"}
+        def provider_call(scope, limit):
+            return scope, limit
+
+        sdk = SimpleNamespace(create_mcp_tool=lambda _: SimpleNamespace(forward=provider_call))
+        for name, expected in (
+            ("catalog_lookup", ("private-tool-default", 8)), ("skill_lookup", ("private-skill-tool-value", 9)),
+        ):
+            mcp = NexentAgent.create_tool(sdk, by_name[name])
+            assert mcp.forward(scope="model-value", limit=1) == expected
         knowledge = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["knowledge_base_search"])
         result = knowledge.forward("facts", ["Blocked"])
         assert "authorized-document" in result and "secret-document" not in result
@@ -1074,8 +1093,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
             class_name="DownloadFromS3Tool", name="download_from_s3", source="builtin", usage="builtin",
             params={"workspace_path": "/management/workspace"},
             metadata={"validate_url_access": lambda _urls: None},
-        ), build_mcp_tool(mcp_tool), build_parallel_executor_tool_config(47), *skill_tools,
-               build_mcp_tool(derived_tool), kb_tool, image_tool, build_local_tool(derived_local, "zh", None, None),
+        ), catalog_lookup, build_parallel_executor_tool_config(47), *skill_tools,
+               skill_lookup, kb_tool, image_tool, build_local_tool(derived_local, "zh", None, None),
                build_local_tool(derived_aidp, "zh", None, None)],
     )
     monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [record])
@@ -1100,7 +1119,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     assert "runtime-mcp-token" not in prepared.model_dump_json()
     assert "private-tool-default" not in prepared.model_dump_json()
     assert "private-skill-tool-value" not in prepared.model_dump_json()
-    assert next(tool for tool in prepared.resource.tools if tool.tool_id == "mcp" and tool.version == "2")
+    assert {tool.version: tool.parameters["argument_overrides"]
+            for tool in prepared.resource.tools if tool.tool_id == "mcp"} == {"1": {"limit": 8}, "2": {"limit": 9}}
     assert "private-knowledge-embedding" not in prepared.model_dump_json()
     assert "private-image-model-key" not in prepared.model_dump_json()
     assert "private-skill-local-key" not in prepared.model_dump_json()

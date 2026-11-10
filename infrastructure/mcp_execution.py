@@ -9,6 +9,7 @@ from contracts.constants import environment
 from nexent.core.agents.agent_model import ToolConfig
 
 LOCAL_MCP_NAME = "outer-apis"
+MCP_ARGUMENT_OVERRIDES = "agentos_mcp_argument_overrides"
 
 
 def get_tenant_local_mcp_server(tenant_id: str) -> str:
@@ -31,6 +32,15 @@ def build_mcp_tool(row: dict) -> ToolConfig:
         class_name=row["class_name"], name=row["name"], description=row["description"],
         inputs=row["inputs"], output_type=row["output_type"], params=parameters, source="mcp", usage=row["usage"],
     )
+
+
+def apply_mcp_argument_overrides(tool: ToolConfig, overrides: dict | None) -> ToolConfig:
+    """Apply explicit request arguments without changing the persisted binding."""
+    if not overrides:
+        return tool
+    if overrides.keys() - tool.params.keys():
+        raise ValueError("Unknown MCP argument override")
+    return tool.model_copy(update={"params": {**tool.params, **overrides}})
 
 
 def select_mcp_server(records: list[dict], usage: str, tenant_id: str) -> tuple[int | None, dict]:

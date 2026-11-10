@@ -382,12 +382,16 @@ def test_external_a2a_binding_rebuilds_only_authorized_revision(mocker, change, 
 
 @pytest.mark.parametrize(("change", "status"), [
     ("remote", None), ("local", None), ("revoked", 404), ("disabled", 404), ("rotated", 409), ("params", 409),
+    ("override", None), ("override_rotated", 409), ("override_params", 409), ("unknown_override", None),
+    ("wire_unknown_override", 422),
 ])
-def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, change, status):
+@pytest.mark.asyncio
+async def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, change, status):
     from fastapi import HTTPException
 
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.mcp_execution import build_mcp_tool
+    from management.services.agent.preparation import tools
     from management.services.agent.preparation.evaluation_snapshot import export_snapshot
     from nexent.core.agents.agent_model import AgentConfig
 
@@ -398,7 +402,7 @@ def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, 
         "tool_instance_id": 17, "name": "lookup", "class_name": "lookup", "origin_name": "lookup",
         "description": "Lookup", "inputs": None, "output_type": "object",
         "usage": "outer-apis" if change == "local" else "remote",
-        "params": [{"name": "private_param", "default": "default-tool-param"}],
+        "params": [{"name": "private_param", "default": "default-tool-param"}, {"name": "limit", "default": 3}],
         "instance_params": {"private_param": "stored-tool-param"},
     }
     server = {
@@ -407,9 +411,23 @@ def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, 
     }
     model_row = model_record(model_id=11)
     model = create_model_config_from_record(model_row)
+    overrides = change.startswith("override")
+    compiled = [build_mcp_tool(tool_row)]
+    if overrides or change == "unknown_override":
+        definition = {**tool_row, "source": "mcp", "params": [
+            {**param, "default": tool_row["instance_params"].get(param["name"], param["default"])}
+            for param in tool_row["params"]
+        ]}
+        mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition])
+        mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
+        parameters = {"limit": 8} if overrides else {"connection_header": "not-a-tool-argument"}
+        compiled = await tools.create_tool_config_list(
+            7, "tenant-a", "user-a", version_no=2, portable_evaluation=True,
+            tool_params={"agents": {"agent": {"tools": {"lookup": parameters}}}},
+        )
     config = AgentConfig(
         agent_id=7, version_no=2, name="agent", description="", model_name=model.cite_name,
-        tools=[build_mcp_tool(tool_row)],
+        tools=compiled,
     )
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.get_model_records", return_value=[model_row])
     mocker.patch("management.services.agent.preparation.evaluation_snapshot.read_bound_mcp_tools", return_value=[tool_row])
@@ -419,18 +437,30 @@ def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, 
     })
     snapshot = export_snapshot(config, [model], "hello", None, tenant_id="tenant-a",
                                user_id="user-a", conversation_id=-42, language="en")
+    if change == "unknown_override":
+        assert snapshot is None
+        return
     assert snapshot is not None
     encoded = snapshot.model_dump_json()
     for value in (server["mcp_server"], "remote-token", "remote-key", "stored-tool-param", "runtime-internal-token"):
         assert value not in encoded
     payload = PreparedEvaluationRun.model_validate_json(encoded)
+    parameters = payload.resource.tools[0].parameters
+    if overrides:
+        assert parameters["argument_overrides"] == {"limit": 8}
+    else:
+        assert "argument_overrides" not in parameters
+    if change == "wire_unknown_override":
+        parameters["argument_overrides"] = {"connection_header": "not-a-tool-argument"}
 
-    if change == "rotated":
+    if change in {"rotated", "override_rotated"}:
         server["authorization_token"] = "new-token"
     elif change == "disabled":
         server["enabled"] = False
     elif change == "params":
         tool_row["instance_params"] = {"private_param": "changed"}
+    elif change == "override_params":
+        tool_row["instance_params"]["limit"] = 10
     reader = mocker.patch("runtime.agentos.prepared_mcp.read_bound_mcp_tools",
                           return_value=[] if change == "revoked" else [tool_row])
     mocker.patch("runtime.agentos.prepared_mcp.read_mcp_execution_servers", return_value=[server])
@@ -443,7 +473,7 @@ def test_mcp_snapshot_rebuilds_only_the_signed_agent_version_and_server(mocker, 
         model_reader.assert_not_called()
     else:
         info = prepare_evaluation_run(payload, actor)
-        assert info.agent_config.tools[0].params == {"private_param": "stored-tool-param"}
+        assert info.agent_config.tools[0].params == {"private_param": "stored-tool-param", "limit": 8 if overrides else 3}
         host, = info.mcp_host
         assert host["allowed_tools"] == {"lookup": "lookup"}
         if change == "local":

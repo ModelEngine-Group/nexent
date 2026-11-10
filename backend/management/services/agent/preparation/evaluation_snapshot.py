@@ -41,7 +41,10 @@ from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
 )
 from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES
-from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
+from infrastructure.mcp_execution import (
+    MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
+    mcp_execution_revision, select_mcp_server,
+)
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_skill_derived_local_tools
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
@@ -445,26 +448,34 @@ def _export_parallel_executor_binding(tool):
 
 def _export_mcp_binding(tool, candidates, servers, agent, tenant_id, tool_servers):
     matching = [row for row in candidates if row["name"] == tool.name]
-    if len(matching) != 1 or build_mcp_tool(matching[0]) != tool:
+    if len(matching) != 1:
         raise ValueError("MCP tool differs from its persisted binding")
     row = matching[0]
-    server_id, host = select_mcp_server(servers, tool.usage, tenant_id)
-    origin_name = row["origin_name"] or tool.class_name
+    persisted = build_mcp_tool(row)
+    metadata = tool.metadata or {}
+    overrides = metadata.get(MCP_ARGUMENT_OVERRIDES)
+    if (metadata.keys() - {MCP_ARGUMENT_OVERRIDES}
+            or apply_mcp_argument_overrides(persisted, overrides) != tool.model_copy(update={"metadata": None})):
+        raise ValueError("MCP tool differs from its persisted binding")
+    server_id, host = select_mcp_server(servers, persisted.usage, tenant_id)
+    origin_name = row["origin_name"] or persisted.class_name
     target = (server_id, origin_name)
     if tool_servers.setdefault(tool.class_name, target) != target:
         raise ValueError("Ambiguous MCP callable")
     revision = mcp_execution_revision(
-        tenant_id, agent.agent_id, agent.version_no, mcp_binding_identity(row), tool,
+        tenant_id, agent.agent_id, agent.version_no, mcp_binding_identity(row), persisted,
         origin_name, server_id, host,
     )
     common = {"tool_name": tool.name, "server_id": server_id, "revision": revision}
+    if overrides:
+        common["argument_overrides"] = overrides
     if "workbench_skill_ids" in row or "skill_instance_ids" in row:
         reference = SkillDerivedMCPBinding(tool_id=row["tool_id"], **common)
         version = "3" if "workbench_skill_ids" in row else "2"
     else:
         reference = MCPExecutionBinding(instance_id=row["tool_instance_id"], **common)
         version = "1"
-    return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json"))
+    return ToolBinding(tool_id="mcp", version=version, parameters=reference.model_dump(mode="json", exclude_unset=True))
 
 
 def _workbench_skill_row(skill):

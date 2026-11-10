@@ -7,7 +7,9 @@ from fastapi import HTTPException
 
 from contracts.agentos import MCPExecutionBinding, SkillDerivedMCPBinding
 from contracts.errors.exceptions import ValidationError
-from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
+from infrastructure.mcp_execution import (
+    apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server,
+)
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
 )
@@ -84,7 +86,7 @@ class PreparedMCP:
             allowed = self.hosts[server_id]["allowed_tools"]
             if allowed.setdefault(origin_name, tool.class_name) != tool.class_name:
                 raise ValueError("Ambiguous MCP tool name")
-            tools.append(tool)
+            tools.append(apply_mcp_argument_overrides(tool, binding.argument_overrides))
         return tools
 
     @staticmethod
