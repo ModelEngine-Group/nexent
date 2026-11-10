@@ -25,7 +25,7 @@ from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
 from management.services.agent.agentos_events import knowledge_scope_event_content, present_public_resume
 from management.services.agent.context import strip_current_time_prefix
-from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
+from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
 from management.services.agent.prepared_projection import resume_assistant_projection
 from nexent.core.concurrency import run_blocking
 
@@ -116,10 +116,25 @@ async def start_turn(
         if conversation_id is None and request.clarification_response is not None:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification requires an existing conversation")
         workbench = None
+        native_conversation = None
         if request.entrypoint == "workbench":
             workbench = await _prepare_workbench(request, conversation_id, user_id, tenant_id)
             if workbench is None:
                 return None
+        elif conversation_id is not None:
+            native_conversation = await _io(
+                "prepared-knowledge-owner", get_conversation, conversation_id, user_id=user_id, tenant_id=tenant_id,
+            )
+            if native_conversation is None:
+                raise _not_owned()
+            if isinstance(native_conversation.get("workbench_config"), dict):
+                raise HTTPException(status_code=403, detail="Conversation belongs to a different chat entrypoint")
+        previous_scope = native_conversation.get("knowledge_scope") if native_conversation is not None else None
+        native_knowledge = None
+        if workbench is None and (request.knowledge_scope is not None or isinstance(previous_scope, dict)):
+            native_knowledge = await _io(
+                "prepared-native-knowledge", prepare_native_knowledge, request, native_conversation, user_id, tenant_id,
+            )
         if conversation_id is None:
             conversation_id = await _io("prepared-turn-sequence", store.allocate_conversation_id)
             request = request.model_copy(update={"conversation_id": conversation_id})
@@ -130,10 +145,14 @@ async def start_turn(
             boundary = await _io("prepared-turn-boundary", store.next_message_index,
                                  conversation_id, user_id, tenant_id)
             options = {"before_message_index": boundary}
+            if native_conversation is not None:
+                options["owned_conversation"] = native_conversation
         if allow_metadata_update:
             options["allow_metadata_update"] = True
         if workbench is not None:
             options["workbench"] = workbench
+        if native_knowledge is not None:
+            options["native_knowledge"] = native_knowledge
         reference = AgentRunReference(conversation_id=conversation_id, run_id=run_id)
         snapshot = await prepare_conversation_snapshot(
             request, reference, user_id, tenant_id, language=payload.language, timezone=payload.timezone, **options,
@@ -143,13 +162,14 @@ async def start_turn(
         if (initial_title is None
                 and await client.find_active_run(reference.conversation_id, user_id, tenant_id) is not None):
             raise active_turn_conflict()
+        knowledge = workbench.knowledge if workbench is not None else (
+            native_knowledge.resolution if native_knowledge is not None else None
+        )
         automation = None
         if request.enable_automation_tool and any(
             tool.tool_id == AUTOMATION_PROPOSAL_TOOL for tool in snapshot.resource.tools
         ):
-            tool_params = request.tool_params
-            if workbench is not None and workbench.knowledge is not None:
-                tool_params = workbench.knowledge.tool_params
+            tool_params = knowledge.tool_params if knowledge is not None else request.tool_params
             automation = {
                 "agent_id": snapshot.resource.agent_id,
                 "agent_version_no": snapshot.resource.version_no,
@@ -171,6 +191,11 @@ async def start_turn(
                 "config": workbench.config.model_dump(mode="json"), "expected_version": workbench.previous_version,
                 "version": workbench.version,
             }
+        else:
+            desired_scope = (
+                knowledge.desired_scope if request.knowledge_scope is not None and knowledge is not None else previous_scope
+            )
+            user_turn["knowledge_update"] = {"expected": previous_scope, "value": desired_scope}
         if request.metadata is not None and (allow_metadata_update or workbench is not None):
             user_turn["metadata_update"] = {
                 "expected_version": snapshot.runtime_metadata_version - 1, "value": request.metadata,
@@ -224,7 +249,7 @@ async def start_turn(
         raise RuntimeServiceUnavailableError("Prepared conversation admission is no longer pending")
     return await _stream_turn(
         confirmed, client, metadata_version=snapshot.runtime_metadata_version, created=initial_title is not None,
-        include_journal_controls=include_journal_controls, workbench=workbench,
+        include_journal_controls=include_journal_controls, workbench=workbench, knowledge=knowledge,
     )
 
 
@@ -240,7 +265,8 @@ async def _cancel_unbound_turn(client, turn):
 
 
 async def _stream_turn(
-    turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True, workbench=None,
+    turn, client, *, metadata_version=None, resumed=False, created=False, include_journal_controls=True,
+    workbench=None, knowledge=None,
 ):
     reference = turn.reference
     cursor = AgentResume(**reference.model_dump())
@@ -261,10 +287,8 @@ async def _stream_turn(
             "mode": workbench.config.mode,
             "agent_mounts": [mount.model_dump(mode="json") for mount in workbench.config.agent_mounts],
         }})
-        if workbench.knowledge is not None:
-            opening_events.append({
-                "type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(workbench.knowledge),
-            })
+    if knowledge is not None:
+        opening_events.append({"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(knowledge)})
     response = present_public_resume(
         upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created,
         include_journal_controls=include_journal_controls, opening_events=opening_events,

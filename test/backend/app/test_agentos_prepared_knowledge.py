@@ -153,7 +153,7 @@ def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mocker, kn
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [None, "override", "disabled"])
+@pytest.mark.parametrize("mode", [None, "override", "disabled", "native"])
 async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy_clients(mocker, mode):
     from types import SimpleNamespace
 
@@ -170,7 +170,7 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         "is_available": True,
     }
     mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
-    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition] if mode is None else [])
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition] if mode in (None, "native") else [])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "root"})
     legacy_vector = mocker.patch.object(tools, "get_vector_db_core")
     legacy_embedding = mocker.patch.object(tools, "get_embedding_model_by_index_name")
@@ -187,7 +187,25 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
     })
     compiler_options = {}
-    if mode is not None:
+    if mode == "native":
+        mocker.patch.object(scope, "resolve_root_version", return_value=2)
+        mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
+            {"agent_id": 7, "version_no": 2, "agent_name": "root", "tools": [definition]},
+            {"agent_id": 8, "version_no": 3, "agent_name": "child", "tools": [definition]},
+        ])
+        mocker.patch.object(scope, "get_knowledge_info_by_ids_and_tenant", return_value=[
+            {"knowledge_id": 7, "index_name": "kb-one", "knowledge_name": "One", "embedding_model_id": 12},
+        ])
+        mocker.patch.object(scope.ElasticSearchService, "filter_accessible_indices", return_value=["kb-one"])
+        native = evaluation_snapshot.prepare_native_knowledge(AgentRequest(
+            query="query", agent_id=7, tool_params=tool_params, knowledge_scope={
+                "local": {"mode": "override", "knowledge_ids": ["7"]}, "aidp": {"mode": "disabled"},
+            },
+        ), {}, "user-a", "tenant-a")
+        assert native.authorized_tools[(8, 3)] == {"knowledge_base_search": {"index_names": ["kb-one"]}}
+        compiler_options["authorized_knowledge_tools"] = native.authorized_tools
+        tool_params = native.resolution.tool_params
+    elif mode is not None:
         config = WorkbenchSessionConfig(
             mode="generic_chat",
             knowledge_scope={

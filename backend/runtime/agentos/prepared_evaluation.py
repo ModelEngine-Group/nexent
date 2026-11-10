@@ -161,7 +161,7 @@ def _materialize_external_agents(resource, actor):
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
     *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
-    root_only_alias=None, allow_scoped_aidp=False,
+    root_only_alias=None, allow_scoped_aidp=False, native_knowledge=False,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -191,7 +191,10 @@ def _materialize_agent(
     local_tools.update(materialize_automation_tool(resource, actor, public_reference))
     if plan_bindings:
         local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
-    local_tools.update(materialize_local_tools(resource, actor, language, allow_scoped_aidp=allow_scoped_aidp))
+    local_tools.update(materialize_local_tools(
+        resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,
+        require_scoped_aidp_instance=native_knowledge,
+    ))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
     ))
@@ -227,7 +230,7 @@ def _materialize_agent(
             _materialize_agent(
                 child, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
                 language=language, sandbox_enabled=sandbox_enabled, publish_skill_artifacts=publish_skill_artifacts,
-                root_only_alias=root_only_alias,
+                root_only_alias=root_only_alias, native_knowledge=native_knowledge,
             )
             for child in resource.subagents
         ],
@@ -308,6 +311,7 @@ def prepare_run_snapshot(
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
 
     workbench_version = payload.workbench_config_version if isinstance(payload, PreparedAgentRun) else None
+    native_knowledge = isinstance(payload, PreparedAgentRun) and payload.native_knowledge is True
     root_generation = payload.models.llm.root_generation
     turn_generation = payload.models.llm.turn_generation
     native_run = isinstance(payload, PreparedAgentRun) or (
@@ -315,6 +319,7 @@ def prepare_run_snapshot(
     )
     if (
         (root_generation is not None) != (workbench_version is not None)
+        or (native_knowledge and workbench_version is not None)
         or (turn_generation is not None and (workbench_version is not None or not native_run))
         or any(binding.root_generation is not None or binding.turn_generation is not None
                for binding in payload.models.additional_llms)
@@ -343,7 +348,7 @@ def prepare_run_snapshot(
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, (PreparedAgentRun, PreparedEphemeralRun)),
                 root_only_alias=payload.models.llm.alias if root_generation is not None or turn_generation is not None else None,
-                allow_scoped_aidp=workbench_version is not None,
+                allow_scoped_aidp=workbench_version is not None, native_knowledge=native_knowledge,
                 public_reference=AgentRunReference(
                     run_id=payload.run_id, conversation_id=payload.conversation_id,
                 ) if isinstance(payload, PreparedAgentRun) else None,

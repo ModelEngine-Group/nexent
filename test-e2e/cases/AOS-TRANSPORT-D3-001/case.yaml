@@ -105,6 +105,9 @@ case:
   - order: 26
     action: Start a public debug run, try stopping it from a second tenant, then stop it from its owner.
     expected: Management sends a signed debug snapshot and the public response retains the debug run ID. Only the owned scope emits a cancellation signal and the worker releases its resources.
+  - order: 27
+    action: Run an owned native conversation whose stored knowledge scope includes a revoked index.
+    expected: Management stages the unchanged desired scope and signs only the authorized index. The public event preserves the warning and the journal streams once.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -133,6 +136,7 @@ case:
   - A clarification response produces one signed prepared run and stays in Management history.
   - Runtime applies the explicit temperature from the signed root model while reading provider credentials locally.
   - A debug run has no persistent conversation and releases its worker and temporary resources after scoped cancellation.
+  - Native knowledge scope preserves the public warning without leaking the revoked index into Runtime.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -330,4 +334,9 @@ case:
     description: Public debug uses signed ephemeral execution and only its owner can signal cancellation.
     steps: [26]
     expected_results: [27]
+    forbidden_side_effects: [1, 2]
+  - id: AC-36
+    description: Native conversation scope is staged under its owner and only authorized index bindings are signed.
+    steps: [27]
+    expected_results: [28]
     forbidden_side_effects: [1, 2]

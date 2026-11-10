@@ -514,6 +514,7 @@ def resolve_knowledge_scope(
         local_capable=local_capable,
         aidp_capable=aidp_capable,
         warnings=warnings,
+        managed_tool_overrides=scope_overrides,
     )
 
 

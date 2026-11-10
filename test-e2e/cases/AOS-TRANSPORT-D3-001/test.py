@@ -254,6 +254,10 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_prepared_turn_over_signed_http(
             knowledge_patches, use_workbench=True, use_knowledge_scope=True,
         )
+    with monkeypatch.context() as native_scope_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            native_scope_patches, use_knowledge_scope=True,
+        )
     with monkeypatch.context() as ephemeral_patches:
         await _assert_signed_ephemeral_stream(ephemeral_patches, tmp_path)
     with monkeypatch.context() as callback_patches:
@@ -1934,6 +1938,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     config = WorkbenchSessionConfig(
         mode="generic_chat", generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
     )
+    native_scope = use_knowledge_scope and not use_workbench
     bindings = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
     if use_knowledge_scope:
         bindings.append({
@@ -1951,6 +1956,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
         **({"runtime_metadata": metadata, "runtime_metadata_version": 6} if metadata is not None else {}),
         **({"workbench_config_version": 4} if use_workbench else {}),
+        **({"native_knowledge": True} if native_scope else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
                      "prompt_templates": {"system_prompt": "Answer"},
                      "tools": bindings},
@@ -1983,6 +1989,9 @@ async def _assert_public_prepared_turn_over_signed_http(
             assert turn["workbench_update"] == {
                 "config": config.model_dump(mode="json"), "expected_version": 3, "version": 4,
             }
+        if native_scope:
+            stored = config.knowledge_scope.model_dump(mode="json")
+            assert turn["knowledge_update"] == {"expected": stored, "value": stored}
         if metadata is not None:
             assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
         if northbound:
@@ -2048,6 +2057,9 @@ async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(conversation_submission, "conversation_belongs_to", owned)
     monkeypatch.setattr(prepared_turn, "run_blocking", inline)
+    monkeypatch.setattr(prepared_turn, "get_conversation", lambda *_args, **_kwargs: {
+        "knowledge_scope": config.knowledge_scope.model_dump(mode="json") if native_scope else None,
+    })
     if use_workbench:
         from management.services.agent import workbench
 
@@ -2060,18 +2072,19 @@ async def _assert_public_prepared_turn_over_signed_http(
         monkeypatch.setattr(workbench, "resolve_workbench_config", lambda requested, **_kwargs: (
             requested, SimpleNamespace(root_skills=(), root=SimpleNamespace(identity=identity)),
         ))
-        if use_knowledge_scope:
-            from management.services.knowledge_base import mount, scope
+    if use_knowledge_scope:
+        from management.services.knowledge_base import mount, scope
 
-            tool = {"class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "params": []}
-            monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", False)
-            monkeypatch.setattr(scope, "snapshot_runtime_knowledge_tree",
-                                lambda *_: [{"agent_name": "root", "tools": [tool]}])
-            monkeypatch.setattr(scope, "get_knowledge_info_by_ids_and_tenant", lambda *_: [
-                {"knowledge_id": 7, "index_name": "kb-one", "knowledge_name": "One", "embedding_model_id": 12},
-                {"knowledge_id": 8, "index_name": "kb-denied", "knowledge_name": "Denied", "embedding_model_id": 12},
-            ])
-            monkeypatch.setattr(scope.ElasticSearchService, "filter_accessible_indices", lambda *_, **__: ["kb-one"])
+        tool = {"class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "params": []}
+        monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", False)
+        monkeypatch.setattr(scope, "resolve_root_version", lambda *_, **__: 2)
+        monkeypatch.setattr(scope, "snapshot_runtime_knowledge_tree",
+                            lambda *_: [{"agent_id": 7, "version_no": 2, "agent_name": "root", "tools": [tool]}])
+        monkeypatch.setattr(scope, "get_knowledge_info_by_ids_and_tenant", lambda *_: [
+            {"knowledge_id": 7, "index_name": "kb-one", "knowledge_name": "One", "embedding_model_id": 12},
+            {"knowledge_id": 8, "index_name": "kb-denied", "knowledge_name": "Denied", "embedding_model_id": 12},
+        ])
+        monkeypatch.setattr(scope.ElasticSearchService, "filter_accessible_indices", lambda *_, **__: ["kb-one"])
 
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
@@ -2083,7 +2096,11 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert kwargs.get("allow_metadata_update", False) == (metadata is not None and northbound)
         if use_workbench:
             assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
-        if use_knowledge_scope:
+        if native_scope:
+            knowledge = kwargs["native_knowledge"]
+            assert knowledge.resolution.local_index_names == ["kb-one"]
+            assert knowledge.authorized_tools[(7, 2)] == {"knowledge_base_search": {"index_names": ["kb-one"]}}
+        elif use_knowledge_scope:
             assert kwargs["workbench"].knowledge.local_index_names == ["kb-one"]
         return snapshot
 
@@ -2127,9 +2144,11 @@ async def _assert_public_prepared_turn_over_signed_http(
         if use_workbench and metadata is not None:
             request.update(metadata=metadata, expected_metadata_version=5)
         if use_knowledge_scope:
-            request.update(knowledge_scope=knowledge_scope, tool_params={
+            request["tool_params"] = {
                 "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
-            })
+            }
+            if not native_scope:
+                request["knowledge_scope"] = knowledge_scope
         if not new_conversation:
             request["conversation_id"] = reference.conversation_id
         if response is not None:

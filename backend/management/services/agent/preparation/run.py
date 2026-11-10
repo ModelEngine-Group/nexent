@@ -143,6 +143,7 @@ async def create_agent_run_info(
     prepared_conversation: PreparedConversationScope | None = None,
     prepared_workbench: "PreparedWorkbench | None" = None,
     turn_generation: TurnModelGeneration | None = None,
+    authorized_knowledge_tools: dict | None = None,
 ):
     export_resources = export_evaluation or prepared_conversation is not None
     if override_model_id is not None:
@@ -226,6 +227,8 @@ async def create_agent_run_info(
         create_config_kwargs["portable_evaluation"] = True
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
+    if authorized_knowledge_tools is not None:
+        create_config_kwargs["authorized_knowledge_tools"] = authorized_knowledge_tools
     if runtime_skill_snapshot is not None:
         create_config_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     if enable_automation_tool and not is_debug and conversation_id is not None:

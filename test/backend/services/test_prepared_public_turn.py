@@ -38,6 +38,7 @@ def flow(mocker):
 
     mocker.patch.object(prepared_turn, "run_blocking", side_effect=inline)
     mocker.patch.object(prepared_turn.store, "next_message_index", return_value=8)
+    mocker.patch.object(prepared_turn, "get_conversation", return_value={})
     compile_snapshot = mocker.patch.object(prepared_turn, "prepare_conversation_snapshot", return_value=snapshot)
     mocker.patch.object(prepared_turn.store, "stage_turn", side_effect=lambda *_args, **_kwargs: operations.append("stage") or staged)
     mocker.patch.object(prepared_turn.store, "confirm_turn", side_effect=lambda *_: operations.append("confirm") or confirmed)
@@ -383,3 +384,29 @@ async def test_unsupported_workbench_uses_unchanged_compatibility_request(mocker
     assert await runtime_client.forward_conversation_run(payload, *ACTOR) is response
     assert reject.await_args.args[0].claimed_run_id == REFERENCE.run_id
     client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+
+
+@pytest.mark.asyncio
+async def test_native_knowledge_scope_conflict_cancels_the_admitted_run(flow, mocker):
+    operations, compile_snapshot, client, _ = flow
+    old_scope = {"schema_version": 1, "local": {"mode": "inherit", "knowledge_ids": []}}
+    request = AgentRequest.model_validate({**PAYLOAD.request, "knowledge_scope": {"local": {"mode": "disabled"}}})
+    desired = request.knowledge_scope.model_dump(mode="json")
+    prepared_turn.get_conversation.return_value = {"knowledge_scope": old_scope}
+    native = SimpleNamespace(resolution=SimpleNamespace(desired_scope=desired))
+    mocker.patch.object(prepared_turn, "prepare_native_knowledge", return_value=native)
+    prepared_turn.store.confirm_turn.side_effect = prepared_turn.store.PreparedTurnConflict()
+    client.stop_run = AsyncMock()
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await prepared_turn.start_turn(PAYLOAD, request, *ACTOR, client)
+
+    assert error.value.status_code == 409
+    assert compile_snapshot.await_args.kwargs["native_knowledge"] is native
+    assert prepared_turn.store.stage_turn.call_args.args[5]["knowledge_update"] == {
+        "expected": old_scope, "value": desired,
+    }
+    client.stop_run.assert_awaited_once_with(AgentStop(**REFERENCE.model_dump(), prevent_start=True), *ACTOR)
+    assert operations == ["stage", "start", "close"]

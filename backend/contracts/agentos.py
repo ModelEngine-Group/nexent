@@ -491,6 +491,7 @@ class PreparedConversationHistory(RunSpecModel):
 
 class PreparedConversationScope(AgentRunReference):
     workbench_config_version: PositiveInt | None = None
+    native_knowledge: Literal[True] | None = None
     historical_context: PreparedConversationHistory | None = None
     runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
     runtime_metadata_version: int | None = Field(default=None, ge=0)
@@ -501,10 +502,11 @@ class PreparedConversationScope(AgentRunReference):
         return validate_runtime_metadata(value)
 
     @model_serializer(mode="wrap")
-    def serialize_optional_workbench_version(self, handler):
+    def serialize_optional_scope(self, handler):
         data = handler(self)
-        if data.get("workbench_config_version") is None:
-            data.pop("workbench_config_version", None)
+        for name in ("workbench_config_version", "native_knowledge"):
+            if data.get(name) is None:
+                data.pop(name, None)
         return data
 
 

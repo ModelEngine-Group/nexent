@@ -112,6 +112,7 @@ def stage_turn(
 ) -> PreparedTurn:
     admission = ConversationRunAdmission
     workbench = user_turn.get("workbench_update")
+    knowledge = user_turn.get("knowledge_update")
     clarification = user_turn.get("clarification_response")
     with get_db_session() as session:
         if initial_title is None:
@@ -127,6 +128,8 @@ def stage_turn(
                 raise PreparedTurnConflict
             if workbench is not None:
                 _require_workbench_version(conversation, workbench["expected_version"], workbench["config"])
+            if knowledge is not None and conversation.knowledge_scope != knowledge["expected"]:
+                raise PreparedTurnConflict
             if (metadata_update := user_turn.get("metadata_update")) is not None:
                 _require_metadata_version(conversation, metadata_update["expected_version"])
             if clarification is not None:
@@ -154,7 +157,8 @@ def stage_turn(
             create_conversation(
                 initial_title, user_id, agent_id=user_turn["agent_id"], chat_mode=user_turn["chat_mode"],
                 workbench_config=workbench["config"] if workbench is not None else None,
-                knowledge_scope=workbench["config"].get("knowledge_scope") if workbench is not None else None,
+                knowledge_scope=(workbench["config"].get("knowledge_scope") if workbench is not None
+                                 else knowledge["value"] if knowledge is not None else None),
                 reserved_conversation_id=reference.conversation_id, db_session=session,
             )
         row.status = "dispatching"
@@ -194,7 +198,12 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
             workbench = user_turn.get("workbench_update")
+            knowledge = user_turn.get("knowledge_update")
             metadata_update = user_turn.get("metadata_update")
+            if knowledge is not None:
+                expected = knowledge["value"] if user_turn["new_conversation"] else knowledge["expected"]
+                if conversation.knowledge_scope != expected:
+                    raise PreparedTurnConflict
             if workbench is not None:
                 config = workbench["config"]
                 config_version = workbench["version"] if user_turn["new_conversation"] else workbench["expected_version"]
@@ -207,6 +216,10 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 conversation.workbench_config = config
                 conversation.workbench_config_version = workbench["version"]
                 conversation.knowledge_scope = config.get("knowledge_scope")
+                conversation.updated_by = turn.user_id
+                conversation.update_time = func.now()
+            if knowledge is not None and conversation.knowledge_scope != knowledge["value"]:
+                conversation.knowledge_scope = knowledge["value"]
                 conversation.updated_by = turn.user_id
                 conversation.update_time = func.now()
             if metadata_update is not None:

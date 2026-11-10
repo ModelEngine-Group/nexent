@@ -63,6 +63,7 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
 
 def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
+    require_scoped_aidp_instance: bool = False,
 ) -> dict[str, ToolConfig]:
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding}
@@ -92,6 +93,17 @@ def materialize_local_tools(
     tools = {}
     for name, reference in references.items():
         if isinstance(reference, ScopedSharedAidpBinding):
+            if require_scoped_aidp_instance:
+                bound = read_bound_local_tools(resource.agent_id, resource.version_no, actor.tenant_id, [name])
+                if not bound and resource.skill_refs:
+                    authorized_skills = {ref.instance_id for ref in resource.skill_refs}
+                    bound = [
+                        row for row in read_skill_derived_local_tools(
+                            resource.agent_id, resource.version_no, actor.tenant_id, [name],
+                        ) if set(row["skill_instance_ids"]) <= authorized_skills
+                    ]
+                if len(bound) != 1 or bound[0]["tool_id"] != reference.catalog_tool_id:
+                    raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
             tools[name] = _materialize_scoped_shared_aidp(reference, resource, actor, language)
             continue
         if isinstance(reference, StoredLocalToolBinding):

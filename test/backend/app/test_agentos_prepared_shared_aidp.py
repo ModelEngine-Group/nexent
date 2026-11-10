@@ -152,3 +152,94 @@ async def test_workbench_mounts_tenant_catalog_aidp_with_signed_scope(mocker, mo
         )
     if mode != "revoked":
         access.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_native_scope_exports_only_authorized_child_aidp_and_runtime_rechecks(mocker, tmp_path):
+    from fastapi import HTTPException
+
+    from contracts.agent import AgentRequest
+    from contracts.agentos import PreparedConversationScope
+    from contracts.errors.exceptions import ValidationError
+    from ext_components.aidp.services import aidp_access_service
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from management.services.agent.preparation import evaluation_snapshot, local_tool, tools
+    from management.services.knowledge_base import scope
+    from nexent.core.agents.agent_model import AgentConfig
+    from runtime.agentos import prepared_evaluation, prepared_local_tool
+    from test.backend.app.test_agentos_prepared_evaluation import model_record
+
+    mocker.patch.object(environment, "JWT_SECRET", "fixture-signing-key")
+    mocker.patch.object(environment, "AIDP_SERVER_URL", "https://provider.invalid")
+    mocker.patch.object(environment, "AIDP_API_KEY", "fixture-key")
+    mocker.patch.object(environment, "AIDP_TENANT_ID", "fixture-provider")
+    mocker.patch.object(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    mocker.patch.object(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    row = {
+        "tool_id": 7, "name": "aidp_search", "class_name": "AidpSearchTool", "source": "local",
+        "description": "AIDP search", "usage": None, "inputs": None, "output_type": "string",
+        "params": [{"name": "kds_list", "default": '["original"]'}], "instance_params": {},
+    }
+    mocker.patch.object(scope, "resolve_root_version", return_value=3)
+    mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
+        {"agent_id": 8, "version_no": 3, "agent_name": "root", "tools": []},
+        {"agent_id": 9, "version_no": 4, "agent_name": "child", "tools": [row]},
+    ])
+    mocker.patch.object(scope, "_resolve_aidp_access_snapshot", return_value=SimpleNamespace(
+        accessible_id_set={"kb1", "kb2"}, name_to_id={"One": "kb1", "Two": "kb2"},
+    ))
+    request = AgentRequest(query="query", agent_id=8, knowledge_scope={
+        "local": {"mode": "disabled"}, "aidp": {"mode": "override", "kds_ids": ["kb1", "kb2", "denied"]},
+    }, tool_params={"agents": {"child": {"tools": {"aidp_search": {"kds_list": ["forged"]}}}}})
+    with pytest.raises(ValidationError, match="unavailable or inaccessible"):
+        evaluation_snapshot.prepare_native_knowledge(request, {}, "user-a", "tenant-a")
+    prepared = evaluation_snapshot.prepare_native_knowledge(request, None, "user-a", "tenant-a")
+    assert prepared.authorized_tools[(9, 4)] == {"aidp_search": {"kds_list": ["kb1", "kb2"]}}
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[row])
+    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "child"})
+    options = {
+        "tool_params": request.tool_params, "portable_evaluation": True,
+        "authorized_knowledge_tools": prepared.authorized_tools,
+    }
+    with pytest.raises(ValidationError, match="configuration changed"):
+        await tools.create_tool_config_list(9, "tenant-a", "user-a", version_no=5, **options)
+    tool, = await tools.create_tool_config_list(9, "tenant-a", "user-a", version_no=4, **options)
+    mocker.patch.object(local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    catalog = mocker.patch.object(prepared_local_tool, "read_shared_aidp_catalog_tool", return_value=row)
+    bound = mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[])
+    mocker.patch.object(prepared_local_tool, "read_skill_derived_local_tools", return_value=[])
+    access = mocker.patch.object(aidp_access_service, "resolve_current_aidp_access", return_value=SimpleNamespace(
+        accessible_id_set={"kb1", "outside"}, name_to_id={"One": "kb1"}, tenant_name_to_id={},
+    ))
+    model = model_record(model_id=11)
+    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[model])
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model)
+    selected = create_model_config_from_record(model)
+    child = AgentConfig(agent_id=9, version_no=4, name="child", description="", model_name=selected.cite_name, tools=[tool])
+    root = AgentConfig(
+        agent_id=8, version_no=3, name="root", description="", model_name=selected.cite_name, tools=[], worker_agents=[child],
+    )
+    snapshot = evaluation_snapshot.export_snapshot(
+        root, [selected], "query", None, tenant_id="tenant-a", conversation_id=42, language="zh",
+        prepared_conversation=PreparedConversationScope(conversation_id=42, run_id="a" * 32, native_knowledge=True),
+    )
+    assert snapshot is not None
+    for private in ("forged", "denied", "original", "fixture-key"):
+        assert private not in snapshot.model_dump_json()
+    actor = ServicePrincipal("user-a", "tenant-a")
+    with pytest.raises(HTTPException) as error:
+        prepared_evaluation.prepare_run_snapshot(snapshot.model_copy(update={"native_knowledge": None}), actor)
+    assert error.value.status_code == 422
+    catalog.assert_not_called()
+    with pytest.raises(HTTPException) as unbound:
+        prepared_evaluation.prepare_run_snapshot(snapshot, actor)
+    assert unbound.value.status_code == 404
+    catalog.assert_not_called()
+    access.assert_not_called()
+
+    bound.return_value = [row]
+    runtime = prepared_evaluation.prepare_run_snapshot(snapshot, actor)
+    mounted = runtime.agent_config.worker_agents[0].tools[0]
+    assert mounted.params["api_key"] == "fixture-key" and mounted.metadata["allowed_kds_set"] == ["kb1"]
+    catalog.assert_called_once_with(7, "tenant-a")
+    access.assert_called_once()

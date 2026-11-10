@@ -71,6 +71,7 @@ change:
     - Management stages and pins clarification answers before a new signed prepared run without exposing the form to Runtime.
     - Signed native turns retain explicit root model settings without changing child aliases or transporting provider secrets.
     - Public debug uses authorized version snapshots and scopes signed cancellation by user and tenant.
+    - Native knowledge scopes apply authorized tool overrides to the static Agent tree and stage changes with the turn.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

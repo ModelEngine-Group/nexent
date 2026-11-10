@@ -320,6 +320,7 @@ async def create_tool_config_list(
     language: str = "zh",
     *,
     portable_evaluation: bool = False,
+    authorized_knowledge_tools: dict | None = None,
 ):
     tool_config_list = []
     langchain_tools = [] if portable_evaluation else await discover_langchain_tools()
@@ -375,6 +376,15 @@ async def create_tool_config_list(
             override_params = agent_tool_overrides[tool.get("name")]
         elif tool.get("class_name") in agent_tool_overrides:
             override_params = agent_tool_overrides[tool.get("class_name")]
+
+        scoped_knowledge_tool = authorized_knowledge_tools is not None and tool.get("class_name") in {
+            "AidpSearchTool", "KnowledgeBaseSearchTool",
+        }
+        if scoped_knowledge_tool:
+            authorized = authorized_knowledge_tools.get((agent_id, version_no), {}).get(tool_identifier)
+            if authorized is None:
+                raise ValidationError("Agent knowledge configuration changed while preparing the run")
+            override_params = {**(override_params or {}), **authorized}
 
         # Independent AIDP endpoint, credential, and default KDS scope are
         # instance configuration. Request-level config overrides must not
@@ -438,7 +448,7 @@ async def create_tool_config_list(
             usage=tool.get("usage"),
         )
 
-        if is_shared_aidp and portable_evaluation and runtime_knowledge_tools is not None:
+        if is_shared_aidp and portable_evaluation and (runtime_knowledge_tools is not None or scoped_knowledge_tool):
             tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}
         elif is_shared_aidp and not portable_evaluation:
             tool_config.metadata = restrict_aidp_access(param_dict["kds_list"], aidp_snapshot)

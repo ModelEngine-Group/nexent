@@ -2,7 +2,7 @@
 """Export authorized AgentOS snapshots from the Management compiler."""
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from functools import cache
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -21,6 +21,7 @@ from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import (
     AppException, ForbiddenError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, ValidationError,
 )
+from contracts.knowledge import ConversationKnowledgeScopeRequest, ResolvedKnowledgeScope
 from contracts.runtime_metadata import validate_runtime_metadata
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
@@ -218,11 +219,51 @@ def _prepare_conversation_history(history, user_id, tenant_id) -> PreparedConver
     return snapshot
 
 
+@dataclass(frozen=True)
+class PreparedNativeKnowledge:
+    resolution: ResolvedKnowledgeScope
+    root_version: int
+    authorized_tools: dict
+
+
+def prepare_native_knowledge(
+    request: AgentRequest, conversation: dict | None, user_id: str, tenant_id: str,
+) -> PreparedNativeKnowledge | None:
+    from management.services.knowledge_base.scope import (
+        resolve_knowledge_scope, resolve_root_version, snapshot_runtime_knowledge_tree,
+    )
+
+    stored = conversation.get("knowledge_scope") if conversation is not None else None
+    selection = request.knowledge_scope
+    if selection is None and isinstance(stored, dict):
+        selection = ConversationKnowledgeScopeRequest.model_validate(stored)
+    if selection is None or request.agent_id is None:
+        return None
+
+    version = resolve_root_version(request.agent_id, tenant_id, request.version_no, is_debug=False)
+    tree = snapshot_runtime_knowledge_tree(request.agent_id, tenant_id, version)
+    resolved = resolve_knowledge_scope(
+        selection, request.agent_id, tenant_id, user_id, version, False, request.tool_params,
+        runtime_agent_tree=tree,
+    )
+    if conversation is not None and request.knowledge_scope is not None:
+        denied = sorted({warning["source"] for warning in resolved.warnings
+                         if warning["code"] == "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE"})
+        if denied:
+            raise ValidationError(f"Some selected knowledge bases are unavailable or inaccessible: {', '.join(denied)}.")
+    authorized = {
+        (node["agent_id"], node["version_no"]): resolved.managed_tool_overrides.get(node["agent_name"], {})
+        for node in tree
+    }
+    return PreparedNativeKnowledge(resolved, version, authorized)
+
+
 async def prepare_conversation_snapshot(
     request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
     language: str = "zh", timezone: str | None = None, current_user_message_id: int | None = None,
     before_message_index: int | None = None, new_conversation: bool = False,
     allow_metadata_update: bool = False, workbench: "PreparedWorkbench | None" = None,
+    native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -231,8 +272,8 @@ async def prepare_conversation_snapshot(
 
     if request.conversation_id != reference.conversation_id:
         raise ForbiddenError("Conversation does not match the admitted run")
-    conversation = {}
-    if not new_conversation:
+    conversation = owned_conversation if owned_conversation is not None else {}
+    if not new_conversation and owned_conversation is None:
         conversation = await run_blocking(
             "snapshot-conversation-scope", get_conversation, reference.conversation_id,
             user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
@@ -243,7 +284,9 @@ async def prepare_conversation_snapshot(
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug or (workbench is not None and request.generation_config is not None),
         workbench is None and request.metadata is not None and (not allow_metadata_update or new_conversation),
-        workbench is None and (request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None),
+        workbench is None and native_knowledge is None and (
+            request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None
+        ),
     )):
         return None
     if await run_blocking(
@@ -275,6 +318,15 @@ async def prepare_conversation_snapshot(
                 runtime_knowledge_tools=workbench.knowledge_tools,
                 runtime_knowledge_context={"scope": build_runtime_knowledge_resources(workbench.knowledge)},
             )
+    if native_knowledge is not None:
+        from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+
+        resolved = native_knowledge.resolution
+        request = request.model_copy(update={"tool_params": resolved.tool_params, "version_no": native_knowledge.root_version})
+        compile_options.update(
+            authorized_knowledge_tools=native_knowledge.authorized_tools,
+            runtime_knowledge_context={"scope": build_runtime_knowledge_resources(resolved)},
+        )
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
     if workbench is None and (generation := _turn_model_generation(request)) is not None:
@@ -303,6 +355,7 @@ async def prepare_conversation_snapshot(
         **reference.model_dump(),
         historical_context=historical_context,
         workbench_config_version=workbench.version if workbench is not None else None,
+        native_knowledge=True if native_knowledge is not None else None,
         runtime_metadata=metadata,
         runtime_metadata_version=metadata_version,
     )
