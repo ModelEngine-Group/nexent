@@ -1,11 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise the production evaluation compiler through its AgentOS boundary."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import CompatibilityConversationRun, AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun
@@ -21,6 +23,50 @@ from nexent.core.concurrency import LanePolicy, ThreadManager
 from runtime.agentos import prepared_evaluation
 
 from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload, model_record
+
+
+@pytest.mark.asyncio
+async def test_generic_workbench_debug_runs_through_agentos(mocker):
+    request = AgentRequest(
+        query="hello", is_debug=True, entrypoint="workbench",
+        workbench={"mode": "generic_chat", "generation_config": {"temperature": 0.4}},
+    )
+    config = request.workbench
+    root = workbench.RuntimeAgentIdentity("agent:7:v2", 7, 2, "workbench_main", "Workbench", "SYSTEM")
+    plan = workbench.ResolvedAgentPlan(
+        workbench.PublishedRootDescriptor(root, {}), workbench.RootRuntimeOverlay(None, None, (), None), (),
+    )
+    resolve = mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
+    raw = evaluation_payload()
+    raw["resource"]["origin"] = "SYSTEM"
+    raw["models"]["llm"]["root_generation"] = {"temperature": 0.4}
+    compile_run = mocker.patch.object(run, "create_agent_run_info", return_value=PreparedEvaluationRun.model_validate(raw))
+    mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=model_record())
+    mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+
+    async def events():
+        yield b'data: {"type":"final_answer","content":"answer"}\n\n'
+
+    client = mocker.patch.object(runtime_client, "_agentos_client").return_value
+    client.run_ephemeral = AsyncMock(return_value=StreamingResponse(events()))
+    client.run_conversation = AsyncMock()
+    result = await runtime_client.forward_conversation_run(
+        CompatibilityConversationRun(request=request.model_dump(mode="json")), "actor", "tenant-a",
+    )
+    client.run_conversation.assert_not_awaited()
+    resolve.assert_called_once_with(config, tenant_id="tenant-a", is_debug=True, user_id="actor")
+    options = compile_run.await_args.kwargs
+    assert options["prepared_workbench"].plan == plan
+    assert options["override_version_no"] == 2
+    snapshot = client.run_ephemeral.await_args.args[0]
+    info = prepared_evaluation.prepare_run_snapshot(snapshot, ServicePrincipal("actor", "tenant-a"))
+    assert info.conversation_id is None
+    assert info.model_config_list[0].temperature == 0.4
+    frames = [json.loads(frame.removeprefix(b"data: ")) async for frame in result.body_iterator]
+    assert frames[0] == {"type": "workbench_config_resolved", "content": {
+        "config_version": 0, "schema_version": 3, "mode": "generic_chat", "agent_mounts": [],
+    }}
 
 
 @pytest.mark.asyncio

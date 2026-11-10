@@ -343,11 +343,12 @@ def prepare_run_snapshot(
     root_generation = payload.models.llm.root_generation
     turn_generation = payload.models.llm.turn_generation
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug is True
+    workbench_debug = debug and root_generation is not None and payload.resource.origin == "SYSTEM"
     native_run = isinstance(payload, PreparedAgentRun) or debug
     native_knowledge = native_run and payload.native_knowledge is True
     if (
-        (root_generation is not None) != (workbench_version is not None)
-        or (native_knowledge and workbench_version is not None)
+        (root_generation is not None) != (workbench_version is not None or workbench_debug)
+        or (native_knowledge and (workbench_version is not None or workbench_debug))
         or (turn_generation is not None and (workbench_version is not None or not native_run))
         or any(binding.root_generation is not None or binding.turn_generation is not None
                for binding in payload.models.additional_llms)

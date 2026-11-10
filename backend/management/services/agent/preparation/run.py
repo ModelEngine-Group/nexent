@@ -386,11 +386,11 @@ async def create_agent_run_info(
             if source_model_alias is None:
                 return None
             agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
-            export_options = {
-                "root_generation": prepared_workbench.config.generation_config,
-                "source_model_alias": source_model_alias,
-                "workbench_skills": prepared_workbench.plan.root_skills,
-            }
+            export_options.update(
+                root_generation=prepared_workbench.config.generation_config,
+                source_model_alias=source_model_alias,
+                workbench_skills=prepared_workbench.plan.root_skills,
+            )
         return export_snapshot(
             agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,

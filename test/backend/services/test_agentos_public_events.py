@@ -175,7 +175,7 @@ async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
 
     payload = CompatibilityConversationRun(request={"agent_id": 7, "query": "hello", "is_debug": True}, language="en")
     snapshot = SimpleNamespace(run_id=CURSOR.run_id)
-    prepared = SimpleNamespace(payload=snapshot, knowledge=None)
+    prepared = SimpleNamespace(payload=snapshot, knowledge=None, workbench=None)
     compile_debug = mocker.patch.object(evaluation_snapshot, "prepare_debug_snapshot", create=True, new_callable=AsyncMock)
     compile_debug.return_value = None if mode == "unsupported" else prepared
     upstream = response(b'data: {"type":"final_answer","content":"answer"}\n\n')

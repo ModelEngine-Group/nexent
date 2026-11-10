@@ -13,7 +13,7 @@ from contracts.agentos import (
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
-from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError, WorkbenchError
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
     active_run_error_response, knowledge_scope_event_content, present_ephemeral_stream, present_public_resume,
@@ -92,11 +92,18 @@ async def forward_conversation_run(
         except RunModelControlsError as exc:
             status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
             raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+        except WorkbenchError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if prepared is not None:
             response = await client.run_ephemeral(prepared.payload, user_id, tenant_id)
             opening = None
             if prepared.knowledge is not None:
                 opening = {"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)}
+            if prepared.workbench is not None:
+                opening = {"type": "workbench_config_resolved", "content": {
+                    "config_version": 0, "schema_version": prepared.workbench.schema_version,
+                    "mode": prepared.workbench.mode, "agent_mounts": [],
+                }}
             public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_event=opening)
             if public.status_code == 200 and request.conversation_id is not None:
                 public.headers["conversation_id"] = str(request.conversation_id)

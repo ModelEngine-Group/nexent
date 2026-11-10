@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic_core import PydanticSerializationError
 
-from contracts.agent import AgentRequest
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import (
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
@@ -170,11 +170,71 @@ def _turn_model_generation(request: AgentRequest) -> TurnModelGeneration | None:
 class PreparedDebug:
     payload: PreparedEphemeralRun
     knowledge: ResolvedKnowledgeScope | None = None
+    workbench: WorkbenchSessionConfig | None = None
+
+
+async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, language, timezone):
+    from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.services.agent.preparation.run import create_agent_run_info
+    from management.services.agent.workbench import PreparedWorkbench, resolve_workbench_config
+    from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
+
+    config = request.workbench
+    if (config is None or config.mode != "generic_chat" or config.skill_mounts
+            or config.knowledge_scope is not None or request.knowledge_scope is not None
+            or request.metadata is not None or request.reasoning_effort is not None
+            or request.reasoning_budget_tokens is not None):
+        return None
+
+    await run_blocking(
+        "snapshot-debug-model-selection", validate_agent_model_selection, request, tenant_id,
+        search_agent_info_by_agent_id, lane="control-io", owner="management",
+    )
+    config, plan = await run_blocking(
+        "snapshot-debug-workbench", resolve_workbench_config, config, tenant_id=tenant_id,
+        is_debug=True, user_id=user_id, lane="control-io", owner="management",
+    )
+    if plan.root_skills or plan.child_mounts:
+        return None
+    root = plan.root.identity
+    generation = config.generation_config.model_dump(mode="json")
+    request = request.model_copy(update={
+        "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
+        "model_id": config.model_id or request.model_id,
+        "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
+        "_runtime_generation_config": generation,
+    })
+    await run_blocking(
+        "snapshot-debug-model-controls", preflight_agent_turn_controls, request, tenant_id,
+        search_agent_info_by_agent_id, lane="control-io", owner="management",
+    )
+    snapshot = await create_agent_run_info(
+        agent_id=root.agent_id, minio_files=request.minio_files,
+        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False, is_debug=True,
+        override_version_no=root.version_no, override_model_id=request.model_id,
+        tool_params=request.tool_params, requested_output_tokens=request.requested_output_tokens,
+        context_policy=request.context_policy, enable_automation_tool=False,
+        enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
+        export_evaluation=True, runtime_skill_snapshot=[],
+        runtime_generation_config=generation,
+        prepared_workbench=PreparedWorkbench(config, plan, 0, 0),
+    )
+    if snapshot is None:
+        return None
+    return PreparedDebug(PreparedEphemeralRun(
+        **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex, debug=True,
+    ), workbench=config)
 
 
 async def prepare_debug_snapshot(
     request: AgentRequest, user_id: str, tenant_id: str, *, language: str, timezone: str | None,
 ) -> PreparedDebug | None:
+    if request.entrypoint == "workbench":
+        return await _prepare_workbench_debug_snapshot(
+            request, user_id, tenant_id, language=language, timezone=timezone,
+        )
+
     from management.services.agent.authorization import authorize_debug_version
     from management.services.agent.preparation.run import create_agent_run_info
     from management.services.model.run_controls import preflight_turn_controls
