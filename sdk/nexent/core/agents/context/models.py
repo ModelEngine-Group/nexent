@@ -355,7 +355,7 @@ def _compact_text(content: dict[str, Any]) -> dict[str, Any]:
 
 def _compact_action(content: dict[str, Any]) -> dict[str, Any]:
     """Keep the action/result boundary and remove verbose reasoning/process fields."""
-    if "execution_fields" in content:
+    if "execution_fields" in content or "messages" in content:
         # Only the manager may commit a recoverable execution representation.
         return deepcopy(content)
     allowed = ("step_number", "tool_calls", "observations", "error", "result")

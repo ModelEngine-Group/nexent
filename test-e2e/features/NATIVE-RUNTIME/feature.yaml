@@ -12,7 +12,7 @@
     "business_rules": [
       {
         "rule_id": "NATIVE-RUNTIME-RULE-001",
-        "description": "Only authorized tools execute through structured native calls and optional restricted code_execution, with valid correlated history and unchanged persisted definitions."
+        "description": "Only authorized tools execute through structured native calls and optional restricted code_execution, with valid correlated history and unchanged persisted definitions. Shared context counts remain advisory; maintenance preserves native call/result correlation and originals, with bounded provider-overflow rebuilding and no completed-effect replay."
       },
       {
         "rule_id": "NATIVE-RUNTIME-RULE-002",

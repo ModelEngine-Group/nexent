@@ -72,6 +72,7 @@ class ManagedContextRuntime:
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_items: Sequence[ContextItemInput] = (),
     ) -> FinalContext:
         final_context = self.context_manager.assemble_final_context(
             model=model,
@@ -82,6 +83,7 @@ class ManagedContextRuntime:
             run_context=self._ensure_run_context(memory),
             request_system_messages=request_system_messages,
             request_tail_messages=request_tail_messages,
+            request_items=request_items,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context
@@ -95,6 +97,7 @@ class ManagedContextRuntime:
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_items: Sequence[ContextItemInput] = (),
     ) -> FinalContext:
         """Force a source-backed rebuild after explicit Provider overflow."""
         final_context = self.context_manager.assemble_final_context(
@@ -107,6 +110,7 @@ class ManagedContextRuntime:
             force_compaction=True,
             request_system_messages=request_system_messages,
             request_tail_messages=request_tail_messages,
+            request_items=request_items,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context

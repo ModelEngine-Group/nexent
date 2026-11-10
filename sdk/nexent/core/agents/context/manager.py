@@ -134,8 +134,9 @@ class ContextManager:
         force_compaction: bool = False,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_items: Sequence[ContextItemInput] = (),
     ) -> FinalContext:
-        if purpose != "step" and (request_system_messages or request_tail_messages):
+        if purpose != "step" and (request_system_messages or request_tail_messages or request_items):
             raise ValueError("Request-only action messages require step purpose")
         self._run_compaction_attempts = 0
         run_context = run_context or self.prepare_run_context(memory, "")
@@ -153,7 +154,8 @@ class ContextManager:
                 }
             ]
             persisted_items.append(self._history_candidate.as_item())
-        current_items = self._project_current_run(memory, current_run_start_idx)
+        current_items = [*self._project_current_run(memory, current_run_start_idx),
+                         *(ContextItem.from_input(item) for item in request_items)]
         items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,
@@ -302,7 +304,7 @@ class ContextManager:
 
             try:
                 final_items = self._compact_to_compaction_target(
-                    final_items, purpose_stable, purpose_dynamic, canonical_tools, model=model,
+                    final_items, purpose_stable, purpose_dynamic, canonical_tools, model=model, force=force_compaction,
                 )
             except Exception:
                 logger.exception("Item maintenance failed; preserving accepted context")
@@ -416,9 +418,9 @@ class ContextManager:
         except Exception:
             logger.exception("History summary status sink failed")
 
-    def _compact_to_compaction_target(self, items, purpose_stable, purpose_dynamic, tools, *, model):
+    def _compact_to_compaction_target(self, items, purpose_stable, purpose_dynamic, tools, *, model, force=False):
         result = list(items)
-        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
+        if not force and self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
             return result
         keep_recent = max(0, self.config.keep_recent_steps)
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
@@ -471,6 +473,9 @@ class ContextManager:
         key = item.content.get("execution_key")
         record = history.get(key) if history is not None and key else None
         if record is None:
+            if "messages" in item.content:
+                # Native protocol records require an owned, bound original before offloading.
+                return None
             if "execution_fields" not in item.content:
                 return item.compact()
             # Debug and standalone SDK runs have no persisted result reference.

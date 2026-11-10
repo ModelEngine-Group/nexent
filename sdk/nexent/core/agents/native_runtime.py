@@ -7,7 +7,9 @@ import inspect
 import json
 from contextlib import nullcontext
 from copy import deepcopy
+from dataclasses import replace
 from threading import Event, RLock
+from uuid import uuid4
 
 from smolagents import ToolCallingAgent
 from smolagents.agents import ActionOutput
@@ -23,6 +25,7 @@ from ..utils.observer import ProcessType
 from .agent_model import AgentVerificationConfig
 from .clarification import ClarificationForm, choose_clarification_tool_name, render_question_text
 from .core_agent import CoreAgent, _screened_tool_forward
+from .native_context import native_context_items
 from .native_model_service import NativeServiceModel as NativeModel
 from .plan_repo import PlanRepo
 from .verification import VerificationController, render_guardrail_refusal
@@ -321,6 +324,30 @@ class NativeToolCallingAgent(ToolCallingAgent):
                     self.enable_planning,
                 )
             )
+        from .context.execution_history import ExecutionHistory
+
+        history = getattr(observer, "execution_history", None)
+        self._execution_history = history if isinstance(history, ExecutionHistory) else None
+        self._execution_owner = uuid4().hex
+        self._native_records = {}
+        self._native_loaded_messages = set()
+        self._execution_loaded = False
+        if self.context_runtime is not None and self._execution_history is not None:
+            from ..tools.read_execution_output_tool import ReadExecutionOutputTool
+
+            if "read_execution_output" in self.tools:
+                raise ValueError("read_execution_output is reserved for execution history")
+            self.context_runtime.context_manager.config.execution_history = self._execution_history
+            self.tools["read_execution_output"] = ReadExecutionOutputTool(
+                self._execution_history, self._execution_owner,
+                lambda: setattr(self, "_execution_loaded", True),
+            )
+            self.programmatic_tool_names.append("read_execution_output")
+        if self.context_runtime is not None and self.observer is not None:
+            self.context_runtime.context_manager.config.history_summary_status_sink = lambda payload: (
+                self.observer.add_message(self.agent_name, ProcessType.HISTORY_SUMMARY,
+                                          json.dumps(payload, ensure_ascii=False))
+            )
         delegate = getattr(self.model, "delegate", self.model)
         self.verification_controller = VerificationController(
             self.verification_config,
@@ -373,6 +400,8 @@ class NativeToolCallingAgent(ToolCallingAgent):
 
     def run(self, *args, **kwargs):
         self.native_messages = []
+        self._native_records = {}
+        self._native_loaded_messages = set()
         self._verification_rounds = 0
         self.verification_controller.pending_tool_block_refusal = None
         self._context_memory = AgentMemory(system_prompt=self.system_prompt)
@@ -428,6 +457,15 @@ class NativeToolCallingAgent(ToolCallingAgent):
         """Native JSON arguments are literal; Python alone resolves execution variables."""
         return arguments
 
+    def _record_native_context(self, context, memory_step):
+        get_monitoring_manager().record_final_context_evidence(context.evidence, step_number=memory_step.step_number)
+        memory_step.model_input_messages = deepcopy(context.messages)
+        if self.observer:
+            payload = self.context_runtime.consume_history_summary_event()
+            if isinstance(payload, dict):
+                self.observer.add_message(self.agent_name, ProcessType.HISTORY_SUMMARY,
+                                          json.dumps(payload, ensure_ascii=False))
+
     def _step_stream(self, memory_step):
         if self.stop_event.is_set():
             raise RunTerminated("Agent run cancelled")
@@ -442,18 +480,33 @@ class NativeToolCallingAgent(ToolCallingAgent):
                 self.native_messages.append({"role": role, "content": content or ""})
         input_messages = list(self.native_messages)
         native_tool_schemas = None
+        context_rebuild = None
+        if self._execution_history is not None:
+            self._execution_history.reset_read_budget(self._execution_owner)
         if self.context_runtime is not None:
             delegate = getattr(self.model, "delegate", self.model)
-            final_context = self.context_runtime.prepare_step(
+            context_arguments = dict(
                 model=delegate,
                 memory=self._context_memory,
                 current_run_start_idx=0,
                 tools=[get_tool_json_schema(tool) for tool in self.tools_and_managed_agents],
                 request_system_messages=[input_messages[0]],
-                request_tail_messages=input_messages[1:],
+                request_items=native_context_items(input_messages[1:], self._native_records, self._native_loaded_messages),
             )
-            if final_context.evidence.exceeds_effective_input_limit:
-                raise ValueError("Native context exceeds its configured input limit; tool history was preserved")
+            final_context = self.context_runtime.prepare_step(**context_arguments)
+            def context_rebuild():
+                rebuilt = self.context_runtime.recover_step(**context_arguments)
+                if engine:
+                    decision = engine.check_input(rebuilt.messages)
+                    self.verification_controller.emit(decision.verification_result, message=decision.message)
+                    if decision.effective_action == "terminate":
+                        raise RunTerminated("Guardrail terminated rebuilt model input")
+                    if decision.masked_messages is not None:
+                        rebuilt = replace(rebuilt, messages=decision.masked_messages)
+                self._record_native_context(rebuilt, memory_step)
+                return rebuilt
+
+            self._record_native_context(final_context, memory_step)
             input_messages = final_context.messages
             native_tool_schemas = final_context.tools
         engine = self.verification_controller.guardrail_engine
@@ -471,6 +524,7 @@ class NativeToolCallingAgent(ToolCallingAgent):
             input_messages,
             tools_to_call_from=self.tools_and_managed_agents,
             native_tool_schemas=native_tool_schemas,
+            context_rebuild=context_rebuild,
         )
         wire = dict(message.raw)
         wire.pop("refusal", None)
@@ -500,6 +554,7 @@ class NativeToolCallingAgent(ToolCallingAgent):
         for call in calls:
             if self.stop_event.is_set():
                 raise RunTerminated("Agent run cancelled")
+            self._execution_loaded = False
             name = call.function.name
             arguments = call.function.arguments
             tool_call = ToolCall(name=name, arguments=arguments, id=call.id)
@@ -534,6 +589,7 @@ class NativeToolCallingAgent(ToolCallingAgent):
                         arguments = decision.masked_kwargs
                 if name in {"final_answer", self.clarification_tool_name} and len(calls) != 1:
                     raise ValueError("A terminal tool must be the only call in its response")
+                self._execution_loaded = False
                 if name == "code_execution":
                     self.tools[name].step_number = memory_step.step_number
                     self._native_executor.send_variables(self.state)
@@ -577,6 +633,15 @@ class NativeToolCallingAgent(ToolCallingAgent):
                 if not check.passed:
                     output += self.verification_controller.build_feedback_observation(check)
             self.native_messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
+            if self._execution_history is not None and name not in {"final_answer", self.clarification_tool_name}:
+                key = self._execution_history.register(self._execution_owner, {"OUTPUT": output})
+                position = len(self.native_messages) - 2  # Exclude the system message.
+                self._native_records[position] = key
+                if self._execution_loaded:
+                    self._native_loaded_messages.add(position)
+                if self.observer:
+                    self.observer.add_message(self.agent_name, ProcessType.EXECUTION_RESULT,
+                                              json.dumps({"execution_key": key}), tool_call_id=call.id)
             observations.append(output)
             if self.observer:
                 self.observer.add_message(

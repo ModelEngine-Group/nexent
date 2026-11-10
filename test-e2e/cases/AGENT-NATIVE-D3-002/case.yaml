@@ -50,13 +50,19 @@
         "order": 4,
         "action": "Close owned provider server/client/scope after every variant.",
         "expected": "No server thread, socket, model stream or cancellation closer remains."
+      },
+      {
+        "order": 5,
+        "action": "Run native context maintenance through the actual HTTP model service with local excess, provider usage, explicit input overflow and an owned completed tool result.",
+        "expected": "Requests continue despite advisory excess; rebuilt requests preserve task and correlated tool results without duplicate effects; summaries retain original-result references and cleanup completes."
       }
     ],
     "expected_results": [
       "Mixed response content remains in native history; actual tool result is returned and normal stop completes. Provider reasoning remains distinct from public text and final output.",
       "Incomplete or inconsistent tool generations never execute tools.",
       "Incomplete or refused text generations never complete successfully.",
-      "Owned network and model resources are released."
+      "Owned network and model resources are released.",
+      "Native context maintenance preserves protected input, tool-call/result structure and exactly-once completed tool effects while using provider usage and bounded service recovery."
     ],
     "forbidden_side_effects": [
       "No external provider calls or persisted Agent Definition mutation.",
@@ -119,6 +125,23 @@
         ],
         "forbidden_side_effects": [
           1,
+          3
+        ]
+      },
+      {
+        "id": "AC-04",
+        "description": "Native shared context maintenance continues safely across model-service boundaries.",
+        "steps": [
+          5,
+          4
+        ],
+        "expected_results": [
+          5,
+          4
+        ],
+        "forbidden_side_effects": [
+          1,
+          2,
           3
         ]
       }

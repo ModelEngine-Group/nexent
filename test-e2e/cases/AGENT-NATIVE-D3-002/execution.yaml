@@ -24,6 +24,11 @@
     ],
     "AC-03": [
       "test_incomplete_or_refused_text_is_not_final"
+    ],
+    "AC-04": [
+      "test_native_estimated_excess_continues_over_http",
+      "test_native_overflow_rebuild_preserves_completed_effect",
+      "test_native_result_offload_preserves_correlated_http_history"
     ]
   },
   "notes": "Case-owned loopback server; finally cancels model scope, closes old client where present and shuts down/joins server; no external credentials or shared assets."

@@ -107,6 +107,7 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
+        request_items: Sequence[ContextItemCandidate] = (),
     ) -> FinalContext:
         """Return all model messages for the current step."""
 
@@ -131,6 +132,7 @@ class ContextRuntime(Protocol):
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ModelMessage] = (),
         request_tail_messages: Sequence[ModelMessage] = (),
+        request_items: Sequence[ContextItemCandidate] = (),
     ) -> FinalContext:
         """Force a source-backed step rebuild after Provider overflow."""
 

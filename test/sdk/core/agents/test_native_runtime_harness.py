@@ -297,14 +297,14 @@ def test_ac007_guardrail_termination_emits_existing_verification_event():
 
 
 
-def test_ac007_context_overflow_fails_before_provider_and_keeps_native_history():
+def test_ac007_estimated_context_excess_reaches_provider_and_keeps_native_history():
     from nexent.core.agents.context import (
         ContextManager,
         ContextManagerConfig,
         ManagedContextRuntime,
     )
 
-    agent, model = agent_for([])
+    agent, model = agent_for([{"role": "assistant", "content": "Done"}])
     agent.context_runtime = ManagedContextRuntime(
         ContextManager(
             ContextManagerConfig(
@@ -314,10 +314,9 @@ def test_ac007_context_overflow_fails_before_provider_and_keeps_native_history()
             )
         )
     )
-    with pytest.raises(ValueError, match="Native context exceeds"):
-        agent.run("A task which cannot fit the authorized one-token input limit")
-    assert model.requests == []
-    assert agent.native_messages[-1]["role"] == "user"
+    assert str(agent.run("A task above the advisory one-token input estimate")) == "Done"
+    assert len(model.requests) == 1
+    assert agent.native_messages[-2]["role"] == "user"
 
 
 

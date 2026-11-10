@@ -4,6 +4,8 @@
 
 import importlib.util
 import json
+import sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
@@ -29,7 +31,7 @@ class EffectTool(Tool):
 
     def forward(self):
         self.executions += 1
-        return 'ACTUAL_OBSERVATION'
+        return getattr(self, 'result', 'ACTUAL_OBSERVATION')
 
 
 @pytest.fixture
@@ -44,11 +46,22 @@ def provider():
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             requests.append(body)
-            tool_turn = config['calls'] and not any(m.get('role') == 'tool' for m in body['messages'])
+            if config.get('overflow_after_tool') and body.get('tools') and any(m.get('role') == 'tool' for m in body['messages']) and not config.get('overflow_sent'):
+                config['overflow_sent'] = True
+                payload = json.dumps({'error': {'code': 'context_length_exceeded', 'message': 'controlled input overflow'}}).encode()
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            tool_turn = bool(body.get('tools')) and config['calls'] and not any(m.get('role') == 'tool' for m in body['messages'])
             delta = {'role':'assistant','content':'Checking now.' if tool_turn else 'FINAL_OBSERVED'}
             if tool_turn:
                 delta['tool_calls'] = [{'index':0,'id':'actual-call','type':'function',
                     'function':{'name':'effect','arguments':'{}'}}]
+            if config.get('context') and not body.get('tools'):
+                delta['content'] = 'SUMMARY-SENTINEL: completed observed action.'
             if config.get('reasoning') or config.get('reasoning_only'):
                 delta['reasoning_content'] = 'Provider reasoning.'
             if config.get('reasoning_only'):
@@ -64,6 +77,8 @@ def provider():
                 packets.append({'choices':[{'index':0,'delta':{},'finish_reason':finish}]})
             for packet in packets:
                 self.wfile.write(('data: '+json.dumps(packet)+'\n\n').encode())
+            if not config.get('reasoning_only'):
+                self.wfile.write(('data: '+json.dumps({'choices':[], 'usage':{'prompt_tokens':10,'completion_tokens':5,'total_tokens':15}})+'\n\n').encode())
             if config.get('reasoning_only'):
                 self.wfile.write(('data: '+json.dumps({'choices':[], 'usage':{'prompt_tokens':10,'completion_tokens':64,'total_tokens':74,'completion_tokens_details':{'reasoning_tokens':64}}})+'\n\n').encode())
             self.wfile.write(b'data: [DONE]\n\n')
@@ -162,3 +177,12 @@ def test_incomplete_or_refused_text_is_not_final(provider,finish,refusal):
     assert requests
     write_case_evidence('incomplete-text-'+str(finish)+('-refusal' if refusal else ''),
                         {'finish_reason':finish,'normal_completion':False,'refusal_present':bool(refusal)})
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from context_cases import (  # noqa: E402,F401 - Case-local collected contracts.
+    test_native_estimated_excess_continues_over_http,
+    test_native_overflow_rebuild_preserves_completed_effect,
+    test_native_result_offload_preserves_correlated_http_history,
+)

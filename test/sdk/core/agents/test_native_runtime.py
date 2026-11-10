@@ -224,7 +224,10 @@ def test_ac001_existing_definition_constructs_native_runtime_without_mutation(mo
     observer = MessageObserver(lang="en")
     factory = NexentAgent(observer, [], Event(), agent_runtime="toolcalling")
     model = ScriptedModel([{"role": "assistant", "content": "Definition retained."}])
-    model.profile = SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace(status="supported")))
+    model.profile = SimpleNamespace(
+        capabilities=SimpleNamespace(tools=SimpleNamespace(status="supported")),
+        model_dump=lambda **_: {"capabilities": {"tools": {"status": "supported"}}},
+    )
     mocker.patch.object(factory, "create_model", return_value=model)
     definition = AgentConfig(
         name="existing",

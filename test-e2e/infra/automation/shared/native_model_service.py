@@ -55,8 +55,8 @@ def create_service_model(*, model_id, api_base, api_key, observer=None, cancella
     values = {key:max_output_tokens for key in ['max_tokens'] if key in declared}
     if 'max_output_tokens' in declared and not values:
         values['max_output_tokens'] = max_output_tokens
-    if enable_thinking and profile.capabilities.reasoning.status == 'supported' and 'enable_thinking' in declared:
-        values['enable_thinking'] = True
+    if profile.capabilities.reasoning.status == 'supported' and 'enable_thinking' in declared:
+        values['enable_thinking'] = enable_thinking
     if values:
         profile = overlay_profile_parameters(profile,values,scope='outlet')
     return LegacyChatModel.from_profile(profile, api_key, observer=observer,cancellation_scope=cancellation_scope)
