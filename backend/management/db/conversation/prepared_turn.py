@@ -141,6 +141,7 @@ def stage_turn(
             create_conversation(
                 initial_title, user_id, agent_id=user_turn["agent_id"], chat_mode=user_turn["chat_mode"],
                 workbench_config=workbench["config"] if workbench is not None else None,
+                knowledge_scope=workbench["config"].get("knowledge_scope") if workbench is not None else None,
                 reserved_conversation_id=reference.conversation_id, db_session=session,
             )
         row.status = "dispatching"

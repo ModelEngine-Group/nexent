@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun
+from contracts.knowledge import ResolvedKnowledgeScope
+from contracts.tool import ToolParamsRequest
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import runtime_client, workbench
@@ -20,11 +22,12 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default", "new", "metadata", "clear_metadata", "workbench", "workbench_scope"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
     new = kind == "new"
+    use_workbench = kind in {"workbench", "workbench_scope"}
     redis = object()
     get_redis = mocker.patch.object(prepared_evaluation, "get_redis_client", return_value=redis)
     record = model_record(model_id=11, connect_status="available")
@@ -41,7 +44,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(compiler, "search_agent_info_by_agent_id", side_effect=read_agent)
     mocker.patch.object(run, "search_agent_info_by_agent_id", side_effect=read_agent)
     mocker.patch.object(compiler, "query_sub_agent_relations", side_effect=lambda main_agent_id, **kwargs: (
-        [{"selected_agent_id": 8, "selected_agent_version_no": 5}] if main_agent_id == 7 and kind != "workbench" else []
+        [{"selected_agent_id": 8, "selected_agent_version_no": 5}] if main_agent_id == 7 and not use_workbench else []
     ))
     mocker.patch.object(compiler, "resolve_sub_agent_version_no", return_value=5)
     mocker.patch.object(compiler, "_get_external_a2a_agents", return_value=[])
@@ -89,11 +92,20 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         if metadata is not None:
             assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, user, tenant) is None
         options = {}
-        if kind == "workbench":
+        if use_workbench:
+            knowledge = None
+            knowledge_scope = {"local": {"mode": "disabled"}} if kind == "workbench_scope" else None
             config = WorkbenchSessionConfig(
                 mode="single_agent_chat", agent_mounts=[{"agent_id": 8, "version_no": 5}],
-                generation_config={"temperature": 0.4},
+                generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
             )
+            if knowledge_scope is not None:
+                knowledge = ResolvedKnowledgeScope(
+                    desired_scope=config.knowledge_scope.model_dump(mode="json"), tool_params=ToolParamsRequest(),
+                    local_disabled=True,
+                )
+                request.knowledge_scope = config.knowledge_scope
+                read_conversation.return_value["knowledge_scope"] = knowledge.desired_scope
             root = workbench.RuntimeAgentIdentity("agent:7:v2", 7, 2, "workbench_main", "Workbench", "SYSTEM")
             child = workbench.RuntimeAgentIdentity("agent:8:v5", 8, 5, "agent_8_v5", "Child", "PERSISTED")
             plan = workbench.ResolvedAgentPlan(
@@ -101,7 +113,9 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
                 child_mounts=(child,),
             )
             request.entrypoint = "workbench"
-            options["workbench"] = workbench.PreparedWorkbench(config, plan, 3, 4)
+            options["workbench"] = workbench.PreparedWorkbench(
+                config, plan, 3, 4, knowledge=knowledge, knowledge_tools=[] if knowledge is not None else None,
+            )
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             request, reference, user, tenant, language="en", timezone="Asia/Shanghai", **options,
             allow_metadata_update=metadata is not None,
@@ -112,9 +126,14 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         assert prepared.input.query != "hello" and "hello" in prepared.input.query
         payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
         info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
-        if kind == "workbench":
+        if use_workbench:
             root_tools = [call for call in compile_tools.await_args_list if call.args[0] == 7]
             assert root_tools[0].kwargs["runtime_skill_snapshot"] == []
+            if kind == "workbench_scope":
+                assert root_tools[0].kwargs["runtime_knowledge_tools"] == []
+                assert next(call for call in compile_tools.await_args_list if call.args[0] == 8).kwargs[
+                    "runtime_knowledge_tools"
+                ] is None
             assert payload.workbench_config_version == 4
             assert payload.models.llm.root_generation.temperature == 0.4
             assert info.agent_config.invocation_name == "workbench_main"
@@ -157,7 +176,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     assert "fixture-private-option" not in encoded
     assert ("provider_body_revision" in encoded) is persisted_body
     if persisted_body:
-        if kind == "workbench":
+        if use_workbench:
             assert lookup_override.call_count == 2
             assert info.model_config_list[0].extra_body == {
                 "provider_option": "fixture-private-option", "enable_thinking": False,

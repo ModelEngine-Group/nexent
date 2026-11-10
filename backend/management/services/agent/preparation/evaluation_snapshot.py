@@ -139,8 +139,8 @@ async def prepare_conversation_snapshot(
         workbench is None and (request.agent_id is None or request.entrypoint or conversation.get("workbench_config") is not None),
         request.is_debug, request.generation_config,
         request.metadata is not None and (not allow_metadata_update or new_conversation),
-        request.clarification_response is not None, request.knowledge_scope is not None,
-        conversation.get("knowledge_scope") is not None,
+        request.clarification_response is not None,
+        workbench is None and (request.knowledge_scope is not None or conversation.get("knowledge_scope") is not None),
     )):
         return None
     if await run_blocking(
@@ -156,6 +156,7 @@ async def prepare_conversation_snapshot(
             "agent_id": root.agent_id, "version_no": root.version_no, "workbench": config,
             "model_id": config.model_id or request.model_id,
             "requested_output_tokens": config.generation_config.requested_output_tokens or request.requested_output_tokens,
+            "knowledge_scope": config.knowledge_scope,
         })
         compile_options = {
             "runtime_sub_agent_mounts": [asdict(child) for child in workbench.plan.child_mounts],
@@ -163,6 +164,14 @@ async def prepare_conversation_snapshot(
             "runtime_generation_config": config.generation_config.model_dump(mode="json"),
             "prepared_workbench": workbench,
         }
+        if workbench.knowledge is not None:
+            from management.services.knowledge_base.scope import build_runtime_knowledge_resources
+
+            request = request.model_copy(update={"tool_params": workbench.knowledge.tool_params})
+            compile_options.update(
+                runtime_knowledge_tools=workbench.knowledge_tools,
+                runtime_knowledge_context={"scope": build_runtime_knowledge_resources(workbench.knowledge)},
+            )
     validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
     preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
     historical_context = None

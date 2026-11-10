@@ -87,6 +87,9 @@ case:
   - order: 20
     action: Submit an owned Workbench turn with a resolved Workbench configuration and stream signed AgentOS output.
     expected: The typed Workbench version and root generation reach Runtime and Management presents the public configuration event and version header.
+  - order: 21
+    action: Submit a Workbench turn with a local knowledge scope and consume the signed prepared journal.
+    expected: Runtime receives the scoped knowledge binding. The response emits the resolved configuration and authorized scope before journal events.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -108,6 +111,7 @@ case:
   - Northbound uses signed prepared admission and projection without a duplicate user write or exposing journal control frames.
   - Northbound passes explicit metadata only as a signed prepared snapshot and retains the response version header.
   - A prepared Workbench turn preserves its resolved configuration event, version and single projection.
+  - Workbench preserves the authorized local knowledge scope event and dispatches its scoped search binding once.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -270,4 +274,9 @@ case:
     description: Signed prepared Workbench execution preserves the resolved configuration, root generation binding and public event.
     steps: [20]
     expected_results: [20]
+    forbidden_side_effects: [1, 2]
+  - id: AC-29
+    description: Signed Workbench execution carries the authorized local search binding and preserves the public knowledge scope event.
+    steps: [21]
+    expected_results: [21]
     forbidden_side_effects: [1, 2]

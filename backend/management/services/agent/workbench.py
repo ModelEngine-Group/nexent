@@ -15,7 +15,7 @@ from nexent.core.agents.agent_model import AgentConfig
 
 from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, ENABLE_AIDP_KNOWLEDGE
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
@@ -96,6 +96,8 @@ class PreparedWorkbench:
     plan: ResolvedAgentPlan
     previous_version: int
     version: int
+    knowledge: ResolvedKnowledgeScope | None = None
+    knowledge_tools: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -599,15 +601,32 @@ def prepare_portable_workbench(
         requested = WorkbenchSessionConfig.model_validate(stored)
     if requested is None:
         raise ValidationError("Workbench configuration is required")
-    if (request.metadata is not None or request.knowledge_scope is not None
-            or requested.knowledge_scope is not None or requested.skill_mounts):
+    if request.metadata is not None or requested.skill_mounts:
+        return None
+    scope = requested.knowledge_scope
+    if ENABLE_AIDP_KNOWLEDGE and scope is not None and scope.aidp.mode != "disabled":
         return None
 
     canonical, plan = resolve_workbench_config(requested, tenant_id=tenant_id, user_id=user_id)
     if plan.root_skills:
         return None
     version = previous_version + int(canonical.model_dump(mode="json") != stored)
-    return PreparedWorkbench(canonical, plan, previous_version, version)
+    if canonical.knowledge_scope is None:
+        return PreparedWorkbench(canonical, plan, previous_version, version)
+
+    from management.services.knowledge_base.mount import mount_knowledge_records
+    from management.services.knowledge_base.scope import resolve_knowledge_scope, snapshot_runtime_knowledge_tree
+
+    root = plan.root.identity
+    # Workbench scopes apply only to the root, even when the run has mounted Agents.
+    tree = snapshot_runtime_knowledge_tree(int(root.agent_id), tenant_id, int(root.version_no))[:1]
+    tools = mount_knowledge_records(tree[0]["tools"], canonical.knowledge_scope, tenant_id)
+    tree[0]["tools"] = tools
+    knowledge = resolve_knowledge_scope(
+        scope=canonical.knowledge_scope, agent_id=int(root.agent_id), tenant_id=tenant_id, user_id=user_id,
+        version_no=root.version_no, is_debug=False, request_tool_params=request.tool_params, runtime_agent_tree=tree,
+    )
+    return PreparedWorkbench(canonical, plan, previous_version, version, knowledge, tools)
 
 
 def runtime_skill_snapshot(tree: ResolvedAgentPlan | ResolvedAgentTree) -> list[Dict[str, Any]]:

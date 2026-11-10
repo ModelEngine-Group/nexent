@@ -23,7 +23,7 @@ from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
 from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
-from management.services.agent.agentos_events import present_public_resume
+from management.services.agent.agentos_events import knowledge_scope_event_content, present_public_resume
 from management.services.agent.context import strip_current_time_prefix
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
 from management.services.agent.prepared_projection import resume_assistant_projection
@@ -145,11 +145,14 @@ async def start_turn(
         if request.enable_automation_tool and any(
             tool.tool_id == AUTOMATION_PROPOSAL_TOOL for tool in snapshot.resource.tools
         ):
+            tool_params = request.tool_params
+            if workbench is not None and workbench.knowledge is not None:
+                tool_params = workbench.knowledge.tool_params
             automation = {
                 "agent_id": snapshot.resource.agent_id,
                 "agent_version_no": snapshot.resource.version_no,
                 "model_id": (workbench.config.model_id if workbench is not None else None) or request.model_id,
-                "tool_params": request.tool_params.model_dump(mode="json") if request.tool_params else None,
+                "tool_params": tool_params.model_dump(mode="json") if tool_params else None,
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
@@ -246,17 +249,21 @@ async def _stream_turn(
             logger.warning("Deferred terminal conversation projection run_id=%s error=%s",
                            reference.run_id, type(exc).__name__)
 
-    opening_event = None
+    opening_events = []
     if workbench is not None:
-        opening_event = {"type": "workbench_config_resolved", "content": {
+        opening_events.append({"type": "workbench_config_resolved", "content": {
             "config_version": workbench.version,
             "schema_version": workbench.config.schema_version,
             "mode": workbench.config.mode,
             "agent_mounts": [mount.model_dump(mode="json") for mount in workbench.config.agent_mounts],
-        }}
+        }})
+        if workbench.knowledge is not None:
+            opening_events.append({
+                "type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(workbench.knowledge),
+            })
     response = present_public_resume(
         upstream, cursor, turn.user_id, on_terminal=on_terminal, created=created,
-        include_journal_controls=include_journal_controls, opening_event=opening_event,
+        include_journal_controls=include_journal_controls, opening_events=opening_events,
     )
     if workbench is not None:
         response.headers["X-Workbench-Config-Version"] = str(workbench.version)

@@ -64,6 +64,7 @@ change:
     - Northbound dispatches supported turns once, preserves public stream framing, falls back only before dispatch, and stops the scoped pending run.
     - Northbound replaces or clears metadata with an owned prepared run, preserves its version, and rejects stale or unadmitted updates.
     - Prepared Workbench turns preserve optimistic configuration versions, mounted Agent identities, and root-only model controls.
+    - Workbench scopes local knowledge at the root, retains document filters, and presents authorization warnings before journal events.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
     test_selectors:

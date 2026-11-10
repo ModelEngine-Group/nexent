@@ -244,6 +244,10 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         )
     with monkeypatch.context() as workbench_patches:
         await _assert_public_prepared_turn_over_signed_http(workbench_patches, use_workbench=True)
+    with monkeypatch.context() as knowledge_patches:
+        await _assert_public_prepared_turn_over_signed_http(
+            knowledge_patches, use_workbench=True, use_knowledge_scope=True,
+        )
     with monkeypatch.context() as callback_patches:
         await _assert_automation_proposal_callback(callback_patches)
 
@@ -1843,6 +1847,7 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
 
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
+    use_knowledge_scope=False,
 ):
     from contracts.agent import WorkbenchSessionConfig
     from contracts.constants.constants import DEFAULT_EN_TITLE
@@ -1855,7 +1860,23 @@ async def _assert_public_prepared_turn_over_signed_http(
     boundary = 0 if new_conversation else 4
     actor = ServicePrincipal("public-user", "public-tenant")
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
-    config = WorkbenchSessionConfig(mode="generic_chat", generation_config={"temperature": 0.4})
+    knowledge_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["7", "8"]},
+        "aidp": {"mode": "disabled"},
+    } if use_knowledge_scope else None
+    config = WorkbenchSessionConfig(
+        mode="generic_chat", generation_config={"temperature": 0.4}, knowledge_scope=knowledge_scope,
+    )
+    bindings = [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]
+    if use_knowledge_scope:
+        bindings.append({
+            "tool_id": "knowledge_base_search", "version": "1", "parameters": {
+                "description": {}, "index_names": ["kb-one"],
+                "allowed": [{"knowledge_id": 7, "index_name": "kb-one", "revision": "a" * 64}],
+                "display_name_to_index": {"One": "kb-one"}, "document_paths": ["report.txt"],
+                "embedding": {"model_id": 12, "revision": "embedding-revision"},
+            },
+        })
     llm = {"model_id": 11, "alias": "demo", "revision": "revision"}
     if use_workbench:
         llm["root_generation"] = config.generation_config.model_dump(mode="json")
@@ -1865,7 +1886,7 @@ async def _assert_public_prepared_turn_over_signed_http(
         **({"workbench_config_version": 4} if use_workbench else {}),
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
                      "prompt_templates": {"system_prompt": "Answer"},
-                     "tools": [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]},
+                     "tools": bindings},
         "models": {"llm": llm},
     })
     state = {"status": "pending"}
@@ -1895,8 +1916,15 @@ async def _assert_public_prepared_turn_over_signed_http(
             if metadata is not None:
                 assert turn["metadata_update"] == {"expected_version": 5, "value": metadata}
         else:
+            automation_params = None
+            if use_knowledge_scope:
+                automation_params = turn["automation"]["tool_params"]
+                assert automation_params["agents"]["root"]["tools"]["knowledge_base_search"] == {
+                    "index_names": ["kb-one"], "document_paths": ["report.txt"],
+                }
             assert turn["automation"] == {
-                "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
+                "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": automation_params,
+                "has_attachments": False,
             }
         calls.append("stage")
         return pending
@@ -1954,8 +1982,23 @@ async def _assert_public_prepared_turn_over_signed_http(
             "workbench_config": WorkbenchSessionConfig(mode="generic_chat").model_dump(mode="json"),
             "workbench_config_version": 3,
         })
-        monkeypatch.setattr(workbench, "resolve_workbench_config",
-                            lambda requested, **_kwargs: (requested, SimpleNamespace(root_skills=())))
+        identity = SimpleNamespace(agent_id=7, version_no=2)
+        monkeypatch.setattr(workbench, "resolve_workbench_config", lambda requested, **_kwargs: (
+            requested, SimpleNamespace(root_skills=(), root=SimpleNamespace(identity=identity)),
+        ))
+        if use_knowledge_scope:
+            from management.services.knowledge_base import mount, scope
+
+            tool = {"class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "params": []}
+            monkeypatch.setattr(workbench, "ENABLE_AIDP_KNOWLEDGE", False)
+            monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", False)
+            monkeypatch.setattr(scope, "snapshot_runtime_knowledge_tree",
+                                lambda *_: [{"agent_name": "root", "tools": [tool]}])
+            monkeypatch.setattr(scope, "get_knowledge_info_by_ids_and_tenant", lambda *_: [
+                {"knowledge_id": 7, "index_name": "kb-one", "knowledge_name": "One", "embedding_model_id": 12},
+                {"knowledge_id": 8, "index_name": "kb-denied", "knowledge_name": "Denied", "embedding_model_id": 12},
+            ])
+            monkeypatch.setattr(scope.ElasticSearchService, "filter_accessible_indices", lambda *_, **__: ["kb-one"])
 
     async def compile_snapshot(request, ref, user_id, tenant_id, **kwargs):
         assert request.conversation_id == reference.conversation_id and ref == reference
@@ -1966,6 +2009,8 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert kwargs.get("allow_metadata_update", False) == (metadata is not None)
         if use_workbench:
             assert kwargs["workbench"].config == config and kwargs["workbench"].version == 4
+        if use_knowledge_scope:
+            assert kwargs["workbench"].knowledge.local_index_names == ["kb-one"]
         return snapshot
 
     monkeypatch.setattr(prepared_turn, "prepare_conversation_snapshot", compile_snapshot)
@@ -2005,6 +2050,10 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "query": "test", "entrypoint": "workbench", "workbench": config.model_dump(mode="json"),
                 "expected_workbench_config_version": 3,
             }
+        if use_knowledge_scope:
+            request.update(knowledge_scope=knowledge_scope, tool_params={
+                "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
+            })
         if not new_conversation:
             request["conversation_id"] = reference.conversation_id
         headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1", "Cookie": "NEXT_LOCALE=en"}
@@ -2019,6 +2068,15 @@ async def _assert_public_prepared_turn_over_signed_http(
         if new_conversation:
             created = {"type": "conversation_created", "content": {"conversation_id": reference.conversation_id}}
             prefix = f"data: {json.dumps(created, separators=(',', ':'))}\n\n" + prefix
+        if use_knowledge_scope:
+            scope_event = {"type": "knowledge_scope_resolved", "content": {
+                "effective": {
+                    "local": {"disabled": False, "knowledge_ids": ["7"], "display_names": ["One"]},
+                    "aidp": {"disabled": True, "kds_ids": [], "display_names": []},
+                },
+                "warnings": [{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1}],
+            }}
+            prefix = f"data: {json.dumps(scope_event, separators=(',', ':'))}\n\n" + prefix
         if use_workbench:
             event = {"type": "workbench_config_resolved", "content": {
                 "config_version": 4, "schema_version": 3, "mode": "generic_chat", "agent_mounts": [],

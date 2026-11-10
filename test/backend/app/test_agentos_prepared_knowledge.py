@@ -153,15 +153,24 @@ def test_prepared_knowledge_reranking_keeps_named_then_tenant_default(mocker, kn
 
 
 @pytest.mark.asyncio
-async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy_clients(mocker):
+@pytest.mark.parametrize("mode", [None, "override", "disabled"])
+async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy_clients(mocker, mode):
+    from types import SimpleNamespace
+
+    from contracts.agent import AgentRequest, WorkbenchSessionConfig
+    from contracts.tool import ToolParamsRequest
+    from management.services.agent import workbench
     from management.services.agent.preparation import knowledge_search, tools
+    from management.services.knowledge_base import mount, scope
 
     definition = {
         "class_name": "KnowledgeBaseSearchTool", "name": "knowledge_base_search", "source": "local",
-        "params": [{"name": "index_names", "default": ["kb-one"]}],
+        "params": [{"name": "index_names", "default": ["kb-one"]},
+                   {"name": "top_k", "default": 3, "type": "integer"}],
+        "is_available": True,
     }
     mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
-    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition])
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[definition] if mode is None else [])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "root"})
     legacy_vector = mocker.patch.object(tools, "get_vector_db_core")
     legacy_embedding = mocker.patch.object(tools, "get_embedding_model_by_index_name")
@@ -174,17 +183,65 @@ async def test_portable_tool_compiler_resolves_knowledge_without_building_legacy
         model_id=12, model_type="embedding",
     ))
 
-    result, = await tools.create_tool_config_list(
+    tool_params = ToolParamsRequest.model_validate({
+        "agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}},
+    })
+    compiler_options = {}
+    if mode is not None:
+        config = WorkbenchSessionConfig(
+            mode="generic_chat",
+            knowledge_scope={
+                "local": {"mode": mode, "knowledge_ids": ["7", "8"] if mode == "override" else []},
+                "aidp": {"mode": "disabled"},
+                "retrieval_config": {"top_k": 5},
+            },
+        )
+        root = SimpleNamespace(agent_id=7, version_no=2)
+        plan = SimpleNamespace(root=SimpleNamespace(identity=root), root_skills=())
+        mocker.patch.object(workbench, "ENABLE_AIDP_KNOWLEDGE", False)
+        mocker.patch.object(mount, "ENABLE_AIDP_KNOWLEDGE", False)
+        mocker.patch.object(workbench, "resolve_workbench_config", return_value=(config, plan))
+        mocker.patch.object(mount, "query_all_tools", return_value=[definition])
+        mocker.patch.object(scope, "snapshot_runtime_knowledge_tree", return_value=[
+            {"agent_name": "root", "tools": []}, {"agent_name": "child", "tools": [definition]},
+        ])
+        records = mocker.patch.object(scope, "get_knowledge_info_by_ids_and_tenant", return_value=[
+            {"knowledge_id": 7, "index_name": "kb-one", "knowledge_name": "One", "embedding_model_id": 12},
+            {"knowledge_id": 8, "index_name": "kb-denied", "knowledge_name": "Denied", "embedding_model_id": 12},
+        ])
+        permissions = mocker.patch.object(scope.ElasticSearchService, "filter_accessible_indices", return_value=["kb-one"])
+        request = AgentRequest(query="query", entrypoint="workbench", workbench=config, tool_params=tool_params)
+        plan = workbench.prepare_portable_workbench(request, None, "user-a", "tenant-a")
+        compiler_options["runtime_knowledge_tools"] = plan.knowledge_tools
+        tool_params = plan.knowledge.tool_params
+        assert "child" not in tool_params.agents
+        if mode == "override":
+            records.assert_called_once_with([7, 8], "tenant-a")
+            permissions.assert_called_once_with(["kb-one", "kb-denied"], user_id="user-a", tenant_id="tenant-a")
+            assert plan.knowledge.local_knowledge_ids == ["7"]
+            assert plan.knowledge.warnings == [{"code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "source": "local", "count": 1}]
+        else:
+            records.assert_not_called()
+            assert plan.knowledge.local_disabled
+
+    compiled = await tools.create_tool_config_list(
         7, "tenant-a", "user-a", version_no=2, portable_evaluation=True,
-        tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"document_paths": ["report.txt"]}}}}},
+        tool_params=tool_params, **compiler_options,
     )
+    legacy_vector.assert_not_called()
+    legacy_embedding.assert_not_called()
+    if mode == "disabled":
+        assert compiled == []
+        return
+
+    result, = compiled
     descriptor = result.metadata["prepared_knowledge_search"]
+    assert descriptor["top_k"] == (5 if mode == "override" else 3)
+    assert descriptor["index_names"] == ["kb-one"]
     assert descriptor["document_paths"] == ["report.txt"]
     assert descriptor["embedding"] == {"model_id": 12, "revision": "revision-1"}
     assert result.metadata["allowed_index_names"] == ["kb-one"]
     assert result.metadata["index_name_to_display_map"] == {"kb-one": "One"}
-    legacy_vector.assert_not_called()
-    legacy_embedding.assert_not_called()
 
 
 def test_prepared_model_revision_matches_database_list_and_id_formats(mocker):

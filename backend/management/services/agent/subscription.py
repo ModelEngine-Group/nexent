@@ -18,7 +18,7 @@ from typing import (
     Dict,
 )
 
-from management.services.agent.agentos_events import active_run_error_response
+from management.services.agent.agentos_events import active_run_error_response, knowledge_scope_event_content
 from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
@@ -390,21 +390,7 @@ async def run_agent_stream(
         agent_request.__dict__["_runtime_knowledge_context"] = {
             "scope": build_runtime_knowledge_resources(resolved_scope),
         }
-        agent_request.__dict__["_resolved_knowledge_scope_event"] = {
-            "effective": {
-                "local": {
-                    "disabled": resolved_scope.local_disabled,
-                    "knowledge_ids": resolved_scope.local_knowledge_ids,
-                    "display_names": resolved_scope.local_display_names,
-                },
-                "aidp": {
-                    "disabled": resolved_scope.aidp_disabled,
-                    "kds_ids": resolved_scope.aidp_kds_ids,
-                    "display_names": resolved_scope.aidp_display_names,
-                },
-            },
-            "warnings": resolved_scope.warnings,
-        }
+        agent_request.__dict__["_resolved_knowledge_scope_event"] = knowledge_scope_event_content(resolved_scope)
         if resolved_scope.warnings:
             logger.warning(
                 "Knowledge scope resolved with warnings conversation_id=%s warnings=%s",
