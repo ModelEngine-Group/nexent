@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Materialize a prepared synthetic evaluation inside Runtime."""
+"""Materialize AgentOS snapshots and execute synthetic evaluations inside Runtime."""
 
 import asyncio
 import logging
@@ -13,7 +13,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import (
-    EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription, ParallelExecutorBinding, PreparedEvaluationRun,
+    EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
+    ParallelExecutorBinding, PreparedAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
@@ -245,7 +246,7 @@ def _remove_skill_files(workspace_path: str | None) -> None:
         logger.warning("Could not remove staged evaluation skill files", exc_info=True)
 
 
-def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
+def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, actor: ServicePrincipal) -> AgentRunInfo:
     if any((
         payload.models.summary, payload.models.verifier, payload.models.embedding, payload.models.rerank,
     )):
@@ -308,21 +309,44 @@ def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincip
     return info
 
 
+def prepare_evaluation_run(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> AgentRunInfo:
+    return prepare_run_snapshot(payload, actor)
+
+
 def _remove_abandoned_skill_files(preparation: asyncio.Task) -> None:
     if not preparation.cancelled() and preparation.exception() is None:
         _remove_skill_files(preparation.result().workspace_path)
 
 
-async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
+async def load_prepared_run(payload, actor, materialize) -> AgentRunInfo:
     preparation = asyncio.create_task(run_blocking(
-        "agentos-prepare-evaluation", prepare_evaluation_run, payload, actor,
+        "agentos-materialize-run", materialize, payload, actor,
         lane="control-io", owner="runtime",
     ))
     try:
-        info = await asyncio.shield(preparation)
+        return await asyncio.shield(preparation)
     except asyncio.CancelledError:
         preparation.add_done_callback(_remove_abandoned_skill_files)
         raise
+
+
+def discard_prepared_workspace(info: AgentRunInfo) -> None:
+    future = info.thread_future
+    if future is not None and not future.done():
+        future.add_done_callback(lambda _: _remove_skill_files(info.workspace_path))
+    else:
+        _remove_skill_files(info.workspace_path)
+
+
+def release_prepared_run(info: AgentRunInfo, conversation_id: int, user_id: str, status: str) -> None:
+    try:
+        unregister_after_worker_exit(agent_run_manager, conversation_id, user_id, status, info)
+    finally:
+        discard_prepared_workspace(info)
+
+
+async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: ServicePrincipal) -> EvaluationAgentResult:
+    info = await load_prepared_run(payload, actor, prepare_evaluation_run)
     try:
         agent_run_manager.register_agent_run(payload.conversation_id, info, actor.user_id)
     except Exception as exc:
@@ -340,11 +364,4 @@ async def execute_prepared_evaluation(payload: PreparedEvaluationRun, actor: Ser
         status = "stopped"
         raise
     finally:
-        try:
-            unregister_after_worker_exit(agent_run_manager, payload.conversation_id, actor.user_id, status, info)
-        finally:
-            future = info.thread_future
-            if future is not None and not future.done():
-                future.add_done_callback(lambda _: _remove_skill_files(info.workspace_path))
-            else:
-                _remove_skill_files(info.workspace_path)
+        release_prepared_run(info, payload.conversation_id, actor.user_id, status)

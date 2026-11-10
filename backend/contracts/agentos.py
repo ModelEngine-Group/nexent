@@ -68,6 +68,7 @@ class EvaluationAgentRun(BaseModel):
 
 
 class AgentOperation(str, Enum):
+    RUN = NAMESPACE + "v1/agent/run"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
     INSPECT = NAMESPACE + "v1/agent/inspect"
@@ -404,13 +405,17 @@ class AgentRunSpec(RunSpecModel):
     models: ModelBindings
     input: RunInput
     language: Literal["zh", "en"] = "zh"
+    tool_caller: ToolCallerContext | None = None
+
+
+class PreparedAgentRun(AgentRunSpec, AgentRunReference):
+    """Execute an authorized snapshot for an existing conversation."""
 
 
 class PreparedEvaluationRun(AgentRunSpec):
     """Execute an authorized resource snapshot under a synthetic evaluation key."""
 
     conversation_id: Annotated[int, Field(le=0)] = 0
-    tool_caller: ToolCallerContext | None = None
 
 
 class EvaluationAgentResult(BaseModel):

@@ -10,6 +10,7 @@ from runtime.agentos.compatibility import create_background_router, create_compa
 from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.agentos.model import create_model_router
 from runtime.agentos.model_administration import create_model_administration_router
+from runtime.agentos.prepared_run import create_prepared_run_router
 from runtime.agentos.resume import create_run_lifecycle_router
 from runtime.model.service import ModelService
 from runtime.recovery import recover_streaming_runs, watch_executions
@@ -128,5 +129,6 @@ app.include_router(create_model_administration_router())
 app.include_router(agent_router)
 app.include_router(create_evaluation_router())
 app.include_router(create_run_lifecycle_router())
+app.include_router(create_prepared_run_router())
 app.include_router(voice_router)
 app.include_router(skill_creator_router)

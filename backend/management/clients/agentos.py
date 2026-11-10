@@ -10,6 +10,7 @@ from contracts.agentos import (
     AgentActiveRun,
     AgentOperation,
     AgentRunLookup,
+    AgentRunReference,
     AgentStop,
     BackgroundRun,
     DebugRunReference,
@@ -27,6 +28,7 @@ from contracts.agentos import (
     ModelOperation,
     ModelReference,
     ModelResult,
+    PreparedAgentRun,
     PreparedEvaluationRun,
     TrackedBackgroundResult,
 )
@@ -74,6 +76,10 @@ class AgentOSClient:
 
     async def run_conversation(self, request: CompatibilityConversationRun, user_id: str, tenant_id: str):
         return await self._open_stream(CompatibilityOperation.CONVERSATION_RUN, request, user_id, tenant_id)
+
+    async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
+        result = await self._post_json(AgentOperation.RUN, payload, user_id, tenant_id)
+        return self._validate_result(AgentRunReference, result)
 
     async def resume(self, request: AgentResume, user_id: str, tenant_id: str) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RESUME, request, user_id, tenant_id)

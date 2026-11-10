@@ -17,7 +17,7 @@ from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
     AgentOperation, AgentResume, AgentRunReference, AgentRunningState, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityOperation, CompatibilityRun,
-    EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
+    EvaluationAgentResult, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import RuntimeUpstreamError
@@ -227,6 +227,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     with monkeypatch.context() as lifecycle_patches:
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
+    with monkeypatch.context() as run_patches:
+        await _assert_prepared_run_over_signed_http(run_patches)
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
@@ -1406,3 +1408,118 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
             ]
     finally:
         registry.unregister_agent_run(conversation_id, "legacy-actor", agent_run_info=info)
+
+
+async def _assert_prepared_run_over_signed_http(monkeypatch):
+    from infrastructure.rdb.agent_execution import ActiveExecutionError
+    from infrastructure.redis.agent_events import START
+    from runtime.agentos import prepared_run, resume
+
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    actor = ServicePrincipal("user-a", "tenant-a")
+    request = PreparedAgentRun.model_validate({
+        **reference.model_dump(),
+        "mode": "nexent",
+        "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}},
+        "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "revision-1"}},
+        "input": {"query": "question"},
+    })
+    journal_events = []
+    admissions = []
+    calls = []
+    finished = threading.Event()
+
+    def owns(conversation_id, *, user_id, tenant_id):
+        return (conversation_id, user_id, tenant_id) == (reference.conversation_id, actor.user_id, actor.tenant_id)
+
+    def begin(identity):
+        if not owns(identity.conversation_id, user_id=identity.user_id, tenant_id=identity.tenant_id):
+            raise PermissionError()
+        if admissions:
+            raise ActiveExecutionError()
+        admissions.append(identity)
+
+    class Journal:
+        def __init__(self, tenant_id, user_id, conversation_id, run_id):
+            assert owns(conversation_id, user_id=user_id, tenant_id=tenant_id)
+            assert run_id == reference.run_id
+
+        def start(self):
+            journal_events.append((START, {"kind": "start"}))
+
+        def append(self, index, data):
+            journal_events.append((f"{index}-0", {"kind": "chunk", "data": data}))
+
+        def repair_terminal(self, status):
+            journal_events.append((f"{len(journal_events)}-0", {"kind": "terminal", "status": status}))
+            finished.set()
+
+        def replay(self, after_id):
+            index = next(i for i, (event_id, _) in enumerate(journal_events) if event_id == after_id)
+            return [journal_events[index]], journal_events[index + 1:], journal_events[-1:]
+
+    async def control_io(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    async def hydrate(payload, signed_actor, materialize):
+        assert payload == request and signed_actor == actor and materialize is prepared_run.prepare_run_snapshot
+        return SimpleNamespace(attempt_outcome="completed")
+
+    async def runner(_info, **_kwargs):
+        calls.append("started")
+        yield '{"type":"thought","content":"step"}'
+        yield '{"type":"final_answer","content":"answer"}'
+
+    from runtime.executions import LocalExecutionRegistry
+    registry = LocalExecutionRegistry()
+    monkeypatch.setattr(prepared_run, "agent_run_manager", registry)
+    monkeypatch.setattr(prepared_run, "release_prepared_run", lambda info, cid, uid, status:
+                        registry.unregister_agent_run(cid, uid, status, info))
+    monkeypatch.setattr(prepared_run, "begin_execution", begin)
+    monkeypatch.setattr(prepared_run, "track_execution", lambda _identity: None)
+    monkeypatch.setattr(prepared_run, "mark_running", lambda _identity, _versions: True)
+    monkeypatch.setattr(prepared_run, "finish_execution", lambda _identity, status: status == "completed")
+    monkeypatch.setattr(prepared_run, "stop_requested", lambda _identity: False)
+    monkeypatch.setattr(prepared_run, "load_prepared_run", hydrate)
+    monkeypatch.setattr(prepared_run, "agent_run", runner)
+    monkeypatch.setattr(resume, "conversation_belongs_to", owns)
+    for module in (prepared_run, resume):
+        monkeypatch.setattr(module, "_control_io", control_io)
+        monkeypatch.setattr(module, "runtime_state_service", SimpleNamespace(enabled=True))
+        monkeypatch.setattr(module, "RunJournal", Journal)
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(prepared_run.create_prepared_run_router())
+    runtime.include_router(resume.create_run_lifecycle_router())
+
+    with serve(runtime) as runtime_url:
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        with pytest.raises(RuntimeUpstreamError) as foreign:
+            await agentos.start_prepared_run(request, actor.user_id, "tenant-b")
+        assert foreign.value.status_code == 404 and not admissions
+        async with httpx.AsyncClient(base_url=runtime_url, trust_env=False) as raw:
+            unauthorized = await raw.post(f"/api{AgentOperation.RUN.value}", json=request.model_dump(mode="json"))
+            assert unauthorized.status_code == 401
+        assert await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id) == reference
+        assert await asyncio.to_thread(finished.wait, 5)
+        with pytest.raises(RuntimeUpstreamError) as duplicate:
+            await agentos.start_prepared_run(request, actor.user_id, actor.tenant_id)
+        assert duplicate.value.status_code == 409
+
+        cursor = AgentResume(**reference.model_dump(), after_event_id=f"{reference.run_id}:1")
+        replay = await agentos.resume(cursor, actor.user_id, actor.tenant_id)
+        body = b"".join([chunk async for chunk in replay.body_iterator]).decode()
+        assert body == (
+            f"id: {reference.run_id}:2\nevent: agentos_observer\n"
+            'data: {"type":"final_answer","content":"answer"}\n\n'
+            f"id: {reference.run_id}:3\nevent: agentos_terminal\n"
+            'data: {"status": "completed"}\n\n'
+        )
+        denied = await agentos.resume(cursor, "user-b", actor.tenant_id)
+        assert denied.status_code == 404
+        assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([chunk async for chunk in denied.body_iterator])
+
+    assert len(admissions) == 1 and calls == ["started"]
+    assert registry.get_agent_run_info(reference.conversation_id, actor.user_id) is None

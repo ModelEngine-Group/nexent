@@ -182,12 +182,13 @@ def bind_assistant_message(session, identity: RunIdentity, message_id: int) -> N
         raise RuntimeError("AgentOS execution no longer owns the assistant projection")
 
 
-def finish_execution(identity: RunIdentity, status: str) -> None:
+def finish_execution(identity: RunIdentity, status: str) -> bool:
     try:
         with get_db_session() as session:
-            session.execute(update(AgentExecution).where(*_scope(identity), *_live_owner()).values(
+            result = session.execute(update(AgentExecution).where(*_scope(identity), *_live_owner()).values(
                 status=status, lease_until=None, journal_repair_pending=True,
             ))
+            return bool(result.rowcount)
     finally:
         untrack_execution(identity)
 

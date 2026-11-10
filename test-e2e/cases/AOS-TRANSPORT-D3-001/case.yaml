@@ -57,6 +57,9 @@ case:
   - order: 10
     action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
     expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy inspect and stop respect user and tenant ownership.
+  - order: 11
+    action: Submit a signed prepared conversation and reconnect to its Runtime journal after the first event.
+    expected: The exact run ID is returned, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -68,6 +71,7 @@ case:
   - The admission claim returns the original run identity on retry without starting a second execution.
   - Run lifecycle commands preserve actor and run isolation, report the latest event cursor and distinguish a cancellation request from terminal status.
   - Public stop and background execution use the run-scoped protocol, preserve the signed actor and reject foreign scope.
+  - Prepared conversation execution starts once and is resumable independently of the submit connection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -180,4 +184,9 @@ case:
     description: Public stop and automation background operations preserve exact run identity across signed HTTP.
     steps: [10]
     expected_results: [10]
+    forbidden_side_effects: [2]
+  - id: AC-19
+    description: Prepared Agent.run and resume use the same scoped identity and retain raw observer events across HTTP requests.
+    steps: [11]
+    expected_results: [11]
     forbidden_side_effects: [2]

@@ -30,6 +30,7 @@ change:
     - Automation schedules run and inspect through AgentOS, and Runtime cancels an abandoned background request.
     - Prepared evaluation resolves an exact tenant model revision and constructs SDK objects inside Runtime.
     - Management sends a supported evaluation snapshot once and Runtime rebinds builtin file access to the signed actor.
+    - Prepared Agent.run writes raw observer events to a scoped journal for Agent.resume without loading Management.
     - Evaluations require a prepared snapshot. The signed legacy evaluation route rejects execution with HTTP 410.
     - Signed resume authorizes the conversation and replays a strict run-scoped cursor.
     - Ordinary conversation admission uses the signed AgentOS compatibility transport and preserves request and SSE context.
@@ -65,6 +66,7 @@ change:
     - test/backend/services/test_evaluation_dispatch.py
     - test/backend/services/test_agent_evaluation_service.py
     - test/backend/app/test_agent_app.py
+    - test/backend/app/test_agentos_prepared_run.py
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_evaluation_compiler.py
     - test/backend/app/test_agentos_prepared_knowledge.py
