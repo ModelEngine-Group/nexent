@@ -63,9 +63,7 @@ def _make_context_budget_snapshot(**overrides):
 
 def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resolved_capacity_snapshot, context_budget_snapshot):
     from services import nl2agent_service as nl2agent_service
-    import contracts.constants.environment as const
-    monkeypatch.setattr(nl2agent_service, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
-    monkeypatch.setattr(const, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
+    monkeypatch.setattr(nl2agent_service, 'get_tenant_local_mcp_server', lambda tenant: 'http://localhost:9999')
     monkeypatch.setattr(nl2agent_service, 'build_authorized_context_input', lambda run_info: None)
     fake_tenant_config_manager = MagicMock()
     fake_tenant_config_manager.get_model_config.return_value = {'model_name': 'gpt-4o', 'model_factory': 'openai'}
@@ -103,7 +101,7 @@ async def test_nl2agent_context_budget_resolution_and_fallback(monkeypatch):
     input_budget = 124000
     capacity_monitoring = {'provider': 'openai', 'model_name': 'gpt-4o', 'fingerprint': 'w1-fingerprint-test'}
     nl2agent_service, resolve_context_budget = _patch_dependencies(monkeypatch, input_budget=input_budget, capacity_monitoring=capacity_monitoring, resolved_capacity_snapshot=resolved_capacity, context_budget_snapshot=snapshot)
-    run_info = await nl2agent_service.build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer test-token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
+    run_info = await nl2agent_service.build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer test-token', identity=AuthenticatedIdentity('test_user', 'tenant-a'))
     resolve_context_budget.assert_called_once_with(capacity_snapshot=resolved_capacity, tenant_id='tenant-a', agent_requested_output_tokens=None, request_requested_output_tokens=None)
     config = run_info.agent_config.context_manager_config
     assert config.token_threshold == snapshot.compaction_trigger_threshold_tokens
@@ -115,7 +113,7 @@ async def test_nl2agent_context_budget_resolution_and_fallback(monkeypatch):
     assert run_info.agent_config.context_budget_snapshot is snapshot
     input_budget = 32768
     nl2agent_service, resolve_context_budget = _patch_dependencies(monkeypatch, input_budget=input_budget, capacity_monitoring={}, resolved_capacity_snapshot=None, context_budget_snapshot=None)
-    run_info = await nl2agent_service.build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer test-token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
+    run_info = await nl2agent_service.build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer test-token', identity=AuthenticatedIdentity('test_user', 'tenant-a'))
     config = run_info.agent_config.context_manager_config
     assert config.token_threshold == input_budget
     assert config.effective_input_limit_tokens == 0

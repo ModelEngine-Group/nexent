@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from management.services.agent.creation import build_nl2agent_system_prompt
 from contracts.errors.exceptions import AgentDraftEditError
 from contracts.agent import AgentInfoRequest
-from services import nl2agent_service as service
+from management.services.agent import nl2agent as service
 from tool_collection.mcp import nl2agent_mcp_tools as tools
 
 

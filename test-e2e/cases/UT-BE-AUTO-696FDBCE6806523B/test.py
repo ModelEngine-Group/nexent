@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from services import nl2agent_service as nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 
 CASE_ID = "UT-BE-AUTO-696FDBCE6806523B"
 _NORMAL_TOOL = "some_normal_tool"

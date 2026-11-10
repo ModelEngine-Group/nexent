@@ -20,11 +20,10 @@ from pydantic import ValidationError
 from contracts.constants.environment import TOKEN
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
-from services.nl2agent_service import (
+from management.services.agent.nl2agent import (
     Nl2AgentCompletionError,
     Nl2AgentDraftSaveError,
     Nl2AgentResourceError,
-    _Nl2AgentBoundaryObserver,
     _build_verified_bound_resources_context,
     _load_internal_uninstalled_resource_catalog,
     _load_installed_resource_catalog,
@@ -32,8 +31,6 @@ from services.nl2agent_service import (
     _normalize_tool_config,
     _redact_installation_snapshot,
     _resource_similarity,
-    build_nl2agent_run_info,
-    create_nl2agent_stream,
     recommend_installed_resources_impl,
     recommend_resources_impl,
     recommend_uninstalled_resources_impl,
@@ -42,6 +39,11 @@ from services.nl2agent_service import (
     search_uninstalled_resources_impl,
     search_installed_mcp_tools_by_query,
     validate_agent_generation_complete_impl,
+)
+from services.nl2agent_service import (
+    _Nl2AgentBoundaryObserver,
+    build_nl2agent_run_info,
+    create_nl2agent_stream,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -176,7 +178,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         return_value="MEMBER",
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=1,
     )
 
@@ -219,11 +221,11 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=[{"agent_id": 22, "name": None}],
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=1,
     )
 
@@ -256,11 +258,11 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=[{"agent_id": 22, "name": None}],
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields", return_value=1,
+        "management.services.agent.nl2agent.update_agent_draft_fields", return_value=1,
     )
 
     result = save_agent_draft_fields_impl(
@@ -289,7 +291,7 @@ def test_nl2agent_cannot_rename_existing_display_name(mocker):
         "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
-    update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
+    update_fields = mocker.patch("management.services.agent.nl2agent.update_agent_draft_fields")
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
         save_agent_draft_fields_impl(
@@ -339,11 +341,11 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.nl2agent.query_all_agent_info_by_tenant_id",
         return_value=existing_agents,
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields"
+        "management.services.agent.nl2agent.update_agent_draft_fields"
     )
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
@@ -418,7 +420,7 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
         return_value=role,
     )
     update_fields = mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields"
+        "management.services.agent.nl2agent.update_agent_draft_fields"
     )
 
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
@@ -451,7 +453,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         side_effect=RuntimeError("private database details"),
     )
 
@@ -485,7 +487,7 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
         return_value="MEMBER",
     )
     mocker.patch(
-        "services.nl2agent_service.update_agent_draft_fields",
+        "management.services.agent.nl2agent.update_agent_draft_fields",
         return_value=0,
     )
 
@@ -525,7 +527,7 @@ def test_agent_draft_fields_reject_non_string_name(name):
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
     query_tools = mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 8,
@@ -573,7 +575,7 @@ def test_search_filters_catalog_and_returns_safe_metadata(mocker):
 
 def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": tool_id,
@@ -586,9 +588,9 @@ def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
             for tool_id in [9, 2, 7, 1, 5, 3]
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=80)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=80)
     mocker.patch(
-        "services.nl2agent_service.fuzz.token_set_ratio",
+        "management.services.agent.nl2agent.fuzz.token_set_ratio",
         return_value=80,
     )
 
@@ -603,7 +605,7 @@ def test_search_sorts_ties_by_tool_id_and_limits_to_five(mocker):
 
 def test_search_filters_scores_below_threshold(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 1,
@@ -615,9 +617,9 @@ def test_search_filters_scores_below_threshold(mocker):
             }
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=44.9)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=44.9)
     mocker.patch(
-        "services.nl2agent_service.fuzz.token_set_ratio",
+        "management.services.agent.nl2agent.fuzz.token_set_ratio",
         return_value=20,
     )
 
@@ -629,7 +631,7 @@ def test_search_filters_scores_below_threshold(mocker):
 
 def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
     mocker.patch(
-        "services.nl2agent_service.query_all_tools",
+        "management.services.agent.nl2agent.query_all_tools",
         return_value=[
             {
                 "tool_id": 1,
@@ -670,8 +672,8 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
             },
         ],
     )
-    mocker.patch("services.nl2agent_service.fuzz.WRatio", return_value=90)
-    mocker.patch("services.nl2agent_service.fuzz.token_set_ratio", return_value=90)
+    mocker.patch("management.services.agent.nl2agent.fuzz.WRatio", return_value=90)
+    mocker.patch("management.services.agent.nl2agent.fuzz.token_set_ratio", return_value=90)
 
     result = search_installed_mcp_tools_by_query(
         "tenant-a",
@@ -789,7 +791,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
         ],
     )
     mocker.patch(
-        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        "management.services.agent.nl2agent.ENABLE_AIDP_KNOWLEDGE",
         False,
     )
 
@@ -891,7 +893,7 @@ async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
         return_value=[],
     )
     mocker.patch(
-        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        "management.services.agent.nl2agent.ENABLE_AIDP_KNOWLEDGE",
         enable_aidp_knowledge,
     )
 
@@ -1072,7 +1074,7 @@ async def test_recommend_uninstalled_resources_overwrites_snapshot_and_redacts_s
         "default_option_id": "repository",
     }
     mocker.patch(
-        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        "management.services.agent.nl2agent._load_internal_uninstalled_resource_catalog",
         new=AsyncMock(return_value=[actual]),
     )
     supplied = ResourceCandidate(
@@ -1248,7 +1250,7 @@ async def test_recommend_uninstalled_resources_rejects_missing_and_mismatched_en
     mocker,
 ):
     load_catalog = mocker.patch(
-        "services.nl2agent_service._load_internal_uninstalled_resource_catalog",
+        "management.services.agent.nl2agent._load_internal_uninstalled_resource_catalog",
         new=AsyncMock(return_value=[]),
     )
     supplied = ResourceCandidate(
@@ -1303,11 +1305,11 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
     installed_result = MagicMock()
     uninstalled_result = MagicMock()
     installed_resolver = mocker.patch(
-        "services.nl2agent_service.recommend_installed_resources_impl",
+        "management.services.agent.nl2agent.recommend_installed_resources_impl",
         new=AsyncMock(return_value=installed_result),
     )
     uninstalled_resolver = mocker.patch(
-        "services.nl2agent_service.recommend_uninstalled_resources_impl",
+        "management.services.agent.nl2agent.recommend_uninstalled_resources_impl",
         new=AsyncMock(return_value=uninstalled_result),
     )
 
@@ -1342,7 +1344,7 @@ async def test_recommend_resources_dispatches_homogeneous_sources(mocker):
 @pytest.mark.asyncio
 async def test_recommend_resources_overwrites_model_display_fields(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(
             return_value=[
                 {
@@ -1364,7 +1366,7 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
         ),
     )
     query_bound_tools = mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[{"tool_id": 7}],
     )
     supplied = ResourceCandidate(
@@ -1402,7 +1404,7 @@ async def test_recommend_resources_overwrites_model_display_fields(mocker):
 @pytest.mark.asyncio
 async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries(mocker):
     load_catalog = mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(return_value=[]),
     )
     supplied = ResourceCandidate(
@@ -1414,7 +1416,7 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
         score=0.9,
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[],
     )
 
@@ -1449,7 +1451,7 @@ async def test_recommend_resources_rejects_missing_or_mismatched_catalog_entries
 @pytest.mark.asyncio
 async def test_verified_binding_context_rereads_database_without_secret_values(mocker):
     mocker.patch(
-        "services.nl2agent_service.require_agent_draft_edit",
+        "management.services.agent.nl2agent.require_agent_draft_edit",
         return_value={
             "name": "current_assistant",
             "description": "Current authoritative description",
@@ -1457,7 +1459,7 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
         },
     )
     mocker.patch(
-        "services.nl2agent_service._load_installed_resource_catalog",
+        "management.services.agent.nl2agent._load_installed_resource_catalog",
         new=AsyncMock(
             return_value=[
                 {
@@ -1482,11 +1484,11 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
         ),
     )
     mocker.patch(
-        "services.nl2agent_service.query_all_enabled_tool_instances",
+        "management.services.agent.nl2agent.query_all_enabled_tool_instances",
         return_value=[{"tool_id": 7, "params": {"api_key": "private-secret"}}],
     )
     mocker.patch(
-        "services.nl2agent_service.query_enabled_skill_instances",
+        "management.services.agent.nl2agent.query_enabled_skill_instances",
         return_value=[
             {
                 "skill_id": 11,
@@ -1534,7 +1536,7 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
         }
     ]
     load_state = mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(draft, facts),
     )
@@ -1558,7 +1560,7 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
     mocker, facts,
 ):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(
             {
@@ -1586,7 +1588,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
     mocker, prompt,
 ):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=(
             {
@@ -1624,7 +1626,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=({"name": "draft_assistant", "description": " "}, []),
     )
@@ -1643,7 +1645,7 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 @pytest.mark.asyncio
 async def test_validate_agent_generation_complete_requires_generated_name(mocker):
     mocker.patch(
-        "services.nl2agent_service._load_verified_nl2agent_state",
+        "management.services.agent.nl2agent._load_verified_nl2agent_state",
         new_callable=AsyncMock,
         return_value=({"display_name": "Draft", "description": "Ready"}, []),
     )

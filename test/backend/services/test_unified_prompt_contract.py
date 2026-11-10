@@ -15,7 +15,7 @@ from management.db.agent.models import AgentInfo
 from contracts.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 from management.services.repository.agent.listing import _extract_root_agent_from_snapshot
 from nexent.core.utils.observer import MessageObserver
-from services import nl2agent_service as service
+from management.services.agent import nl2agent as service
 from tool_collection.mcp import nl2agent_mcp_tools as tools
 
 

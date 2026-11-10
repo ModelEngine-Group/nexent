@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 from mcp.types import Tool
 from pydantic import ValidationError
 
-import services.nl2agent_service as nl2agent_service
+from management.services.agent import nl2agent as nl2agent_service
 from management.services.tool import configuration as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
 from contracts.errors.exceptions import AgentDraftEditError

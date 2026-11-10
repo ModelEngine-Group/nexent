@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from contracts.agent import NL2AgentRunRequest, NL2SkillRunRequest
-from services import nl2agent_service as nl2agent_service
+from services import nl2agent_service
 from services import nl2skill_service as nl2skill_service
 
 

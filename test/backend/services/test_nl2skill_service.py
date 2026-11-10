@@ -12,13 +12,15 @@ import pytest
 
 from contracts.agent import NL2SkillRunRequest
 from services import nl2skill_service as nl2skill_service
-from services.nl2skill_service import (
+from management.services.skill.nl2skill import (
     _assemble_draft_content,
-    _convert_history,
     _decorate_event,
     _extract_target_files,
     _normalize_draft_snapshot,
     _normalize_relative_path,
+)
+from services.nl2skill_service import (
+    _convert_history,
     _resolve_model_for_nl2skill,
     build_nl2skill_run_info,
     create_nl2skill_stream,

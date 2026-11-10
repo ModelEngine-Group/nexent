@@ -97,7 +97,7 @@ async def test_regeneration_retries_invalid_model_output(mocker):
 ])
 @pytest.mark.asyncio
 async def test_generation_completion_uses_the_same_identifier_contract(mocker, name, valid):
-    from services import nl2agent_service as service
+    from management.services.agent import nl2agent as service
 
     draft = {
         "name": name, "description": "Ready", "prompt": "Ready", "greeting_message": "Hello",
