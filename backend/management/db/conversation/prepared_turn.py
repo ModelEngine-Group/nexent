@@ -104,7 +104,8 @@ def stage_turn(
             raise AdmissionScopeError
         row.status = "dispatching"
         row.conversation_id = reference.conversation_id
-        row.prepared_user_turn = user_turn
+        row.prepared_automation_context = user_turn.get("automation")
+        row.prepared_user_turn = {key: value for key, value in user_turn.items() if key != "automation"}
         row.prepared_message_index = message_index + 1
         row.update_time = datetime.now(timezone.utc).replace(tzinfo=None)
         return _view(row)
@@ -134,7 +135,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             if _next_index(session, conversation_id) != row.prepared_message_index - 1:
                 raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
-            create_conversation_message({
+            source_message_id = create_conversation_message({
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index - 1,
                 "role": "user", "content": user_turn["query"], "minio_files": user_turn["minio_files"],
             }, turn.user_id, db_session=session)
@@ -145,6 +146,10 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             conversation.chat_mode = user_turn["chat_mode"]
             conversation.agent_id = user_turn["agent_id"]
             row.prepared_user_turn = None
+            if row.prepared_automation_context is not None:
+                row.prepared_automation_context = {
+                    **row.prepared_automation_context, "source_message_id": source_message_id,
+                }
             row.status = "admitted"
             row.journal_available = True
         return _view(row)
@@ -168,6 +173,7 @@ def close_turn(turn: PreparedTurn, *, failure_status: str | None = None) -> None
                 message.streaming_owner == "management", message.status == "streaming", message.delete_flag == "N",
             ).values(status=failure_status, updated_by=turn.user_id, update_time=func.now()))
         row.prepared_user_turn = None
+        row.prepared_automation_context = None
         row.prepared_message_index = None
 
 
@@ -178,3 +184,33 @@ def pending_turns(after_run_id: str, limit: int) -> list[PreparedTurn]:
             _pending(admission.run_id > after_run_id).order_by(admission.run_id).limit(limit)
         )
         return [_view(row) for row in rows]
+
+def automation_turn(reference: AgentRunReference, user_id: str, tenant_id: str) -> PreparedTurn | None:
+    admission = ConversationRunAdmission
+    with get_db_session() as session:
+        if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
+            return None
+        row = session.scalar(_pending(
+            admission.run_id == reference.run_id, admission.conversation_id == reference.conversation_id,
+            admission.created_by == user_id, admission.tenant_id == tenant_id,
+            admission.prepared_automation_context.is_not(None),
+        ))
+        return _view(row) if row is not None else None
+
+
+def automation_source(turn: PreparedTurn) -> dict | None:
+    with get_db_session() as session:
+        if _owned(session, turn.reference.conversation_id, turn.user_id, turn.tenant_id) is None:
+            return None
+        row = session.scalar(_pending(*_turn_scope(turn)))
+        if row is None or row.status != "admitted" or not row.prepared_automation_context:
+            return None
+        context = row.prepared_automation_context
+        message = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.message_id == context["source_message_id"],
+            ConversationMessage.conversation_id == turn.reference.conversation_id,
+            ConversationMessage.created_by == turn.user_id, ConversationMessage.message_role == "user",
+            ConversationMessage.message_index == row.prepared_message_index - 1,
+            ConversationMessage.status == "completed", ConversationMessage.delete_flag == "N",
+        ))
+        return {**context, "user_message": message.message_content} if message is not None else None

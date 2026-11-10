@@ -13,7 +13,7 @@ from contracts.constants.environment import (
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import WorkbenchError
 from contracts.tool import ToolParamsRequest
-from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+from infrastructure.agent_tool_config import build_automation_proposal_tool, build_parallel_executor_tool_config
 from management.db.agent.repository import (
     query_sub_agent_relations,
     resolve_sub_agent_version_no,
@@ -235,24 +235,27 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from management.services.automation.proposal import (
-            agent_loop_automation_tool_adapter,
-        )
-
-        tool_list.append(
-            agent_loop_automation_tool_adapter.build_tool_config(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                conversation_id=int(conversation_id),
-                agent_id=int(agent_id),
-                user_message=automation_user_message,
-                agent_version_no=version_no,
-                model_id=automation_model_id,
-                tool_params=normalized_tool_params.model_dump(mode="json"),
-                has_attachments=automation_has_attachments,
-                language=language,
+        if portable_evaluation:
+            tool_list.append(build_automation_proposal_tool())
+        else:
+            from management.services.automation.proposal import (
+                agent_loop_automation_tool_adapter,
             )
-        )
+
+            tool_list.append(
+                agent_loop_automation_tool_adapter.build_tool_config(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    conversation_id=int(conversation_id),
+                    agent_id=int(agent_id),
+                    user_message=automation_user_message,
+                    agent_version_no=version_no,
+                    model_id=automation_model_id,
+                    tool_params=normalized_tool_params.model_dump(mode="json"),
+                    has_attachments=automation_has_attachments,
+                    language=language,
+                )
+            )
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")

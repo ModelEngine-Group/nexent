@@ -234,6 +234,8 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
     with monkeypatch.context() as turn_patches:
         await _assert_public_prepared_turn_over_signed_http(turn_patches)
+    with monkeypatch.context() as callback_patches:
+        await _assert_automation_proposal_callback(callback_patches)
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
@@ -1109,6 +1111,7 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
 
     monkeypatch.setattr(conversation_submission, "_control_io", control_io)
     monkeypatch.setattr(prepared_turn, "find_pending_turn", lambda *_: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(prepared_turn, "start_turn", lambda *_: asyncio.sleep(0, result=None))
     monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
     monkeypatch.setattr(
         conversation_submission, "conversation_belongs_to",
@@ -1842,12 +1845,12 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
         "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "example",
-                     "prompt_templates": {"system_prompt": "Answer"}},
+                     "prompt_templates": {"system_prompt": "Answer"},
+                     "tools": [{"tool_id": "create_scheduled_task_proposal", "version": "1"}]},
         "models": {"llm": {"model_id": 11, "alias": "demo", "revision": "revision"}},
     })
     state = {"status": "pending"}
     calls = []
-    fields = reference.model_dump()
     pending = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
                               message_index=5, assistant_message_id=None)
     confirmed = SimpleNamespace(**{**vars(pending), "assistant_message_id": 81})
@@ -1862,6 +1865,9 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     def stage(_scope, ref, user_id, tenant_id, index, turn):
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, 4)
         assert turn["query"] == "test"
+        assert turn["automation"] == {
+            "agent_id": 7, "agent_version_no": 2, "model_id": None, "tool_params": None, "has_attachments": False,
+        }
         calls.append("stage")
         return pending
 
@@ -1936,7 +1942,7 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
     with serve(runtime) as runtime_url:
         monkeypatch.setattr(runtime_client, "_agentos_client",
                             lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
-        request = {**fields, "query": "test", "agent_id": 7, "enable_automation_tool": False}
+        request = {"conversation_id": reference.conversation_id, "query": "test", "agent_id": 7}
         headers = {"Authorization": actor.tenant_id, "Idempotency-Key": "turn-1"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management),
                                      base_url="http://management") as browser:
@@ -1949,3 +1955,95 @@ async def _assert_public_prepared_turn_over_signed_http(monkeypatch):
         assert retry.status_code == 202 and retry.json()["run_id"] == reference.run_id
         assert denied.status_code == 404
     assert calls == ["stage", "start", "confirm", "project", "close"]
+
+
+async def _assert_automation_proposal_callback(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from contracts.agentos import AgentResource, ManagementOperation, ToolBinding
+    from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
+    from management.api.automation import agentos_callback as callback_api
+    from management.services.automation import agentos_callback, proposal
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import resume
+    from runtime.agentos.prepared_automation import materialize_automation_tool
+
+    actor = ServicePrincipal("proposal-user", "proposal-tenant")
+    reference = AgentRunReference(conversation_id=56, run_id="c" * 32)
+    turn = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
+                           assistant_message_id=None)
+    confirmed = SimpleNamespace(**{**vars(turn), "assistant_message_id": 91})
+    observations = Mock()
+    sources = []
+
+    def owned_turn(ref, user_id, tenant_id):
+        return turn if (ref, user_id, tenant_id) == (reference, actor.user_id, actor.tenant_id) else None
+
+    def inspect(run_id, user_id, tenant_id, conversation_id, **_):
+        assert (run_id, user_id, tenant_id, conversation_id) == (
+            reference.run_id, actor.user_id, actor.tenant_id, reference.conversation_id,
+        )
+        return {"conversation_id": conversation_id, "status": "running", "cancellation_requested": False}
+
+    async def inline(_name, fn, *args, lane=None, owner=None, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def create(request, tenant_id, user_id, **options):
+        assert (tenant_id, user_id) == (actor.tenant_id, actor.user_id)
+        assert request.message == "Remind me every Monday" and request.agent_version_no == 3
+        assert options["persist_conversation_exchange"] is False and options["force_llm"] is True
+        sources.append(options["source_message_id"])
+        return {"proposal_id": 84, "title": "Weekly reminder"}
+
+    monkeypatch.setattr(agentos_callback, "run_blocking", inline)
+    monkeypatch.setattr(agentos_callback.store, "automation_turn", owned_turn)
+    confirm = Mock(return_value=confirmed)
+    monkeypatch.setattr(agentos_callback.store, "confirm_turn", confirm)
+    monkeypatch.setattr(agentos_callback.store, "automation_source", lambda current: {
+        "agent_id": 7, "agent_version_no": 3, "source_message_id": 92,
+        "user_message": "Remind me every Monday",
+    } if current is confirmed else None)
+    monkeypatch.setattr(proposal.agent_automation_facade, "create_proposal", AsyncMock(side_effect=create))
+    monkeypatch.setattr(resume, "_control_io", inline)
+    monkeypatch.setattr(resume, "read_execution", inspect)
+    monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(resume.create_run_lifecycle_router())
+    management = FastAPI(root_path="/api")
+    management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    management.include_router(callback_api.router)
+    with serve(runtime) as runtime_url, serve(management) as management_url:
+        monkeypatch.setattr(agentos_callback, "_agentos_client",
+                            lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+        monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", management_url)
+        resource = AgentResource(
+            agent_id=7, version_no=3, name="agent", description="", prompt_templates={},
+            tools=[ToolBinding(tool_id=AUTOMATION_PROPOSAL_TOOL, version="1")],
+        )
+        config = materialize_automation_tool(resource, actor, reference)[AUTOMATION_PROPOSAL_TOOL]
+        tool = NexentAgent.create_builtin_tool(SimpleNamespace(observer=observations), config)
+        response = await asyncio.to_thread(tool.forward, "Untrusted text supplied by the model")
+        assert "scheduled-task proposal is ready" in response
+        assert observations.add_message.call_args.args[1].value == "automation_proposal"
+        assert json.loads(observations.add_message.call_args.args[2])["proposal_id"] == 84
+
+        operation = ManagementOperation.AUTOMATION_PROPOSAL
+        path = f"/api{operation.value}"
+        body = reference.model_dump_json().encode()
+        async with httpx.AsyncClient(base_url=management_url, trust_env=False) as client:
+            raw = await client.post(path, content=body)
+            forward = sign_call(AgentOperation.RUN, body, actor)
+            rejected = await client.post(path, content=body, headers={"Authorization": f"Bearer {forward}"})
+            foreign = sign_call(operation, body, ServicePrincipal(actor.user_id, "other"))
+            denied = await client.post(path, content=body, headers={"Authorization": f"Bearer {foreign}"})
+            valid = sign_call(operation, body, actor)
+            tampered = await client.post(path, content=body + b" ", headers={"Authorization": f"Bearer {valid}"})
+            another = reference.model_copy(update={"run_id": "d" * 32}).model_dump_json().encode()
+            cross_run = sign_call(operation, another, actor)
+            forbidden = await client.post(path, content=another, headers={"Authorization": f"Bearer {cross_run}"})
+        assert (raw.status_code, rejected.status_code, denied.status_code, tampered.status_code) == (401, 401, 404, 401)
+        assert forbidden.status_code == 404
+    assert sources == [92]
+    confirm.assert_called_once_with(turn)

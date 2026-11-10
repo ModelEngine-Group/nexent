@@ -28,6 +28,7 @@ class ConversationRunAdmission(TableBase):
     prepared_user_turn = Column(JSONB(none_as_null=True), doc="Uncommitted user message and settings until Runtime admission.")
     prepared_message_index = Column(Integer, doc="Assistant message index while Management projection is outstanding.")
     prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
+    prepared_automation_context = Column(JSONB(none_as_null=True), doc="Authorized proposal settings for the pending run.")
 
 
 class AdmissionScopeError(ValueError):

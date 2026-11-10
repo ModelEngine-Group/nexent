@@ -20,7 +20,8 @@ from infrastructure.agent_attachments import _build_internal_s3_url, validate_at
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
 from infrastructure.agent_model_overrides import get_provider_body_patch, merge_provider_body, provider_body_revision
 from infrastructure.agent_tool_config import (
-    PLAN_TOOL_NAMES, build_parallel_executor_tool_config, build_plan_tool_configs,
+    AUTOMATION_PROPOSAL_TOOL, PLAN_TOOL_NAMES, build_automation_proposal_tool,
+    build_parallel_executor_tool_config, build_plan_tool_configs,
 )
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
@@ -128,7 +129,7 @@ async def prepare_conversation_snapshot(
         raise ForbiddenError("Conversation is not accessible to the current identity")
     if any((
         request.agent_id is None, request.is_debug, request.entrypoint,
-        request.enable_automation_tool, request.generation_config, request.metadata is not None,
+        request.generation_config, request.metadata is not None,
         request.clarification_response is not None, request.knowledge_scope is not None,
         conversation.get("workbench_config") is not None, conversation.get("knowledge_scope") is not None,
     )):
@@ -165,7 +166,8 @@ async def prepare_conversation_snapshot(
         reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
         requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
         conversation_id=reference.conversation_id, context_policy=request.context_policy,
-        enable_automation_tool=False, enable_planning=bool(request.enable_plan), prepared_conversation=scope,
+        enable_automation_tool=request.enable_automation_tool, enable_planning=bool(request.enable_plan),
+        prepared_conversation=scope,
     )
 
 
@@ -268,12 +270,12 @@ def _export_skill_bindings(agent, tenant_id, context_items):
     ]
 
 
-def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_planning=False):
+def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False):
     if agent.pre_run_tool_events or agent.sandbox_policy is not None:
         raise ValueError("Unsupported prepared resource")
     plan_tools = [tool for tool in agent.tools if tool.name in PLAN_TOOL_NAMES]
     if plan_tools or agent.enable_planning:
-        if not (allow_planning and agent.enable_planning and len(plan_tools) == len(PLAN_TOOL_NAMES)):
+        if not (allow_public_tools and agent.enable_planning and len(plan_tools) == len(PLAN_TOOL_NAMES)):
             raise ValueError("Unsupported prepared planning scope")
         expected = {tool.name: tool.class_name for tool in build_plan_tool_configs()}
         if set(expected) != {tool.name for tool in plan_tools} or any(
@@ -281,6 +283,10 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             for tool in plan_tools
         ):
             raise ValueError("Unsupported prepared planning tools")
+
+    proposal_tools = [tool for tool in agent.tools if tool.name == AUTOMATION_PROPOSAL_TOOL]
+    if proposal_tools and (not allow_public_tools or proposal_tools != [build_automation_proposal_tool()]):
+        raise ValueError("Unsupported prepared automation proposal binding")
 
     profile = agent.model_dump(mode="json", include=set(EvaluationAgentOptions.model_fields))
     context_items = profile.get("context_items")
@@ -332,7 +338,7 @@ def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_ser
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
-        elif tool.name in PLAN_TOOL_NAMES:
+        elif tool.name in PLAN_TOOL_NAMES or tool.name == AUTOMATION_PROPOSAL_TOOL:
             binding = ToolBinding(tool_id=tool.name, version="1")
         elif tool.name in set(EvaluationSkillTool):
             binding = _builtin_binding(tool)
@@ -407,7 +413,7 @@ def export_snapshot(
         aliases = {}
         resource = _export_resource(
             agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {},
-            allow_planning=prepared_conversation is not None,
+            allow_public_tools=prepared_conversation is not None,
         )
         bindings = [
             _export_model(alias, models, tenant_id, resource, agent_model_overrides) for alias in aliases

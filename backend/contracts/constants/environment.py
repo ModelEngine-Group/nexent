@@ -22,6 +22,7 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
+MANAGEMENT_AGENTOS_URL = os.getenv('MANAGEMENT_AGENTOS_URL', 'http://nexent-config:5010').rstrip('/')
 # Downstream verification settings; Gateway owns its upstream configuration.
 # Staged compatibility flag; shipped deployment and the standalone image enable it.
 _GATEWAY_AUTH_FLAG = os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower()

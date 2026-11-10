@@ -3,7 +3,7 @@
 
 from starlette.responses import JSONResponse
 
-from contracts.agentos import PRINCIPAL_KEY
+from contracts.agentos import PRINCIPAL_KEY, ManagementOperation
 from gateway.security.policy import canonical_path
 from gateway.downstream.identity import (
     IDENTITY_HEADER, LOOKUP_PATH, IdentityError, enabled, identity_context, signing_key, verify_identity,
@@ -28,8 +28,10 @@ class GatewayIdentityMiddleware:
             return await self.app(scope, receive, send)
         if scope["type"] == "http" and method == "OPTIONS" and "origin" in headers and "access-control-request-method" in headers:
             return await self.app(scope, receive, send)
-        if self.audience == "management" and method == "POST" and path == LOOKUP_PATH:
-            # The private endpoint verifies a body-bound service token itself.
+        if self.audience == "management" and method == "POST" and path in {
+            LOOKUP_PATH, ManagementOperation.AUTOMATION_PROPOSAL.value,
+        }:
+            # These private endpoints verify their own body-bound service token.
             return await self.app(scope, receive, send)
         if self.audience == "runtime" and PRINCIPAL_KEY in scope:
             # AgentOSMiddleware already checked the operation and exact body.

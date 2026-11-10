@@ -20,7 +20,7 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning"])
+@pytest.mark.parametrize("kind", ["evaluation", "ordinary", "planning", "default"])
 @pytest.mark.parametrize("persisted_body", [False, True])
 async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, kind):
     planning = kind == "planning"
@@ -82,7 +82,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
         prepared = await evaluation_snapshot.prepare_conversation_snapshot(
             AgentRequest(query="hello", agent_id=7, conversation_id=42,
-                         enable_automation_tool=False, enable_plan=planning),
+                         enable_automation_tool=kind == "default", enable_plan=planning),
             reference, user, tenant, language="en", timezone="Asia/Shanghai", current_user_message_id=23,
         )
         assert isinstance(prepared, PreparedAgentRun)
@@ -137,6 +137,11 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     try:
         for agent in [info.agent_config, *info.agent_config.worker_agents]:
             expected = ["parallel_executor", "download_from_s3", "upload_to_s3"]
+            if kind == "default" and agent is info.agent_config:
+                expected.insert(1, "create_scheduled_task_proposal")
+                tool = next(tool for tool in agent.tools if tool.name == "create_scheduled_task_proposal")
+                assert callable(tool.metadata["create_proposal"])
+                assert "create_proposal" not in encoded
             if planning and agent is info.agent_config:
                 expected.extend(["create_plan", "update_plan_step"])
                 executor = SimpleNamespace(observer=info.observer)

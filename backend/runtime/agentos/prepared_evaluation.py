@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import (
-    EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
+    AgentRunReference, EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
     ParallelExecutorBinding, PreparedAgentRun, PreparedEvaluationRun,
 )
 from contracts.constants.environment import (
@@ -50,6 +50,7 @@ from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
 from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_analysis import materialize_analysis_tools
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
+from runtime.agentos.prepared_automation import materialize_automation_tool
 from runtime.agentos.prepared_knowledge import materialize_knowledge_search
 from runtime.agentos.prepared_langchain import materialize_langchain_tools
 from runtime.agentos.prepared_local_tool import materialize_local_tools
@@ -156,7 +157,7 @@ def _materialize_external_agents(resource, actor):
 
 def _materialize_agent(
     resource, actor, workspace_path, workspace_run_id, model_aliases, used_aliases, mcp,
-    *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, allow_planning=False,
+    *, language, sandbox_enabled, root_alias=None, publish_skill_artifacts=False, public_reference=None,
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
@@ -171,7 +172,7 @@ def _materialize_agent(
     used_aliases.add(alias)
     plan_bindings = [binding for binding in resource.tools if binding.tool_id in PLAN_TOOL_NAMES]
     if plan_bindings and (
-        not allow_planning or len(plan_bindings) != len(PLAN_TOOL_NAMES)
+        public_reference is None or len(plan_bindings) != len(PLAN_TOOL_NAMES)
         or {binding.tool_id for binding in plan_bindings} != PLAN_TOOL_NAMES
         or any(binding.version != "1" or binding.parameters or binding.credential_ref is not None
                for binding in plan_bindings)
@@ -181,6 +182,7 @@ def _materialize_agent(
     local_tools = materialize_skill_tools(
         resource, actor, workspace_path, publish_artifacts=publish_skill_artifacts,
     )
+    local_tools.update(materialize_automation_tool(resource, actor, public_reference))
     if plan_bindings:
         local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
     local_tools.update(materialize_local_tools(resource, actor, language))
@@ -309,7 +311,9 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
                 payload.resource, actor, workspace_path, workspace_run_id, aliases, used_aliases, mcp,
                 language=payload.language, sandbox_enabled=sandbox_enabled, root_alias=payload.models.llm.alias,
                 publish_skill_artifacts=isinstance(payload, PreparedAgentRun),
-                allow_planning=isinstance(payload, PreparedAgentRun),
+                public_reference=AgentRunReference(
+                    run_id=payload.run_id, conversation_id=payload.conversation_id,
+                ) if isinstance(payload, PreparedAgentRun) else None,
             )
             if used_aliases != aliases:
                 raise ValueError("Unused evaluation model binding")

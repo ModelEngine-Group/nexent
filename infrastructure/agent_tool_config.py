@@ -5,6 +5,7 @@ import json
 
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
+from nexent.core.tools.create_scheduled_task_tool import CreateScheduledTaskProposalTool
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
 
@@ -42,3 +43,20 @@ def build_plan_tool_configs() -> list[ToolConfig]:
         )
         for name, class_name, inputs in _PLAN_TOOLS
     ]
+
+AUTOMATION_PROPOSAL_TOOL = CreateScheduledTaskProposalTool.name
+
+
+def build_automation_proposal_tool(callback=None) -> ToolConfig:
+    return ToolConfig(
+        class_name=CreateScheduledTaskProposalTool.__name__,
+        name=AUTOMATION_PROPOSAL_TOOL,
+        description=CreateScheduledTaskProposalTool.description,
+        description_zh=CreateScheduledTaskProposalTool.description_zh,
+        inputs=json.dumps(CreateScheduledTaskProposalTool.inputs, ensure_ascii=False),
+        output_type=CreateScheduledTaskProposalTool.output_type,
+        params={},
+        source="builtin",
+        usage="builtin",
+        metadata={"create_proposal": callback} if callback is not None else None,
+    )

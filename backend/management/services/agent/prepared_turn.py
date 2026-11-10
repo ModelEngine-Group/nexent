@@ -16,6 +16,7 @@ from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
     ForbiddenError, RunModelControlsError, RuntimeServiceUnavailableError, RuntimeUpstreamError, ValidationError,
 )
+from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
 from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_prepared_projection_receipt
@@ -38,7 +39,7 @@ async def _io(name, fn, *args, **kwargs):
 def is_prepared_candidate(payload, request):
     return bool(
         not payload.resume and not request.is_debug and request.conversation_id and request.conversation_id > 0
-        and request.agent_id and not request.entrypoint and not request.enable_automation_tool
+        and request.agent_id and not request.entrypoint
     )
 
 
@@ -84,9 +85,21 @@ async def start_turn(payload, request, user_id, tenant_id, client):
             return None
         if await client.find_active_run(reference.conversation_id, user_id, tenant_id) is not None:
             raise active_turn_conflict()
+        automation = None
+        if request.enable_automation_tool and any(
+            tool.tool_id == AUTOMATION_PROPOSAL_TOOL for tool in snapshot.resource.tools
+        ):
+            automation = {
+                "agent_id": snapshot.resource.agent_id,
+                "agent_version_no": snapshot.resource.version_no,
+                "model_id": request.model_id,
+                "tool_params": request.tool_params.model_dump(mode="json") if request.tool_params else None,
+                "has_attachments": bool(request.minio_files),
+            }
         turn = await _io("prepared-turn-stage", store.stage_turn, scope, reference, user_id, tenant_id, boundary, {
             "query": strip_current_time_prefix(request.query), "minio_files": request.minio_files,
             "chat_mode": "planning" if request.enable_plan else "execution", "agent_id": request.agent_id,
+            "automation": automation,
         })
     except Exception as exc:
         await _io("prepared-turn-reject-claim", set_conversation_admission, scope, reference.run_id, user_id, tenant_id,

@@ -492,7 +492,13 @@ class ModelAdministrationOperation(str, Enum):
     PROBE = NAMESPACE + "v1/model/probe"
 
 
-AgentOSOperation = CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation
+class ManagementOperation(str, Enum):
+    AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
+
+
+AgentOSOperation = (
+    CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation | ManagementOperation
+)
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
     for operations in (CompatibilityOperation, AgentOperation, ModelOperation, ModelAdministrationOperation)
