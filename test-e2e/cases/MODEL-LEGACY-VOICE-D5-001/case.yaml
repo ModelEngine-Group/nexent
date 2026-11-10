@@ -14,7 +14,7 @@ case:
   preconditions:
   - The test owns an isolated PostgreSQL scratch database.
   test_data:
-    configuration: Duplicate and singleton legacy records, configured models with the same names, defaults across tenants, and a reference to a previously retired seed.
+    configuration: Bootstrap duplicates and singletons, a registration-time pair, a similar pair added after registration, same-name user models, tenant-wide STT metadata and default references.
   steps:
   - order: 1
     action: Apply the upgrade to the synthetic model and tenant configuration tables.
@@ -23,8 +23,8 @@ case:
     action: Reapply the migration and compare both tables to their post-upgrade state.
     expected: Both tables remain identical, including audit fields.
   expected_results:
-  - All active seed copies are retired, including singleton rows and defaults still pointing to previously retired seeds.
-  - The migration preserves other tenant and model-type references, custom models, and metadata for a surviving STT selection.
+  - Identified bootstrap and administrator-registration seeds are retired, including defaults still pointing to previously retired seeds.
+  - The migration preserves custom models, ambiguous rows, other tenant and model-type references, and tenant-wide STT metadata.
   - Reapplication changes zero rows.
   forbidden_side_effects:
   - No hard deletion, custom configuration loss or writes outside the owned database.

@@ -6,7 +6,7 @@ change:
   title: Retire legacy built-in voice models during database upgrade
   description: Clean up obsolete historical model rows and default selections, and remove four unused deployment settings.
   observed_behavior: Old bootstrap or administrator registration can leave active legacy seed rows in the model list after upgrade.
-  expected_behavior: Upgrades retire all unconfigured legacy seed copies and references while preserving tenant-managed models. Internal MCP authentication uses its own environment key.
+  expected_behavior: Upgrades retire identifiable legacy seeds and their direct default references. Tenant-managed models, ambiguous rows and tenant-wide STT metadata are preserved. Internal MCP authentication uses its own environment key.
   escaped_stage: D5
   coverage_gap:
     type: missing_case
