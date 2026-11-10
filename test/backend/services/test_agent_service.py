@@ -666,6 +666,14 @@ sys.modules.pop("contracts.agent", None)
 if hasattr(sys.modules.get("consts"), "model"):
     delattr(sys.modules["consts"], "model")
 
+from importlib.machinery import ModuleSpec as _SDKModuleSpec
+from pathlib import Path as _SDKPath
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.core.agents.contracts"):
+    if _package in sys.modules:
+        sys.modules[_package].__path__ = [str(_SDKPath(__file__).resolve().parents[3] / "sdk" / _package.replace(".", "/"))]
+        sys.modules[_package].__spec__ = _SDKModuleSpec(_package, loader=None, is_package=True)
+        sys.modules[_package].__package__ = _package
+
 # Now import backend modules
 # Load the consolidated context after its external collaborators are isolated.
 sys.modules.pop("management.services.agent.context", None)

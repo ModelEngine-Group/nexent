@@ -149,6 +149,14 @@ nexent_module.MessageObserver = observer_mod.MessageObserver
 import management.db.client
 import management.db.client
 
+from importlib.machinery import ModuleSpec as _SDKModuleSpec
+from pathlib import Path as _SDKPath
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.core.agents.contracts"):
+    if _package in sys.modules:
+        sys.modules[_package].__path__ = [str(_SDKPath(__file__).resolve().parents[3] / "sdk" / _package.replace(".", "/"))]
+        sys.modules[_package].__spec__ = _SDKModuleSpec(_package, loader=None, is_package=True)
+        sys.modules[_package].__package__ = _package
+
 from management.services.model.invocation import call_llm_for_system_prompt, _process_thinking_tokens
 
 

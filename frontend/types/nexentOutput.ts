@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /** Transport facts accepted at the shared Nexent output boundary. */
 export interface NexentOutputEvent {
   type: string;

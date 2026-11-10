@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Incomplete responses must not cause execution or hidden stream replay."""
 
 import asyncio

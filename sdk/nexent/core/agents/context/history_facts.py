@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Render persisted evidence as reference data, never as executable tool messages."""
 
 import json

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real image model and authenticated deployment qualification, with local fixture IDs."""
 
 import json

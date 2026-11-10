@@ -3,6 +3,7 @@
 """Management provisioning and request snapshot guards with external I/O isolated."""
 
 import json
+import sys
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -38,6 +39,8 @@ def test_management_snapshot_uses_canonical_codec_without_credentials(saved):
     assert profile.outlet_id == 7 and profile.identity.tenant_id == "tenant"
     assert profile.parameter_values["max_output_tokens"] == 256
     assert profile.parameter_values["temperature"] == .7
+    output_rule = next(rule for rule in profile.parameter_rules if rule["key"] == "max_output_tokens")
+    assert output_rule["allowed_scopes"] == ["outlet"]
     assert profile.capabilities.tools.status == "supported"
     assert "unit-secret" not in json.dumps(saved["runtime_outlet_snapshot"])
 
@@ -182,24 +185,32 @@ def test_clearing_an_explicit_capacity_column_does_not_restore_a_catalog_default
     assert restore_runtime_model_snapshot(record, "tenant").capabilities.context.combined_window is None
 
 
-def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved):
+def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved, monkeypatch):
     """The refactored record factory must retain the Jiuwen outlet binding."""
     from management.services.model.run_bindings import create_model_config_from_record
-    from management.services.model.run_controls import overlay_root_model
+    # MCP transport is unrelated to the in-memory root preference overlay.
+    monkeypatch.setitem(sys.modules, "management.services.mcp.service",
+                        SimpleNamespace(get_remote_mcp_server_list=Mock()))
+    from management.services.agent.preparation.run import apply_root_model_preferences
+    from management.services.model.runtime_options import compile_bound_model_profile
 
-    base = create_model_config_from_record(saved, "tenant")
+    canonical_record = {**saved, **saved["runtime_outlet_snapshot"]["row"]}
+    base = create_model_config_from_record(canonical_record, "tenant")
     original = base.resolved_profile.model_dump()
-    overlay = overlay_root_model(base, {"temperature": 0.3}, "turn_model")
-    compiled = compile_model_runtime_profile(overlay, AgentConfig(
-        name="root", description="Root", model_name="turn_model", tools=[], agent_core="jiuwen",
-    ))
+    models = [base]
+    config = AgentConfig(name="root", description="Root", model_name=base.cite_name, tools=[])
+    apply_root_model_preferences(models, config, {str(saved["model_id"]): {"temperature": 0.3}})
+    overlay = models[-1]
+    compiled = compile_bound_model_profile(overlay, config)
 
+    assert len(models) == 2 and overlay.cite_name == config.model_name != base.cite_name
     assert base.resolved_profile.outlet_id == compiled.outlet_id == saved["model_id"]
     assert compiled.identity.tenant_id == "tenant"
     assert compiled.parameter_values["temperature"] == 0.3
     assert base.temperature == 0.7
     assert base.resolved_profile.model_dump() == original
-    assert overlay.resolved_profile.model_dump() == original
+    assert overlay.resolved_profile.parameter_values["temperature"] == 0.3
+    assert overlay.resolved_profile.parameter_rules == base.resolved_profile.parameter_rules
 
 
 @pytest.mark.parametrize("extra", [{}, {"reasoning_effort": "auto"}])

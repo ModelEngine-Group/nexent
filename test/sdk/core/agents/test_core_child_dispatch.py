@@ -89,7 +89,8 @@ async def test_only_collaboration_deadline_cancels_owner(lane, caplog):
     future = Future()
     if lane == "model-tool-io":
         future.set_exception(TimeoutError("tool-local timeout"))
-    info = SimpleNamespace(collaboration_timeout_seconds=0.01, model_deadline=None, observer=Mock())
+    info = SimpleNamespace(collaboration_timeout_seconds=0.01, model_deadline=None, observer=Mock(),
+                           agent_config=SimpleNamespace(worker_agents=[], external_a2a_agents=[]))
     adapter = JiuwenAdapter(info)
     adapter.scope = RunCancellationScope()
     adapter.manager = Mock()

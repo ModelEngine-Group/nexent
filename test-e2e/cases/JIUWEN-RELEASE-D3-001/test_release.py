@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Run the fixed smoke on the authorized deployment with machine-local outlet IDs."""
 
 import json

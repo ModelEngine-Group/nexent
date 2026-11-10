@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real Jiuwen resources through canonical model transport."""
 import asyncio
 import json

@@ -16,10 +16,6 @@ def protocol(monkeypatch):
         module = types.ModuleType(name)
         module.__path__ = [str(root / "sdk" / name.replace(".", "/"))]
         monkeypatch.setitem(sys.modules, name, module)
-    clarification = types.ModuleType("nexent.core.agents.contracts.clarification")
-    clarification.CLARIFICATION_SCHEMA_GUIDANCE = ""
-    clarification.ClarificationForm = type("ClarificationForm", (), {})
-    monkeypatch.setitem(sys.modules, clarification.__name__, clarification)
     guidance = types.ModuleType("nexent.core.agents.prompt.clarification")
     guidance.CLARIFICATION_SCHEMA_GUIDANCE = ""
     monkeypatch.setitem(sys.modules, guidance.__name__, guidance)

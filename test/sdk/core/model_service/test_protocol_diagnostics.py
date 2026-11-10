@@ -64,3 +64,19 @@ def test_untrusted_exception_text_is_not_in_diagnostics(caplog):
     assert result.category == "MODEL_PROTOCOL_ERROR"
     assert "PRIVATE_RESPONSE_TEXT" not in caplog.text
     assert caplog.records[0].protocol_code == "UNCLASSIFIED"
+
+
+@pytest.mark.parametrize("code", ["MODEL_TOOL_CALL_INVALID", "MODEL_RESPONSE_INCOMPLETE"])
+def test_logged_protocol_codes_are_canonical_strings_not_exception_objects(caplog, code):
+    """An exception-controlled string representation must never reach logging."""
+    class ProviderCategory(str):
+        def __str__(self):
+            return "PRIVATE_CREDENTIAL_FROM_EXCEPTION"
+
+    result = normalize_model_error(ModelAdapterError(ProviderCategory(code)), request_id="internal-request")
+    records = [record for record in caplog.records if "model_protocol_error" in record.message]
+    assert len(records) == 1
+    assert type(records[0].protocol_code) is str
+    assert records[0].protocol_code == code
+    assert result.diagnostic_code == code
+    assert "PRIVATE_CREDENTIAL_FROM_EXCEPTION" not in caplog.text

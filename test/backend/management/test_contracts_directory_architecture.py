@@ -81,6 +81,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "knowledge",
         "memory",
         "model",
+        "model_profile",
         "skill",
         "tag",
         "tool",

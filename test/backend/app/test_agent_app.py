@@ -151,6 +151,14 @@ sys.modules['management.services.configuration.user.memory'] = MagicMock()
 sys.modules['management.services.agent.versions'] = MagicMock()
 sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 
+from importlib.machinery import ModuleSpec as _SDKModuleSpec
+from pathlib import Path as _SDKPath
+for _package in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.models", "nexent.core.agents.contracts"):
+    if _package in sys.modules:
+        sys.modules[_package].__path__ = [str(_SDKPath(__file__).resolve().parents[3] / "sdk" / _package.replace(".", "/"))]
+        sys.modules[_package].__spec__ = _SDKModuleSpec(_package, loader=None, is_package=True)
+        sys.modules[_package].__package__ = _package
+
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
 from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission

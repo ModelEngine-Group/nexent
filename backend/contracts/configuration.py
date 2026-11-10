@@ -125,3 +125,11 @@ def _build_otlp_headers(headers_str, authorization, x_api_key, langsmith_api_key
 
 
     return OTLP_HEADERS
+
+
+def parse_agent_core(value: str) -> str:
+    """Validate the deployment Core without reading process configuration."""
+    core = value.strip().lower()
+    if core not in {"smolagents", "jiuwen"}:
+        raise ValueError("NEXENT_AGENT_CORE must be smolagents or jiuwen")
+    return core

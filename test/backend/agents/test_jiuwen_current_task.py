@@ -17,7 +17,7 @@ async def test_current_query_preserves_history_without_reactivating_uploads(mock
     new_file = {"name": "new-image.png", "url": "s3://nexent/attachments/new-image.png"}
     history = [HistoryItem(role="user", content="Analyze the original image", minio_files=[old_file]),
                HistoryItem(role="assistant", content="The image has already been analyzed")]
-    mocker.patch("management.services.model.runtime_options.compile_model_runtime_profile", return_value=None)
+    mocker.patch("management.services.model.runtime_options.compile_bound_model_profile", return_value=None)
     config = AgentConfig(agent_core=core, name="fixture", description="Fixture", model_name="fixture", tools=[])
     model = ModelConfig(cite_name="fixture", model_name="fixture", url="http://fixture")
     for name in ["_ensure_agent_reasoning_snapshot", "_validate_run_minio_files"]:

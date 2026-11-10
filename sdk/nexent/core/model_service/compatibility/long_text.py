@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Existing long-text preparation shared independently of the model sender."""
 
 import logging

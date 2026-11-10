@@ -160,7 +160,8 @@ def normalize_model_error(
             parameter_name = parameter
     if category == "MODEL_PROTOCOL_ERROR" and response is None:
         source_code = getattr(error, "category", None)
-        code = source_code if source_code in _PROTOCOL_DIAGNOSTICS or source_code in _DIAGNOSTICS else "UNCLASSIFIED"
+        code = next((known for known in (*_PROTOCOL_DIAGNOSTICS, *_DIAGNOSTICS)
+                     if known == source_code), "UNCLASSIFIED")
         logger.warning("event=model_protocol_error protocol_code=%s request_id=%s", code, request_id,
                        extra={"protocol_code": code, "request_id": request_id})
     retryable, message = _CATEGORIES[category]

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Local deterministic OpenAI-compatible model and native MCP fixture."""
 
 import asyncio

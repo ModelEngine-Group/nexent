@@ -11,7 +11,7 @@ from jinja2 import UndefinedError
 
 
 ROOT = Path(__file__).parents[4]
-# Baseline captures reviewed SDK resources, including workspace guidance merged in 95c166472.
+# Baseline includes reviewed shared response style, Core protocols and workspace guidance.
 BASELINE = json.loads(
     (ROOT / "test" / "assets" / "sdk_prompt_migration_hashes.json").read_text(
         encoding="utf-8"

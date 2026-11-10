@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import parse_agent_core, parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -14,9 +14,7 @@ _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
 
 # One deployment owns the execution Core; persisted Agent fields are legacy metadata.
-NEXENT_AGENT_CORE = os.getenv('NEXENT_AGENT_CORE', 'smolagents').strip().lower()
-if NEXENT_AGENT_CORE not in {'smolagents', 'jiuwen'}:
-    raise ValueError('NEXENT_AGENT_CORE must be smolagents or jiuwen')
+NEXENT_AGENT_CORE = parse_agent_core(os.getenv('NEXENT_AGENT_CORE', 'smolagents'))
 
 # Operations service configuration
 OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)

@@ -31,7 +31,7 @@ def bootstrap(monkeypatch):
             monkeypatch.setattr(os, 'execvp', lambda command, argv: launched.append(command))
             monkeypatch.setattr(sys, 'argv', ['bootstrap', 'sandbox-test', str(path), 'jupyter'])
             try:
-                runpy.run_path(str(source.with_name('sandbox_tls_bootstrap.py')), run_name='__main__')
+                runpy.run_path(str(source.with_name("tls_bootstrap.py")), run_name='__main__')
             except (ValueError, OSError) as exc:
                 return SimpleNamespace(returncode=1, stdout='', stderr=str(exc))
             return SimpleNamespace(returncode=0, stdout='gateway launched' if launched else '', stderr='')
@@ -99,7 +99,7 @@ def test_rejects_damaged_existing_identity(bootstrap, tmp_path, damage):
     elif damage == 'missing_certificate':
         (directory / 'server.crt').unlink()
     else:
-        os.link(key, tmp_path / 'key-link')
+        os.link(key, directory.parent / 'key-link')
     original = key.read_bytes()
     result = run()
     assert result.returncode != 0

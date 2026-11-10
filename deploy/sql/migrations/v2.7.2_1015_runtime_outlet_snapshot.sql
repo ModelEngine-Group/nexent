@@ -1,3 +1,5 @@
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 -- Migration kind: REQUIRED_SCHEMA
 -- Required for: management-side trusted model snapshots consumed by optional Agent Cores.
 -- This transitional envelope is decoded by the canonical ModelService storage codec.

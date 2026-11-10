@@ -75,6 +75,10 @@ def build_runtime_outlet_snapshot(record):
                 {**record, "config_revision": revision}, legacy_capability=capability,
                 migrated_at=datetime.now(UTC).isoformat(),
             )
+        from nexent.core.model_service.profiles.outlet_controls import ensure_outlet_parameter_rules
+
+        # Persist the same outlet-only length policy used by runtime overlays.
+        profile = ensure_outlet_parameter_rules(profile)
         data = profile.model_dump()
         data["provenance"]["provider_metadata"]["legacy_context_columns"] = {
             key: record.get(key) for key in (

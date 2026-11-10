@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { baseUrl, installEditor, label } from "../../infra/automation/d4/fixtures/agent-editor-workflows";
 
