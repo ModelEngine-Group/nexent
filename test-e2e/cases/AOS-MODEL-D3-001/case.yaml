@@ -33,12 +33,16 @@ case:
   - order: 5
     action: Invoke a chat model through the Management worker adapter.
     expected: The worker submits the same signed Model.invoke operation and receives the model text.
+  - order: 6
+    action: Embed an evaluation search query with its registered model ID.
+    expected: The signed model request returns a vector from the controlled embedding provider.
   expected_results:
   - Metadata and inference traverse the signed transport with the configured tenant model.
   - Rejected requests produce no provider calls.
   - Model management does not accept record ownership from the payload.
   - Tenant model cleanup is scoped and retryable.
   - Management workers receive text through the same Runtime model operation.
+  - A Management worker obtains the registered model vector without a local provider client.
   forbidden_side_effects:
   - AgentOS metadata must not expose provider credentials.
   - The case must not leave temporary servers running.
@@ -78,4 +82,9 @@ case:
     description: A synchronous Management worker uses signed Model.invoke.
     steps: [5]
     expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-06
+    description: Signed worker embedding uses the tenant model and returns a finite vector.
+    steps: [6]
+    expected_results: [6]
     forbidden_side_effects: [1, 2]

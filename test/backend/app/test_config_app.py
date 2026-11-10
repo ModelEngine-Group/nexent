@@ -140,6 +140,10 @@ class TestConfigAppRouterConfiguration:
             "management.api.knowledge_base.ragflow": {"router": APIRouter()},
             "management.api.file.file_management": {"file_management_config_router": APIRouter()},
             "management.api.file.image": {"router": APIRouter()},
+            "management.api.file.storage": {"router": APIRouter()},
+            "management.api.conversation.conversation_management": {"router": APIRouter()},
+            "management.api.conversation.conversation_share": {"router": APIRouter()},
+            "management.api.conversation.workbench_pins": {"router": APIRouter()},
             "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
             "management.api.identity.mock_user_management": {"router": APIRouter()},
             "management.api.model.model_managment": {"router": APIRouter()},
@@ -150,7 +154,6 @@ class TestConfigAppRouterConfiguration:
             "management.api.configuration.tenant_config": {"router": APIRouter()},
             "management.api.tool.tool_config": {"router": APIRouter()},
             "management.api.identity.user_management": {"router": APIRouter()},
-            "runtime.api.voice.streaming": {"voice_config_router": APIRouter()},
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
@@ -262,6 +265,7 @@ class TestConfigAppRouterConfiguration:
             for retired in retired_routers.values()
         )
         assert api_key_router in config_app.app.included_routers
+        assert router_modules["management.api.file.storage"]["router"] in config_app.app.included_routers
         for router in router_modules["management.api.northbound"].values():
             assert router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {

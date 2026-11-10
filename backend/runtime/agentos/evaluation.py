@@ -34,9 +34,9 @@ def create_evaluation_router(execute=None) -> APIRouter:
 
 
 async def execute_evaluation_case(payload: EvaluationAgentRun, actor: ServicePrincipal) -> EvaluationAgentResult:
-    from management.services.agent.lifecycle import agent_run_manager as run_manager
     from management.services.agent.service import prepare_agent_run
     from runtime.adapters.nexent.runner import agent_run
+    from runtime.executions import agent_run_manager as run_manager
     from runtime.thread_management import runtime_thread_manager
 
     return await _collect_case_events(

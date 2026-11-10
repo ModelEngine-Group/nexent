@@ -21,7 +21,7 @@ from contracts.model_administration import ModelHealthcheck, ModelRegistration, 
 from contracts.errors.exceptions import RuntimeUpstreamError
 from gateway.downstream.middleware import GatewayIdentityMiddleware
 from management.clients.agentos import AgentOSClient
-from management.clients.model import invoke_chat_prompt_in_worker
+from management.clients.model import embed_query_in_worker, invoke_chat_prompt_in_worker
 from nexent.core.concurrency import shutdown_fallback_thread_manager
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.middleware import AgentOSMiddleware
@@ -89,6 +89,13 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
             media_type="text/event-stream",
         )
 
+    embed_calls = []
+
+    @provider.post("/v1/embeddings")
+    async def embed(request: Request):
+        embed_calls.append((request.headers["authorization"], await request.json()))
+        return {"data": [{"embedding": [0.1, 0.2]}]}
+
     with serve(provider) as provider_url:
         record = {
             "tenant_id": "tenant-a",
@@ -102,7 +109,16 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
         }
 
         def lookup(model_id, tenant_id):
-            return record if (model_id, tenant_id) == (11, "tenant-a") else None
+            if tenant_id != "tenant-a":
+                return None
+            if model_id == 11:
+                return record
+            if model_id == 17:
+                return {
+                    **record, "model_name": "test-embedding", "model_type": "embedding",
+                    "base_url": f"{provider_url}/v1/embeddings",
+                }
+            return None
 
         records = {}
 
@@ -156,7 +172,7 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 model_id=11,
                 input=[ChatMessage(role="user", content="verify model")],
                 expected_revision=model.revision,
-                options=ChatOptions(temperature=0.3, top_p=0.95),
+                options=ChatOptions(temperature=0.3, top_p=0.95, max_output_tokens=700),
             )
             result = await agentos.invoke_model(request, "user-a", "tenant-a")
             assert result.output == {"content": "verified answer"}
@@ -181,6 +197,15 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
                 tenant_id="tenant-a",
             )
             assert output == "verified answer"
+
+            assert await asyncio.to_thread(
+                embed_query_in_worker, model_id=17, query="search", user_id="worker-a", tenant_id="tenant-a",
+            ) == [0.1, 0.2]
+            with pytest.raises(RuntimeUpstreamError) as failure:
+                await agentos.invoke_model(
+                    EmbeddingInvocation(model_id=17, input=["search"]), "worker-a", "tenant-b",
+                )
+            assert failure.value.status_code == 404
 
             registration = ModelRegistration(
                 model_name="new-model", model_type="llm", base_url=record["base_url"], api_key="test-registration-key",
@@ -226,3 +251,5 @@ async def test_agentos_model_over_http(monkeypatch, managed_provider_threads):
     assert provider_input["temperature"] == 0.3
     assert provider_input["top_p"] == 0.95
     assert provider_input["messages"][-1]["content"] == "verify model"
+    assert provider_input["max_tokens"] == 700
+    assert embed_calls == [("Bearer provider-secret", {"model": "test-embedding", "input": ["search"]})]

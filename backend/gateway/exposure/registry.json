@@ -1875,8 +1875,8 @@
       "method": "POST",
       "path": "/api/file/storage",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/file/upload.py",
+      "target": "management",
+      "source": "backend/management/api/file/storage.py",
       "route_id": "route-23c3aa676d825f99",
       "credential_kinds": [
         "session"

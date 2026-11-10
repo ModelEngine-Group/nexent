@@ -20,6 +20,7 @@ from management.api.knowledge_base.idata import router as idata_router
 from management.api.knowledge_base.ragflow import router as ragflow_router
 from management.api.file.file_management import file_management_config_router as file_manager_router
 from management.api.file.image import router as proxy_router
+from management.api.file.storage import router as file_storage_router
 from management.api.knowledge_base.knowledge_summary import router as summary_router
 from management.api.identity.mock_user_management import router as mock_user_management_router
 from management.api.model.model_managment import router as model_manager_router
@@ -152,6 +153,7 @@ app.include_router(skill_repository_router)
 app.include_router(vectordatabase_router)
 app.include_router(datamate_router)
 app.include_router(file_manager_router)
+app.include_router(file_storage_router)
 app.include_router(proxy_router)
 app.include_router(tool_config_router)
 app.include_router(dify_router)

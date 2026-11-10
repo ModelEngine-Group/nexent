@@ -23,7 +23,6 @@ from management.api.automation.agent_automation import (
 )
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
-from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
@@ -128,6 +127,5 @@ app.include_router(agent_router)
 app.include_router(create_evaluation_router())
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
-app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)

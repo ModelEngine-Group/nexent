@@ -176,6 +176,7 @@ class AgentAutomationFacade:
         try:
             parsed = await automation_intent_analyzer.analyze(AutomationIntentContext(
                 tenant_id=tenant_id,
+                user_id=user_id,
                 message=request.message,
                 timezone=request.timezone,
                 model_id=request.model_id,

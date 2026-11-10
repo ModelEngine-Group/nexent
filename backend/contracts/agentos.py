@@ -94,6 +94,7 @@ class ChatOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     temperature: Annotated[float, Field(ge=0, le=2)] | None = None
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
+    max_output_tokens: PositiveInt | None = None
 
 
 class ChatInvocation(ModelInvokeBase):

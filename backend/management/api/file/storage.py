@@ -11,10 +11,10 @@ from management.services.permission.identity.session import get_current_user_id
 logger = logging.getLogger("file_management_app")
 
 
-file_management_runtime_router = APIRouter(prefix="/file")
+router = APIRouter(prefix="/file")
 
 
-@file_management_runtime_router.post("/storage")
+@router.post("/storage")
 async def storage_upload_files(
     http_request: Request,
     files: List[UploadFile] = File(..., description="List of files to upload"),
@@ -68,11 +68,3 @@ async def storage_upload_files(
     except Exception as e:
         logger.error(f"Storage upload error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Storage upload error.")
-
-    # Return upload results for all files
-    return {
-        "message": f"Processed {len(results)} files",
-        "success_count": sum(1 for r in results if r.get("success", False)),
-        "failed_count": sum(1 for r in results if not r.get("success", False)),
-        "results": results,
-    }
