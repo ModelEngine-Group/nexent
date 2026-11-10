@@ -47,8 +47,6 @@ def export_local_tool(
         "default_reranker": default,
     }
     if "workbench_skill_ids" in row:
-        if tool.name == "ind_aidp_search":
-            raise ValueError("Mounted independent AIDP requires a Workbench image proxy binding")
         binding = SkillDerivedLocalToolBinding(tool_id=row["tool_id"], **options)
         version = "4"
     elif "skill_instance_ids" in row:

@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from contracts.agentos import (
     AgentRunReference, EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
-    ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun,
+    ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
@@ -205,10 +205,16 @@ def _materialize_agent(
     local_tools.update(memory_tools)
     if plan_bindings:
         local_tools.update({tool.name: tool for tool in build_plan_tool_configs()})
+    workbench_lookup = None
+    if workbench_version is not None and public_reference is not None and mounted_tools:
+        workbench_lookup = WorkbenchSkillLookup(
+            conversation_id=public_reference.conversation_id, run_id=public_reference.run_id,
+            agent_id=resource.agent_id, agent_version=resource.version_no, workbench_version=workbench_version,
+        )
     local_tools.update(materialize_local_tools(
         resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,
         require_scoped_aidp_instance=native_knowledge,
-        workbench_tools=mounted_tools,
+        workbench_tools=mounted_tools, workbench_lookup=workbench_lookup,
     ))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],

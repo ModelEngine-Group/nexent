@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
@@ -233,7 +233,10 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     with monkeypatch.context() as planning_patches:
         await _assert_prepared_planning_over_signed_http(planning_patches, tmp_path)
     with monkeypatch.context() as root_skill_patches:
-        await _assert_workbench_root_skills_over_signed_http(root_skill_patches, tmp_path)
+        with _serve_workbench_aidp_images() as (provider_url, provider_calls):
+            await _assert_workbench_root_skills_over_signed_http(
+                root_skill_patches, tmp_path, provider_url, provider_calls,
+            )
     with monkeypatch.context() as turn_patches:
         await _assert_public_prepared_turn_over_signed_http(turn_patches, use_memory=True)
     with monkeypatch.context() as clarification_patches:
@@ -681,7 +684,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         image_url, = image_refs
         assert image_url.startswith("/api/ind-aidp/images/")
         image = await independent_aidp_proxy.fetch_ind_aidp_image_impl(image_url.rsplit("/", 1)[-1])
-        assert image == (b"fixture-png", "image/png")
+        assert image == (b"fixture-png", "image/png", "private, max-age=3600")
         assert next(tool for tool in prepared.resource.tools if tool.tool_id == "langchain").version == "1"
         plugin.write_text('raise AssertionError("changed plugin must not execute")\n', encoding="utf-8")
         with pytest.raises(RuntimeUpstreamError) as changed_plugin:
@@ -2067,14 +2070,31 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     assert [call.args[1].value for call in events.add_message.call_args_list] == ["plan", "plan_step_update"]
 
 
-async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
+@contextmanager
+def _serve_workbench_aidp_images():
+    provider = FastAPI()
+    calls = []
+
+    @provider.get("/KnowledgeBase/Tenants/provider-a/KnowledgeBases/kb-a/p.png")
+    async def get_image(request: Request):
+        calls.append(request.headers.get("Authorization"))
+        return Response(b"fixture-image", media_type="image/png")
+
+    with serve(provider) as url:
+        yield url, calls
+
+
+async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, provider_url, provider_calls):
     from contracts.agentos import EvaluationSkillTool, ManagementOperation, WorkbenchSkillLookup, WorkbenchSkillMounts
-    from infrastructure import langchain_plugins
+    from gateway.downstream.identity import IDENTITY_HEADER, sign_identity
+    from infrastructure import ind_aidp_images, langchain_plugins
     from infrastructure.agent_model_config import model_record_revision
     from infrastructure.local_tool_execution import build_local_tool
     from infrastructure.mcp_execution import build_mcp_tool
     from infrastructure.skill_execution import capture_skill_files
     from management.api.agent import workbench_callback
+    from management.api.knowledge_base import ind_aidp
+    from management.services.knowledge_base.providers import aidp
     from management.services.agent.preparation import evaluation_snapshot
     from management.services.agent.workbench import ResolvedSkillMount
     from nexent.core.agents.agent_model import AgentConfig, ToolConfig
@@ -2092,7 +2112,8 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     (skill_dir / "config" / "config.yaml").write_text("value: default", encoding="utf-8")
     monkeypatch.setattr(environment, "CONTAINER_SKILLS_PATH", str(root))
     effective = {"value": "synthetic-private-setting"}
-    tool_ids = [21, 22, 23]
+    tool_ids = [21, 22, 23, 24]
+    monkeypatch.setattr(ind_aidp_images, "IND_AIDP_IMAGE_SIGNING_KEY", "synthetic-workbench-image-signing-key")
     common_row = {"description": "Tool", "origin_name": None, "inputs": None, "output_type": "string",
                   "instance_params": {}, "workbench_skill_ids": [45],
                   "params": [{"name": "value", "default": effective["value"]}]}
@@ -2103,6 +2124,13 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
                "source": "mcp", "usage": "mounted-provider", "origin_name": "upstream_mcp"}
     chain_row = {**common_row, "tool_id": 23, "name": "mounted_plugin", "class_name": "mounted_plugin",
                  "source": "langchain", "usage": None}
+    aidp_row = {
+        **common_row, "tool_id": 24, "name": "ind_aidp_search", "class_name": "IndependentAidpSearchTool",
+        "source": "local", "usage": None, "params": [{"name": name, "default": value} for name, value in {
+            "server_url": provider_url, "api_key": "private-aidp-key", "tenant_id": "provider-a",
+            "kds_list": ["kb-a"],
+        }.items()],
+    }
     servers = [{"mcp_id": 31, "mcp_name": "mounted-provider", "mcp_server": "https://mcp.invalid/v1",
                 "enabled": True, "authorization_token": "private-mcp-header", "custom_headers": {}}]
     plugin_root = tmp_path / "workbench-plugins"
@@ -2118,14 +2146,17 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     for name in ("read_bound_local_tools", "read_bound_mcp_tools", "read_bound_langchain_tools"):
         monkeypatch.setattr(evaluation_snapshot, name, lambda *_: [])
     monkeypatch.setattr(prepared_mcp, "read_mcp_execution_servers", lambda tenant: servers)
-    access = {"visible": True, "change_tool": False, "closed": False}
+    access = {"visible": True, "change_tool": False, "closed": False, "image_revoked": False}
+    image_paths = []
 
     def read_tools(agent_id, version, tenant, skills):
         assert (agent_id, version, tenant) == (7, 3, actor.tenant_id)
+        if not skills:
+            return []
         assert len(skills) == 1 and skills[0]["tool_ids"] == tool_ids and skills[0]["config"] == effective
         if access["change_tool"]:
-            return [{**local_row, "params": [{"name": "deepseek_api_key", "default": "changed"}]}, mcp_row, chain_row]
-        return [local_row, mcp_row, chain_row]
+            return [{**local_row, "params": [{"name": "deepseek_api_key", "default": "changed"}]}, mcp_row, chain_row, aidp_row]
+        return [local_row, mcp_row, chain_row, aidp_row]
 
     monkeypatch.setattr(evaluation_snapshot, "read_workbench_derived_tools", read_tools)
     monkeypatch.setattr(prepared_evaluation, "read_workbench_derived_tools", read_tools)
@@ -2144,7 +2175,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
                                 else {"isolated_skills_root": False})},
         ) for tool in EvaluationSkillTool] + [
             build_local_tool(local_row, "en", None, None), build_mcp_tool(mcp_row),
-            langchain_plugins.build_langchain_tool(chain_row),
+            langchain_plugins.build_langchain_tool(chain_row), build_local_tool(aidp_row, "en", None, None),
         ],
     )
     resource = evaluation_snapshot._export_resource(
@@ -2164,6 +2195,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
                            "root_generation": {}}},
     })
     assert effective["value"] not in payload.model_dump_json()
+    assert "private-aidp-key" not in payload.model_dump_json() and provider_url not in payload.model_dump_json()
     assert "Mounted skill guide" not in payload.model_dump_json()
     assert "private-mcp-header" not in payload.model_dump_json()
     assert "from langchain_core" not in payload.model_dump_json()
@@ -2178,8 +2210,9 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
         scoped_reads.append(request.workbench_version)
         return mounts
 
-    def read(agent_id, agent_version, principal, overrides, ids):
-        assert (agent_id, agent_version, principal, overrides, ids) == (7, 3, actor, {45: effective}, {45})
+    def read(agent_id, agent_version, principal, overrides, ids=None):
+        assert (agent_id, agent_version, principal, overrides) == (7, 3, actor, {45: effective})
+        assert ids is None or ids == {45}
         return {45: {"skill_id": 45, "name": "mounted", "description": "Example", "config": effective,
                      "tool_ids": tool_ids}} if access["visible"] else {}
 
@@ -2197,6 +2230,8 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
             assert info.mcp_host[0]["headers"]["Authorization"] == "private-mcp-header"
             assert info.mcp_host[0]["allowed_tools"] == {"upstream_mcp": "mounted_mcp"}
             assert tools["mounted_plugin"].metadata.invoke({"value": "local"}) == "local"
+            private_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tools["ind_aidp_search"])
+            image_paths.append(private_search.image_url_builder("kb-a/p.png"))
         finally:
             prepared_evaluation._remove_skill_files(info.workspace_path)
         return reference
@@ -2217,6 +2252,17 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
     management = FastAPI(root_path="/api")
     management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
     management.include_router(workbench_callback.router)
+    management.include_router(ind_aidp.router)
+
+    def read_image_mounts(request, user_id, tenant_id):
+        if (request, user_id, tenant_id) != (lookup, actor.user_id, actor.tenant_id) or access["image_revoked"]:
+            return None
+        return {45: effective}
+
+    monkeypatch.setattr(aidp, "read_workbench_image_mounts", read_image_mounts)
+    monkeypatch.setattr(aidp, "read_workbench_skill_rows", read)
+    monkeypatch.setattr(aidp, "read_workbench_derived_tools", read_tools)
+    monkeypatch.setattr(aidp, "run_blocking", blocking)
     with serve(runtime) as runtime_url, serve(management) as management_url:
         monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", management_url)
         operation = ManagementOperation.WORKBENCH_SKILL_MOUNTS
@@ -2233,6 +2279,26 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path):
             assert approved.json() == mounts.model_dump()
         client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         assert await client.start_prepared_run(payload, actor.user_id, actor.tenant_id) == reference
+        path, = image_paths
+        identity = {"kind": "session", "user_id": actor.user_id, "tenant_id": actor.tenant_id}
+
+        def image_identity(claims):
+            return {IDENTITY_HEADER: sign_identity(claims, "management", "GET", path, b"")}
+
+        # The execution and its temporary workspace are gone, but the admitted turn is still owned.
+        async with httpx.AsyncClient(base_url=management_url, trust_env=False) as http:
+            image = await http.get(path, headers=image_identity(identity))
+            assert image.status_code == 200 and image.content == b"fixture-image"
+            assert image.headers["content-type"] == "image/png" and image.headers["cache-control"] == "no-store"
+            for foreign in (dict(identity, user_id="other-user"), dict(identity, tenant_id="other-tenant")):
+                assert (await http.get(path, headers=image_identity(foreign))).status_code == 502
+            access["visible"] = False
+            assert (await http.get(path, headers=image_identity(identity))).status_code == 502
+            access["visible"] = True
+            access["image_revoked"] = True
+            assert (await http.get(path, headers=image_identity(identity))).status_code == 502
+            access["image_revoked"] = False
+        assert provider_calls == ["Bearer private-aidp-key"]
         access["change_tool"] = True
         with pytest.raises(RuntimeUpstreamError) as changed_tool:
             await client.start_prepared_run(payload, actor.user_id, actor.tenant_id)

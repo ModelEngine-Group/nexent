@@ -16,7 +16,7 @@ from infrastructure.workbench_skill_execution import can_view_skill, resolve_ski
 
 
 def read_workbench_skill_rows(
-    agent_id: int, agent_version: int, actor: ServicePrincipal, mounts: dict[int, dict], ids: set[int],
+    agent_id: int, agent_version: int, actor: ServicePrincipal, mounts: dict[int, dict], ids: set[int] | None = None,
 ) -> dict[int, dict]:
     """Recompute the root Skill configuration for the exact signed Workbench revision."""
     with get_db_session() as session:
@@ -30,8 +30,10 @@ def read_workbench_skill_rows(
             if skill_id in published:
                 return {}
             published[skill_id] = values or {}
-        if (set(published) | mounts.keys()) != ids:
+        available_ids = set(published) | mounts.keys()
+        if ids is not None and ids != available_ids:
             return {}
+        ids = available_ids
         groups = set(query_group_ids_by_user_in_tenant(
             actor.user_id, actor.tenant_id, session_factory=lambda: nullcontext(session),
         ))

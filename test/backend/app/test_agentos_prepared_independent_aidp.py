@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from contracts.agentos import WorkbenchSkillLookup
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.nexent_agent import NexentAgent
@@ -36,29 +37,61 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     compile_callback = mocker.patch.object(tools, "create_ind_aidp_image_url_builder")
     tool, = await tools.create_tool_config_list(8, "tenant-a", "user-a", version_no=4, portable_evaluation=True)
     compile_callback.assert_not_called()
-    if derived == "workbench":
-        with pytest.raises(ValueError, match="Workbench image proxy"):
-            local_tool.export_local_tool(tool, [row], 8, 4, "tenant-a", "zh")
-        return
     binding = local_tool.export_local_tool(tool, [row], 8, 4, "tenant-a", "zh")
     for secret in ("https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb"):
         assert secret not in binding.model_dump_json()
 
-    if derived:
+    if derived is True:
         mocker.patch.object(prepared_local_tool, "read_skill_derived_local_tools", return_value=[row])
-    else:
+    elif not derived:
         mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[row])
     resource = SimpleNamespace(
         agent_id=8, version_no=4, tools=[binding],
-        skill_refs=[SimpleNamespace(instance_id=42)] if derived else [],
+        skill_refs=[SimpleNamespace(instance_id=42)] if derived is True else [],
+        workbench_skill_refs=[SimpleNamespace(skill_id=42)] if derived == "workbench" else [],
     )
-    hydrated = prepared_local_tool.materialize_local_tools(resource, ServicePrincipal("user-a", "tenant-a"), "zh")
+    actor = ServicePrincipal("user-a", "tenant-a")
+    options = {}
+    if derived == "workbench":
+        lookup = WorkbenchSkillLookup(
+            agent_id=8, agent_version=4, conversation_id=12, run_id="a" * 32, workbench_version=3,
+        )
+        with pytest.raises(ValueError, match="Workbench"):
+            prepared_local_tool.materialize_local_tools(resource, actor, "zh", workbench_tools=[row])
+        options = {"workbench_tools": [row], "workbench_lookup": lookup}
+    hydrated = prepared_local_tool.materialize_local_tools(resource, actor, "zh", **options)
     instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), hydrated["ind_aidp_search"])
     assert instance.api_key == "runtime-aidp-fixture-key"
     assert instance.kds_list == ["private-kb"]
     reference = instance.image_url_builder("/KnowledgeBase/Tenants/provider-a/KnowledgeBases/private-kb/p.png")
     assert reference.startswith("/api/ind-aidp/images/")
     payload = proxy._decode_image_ref(reference.rsplit("/", 1)[-1])
+    if derived == "workbench":
+        assert payload["workbench"] == lookup.model_dump(mode="json")
+        assert "runtime-aidp-fixture-key" not in str(payload) and "https://private-aidp.invalid" not in str(payload)
+        mounts = mocker.patch.object(proxy, "read_workbench_image_mounts", return_value={42: {}})
+        rows = mocker.patch.object(proxy, "read_workbench_skill_rows", return_value={42: {"skill_id": 42}})
+        tools = mocker.patch.object(proxy, "read_workbench_derived_tools", return_value=[row])
+        assert proxy._resolve_image_credentials(payload, actor) == (
+            "https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb/p.png",
+        )
+        mounts.assert_called_once_with(lookup, "user-a", "tenant-a")
+        rows.assert_called_once_with(8, 4, actor, {42: {}})
+        for foreign in (None, ServicePrincipal("user-a", "other-tenant")):
+            with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
+                proxy._resolve_image_credentials(payload, foreign)
+        mounts.return_value = None
+        with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
+            proxy._resolve_image_credentials(payload, ServicePrincipal("other-user", "tenant-a"))
+        mounts.return_value = {42: {}}
+        row["workbench_skill_ids"] = [43]
+        with pytest.raises(proxy.IndependentAidpServiceError, match="changed"):
+            proxy._resolve_image_credentials(payload, actor)
+        tools.return_value = []
+        with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
+            proxy._resolve_image_credentials(payload, actor)
+        return
+
     revision = payload.pop("skill_revision", None)
     assert bool(revision) is derived
     assert payload == {

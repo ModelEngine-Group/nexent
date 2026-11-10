@@ -132,6 +132,29 @@ def read_workbench_skill_mounts(
         return WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in mounts])
 
 
+def read_workbench_image_mounts(
+    lookup: WorkbenchSkillLookup, user_id: str, tenant_id: str,
+) -> dict[int, dict] | None:
+    """Read current mounts for the conversation of an admitted image-producing run."""
+    admission, conversation, message = ConversationRunAdmission, ConversationRecord, ConversationMessage
+    with get_db_session() as session:
+        if not tenant_membership_matches(session, user_id, tenant_id):
+            return None
+        config = session.scalar(select(conversation.workbench_config).select_from(conversation).join(
+            admission, admission.conversation_id == conversation.conversation_id,
+        ).join(message, message.message_id == admission.prepared_assistant_id).where(
+            admission.run_id == lookup.run_id, admission.conversation_id == lookup.conversation_id,
+            admission.created_by == user_id, admission.tenant_id == tenant_id, admission.status == "admitted",
+            admission.delete_flag == "N", conversation.created_by == user_id, conversation.delete_flag == "N",
+            conversation.workbench_config_version == lookup.workbench_version,
+            message.conversation_id == conversation.conversation_id, message.created_by == user_id,
+            message.message_role == "assistant", message.delete_flag == "N",
+        ))
+        if config is None:
+            return None
+        return {mount.skill_id: mount.config_values for mount in WorkbenchSessionConfig.model_validate(config).skill_mounts}
+
+
 def _require_metadata_version(conversation: ConversationRecord, expected: int) -> None:
     current = conversation.runtime_metadata_version or 0
     if current != expected:

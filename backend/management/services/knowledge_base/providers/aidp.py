@@ -7,8 +7,12 @@ from typing import Any, Dict, Tuple
 from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 import httpx
+from pydantic import ValidationError as PayloadValidationError
+
+from contracts.agentos import WorkbenchSkillLookup
 
 from contracts.errors.exceptions import ValidationError
+from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.ind_aidp_images import (
     IndependentAidpServiceError as IndependentAidpServiceError,
     _decode_image_ref,
@@ -16,10 +20,15 @@ from infrastructure.ind_aidp_images import (
     _validate_tenant_id,
     create_ind_aidp_image_url_builder as create_ind_aidp_image_url_builder,
     ind_aidp_skill_revision,
+    ind_aidp_workbench_revision,
 )
 from infrastructure.local_tool_execution import catalog_tool_parameters
 from infrastructure.rdb.local_tool_records import read_skill_derived_local_tools
+from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools, read_workbench_skill_rows
+from management.db.conversation.prepared_turn import read_workbench_image_mounts
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
+
+from nexent.core.concurrency import run_blocking
 
 logger = logging.getLogger("ind_aidp_service")
 
@@ -104,6 +113,33 @@ def _read_skill_image_params(payload: dict) -> dict:
     return params
 
 
+def _read_workbench_image_params(payload: dict, actor: ServicePrincipal | None) -> dict:
+    if actor is None or actor.tenant_id != payload["tenant_id"]:
+        raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
+    try:
+        lookup = WorkbenchSkillLookup.model_validate(payload["workbench"])
+        tool_id = int(payload["tool_id"])
+        if (lookup.agent_id, lookup.agent_version) != (payload["agent_id"], payload["version_no"]):
+            raise ValueError("Inconsistent Workbench image scope")
+        mounts = read_workbench_image_mounts(lookup, actor.user_id, actor.tenant_id)
+        if mounts is None:
+            raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
+        rows = read_workbench_skill_rows(lookup.agent_id, lookup.agent_version, actor, mounts)
+        tools = read_workbench_derived_tools(lookup.agent_id, lookup.agent_version, actor.tenant_id, list(rows.values()))
+        matches = [row for row in tools if row["tool_id"] == tool_id and row["class_name"] == _IMAGE_CLASS_NAME]
+    except (PayloadValidationError, ValidationError, TypeError, ValueError) as exc:
+        raise IndependentAidpServiceError("Independent AIDP Workbench tool changed") from exc
+    if len(matches) != 1:
+        raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
+    row = matches[0]
+    params = catalog_tool_parameters(row)
+    revision = ind_aidp_workbench_revision(lookup, actor.tenant_id, tool_id, row["workbench_skill_ids"], params)
+    supplied = payload.get("skill_revision")
+    if not isinstance(supplied, str) or not compare_digest(revision, supplied):
+        raise IndependentAidpServiceError("Independent AIDP Workbench tool changed")
+    return params
+
+
 def _read_image_instance_params(payload: dict) -> dict:
     instance = query_tool_instances_by_id(
         agent_id=int(payload["agent_id"]),
@@ -117,8 +153,15 @@ def _read_image_instance_params(payload: dict) -> dict:
     return instance.get("params") or {}
 
 
-def _resolve_image_credentials(payload: Dict[str, Any]) -> Tuple[str, str, str, str]:
-    params = _read_skill_image_params(payload) if "skill_revision" in payload else _read_image_instance_params(payload)
+def _resolve_image_credentials(
+    payload: Dict[str, Any], actor: ServicePrincipal | None = None,
+) -> Tuple[str, str, str, str]:
+    if "workbench" in payload:
+        params = _read_workbench_image_params(payload, actor)
+    elif "skill_revision" in payload:
+        params = _read_skill_image_params(payload)
+    else:
+        params = _read_image_instance_params(payload)
     base_url = _normalize_base_url(params.get("server_url"))
     api_key = params.get("api_key")
     aidp_tenant_id = _validate_tenant_id(params.get("tenant_id") or "aidp")
@@ -130,10 +173,16 @@ def _resolve_image_credentials(payload: Dict[str, Any]) -> Tuple[str, str, str, 
     return base_url, api_key.strip(), aidp_tenant_id, image_path
 
 
-async def fetch_ind_aidp_image_impl(image_ref: str) -> Tuple[bytes, str]:
-    """Fetch an image in real time with credentials loaded from the tool instance."""
+async def fetch_ind_aidp_image_impl(
+    image_ref: str, actor: ServicePrincipal | None = None,
+) -> Tuple[bytes, str, str]:
+    """Fetch an image using currently authorized credentials and return its cache policy."""
     payload = _decode_image_ref(image_ref)
-    base_url, api_key, aidp_tenant_id, image_path = _resolve_image_credentials(payload)
+    base_url, api_key, aidp_tenant_id, image_path = await run_blocking(
+        "independent-aidp-image-credentials", _resolve_image_credentials, payload, actor,
+        lane="control-io", owner="management",
+    )
+    cache_control = "no-store" if "workbench" in payload else "private, max-age=3600"
     base_parsed = urlparse(base_url)
     target_path = (
         f"/KnowledgeBase/Tenants/{quote(aidp_tenant_id, safe='')}/"
@@ -157,7 +206,7 @@ async def fetch_ind_aidp_image_impl(image_ref: str) -> Tuple[bytes, str]:
                 raise IndependentAidpServiceError("AIDP image endpoint returned non-image content")
             if len(response.content) > _MAX_IMAGE_SIZE:
                 raise IndependentAidpServiceError("AIDP image exceeds the 20 MB limit")
-            return response.content, content_type
+            return response.content, content_type, cache_control
     except httpx.HTTPStatusError as exc:
         raise IndependentAidpServiceError(
             f"AIDP image endpoint returned HTTP {exc.response.status_code}"

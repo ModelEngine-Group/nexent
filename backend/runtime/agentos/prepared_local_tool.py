@@ -6,11 +6,15 @@ from hmac import compare_digest
 
 from fastapi import HTTPException
 
-from contracts.agentos import AgentResource, ScopedSharedAidpBinding, SkillDerivedLocalToolBinding, StoredLocalToolBinding
+from contracts.agentos import (
+    AgentResource, ScopedSharedAidpBinding, SkillDerivedLocalToolBinding, StoredLocalToolBinding, WorkbenchSkillLookup,
+)
 from contracts.constants import environment
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
-from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder, ind_aidp_skill_revision
+from infrastructure.ind_aidp_images import (
+    create_ind_aidp_image_url_builder, ind_aidp_skill_revision, ind_aidp_workbench_revision,
+)
 from infrastructure.local_tool_execution import (
     LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, build_local_tool, local_tool_rerank_name, local_tool_revision,
 )
@@ -64,6 +68,7 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
 def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
     require_scoped_aidp_instance: bool = False, workbench_tools=(),
+    workbench_lookup: WorkbenchSkillLookup | None = None,
 ) -> dict[str, ToolConfig]:
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding, "4": SkillDerivedLocalToolBinding}
@@ -73,9 +78,13 @@ def materialize_local_tools(
         schema = schemas.get(binding.version)
         if binding.tool_id == "aidp_search" and binding.version == "3" and allow_scoped_aidp:
             schema = ScopedSharedAidpBinding
-        if (schema is None or binding.credential_ref is not None or binding.tool_id in references
-                or (binding.version == "4" and binding.tool_id == "ind_aidp_search")):
+        if schema is None or binding.credential_ref is not None or binding.tool_id in references:
             raise ValueError("Unsupported local SDK tool binding")
+        if binding.version == "4" and binding.tool_id == "ind_aidp_search" and (
+            workbench_lookup is None
+            or (workbench_lookup.agent_id, workbench_lookup.agent_version) != (resource.agent_id, resource.version_no)
+        ):
+            raise ValueError("Mounted independent AIDP requires a Workbench run reference")
         references[binding.tool_id] = binding.version, schema.model_validate(binding.parameters)
     if not references:
         return {}
@@ -134,14 +143,18 @@ def materialize_local_tools(
             tool.metadata = {"rerank_model": _reranker(reference, actor.tenant_id) if rerank_name else None}
         elif name == "ind_aidp_search":
             skill_revision = None
-            if isinstance(reference, SkillDerivedLocalToolBinding):
+            if version == "4":
+                skill_revision = ind_aidp_workbench_revision(
+                    workbench_lookup, actor.tenant_id, row["tool_id"], row["workbench_skill_ids"], tool.params,
+                )
+            elif isinstance(reference, SkillDerivedLocalToolBinding):
                 skill_revision = ind_aidp_skill_revision(
                     *scope, row["tool_id"], row["skill_instance_ids"], tool.params,
                 )
             tool.metadata = {"image_url_builder": create_ind_aidp_image_url_builder(
                 agent_id=resource.agent_id, version_no=resource.version_no, tenant_id=actor.tenant_id,
                 tool_id=row["tool_id"], aidp_tenant_id=tool.params.get("tenant_id") or "aidp",
-                skill_revision=skill_revision,
+                skill_revision=skill_revision, workbench_lookup=workbench_lookup if version == "4" else None,
             )}
         elif name == "aidp_search":
             _bind_shared_aidp_access(tool, actor)

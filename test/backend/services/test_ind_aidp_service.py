@@ -64,7 +64,7 @@ async def test_image_fetch_uses_resolved_instance_credentials(monkeypatch):
     monkeypatch.setattr(
         ind_aidp_service,
         "_resolve_image_credentials",
-        lambda _: ("https://independent-aidp.example", "instance-secret", "aidp", "kb/image.png"),
+        lambda _, actor: ("https://independent-aidp.example", "instance-secret", "aidp", "kb/image.png"),
     )
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=1,
@@ -75,7 +75,8 @@ async def test_image_fetch_uses_resolved_instance_credentials(monkeypatch):
     )
     image_ref = builder("kb/image.png").rsplit("/", 1)[-1]
 
-    content, content_type = await ind_aidp_service.fetch_ind_aidp_image_impl(image_ref)
+    content, content_type, cache_control = await ind_aidp_service.fetch_ind_aidp_image_impl(image_ref)
+    assert cache_control == "private, max-age=3600"
 
     assert content == b"png-bytes"
     assert content_type == "image/png"
@@ -404,7 +405,7 @@ def _make_image_ref(monkeypatch):
     monkeypatch.setattr(
         ind_aidp_service,
         "_resolve_image_credentials",
-        lambda _: ("https://independent-aidp.example", "secret", "aidp", "kb/a.png"),
+        lambda _, actor: ("https://independent-aidp.example", "secret", "aidp", "kb/a.png"),
     )
     builder = ind_aidp_service.create_ind_aidp_image_url_builder(
         agent_id=1, tool_id=2, tenant_id="tenant-a", version_no=0, aidp_tenant_id="aidp"

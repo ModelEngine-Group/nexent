@@ -135,6 +135,9 @@ case:
   - order: 36
     action: Run NL2Agent through Management, call the scoped draft tool, and close a second Runtime stream.
     expected: Only the bound draft is written, the first interactive card ends its run, and a closed grant cannot be reused.
+  - order: 37
+    action: Fetch a mounted independent AIDP image after its signed Workbench run, then try a foreign user, tenant or revoked mount.
+    expected: Only the authorized image reaches its provider and the image response is not cached.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -173,6 +176,7 @@ case:
   - Mounted Skills contribute only their authorized Local, MCP, and LangChain tools without transporting credentials or plugin code.
   - Management retains Skill SSE and history. Signed Runtime runs the selected model, reports one safe failure, and stops on disconnect.
   - NL2Agent uses signed bidirectional transport for execution and tools. Closing the stream revokes draft access.
+  - Workbench image retrieval is bound to the admitted conversation and current mounted tool and does not transport credentials in the signed URL.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -420,4 +424,9 @@ case:
     description: A request-owned NL2Agent run uses signed, revocable callbacks scoped to its draft.
     steps: [36]
     expected_results: [37]
+    forbidden_side_effects: [1, 2]
+  - id: AC-46
+    description: An independent AIDP tool mounted by a Workbench Skill returns a scoped proxy image after the signed run.
+    steps: [37]
+    expected_results: [38]
     forbidden_side_effects: [1, 2]
