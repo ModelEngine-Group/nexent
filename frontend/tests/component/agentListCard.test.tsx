@@ -107,6 +107,50 @@ describe("AgentListCard", () => {
   });
 
   it.each([
+    ["Release 2", "Release 2"],
+    [null, "V2"],
+    ["   ", "V2"],
+  ])(
+    "shows the published version for version name %j",
+    (versionName, label) => {
+      render(
+        <AgentListCard
+          agent={{
+            ...agent,
+            current_version_no: 2,
+            version_label: versionName,
+          }}
+          onOpen={vi.fn()}
+          onManageVersions={vi.fn()}
+        />
+      );
+
+      expect(screen.getByTestId("agent-card-body")).toHaveTextContent(label);
+    }
+  );
+
+  it("omits the version on an unpublished Agent and keeps its availability warning", () => {
+    render(
+      <AgentListCard
+        agent={{
+          ...agent,
+          current_version_no: 0,
+          version_label: "Old release",
+          is_available: false,
+        }}
+        onOpen={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Old release")).not.toBeInTheDocument();
+    expect(screen.queryByText("V0")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("mcpConfig.status.unavailable")
+    ).toBeInTheDocument();
+  });
+
+  it.each([
     ["marketing", "营销"],
     ["customer_service", "客服"],
     ["database", "database"],
