@@ -58,8 +58,8 @@ case:
     action: Stop an ordinary run through the public Management route and start and cancel an automation run using its persisted execution ID.
     expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime compatibility ingress requires a Gateway session signature, and legacy inspect and stop respect user and tenant ownership.
   - order: 11
-    action: Submit a signed prepared conversation and reconnect to its Runtime journal after the first event.
-    expected: The exact run ID is returned, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Management projects the retained observer frames into ordered message units.
+    action: Compile an owned conversation snapshot in Management, submit it signed and reconnect after the first event.
+    expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Management projects the retained observer frames into ordered message units.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.

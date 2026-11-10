@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Export authorized evaluation resources from the existing compiler."""
+"""Export authorized AgentOS snapshots from the Management compiler."""
 
 from functools import cache
 
@@ -7,12 +7,13 @@ from pydantic_core import PydanticSerializationError
 
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResource, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
+    AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
-    PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
+    PreparedAgentRun, PreparedConversationScope, PreparedEvaluationRun, RunAttachment, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext,
 )
 from contracts.constants import environment
+from contracts.errors.exceptions import ForbiddenError
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
@@ -30,9 +31,13 @@ from infrastructure.rdb.mcp_execution_records import (
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
+from management.db.conversation.repository import get_conversation
+from management.services.agent.context import prepend_current_time
+from management.services.configuration.user.memory import get_memory_switch
 from management.services.agent.preparation.langchain_tool import export_langchain_tool
 from management.services.agent.preparation.local_tool import export_local_tool
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
+from nexent.core.concurrency import run_blocking
 from nexent.multi_modal.utils import parse_s3_url
 
 
@@ -73,6 +78,54 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
         tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
         override_version_no=request.version_no, conversation_id=request.conversation_id,
         enable_automation_tool=False, export_evaluation=True,
+    )
+
+
+async def prepare_conversation_snapshot(
+    request: AgentRequest, reference: AgentRunReference, user_id: str, tenant_id: str, *,
+    language: str = "zh", timezone: str | None = None,
+) -> PreparedAgentRun | None:
+    """Compile an existing authorized conversation without constructing Runtime SDK objects."""
+    from management.services.agent.preparation.run import create_agent_run_info
+    from management.services.model.run_controls import preflight_agent_turn_controls, validate_agent_model_selection
+    from management.db.agent.repository import search_agent_info_by_agent_id
+
+    if request.conversation_id != reference.conversation_id:
+        raise ForbiddenError("Conversation does not match the admitted run")
+    conversation = await run_blocking(
+        "snapshot-conversation-scope", get_conversation, reference.conversation_id,
+        user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
+    )
+    if conversation is None:
+        raise ForbiddenError("Conversation is not accessible to the current identity")
+    if any((
+        request.agent_id is None, request.is_debug, request.entrypoint, request.enable_plan,
+        request.enable_automation_tool, request.generation_config, request.metadata is not None,
+        request.clarification_response is not None, request.knowledge_scope is not None,
+        conversation.get("workbench_config") is not None, conversation.get("knowledge_scope") is not None,
+    )):
+        return None
+    if await run_blocking(
+        "snapshot-memory-policy", get_memory_switch, user_id, lane="control-io", owner="management",
+    ):
+        return None
+
+    validate_agent_model_selection(request, tenant_id, search_agent_info_by_agent_id)
+    preflight_agent_turn_controls(request, tenant_id, search_agent_info_by_agent_id)
+    scope = PreparedConversationScope(
+        **reference.model_dump(),
+        runtime_metadata=conversation.get("runtime_metadata") or {},
+        runtime_metadata_version=conversation.get("runtime_metadata_version") or 0,
+    )
+    return await create_agent_run_info(
+        agent_id=request.agent_id, minio_files=request.minio_files,
+        query=prepend_current_time(request.query, timezone, language=language), history=request.history,
+        tenant_id=tenant_id, user_id=user_id, language=language, allow_memory_search=False,
+        override_version_no=request.version_no, override_model_id=request.model_id,
+        reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
+        requested_output_tokens=request.requested_output_tokens, tool_params=request.tool_params,
+        conversation_id=reference.conversation_id, context_policy=request.context_policy,
+        enable_automation_tool=False, prepared_conversation=scope,
     )
 
 
@@ -297,7 +350,7 @@ def _export_model(alias, models, tenant_id, resource, agent_model_overrides):
 
 def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
-    agent_model_overrides=None,
+    agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -311,12 +364,15 @@ def export_snapshot(
         tool_caller = ToolCallerContext(**{
             key: identity[key] for key in ToolCallerContext.model_fields if key in identity
         }) if identity is not None else None
-        return PreparedEvaluationRun(
-            mode="nexent", language=language, conversation_id=conversation_id, resource=resource, tool_caller=tool_caller,
+        fields = dict(
+            mode="nexent", language=language, resource=resource, tool_caller=tool_caller,
             models=ModelBindings(llm=bindings[0], additional_llms=bindings[1:]),
             input=run_input or RunInput(
                 query=query, history=[RunHistoryMessage(role=item.role, content=item.content) for item in (history or [])],
             ),
         )
+        if prepared_conversation is not None:
+            return PreparedAgentRun(**fields, **prepared_conversation.model_dump())
+        return PreparedEvaluationRun(**fields, conversation_id=conversation_id)
     except (LookupError, OSError, TypeError, ValueError, PydanticSerializationError):
         return None

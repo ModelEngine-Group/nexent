@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from contracts.agentos import EvaluationAgentRun, PreparedEvaluationRun
+from contracts.agent import AgentRequest
+from contracts.agentos import AgentRunReference, EvaluationAgentRun, PreparedAgentRun, PreparedEvaluationRun
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent import runtime_client
@@ -19,8 +20,9 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ordinary", [False, True])
 @pytest.mark.parametrize("persisted_body", [False, True])
-async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body):
+async def test_production_compiler_routes_root_and_child_parallel_executor_to_runtime(mocker, persisted_body, ordinary):
     record = model_record(model_id=11, connect_status="available")
     model = create_model_config_from_record(record)
 
@@ -61,21 +63,40 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     client = mocker.AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
-    case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
-    assert await runtime_client.forward_evaluation_case(case, "user-a", "tenant-a") is (
-        client.run_prepared_evaluation.return_value
-    )
-    client.run_evaluation_case.assert_not_called()
-    assert [call.kwargs["portable_evaluation"] for call in compile_tools.await_args_list] == [True, True]
-    prepared, user, tenant = client.run_prepared_evaluation.await_args.args
-    assert (user, tenant) == ("user-a", "tenant-a")
-    assert prepared.resource.subagents[0].version_no == 5
+    user, tenant = "user-a", "tenant-a"
+    if ordinary:
+        mocker.patch.object(run, "query_current_version_no", return_value=2)
+        mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={
+            "runtime_metadata": {"project": "test"},
+            "runtime_metadata_version": 4,
+        })
+        mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+        reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+        prepared = await evaluation_snapshot.prepare_conversation_snapshot(
+            AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False),
+            reference, user, tenant, language="en", timezone="Asia/Shanghai",
+        )
+        assert isinstance(prepared, PreparedAgentRun)
+        assert (prepared.run_id, prepared.conversation_id, prepared.resource.version_no) == (reference.run_id, 42, 2)
+        assert prepared.input.query != "hello" and "hello" in prepared.input.query
+        payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
+        info = prepared_evaluation.prepare_run_snapshot(payload, ServicePrincipal(user, tenant))
+        assert info.runtime_metadata == {"project": "test"}
+        assert info.runtime_metadata_version == 4
+    else:
+        case = EvaluationAgentRun(agent_id=7, version_no=2, query="hello", conversation_id=-42)
+        assert await runtime_client.forward_evaluation_case(case, user, tenant) is client.run_prepared_evaluation.return_value
+        client.run_evaluation_case.assert_not_called()
+        prepared, sent_user, sent_tenant = client.run_prepared_evaluation.await_args.args
+        assert (sent_user, sent_tenant) == (user, tenant)
+        payload = PreparedEvaluationRun.model_validate_json(prepared.model_dump_json())
+        info = prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal(user, tenant))
 
+    assert [call.kwargs["portable_evaluation"] for call in compile_tools.await_args_list] == [True, True]
+    assert prepared.resource.subagents[0].version_no == 5
     encoded = prepared.model_dump_json()
     assert "fixture-private-option" not in encoded
     assert ("provider_body_revision" in encoded) is persisted_body
-    payload = PreparedEvaluationRun.model_validate_json(encoded)
-    info = prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal(user, tenant))
     if persisted_body:
         lookup_override.assert_called_once_with(7, 2, "tenant-a")
         assert info.model_config_list[0].extra_body == {"provider_option": "fixture-private-option"}
@@ -118,3 +139,33 @@ def test_parallel_executor_rejects_nonpositive_or_coerced_timeout(mocker, value)
         )
     assert error.value.status_code == 422
     load_model.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepared_conversation_scope_is_checked_before_compilation(mocker):
+    from contracts.errors.exceptions import ForbiddenError
+
+    read = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value=None)
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
+
+    with pytest.raises(ForbiddenError):
+        await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "foreign")
+    read.assert_called_once_with(42, user_id="actor", tenant_id="foreign")
+    compile_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepared_conversation_does_not_drop_memory_or_scope(mocker):
+    get_conversation = mocker.patch.object(evaluation_snapshot, "get_conversation", return_value={"knowledge_scope": {"local": []}})
+    memory = mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=True)
+    compile_run = mocker.patch.object(run, "create_agent_run_info")
+    reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+    request = AgentRequest(query="hello", agent_id=7, conversation_id=42, enable_automation_tool=False)
+
+    assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
+    get_conversation.return_value = {}
+    assert await evaluation_snapshot.prepare_conversation_snapshot(request, reference, "actor", "tenant") is None
+    memory.assert_called_once_with("actor")
+    compile_run.assert_not_called()

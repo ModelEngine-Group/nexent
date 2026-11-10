@@ -6,6 +6,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
+from contracts.agentos import PreparedConversationScope
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
     MCP_REQUEST_TIMEOUT_SECONDS,
@@ -134,7 +135,9 @@ async def create_agent_run_info(
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
     export_evaluation: bool = False,
     resource_versions: dict | None = None,
+    prepared_conversation: PreparedConversationScope | None = None,
 ):
+    export_resources = export_evaluation or prepared_conversation is not None
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
 
@@ -149,7 +152,7 @@ async def create_agent_run_info(
             workspace_path,
             tenant_id,
         )
-    if export_evaluation:
+    if export_resources:
         from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 
         try:
@@ -191,7 +194,7 @@ async def create_agent_run_info(
         version_no=version_no,
     )
 
-    final_query = query if export_evaluation else await join_minio_file_description_to_query(
+    final_query = query if export_resources else await join_minio_file_description_to_query(
         minio_files=minio_files,
         query=query,
         history=history,
@@ -212,7 +215,7 @@ async def create_agent_run_info(
         "enable_planning": enable_planning,
         "runtime_file_context": runtime_file_context,
     }
-    if export_evaluation:
+    if export_resources:
         create_config_kwargs["portable_evaluation"] = True
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
@@ -347,13 +350,13 @@ async def create_agent_run_info(
         index = model_list.index(selected_config)
         model_list[index] = overlay
 
-    if export_evaluation:
+    if export_resources:
         from management.services.agent.preparation.evaluation_snapshot import export_snapshot
 
         return export_snapshot(
             agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
-            agent_model_overrides=model_params_override,
+            agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
         )
 
     if resource_versions is not None:

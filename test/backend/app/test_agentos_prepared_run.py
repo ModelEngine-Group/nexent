@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from contracts.agentos import AgentRunReference, PreparedAgentRun
+from contracts.constants.constants import MAX_RUNTIME_METADATA_BYTES
 from infrastructure.agentos_identity import ServicePrincipal
 from infrastructure.rdb.agent_execution import ActiveExecutionError
 from runtime.agentos import prepared_run
@@ -144,3 +146,12 @@ async def test_missing_event_store_fails_before_admission(payload, runtime):
     assert result.value.status_code == 503
     runtime.begin.assert_not_called()
     assert not runtime.tasks
+
+
+@pytest.mark.parametrize("overrides", [
+    {"runtime_metadata": {"oversized": "x" * MAX_RUNTIME_METADATA_BYTES}},
+    {"runtime_metadata_version": -1},
+])
+def test_prepared_conversation_metadata_uses_existing_limits(payload, overrides):
+    with pytest.raises(ValidationError):
+        PreparedAgentRun.model_validate(payload.model_dump() | overrides)

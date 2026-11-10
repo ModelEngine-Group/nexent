@@ -229,7 +229,7 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
     with monkeypatch.context() as run_patches:
-        await _assert_prepared_run_over_signed_http(run_patches)
+        await _assert_prepared_run_over_signed_http(run_patches, tmp_path)
 
 
 async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
@@ -1423,21 +1423,18 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
         registry.unregister_agent_run(conversation_id, "legacy-actor", agent_run_info=info)
 
 
-async def _assert_prepared_run_over_signed_http(monkeypatch):
+async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
+    from contracts.agent import AgentRequest
+    from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.rdb.agent_execution import ActiveExecutionError
     from infrastructure.redis.agent_events import START
     from management.services.agent.stream import AssistantMessageProjection, finalize_buffered_unit_fragments
-    from runtime.agentos import prepared_run, resume
+    from management.services.agent.preparation import evaluation_snapshot, run as compile_run
+    from nexent.core.agents.agent_model import AgentConfig
+    from runtime.agentos import prepared_evaluation, prepared_run, resume
 
     reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
     actor = ServicePrincipal("user-a", "tenant-a")
-    request = PreparedAgentRun.model_validate({
-        **reference.model_dump(),
-        "mode": "nexent",
-        "resource": {"agent_id": 7, "version_no": 3, "name": "agent", "description": "", "prompt_templates": {}},
-        "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "revision-1"}},
-        "input": {"query": "question"},
-    })
     journal_events = []
     admissions = []
     calls = []
@@ -1472,14 +1469,59 @@ async def _assert_prepared_run_over_signed_http(monkeypatch):
             index = next(i for i, (event_id, _) in enumerate(journal_events) if event_id == after_id)
             return [journal_events[index]], journal_events[index + 1:], journal_events[-1:]
 
-    async def control_io(_task, function, *args, **kwargs):
+    async def control_io(_task, function, *args, lane=None, owner=None, **kwargs):
         return function(*args, **kwargs)
+
+    model_record = {
+        "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "test-model", "model_name": "test-model", "model_repo": None,
+        "base_url": "http://provider.test/v1", "api_key": "synthetic-provider-secret",
+        "update_time": "2026-11-10T00:00:00",
+    }
+
+    async def read_models(tenant_id):
+        assert tenant_id == actor.tenant_id
+        return [create_model_config_from_record(model_record)]
+
+    async def compile_agent(**kwargs):
+        assert kwargs["portable_evaluation"] and kwargs["version_no"] == 3
+        return AgentConfig(
+            name="agent", description="", agent_id=7, version_no=3,
+            model_name="test-model", prompt_templates={"system_prompt": "Answer"}, tools=[],
+        )
+
+    def read_conversation(conversation_id, *, user_id, tenant_id):
+        if owns(conversation_id, user_id=user_id, tenant_id=tenant_id):
+            return {"runtime_metadata": {"project": "demo"}, "runtime_metadata_version": 4}
+        return None
+
+    monkeypatch.setattr(evaluation_snapshot, "run_blocking", control_io)
+    monkeypatch.setattr(evaluation_snapshot, "get_conversation", read_conversation)
+    monkeypatch.setattr(evaluation_snapshot, "get_memory_switch", lambda _user: False)
+    monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda *_args: [model_record])
+    monkeypatch.setattr(compile_run, "create_model_config_list", read_models)
+    monkeypatch.setattr(compile_run, "query_current_version_no", lambda **kwargs: 3)
+    monkeypatch.setattr(compile_run, "create_agent_config", compile_agent)
+    monkeypatch.setattr(compile_run, "_ensure_agent_reasoning_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr(compile_run, "search_agent_info_by_agent_id", lambda **kwargs: {})
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_args: model_record)
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    request = await evaluation_snapshot.prepare_conversation_snapshot(
+        AgentRequest(query="question", conversation_id=42, agent_id=7, enable_automation_tool=False),
+        reference, actor.user_id, actor.tenant_id, language="en",
+    )
+    assert isinstance(request, PreparedAgentRun)
+    assert request.resource.version_no == 3
+    assert "synthetic-provider-secret" not in request.model_dump_json()
 
     async def hydrate(payload, signed_actor, materialize):
         assert payload == request and signed_actor == actor and materialize is prepared_run.prepare_run_snapshot
-        return SimpleNamespace(attempt_outcome="completed")
+        return materialize(payload, signed_actor)
 
-    async def runner(_info, **_kwargs):
+    async def runner(info, **_kwargs):
+        assert info.runtime_metadata == {"project": "demo"} and info.runtime_metadata_version == 4
+        assert info.model_config_list[0].api_key == "synthetic-provider-secret"
         calls.append("started")
         yield '{"type":"thought","content":"step"}'
         yield '{"type":"final_answer","content":"answer"}'
@@ -1491,7 +1533,12 @@ async def _assert_prepared_run_over_signed_http(monkeypatch):
                         registry.unregister_agent_run(cid, uid, status, info))
     monkeypatch.setattr(prepared_run, "begin_execution", begin)
     monkeypatch.setattr(prepared_run, "track_execution", lambda _identity: None)
-    monkeypatch.setattr(prepared_run, "mark_running", lambda _identity, _versions: True)
+    def mark_running(identity, versions):
+        assert identity.run_id == reference.run_id
+        assert versions["runtime_metadata_version"] == 4 and versions["agent_version_no"] == 3
+        return True
+
+    monkeypatch.setattr(prepared_run, "mark_running", mark_running)
     monkeypatch.setattr(prepared_run, "finish_execution", lambda _identity, status: status == "completed")
     monkeypatch.setattr(prepared_run, "stop_requested", lambda _identity: False)
     monkeypatch.setattr(prepared_run, "load_prepared_run", hydrate)

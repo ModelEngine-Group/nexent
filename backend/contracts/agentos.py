@@ -4,7 +4,9 @@
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, field_validator, model_serializer
+
+from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -416,7 +418,17 @@ class AgentRunSpec(RunSpecModel):
     tool_caller: ToolCallerContext | None = None
 
 
-class PreparedAgentRun(AgentRunSpec, AgentRunReference):
+class PreparedConversationScope(AgentRunReference):
+    runtime_metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    runtime_metadata_version: int | None = Field(default=None, ge=0)
+
+    @field_validator("runtime_metadata")
+    @classmethod
+    def validate_metadata(cls, value):
+        return validate_runtime_metadata(value)
+
+
+class PreparedAgentRun(AgentRunSpec, PreparedConversationScope):
     """Execute an authorized snapshot for an existing conversation."""
 
 

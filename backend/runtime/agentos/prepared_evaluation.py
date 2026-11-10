@@ -304,6 +304,9 @@ def prepare_run_snapshot(payload: PreparedEvaluationRun | PreparedAgentRun, acto
             user_id=actor.user_id,
             tenant_id=actor.tenant_id,
         )
+        if isinstance(payload, PreparedAgentRun):
+            info.runtime_metadata = payload.runtime_metadata
+            info.runtime_metadata_version = payload.runtime_metadata_version
         info.context_input = build_authorized_context_input(info)
         cleanup.pop_all()
     return info

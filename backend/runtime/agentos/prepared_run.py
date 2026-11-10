@@ -60,6 +60,8 @@ async def _run_snapshot(payload, actor, identity, journal):
                 for item in payload.resource.subagents
             ],
         }
+        if payload.runtime_metadata_version is not None:
+            versions["runtime_metadata_version"] = payload.runtime_metadata_version
         if not versions["mounted_agents"]:
             del versions["mounted_agents"]
         if not await _control_io("agentos-prepared-running", mark_running, identity, versions):
