@@ -478,13 +478,10 @@ def mock_convert_list_to_string(items):
         import_agent_by_agent_id,
         clear_agent_memory,
         import_agent_impl,
-        save_messages,
-        prepare_agent_run,
-        run_agent_stream,
-        stop_agent_tasks,
-        _resolve_user_tenant_language,
         clear_agent_new_mark_impl,
     )
+    from management.services.agent.run import save_messages, prepare_agent_run, stop_agent_tasks
+    from management.services.agent.subscription import run_agent_stream, _resolve_user_tenant_language
     from test.backend.services.agent_legacy_helpers import (
         insert_related_agent_impl,
         load_default_agents_json_file,
@@ -702,14 +699,11 @@ from management.services.agent.service import (
     import_agent_by_agent_id,
     import_agent_impl,
     get_agent_by_name_impl,
-    save_messages,
-    prepare_agent_run,
-    run_agent_stream,
-    stop_agent_tasks,
-    _resolve_user_tenant_language,
     _resolve_model_ids_with_fallback,
     clear_agent_new_mark_impl,
 )
+from management.services.agent.run import save_messages, prepare_agent_run, stop_agent_tasks
+from management.services.agent.subscription import run_agent_stream, _resolve_user_tenant_language
 from test.backend.services.agent_legacy_helpers import (
     delete_related_agent_impl,
     insert_related_agent_impl,
@@ -10576,7 +10570,7 @@ async def test_run_agent_stream_binds_agent_monitoring_context(mock_generate_str
 
 def test_generate_stream_decorated():
     """generate_stream exists as callable after module import."""
-    from management.services.agent.service import generate_stream
+    from management.services.agent.run import generate_stream
 
     assert callable(generate_stream)
 
@@ -11172,7 +11166,7 @@ async def test_update_agent_info_impl_rejects_unavailable_skill_id(mock_query_sk
 @pytest.mark.asyncio
 async def test_generate_stream_unexpected_exception():
     """Test generate_stream handles unexpected exceptions."""
-    from management.services.agent.service import generate_stream
+    from management.services.agent.run import generate_stream
 
     agent_request = MagicMock()
     agent_request.is_debug = False
@@ -11432,7 +11426,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
 # Test for save_messages error cases
 def test_save_messages_user_with_messages_error():
     """Test save_messages raises error when messages provided for user."""
-    from management.services.agent.service import save_messages
+    from management.services.agent.run import save_messages
     from contracts.constants.constants import MESSAGE_ROLE
 
     agent_request = MagicMock()
@@ -11445,7 +11439,7 @@ def test_save_messages_user_with_messages_error():
 
 def test_save_messages_assistant_without_messages_error():
     """Test save_messages raises error when messages missing for assistant."""
-    from management.services.agent.service import save_messages
+    from management.services.agent.run import save_messages
     from contracts.constants.constants import MESSAGE_ROLE
 
     agent_request = MagicMock()
@@ -11888,7 +11882,7 @@ def test_safe_agent_stream_error_chunk():
 @pytest.mark.asyncio
 async def test_cleanup_channel_later():
     """_cleanup_channel_later should call remove_channel after delay."""
-    from management.services.agent.service import _cleanup_channel_later
+    from management.services.agent.execution import _cleanup_channel_later
     from management.services.agent.run import streaming_channel_manager
 
     with patch.object(
@@ -12148,7 +12142,7 @@ async def test_process_skill_file_uploads_uses_content_type(
 
 def test_stop_agent_tasks():
     """stop_agent_tasks should call preprocess_manager.stop_preprocess_tasks."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -12274,7 +12268,7 @@ def test_resolve_model_ids_with_fallback_model_not_found_in_catalog(mock_get_mod
 # Tests for stop_agent_tasks with various scenarios
 def test_stop_agent_tasks_both_stopped():
     """stop_agent_tasks should return success when both agent and preprocess stop."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -12290,7 +12284,7 @@ def test_stop_agent_tasks_both_stopped():
 
 def test_stop_agent_tasks_agent_only():
     """stop_agent_tasks should return success when only agent stops."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -12306,7 +12300,7 @@ def test_stop_agent_tasks_agent_only():
 
 def test_stop_agent_tasks_preprocess_only():
     """stop_agent_tasks should return success when only preprocess stops."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -12322,7 +12316,7 @@ def test_stop_agent_tasks_preprocess_only():
 
 def test_stop_agent_tasks_none_stopped():
     """stop_agent_tasks should return already_stopped when nothing stops."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -12766,7 +12760,7 @@ def test_check_agent_value_duplicate_mismatched_case():
 # Tests for stop_agent_tasks with logging
 def test_stop_agent_tasks_logs_messages():
     """stop_agent_tasks should log appropriate messages."""
-    from management.services.agent.service import stop_agent_tasks
+    from management.services.agent.run import stop_agent_tasks
     from management.services.agent.preprocessing import preprocess_manager
     from management.services.agent.lifecycle import agent_run_manager
 
@@ -14641,7 +14635,7 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
                         yield 'data: {"type": "final_answer", "content": "test response"}\n\n'
                     mock_channel.subscribe_with_history = mock_subscribe
                     mock_channel_mgr.get_channel.return_value = mock_channel
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
                     assert mock_channel.history_size == 10
 
@@ -14674,7 +14668,7 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
                         yield
                     mock_channel.subscribe_with_history = mock_subscribe
                     mock_channel_mgr.get_channel.return_value = mock_channel
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
 
 
@@ -14770,7 +14764,7 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
                     mock_channel.subscribe_with_history = AsyncMock(return_value=iter([]))
                     mock_channel_mgr.get_channel.return_value = mock_channel
                     mock_channel_mgr.complete_channel = AsyncMock()
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
 
 
@@ -14790,7 +14784,7 @@ async def test_run_agent_stream_resume_already_finished(monkeypatch):
         mock_resolve.return_value = ('user1', 'tenant1', 'en')
         with patch('management.services.agent.subscription._detect_resume_position') as mock_detect:
             mock_detect.return_value = {'should_resume': False, 'message_id': 1, 'message_status': 'completed', 'reason': 'backend_completed'}
-            result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+            result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
             assert result.status_code == 200
 
 
@@ -14813,7 +14807,7 @@ async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypa
             with patch('management.services.agent.subscription.agent_run_manager') as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = None
                 with patch('management.services.agent.subscription.update_message_status') as mock_update:
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
                     assert mock_update.call_count <= 1
 
@@ -14838,7 +14832,7 @@ async def test_run_agent_stream_resume_no_channel(monkeypatch):
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
                 with patch('management.services.agent.subscription.streaming_channel_manager') as mock_channel_mgr:
                     mock_channel_mgr.get_channel.return_value = None
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
 
 
@@ -14870,7 +14864,7 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                     mock_channel.subscribe_with_history = mock_subscribe
                     mock_channel_mgr.get_channel.return_value = mock_channel
                     mock_channel_mgr.complete_channel = AsyncMock()
-                    result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+                    result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
                     assert result.status_code == 200
 
 
@@ -14947,7 +14941,7 @@ async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
 
     monkeypatch.setattr(agent_execution, "runtime_state_service", fake_runtime_state)
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    await agent_execution._cancel_task_on_runtime_signal(123, "user1", task)
 
     task.cancel.assert_called_once()
     fake_runtime_state.is_cancelled_async.assert_awaited_once_with(
@@ -14972,7 +14966,7 @@ async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
     monkeypatch.setattr(agent_execution, "runtime_state_service", fake_runtime_state)
     monkeypatch.setattr(agent_execution.asyncio, "sleep", fake_sleep)
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    await agent_execution._cancel_task_on_runtime_signal(123, "user1", task)
 
     task.cancel.assert_called_once()
     assert sleeps == [agent_execution.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
@@ -14990,7 +14984,7 @@ async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
 
     monkeypatch.setattr(agent_execution, "runtime_state_service", fake_runtime_state)
 
-    await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
+    await agent_execution._cancel_task_on_runtime_signal(123, "user1", task)
 
     task.cancel.assert_not_called()
     fake_runtime_state.is_cancelled_async.assert_not_awaited()
@@ -15907,7 +15901,7 @@ class TestValidateRequestedOutputTokensForAgent:
 @patch("management.services.agent.subscription.get_latest_assistant_message")
 def test_detect_resume_position_no_message(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should return no_resume when no message found."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = None
 
@@ -15924,7 +15918,7 @@ def test_detect_resume_position_streaming(
     mock_get_msg, mock_channel_mgr, mock_last_unit
 ):
     """_detect_resume_position should detect streaming message."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "streaming"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -15945,7 +15939,7 @@ def test_detect_resume_position_channel_active(
     mock_get_msg, mock_channel_mgr, mock_last_unit
 ):
     """_detect_resume_position should detect active channel with completed message."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -15965,7 +15959,7 @@ def test_detect_resume_position_channel_active(
 @patch("management.services.agent.subscription.get_latest_assistant_message")
 def test_detect_resume_position_no_channel(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should return no_resume when message is completed and no channel."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel_mgr.get_channel.return_value = None
@@ -15983,7 +15977,7 @@ def test_detect_resume_position_no_last_unit(
     mock_get_msg, mock_channel_mgr, mock_last_unit
 ):
     """_detect_resume_position should handle missing last unit."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "streaming"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -16005,7 +15999,7 @@ def test_detect_resume_position_no_last_unit(
 @patch("management.services.agent.subscription.get_latest_assistant_message")
 def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should handle failed message status."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "failed"}
     mock_channel_mgr.get_channel.return_value = None  # No active channel
@@ -16021,7 +16015,7 @@ def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
 @patch("management.services.agent.subscription.get_latest_assistant_message")
 def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should handle stopped message status."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "stopped"}
     mock_channel_mgr.get_channel.return_value = None  # No active channel
@@ -16039,7 +16033,7 @@ def test_detect_resume_position_channel_inactive_completed(
     mock_get_msg, mock_channel_mgr
 ):
     """_detect_resume_position should not resume when channel exists but is completed."""
-    from management.services.agent.service import _detect_resume_position
+    from management.services.agent.subscription import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel = MagicMock()
@@ -16077,7 +16071,7 @@ async def test_run_agent_stream_resume_update_message_status_exception(mock_reso
         agent_request.minio_files = []
         agent_request.is_debug = False
         agent_request.resume = True
-        result = await agent_service.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
+        result = await agent_subscription.run_agent_stream(agent_request, MagicMock(), resume=True, user_id='test_user', tenant_id='test_tenant')
         assert result.status_code == 200
         assert mock_update.call_count == 1
 
@@ -17951,7 +17945,7 @@ async def test_update_agent_info_impl_with_related_agents_objects(mock_update_ag
 
 @patch('management.services.agent.subscription.get_user_language', return_value='en-US')
 def test_resolve_user_tenant_language_honors_explicit_identity(mock_get_user_language):
-    result = agent_service._resolve_user_tenant_language(http_request=MagicMock(), user_id='user-2', tenant_id='tenant-2')
+    result = agent_subscription._resolve_user_tenant_language(http_request=MagicMock(), user_id='user-2', tenant_id='tenant-2')
     assert result == ('user-2', 'tenant-2', 'en-US')
     mock_get_user_language.assert_called_once()
 

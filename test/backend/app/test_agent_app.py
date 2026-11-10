@@ -151,6 +151,7 @@ sys.modules['infrastructure.trace.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
+sys.modules['management.services.agent.subscription'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
 sys.modules['management.services.configuration.user.memory'] = MagicMock()

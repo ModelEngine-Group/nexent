@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
-from management.services.agent.service import run_agent_stream
+from management.services.agent.subscription import run_agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt

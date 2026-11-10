@@ -4,6 +4,8 @@
 import ast
 import importlib.util
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tokenize
 from types import SimpleNamespace
@@ -55,6 +57,40 @@ def _legacy_agent_imports(root):
 def test_ut_be_arb_001_product_callers_use_canonical_owners():
     assert not (ROOT / "backend/agents").exists()
     assert not _legacy_agent_imports(ROOT)
+
+
+def test_management_app_serves_liveness_without_runtime_source():
+    script = """
+import asyncio
+import importlib.abc
+import sys
+from unittest.mock import patch
+
+import httpx
+
+class BlockRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"runtime", "backend.runtime"} or fullname.startswith(("runtime.", "backend.runtime.")):
+            raise AssertionError(f"Management imported peer source: {fullname}")
+
+sys.meta_path.insert(0, BlockRuntime())
+with patch("nexent.core.nlp.stopwords.load_stopwords"):
+    from management.api.application import app
+
+assert "post" in app.openapi()["paths"]["/agent/run"]
+
+async def verify():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
+        result = await client.get("/health/live")
+        assert result.status_code == 200 and result.json() == {"status": "alive"}
+
+asyncio.run(verify())
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_source_scan_ignores_dependencies_but_detects_owned_legacy_imports(tmp_path):
