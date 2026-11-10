@@ -28,6 +28,7 @@ interface SkillDetailModalProps {
   onClose: () => void;
   zIndex?: number;
   maskClosable?: boolean;
+  repositoryLayout?: boolean;
 }
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
@@ -64,6 +65,7 @@ export default function SkillDetailModal({
   onClose,
   zIndex = 1000,
   maskClosable = true,
+  repositoryLayout = false,
 }: SkillDetailModalProps) {
   const { t } = useTranslation("common");
   const [form] = Form.useForm<SkillFormData>();
@@ -151,15 +153,16 @@ export default function SkillDetailModal({
       open={open}
       onCancel={handleClose}
       footer={null}
-      width={820}
+      destroyOnHidden={repositoryLayout}
+      width={repositoryLayout ? 960 : 820}
       zIndex={zIndex}
       mask={{ closable: maskClosable }}
       className="skill-detail-modal"
       styles={{
         body: {
-          height: 620,
+          height: repositoryLayout ? 1050 : 620,
           maxHeight: "75vh",
-          overflow: "hidden",
+          overflow: repositoryLayout ? "auto" : "hidden",
         },
       }}
     >
@@ -180,6 +183,7 @@ export default function SkillDetailModal({
             activeSkillTab={activeSkillTab}
             setActiveSkillTab={setActiveSkillTab}
             readOnly
+            repositoryLayout={repositoryLayout}
           />
         </div>
       </Spin>

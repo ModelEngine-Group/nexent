@@ -1,7 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Agent repository service for tenant marketplace listing API calls
  */
 
+import { submitResourceReview } from "./resourceReviewService";
+import type { ResourceReview } from "@/types/resourceReview";
 import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
 import { getAuthHeaders } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -113,31 +117,14 @@ export async function createAgentRepositoryListing(
   agentId: number,
   versionNo: number,
   payload: AgentRepositoryListingCreatePayload
-): Promise<AgentRepositoryListingDetail> {
-  try {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.agentRepository.createListing(agentId, versionNo),
-      {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to create agent repository listing: ${response.statusText}`
-      );
-    }
-
-    return response.json();
-  } catch (error) {
-    log.error("Error creating agent repository listing:", error);
-    throw error;
-  }
+): Promise<ResourceReview> {
+  return submitResourceReview({
+    resource_type: "agent",
+    source_resource_id: String(agentId),
+    version_no: versionNo,
+    submit_description: payload.content,
+    listing_fields: { icon_url: payload.icon_url, tags: payload.tags },
+  });
 }
 
 export async function updateAgentRepositoryStatus(

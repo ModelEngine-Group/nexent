@@ -142,6 +142,7 @@ def _to_summary_item(
         "icon_url": record.get("icon_url"),
         "downloads": downloads,
         "content": record.get("content"),
+        "published_at": _serialize_created_at(record.get("published_at")),
         "publisher_tenant_id": record.get("publisher_tenant_id"),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
         "is_main_agent": record.get("is_main_agent", True),

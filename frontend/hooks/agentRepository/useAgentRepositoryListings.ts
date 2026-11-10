@@ -1,4 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
+  hashKey,
   useMutation,
   useQuery,
   useQueryClient,
@@ -36,11 +39,22 @@ export async function invalidateAgentRepositoryCaches(
 
 export function useAgentRepositoryListings(
   params?: AgentRepositoryListingListParams,
-  enabled = true
+  enabled = true,
+  keepPageVisible = false
 ) {
   return useQuery({
     queryKey: [AGENT_REPOSITORY_LISTINGS_QUERY_KEY, params],
     queryFn: () => agentRepositoryService.fetchAgentRepositoryListings(params),
+    placeholderData: keepPageVisible
+      ? (previousData, previousQuery) => {
+          const previousParams = previousQuery?.queryKey[1] as
+            AgentRepositoryListingListParams | undefined;
+          return hashKey([{ ...previousParams, page: undefined }]) ===
+            hashKey([{ ...params, page: undefined }])
+            ? previousData
+            : undefined;
+        }
+      : undefined,
     staleTime: 60_000,
     refetchOnMount: "always",
     enabled,

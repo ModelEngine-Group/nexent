@@ -6,6 +6,15 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class McpDeleteTarget(BaseModel):
+    kind: Literal["local", "community"]
+    id: int = Field(gt=0, strict=True)
+
+
+class McpBatchDeleteRequest(BaseModel):
+    items: list[McpDeleteTarget] = Field(min_length=1, max_length=100)
+
+
 class AgentToolParamsRequest(BaseModel):
     """Request-scoped tool parameter overrides for a single agent."""
 
@@ -324,6 +333,7 @@ class CommunityListRequest(BaseModel):
         None, description="Filter by transport: url or container"
     )
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    sort_by_published_time: bool = False
     page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 

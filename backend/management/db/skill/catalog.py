@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, update
 from contracts.constants.constants import STATUS_NOT_SHARED
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
+from management.db.repository_transactions import current_repository_session, lock_repository_source
 from management.db.models import SkillRepository
 
 _UPDATE_ALLOWED_FIELDS = frozenset(
@@ -46,6 +47,7 @@ def insert_skill_repository_record(
         if payload.get("status") is None:
             payload["status"] = STATUS_NOT_SHARED
 
+
         new_record = SkillRepository(**filter_property(payload, SkillRepository))
         session.add(new_record)
         session.flush()
@@ -67,6 +69,9 @@ def get_skill_repository_by_id_and_publisher(
             )
             .first()
         )
+        if record is not None and current_repository_session() is not None:
+            lock_repository_source(session, "skill", publisher_tenant_id, record.skill_id)
+            session.refresh(record)
         return as_dict(record) if record else None
 
 
@@ -78,6 +83,7 @@ def get_skill_repository_by_skill_id(
 ) -> Optional[dict]:
     """Fetch an active repository listing by source skill_id."""
     with get_db_session() as session:
+        lock_repository_source(session, "skill", publisher_tenant_id, skill_id)
         query = session.query(SkillRepository).filter(
             SkillRepository.skill_id == skill_id,
             SkillRepository.delete_flag != "Y",
@@ -145,6 +151,8 @@ def list_skill_repository_summaries(
     search: Optional[str] = None,
     tag: Optional[str] = None,
     sort_by_update_time: bool = False,
+    sort_by_published_time: bool = False,
+    review_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List active repository summaries for a publisher tenant without heavy payloads."""
     safe_page = max(int(page or 1), 1)
@@ -165,6 +173,7 @@ def list_skill_repository_summaries(
             SkillRepository.icon,
             SkillRepository.downloads,
             SkillRepository.content,
+            SkillRepository.published_at,
             SkillRepository.create_time,
         )
         query = _apply_skill_repository_filters(
@@ -178,12 +187,18 @@ def list_skill_repository_summaries(
             tag=tag,
         )
 
+        if review_user_id is not None:
+            query = query.filter(or_(SkillRepository.status == "shared",
+                SkillRepository.submitted_user_id == review_user_id,
+                (SkillRepository.status == "not_shared") & (SkillRepository.publisher_user_id == review_user_id)))
         total = query.count()
         order_by_fields = (
             (SkillRepository.update_time.desc(), SkillRepository.skill_repository_id.desc())
             if sort_by_update_time
             else (SkillRepository.skill_repository_id.desc(),)
         )
+        if sort_by_published_time:
+            order_by_fields = (SkillRepository.published_at.desc().nullslast(), SkillRepository.skill_repository_id.desc())
         rows = query.order_by(*order_by_fields).offset((safe_page - 1) * safe_page_size).limit(safe_page_size).all()
 
     items = [
@@ -201,6 +216,7 @@ def list_skill_repository_summaries(
             "icon": row.icon,
             "downloads": row.downloads or 0,
             "content": row.content,
+            "published_at": getattr(row, "published_at", None).isoformat() if getattr(row, "published_at", None) else None,
             "created_at": row.create_time.isoformat() if row.create_time else None,
         }
         for row in rows
@@ -287,6 +303,7 @@ def update_skill_repository_status_by_id(
         update_values["submitted_by"] = submitted_by
     if content is not None:
         update_values["content"] = content
+
 
     with get_db_session() as session:
         where_clauses = [

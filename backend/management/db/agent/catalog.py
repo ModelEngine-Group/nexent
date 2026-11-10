@@ -8,6 +8,7 @@ from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNE
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
+from management.db.repository_transactions import current_repository_session, lock_repository_source
 from management.db.models import AgentInfo, AgentRepository, AgentVersion
 from management.db.identity.group import query_group_ids_by_user
 
@@ -54,6 +55,7 @@ def insert_agent_repository_record(
         if payload.get("status") is None:
             payload["status"] = STATUS_NOT_SHARED
 
+
         new_record = AgentRepository(**filter_property(payload, AgentRepository))
         session.add(new_record)
         session.flush()
@@ -75,6 +77,9 @@ def get_agent_repository_by_id(
             )
             .first()
         )
+        if record is not None and current_repository_session() is not None:
+            lock_repository_source(session, "agent", publisher_tenant_id, record.agent_id)
+            session.refresh(record)
         return as_dict(record) if record else None
 
 
@@ -86,6 +91,7 @@ def get_agent_repository_by_agent_id(
 ) -> Optional[dict]:
     """Fetch an active repository listing by root agent_id and optional version."""
     with get_db_session() as session:
+        lock_repository_source(session, "agent", publisher_tenant_id, agent_id)
         query = session.query(AgentRepository).filter(
             AgentRepository.agent_id == agent_id,
             AgentRepository.delete_flag != "Y",
@@ -173,6 +179,8 @@ def list_agent_repository_summaries(
             AgentRepository.version_no,
             AgentRepository.author,
             AgentRepository.submitted_by,
+            AgentRepository.submitted_user_id,
+            AgentRepository.publisher_user_id,
             AgentRepository.name,
             AgentRepository.display_name,
             AgentRepository.description,
@@ -183,6 +191,7 @@ def list_agent_repository_summaries(
             AgentRepository.icon_url,
             AgentRepository.downloads,
             AgentRepository.content,
+            AgentRepository.published_at,
             AgentRepository.create_time,
         ).filter(
             AgentRepository.delete_flag != "Y",
@@ -200,6 +209,8 @@ def list_agent_repository_summaries(
                 "version_no": row.version_no,
                 "author": row.author,
                 "submitted_by": row.submitted_by,
+                "submitted_user_id": getattr(row, "submitted_user_id", None),
+                "publisher_user_id": getattr(row, "publisher_user_id", None),
                 "name": row.name,
                 "display_name": row.display_name,
                 "description": row.description,
@@ -210,6 +221,7 @@ def list_agent_repository_summaries(
                 "icon_url": row.icon_url,
                 "downloads": row.downloads,
                 "content": row.content,
+                "published_at": getattr(row, "published_at", None),
                 "create_time": row.create_time,
             }
             for row in rows
@@ -283,6 +295,7 @@ def update_agent_repository_status_by_id(
         update_values["submitted_by"] = submitted_by
     if content is not None:
         update_values["content"] = content
+
 
     with get_db_session() as session:
         where_clauses = [

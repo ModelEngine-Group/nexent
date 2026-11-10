@@ -27,7 +27,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from contracts.errors.exceptions import McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError
+from contracts.errors.exceptions import ForbiddenError, McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
@@ -45,6 +45,49 @@ app.include_router(router)
 client = TestClient(app)
 
 AUTH_HEADER = {"Authorization": "Bearer test_token"}
+
+
+def test_batch_delete_dispatches_unique_targets_and_keeps_partial_results():
+    items = [
+        {"kind": "local", "id": 7},
+        {"kind": "community", "id": 7},
+        {"kind": "community", "id": 7},
+    ]
+    with (
+        patch.object(mgmt_app, "get_current_user_info", return_value=("uid", "tid", "en")),
+        patch.object(mgmt_app, "delete_mcp_service", new_callable=AsyncMock) as local,
+        patch.object(mgmt_app, "delete_community_mcp_service", new_callable=AsyncMock) as community,
+        patch.object(mgmt_app, "record_security_event") as audit,
+    ):
+        local.side_effect = ForbiddenError("MCP service is read-only")
+        response = client.post("/mcp-tools/batch_delete", json={"items": items}, headers=AUTH_HEADER)
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"] == [
+        {"kind": "local", "id": 7, "success": False, "message": "MCP service is read-only"},
+        {"kind": "community", "id": 7, "success": True},
+    ]
+    local.assert_awaited_once_with(tenant_id="tid", user_id="uid", mcp_id=7)
+    community.assert_awaited_once_with(tenant_id="tid", user_id="uid", market_id=7)
+    audit.assert_called_once()
+
+
+def test_batch_delete_validates_targets_before_authentication():
+    with patch.object(mgmt_app, "get_current_user_info") as auth:
+        for items in ([], [{"kind": "local", "id": 0}], [{"kind": "local", "id": 1}] * 101):
+            response = client.post("/mcp-tools/batch_delete", json={"items": items})
+            assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    auth.assert_not_called()
+
+
+def test_batch_delete_requires_authentication():
+    with (
+        patch.object(mgmt_app, "get_current_user_info", side_effect=UnauthorizedError("Unauthorized")),
+        patch.object(mgmt_app, "delete_mcp_service", new_callable=AsyncMock) as local,
+    ):
+        response = client.post("/mcp-tools/batch_delete", json={"items": [{"kind": "local", "id": 1}]})
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    local.assert_not_awaited()
 
 
 # ============================================================================

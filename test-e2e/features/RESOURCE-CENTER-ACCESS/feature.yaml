@@ -1,0 +1,23 @@
+schema_version: '1.0'
+module:
+  id: RESOURCE-CENTER
+  name: 资源仓库与统一审核
+feature:
+  feature_id: RESOURCE-CENTER-ACCESS
+  name: 资源仓库入口与权限
+  status: planned
+  description: 资源仓库统一设计；设计阶段，尚未实施或执行业务验收。
+  business_rules:
+  - rule_id: RESOURCE-CENTER-ACCESS-RULE-001
+    description: AC-001：新/resource-space URL注册到对应角色，默认角色范围与原三个仓库一致；前端复用现有身份/角色/URL权限判断，有入口即显示四Tab，无入口拒绝；不新增capabilities接口或页面能力字段。
+  - rule_id: RESOURCE-CENTER-ACCESS-RULE-002
+    description: AC-002：新增/resource-space与旧仓库页面及别名并行；保留旧页面、旧链接和旧URL角色登记，新页面内的导航、通知和返回链接生成新URL并保留语言、Tab/视图及资源身份；旧页面继续可访问；支持外部直接打开四个Tab的新深链，URL显式tab优先于本地状态；首次加载、刷新、前进后退及登录后返回保持目标；所有原入口按业务目的映射具体Tab/view及正确类型ID，不统一丢回默认Tab。
+  required_test_stages:
+  - D2
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - RESOURCE-CENTER-REQ-20261031
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    notes: 2026-10-31 full requirement design. Existing repository Features and D1 Cases remain unchanged.

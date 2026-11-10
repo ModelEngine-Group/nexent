@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from contracts.constants.environment import MINIO_ACCESS_KEY, MINIO_DEFAULT_BUCKET, MINIO_ENDPOINT, MINIO_REGION, MINIO_SECRET_KEY, NEXENT_POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER
 from management.db.models import TableBase
+from management.db.repository_transactions import current_repository_session
 from nexent.storage.storage_client_factory import create_storage_client_from_config, MinIOStorageConfig
 
 
@@ -42,6 +43,7 @@ class PostgresClient:
                 "client_encoding": "utf8",
             },
             echo=False,
+            hide_parameters=True,
             pool_size=10,
             pool_pre_ping=True,
             pool_timeout=30,
@@ -301,18 +303,20 @@ def get_db_session(db_session=None):
     param db_session: Optional session to use, if None, a new session will be created.
     Provide a transactional scope around a series of operations.
     """
-    session = db_client.session_maker() if db_session is None else db_session
+    shared_session = db_session if db_session is not None else current_repository_session()
+    owns_session = shared_session is None
+    session = db_client.session_maker() if owns_session else shared_session
     try:
         yield session
-        if db_session is None:
+        if owns_session:
             session.commit()
     except Exception as e:
-        if db_session is None:
+        if owns_session:
             session.rollback()
         logger.error(f"Database operation failed: {str(e)}")
         raise e
     finally:
-        if db_session is None:
+        if owns_session:
             session.close()
 
 

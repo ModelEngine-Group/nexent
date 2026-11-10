@@ -138,6 +138,7 @@ export default function AgentListCard({
 
       <div className="absolute right-[14px] top-[6px]">
         <AgentConfigActions
+          agent={agent}
           agentId={agentId}
           agentName={title}
           readOnly={agent.permission === "READ_ONLY"}

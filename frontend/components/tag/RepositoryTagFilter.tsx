@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Button, Popover, Select } from "antd";
 import { Tag } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 
 export interface RepositoryTagStat {
   tag: string;
@@ -21,6 +24,27 @@ export default function RepositoryTagFilter({
   onChange,
 }: RepositoryTagFilterProps) {
   const { t } = useTranslation("common");
+  const presentation = useRepositoryPresentation();
+
+  if (presentation) {
+    return (
+      <Select
+        aria-label={t("repository.tagFilter.button")}
+        allowClear
+        showSearch
+        className="w-[240px] max-w-full"
+        value={value}
+        placeholder={t("resourceCenter.tags")}
+        optionFilterProp="label"
+        optionLabelProp="value"
+        options={tags.map(({ tag, count }) => ({
+          value: tag,
+          label: `${tag} (${count})`,
+        }))}
+        onChange={onChange}
+      />
+    );
+  }
 
   return (
     <Popover

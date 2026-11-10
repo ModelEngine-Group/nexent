@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: RESOURCE-CENTER-LIFECYCLE-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_revision_races_rollback_and_notification_failure_windows
+acceptance_bindings:
+  AC-01:
+  - test_revision_races_rollback_and_notification_failure_windows
+  AC-02:
+  - test_revision_races_rollback_and_notification_failure_windows
+  AC-03:
+  - test_revision_races_rollback_and_notification_failure_windows
+  AC-04:
+  - test_revision_races_rollback_and_notification_failure_windows
+notes: Script prepared; execution deferred until functional/UI completion per user
+  development strategy.

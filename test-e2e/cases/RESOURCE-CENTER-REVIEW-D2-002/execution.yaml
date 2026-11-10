@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: RESOURCE-CENTER-REVIEW-D2-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_typed_details_and_revision_decisions
+acceptance_bindings:
+  AC-01:
+  - test_typed_details_and_revision_decisions
+  AC-02:
+  - test_typed_details_and_revision_decisions
+  AC-03:
+  - test_typed_details_and_revision_decisions
+  AC-04:
+  - test_typed_details_and_revision_decisions
+  AC-05:
+  - test_typed_details_and_revision_decisions
+notes: Backend contract implemented. Complete change acceptance remains pending; no
+  UI or migration proof is inferred from this execution.

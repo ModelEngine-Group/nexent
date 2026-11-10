@@ -9,6 +9,7 @@ and one row per resolved receiver is written to notification_receiver_t.
 
 import logging
 from typing import Any, Dict, List, Optional
+from management.db.repository_transactions import after_repository_commit
 
 from contracts.constants.constants import VALID_EVENT_TYPES, VALID_RESOURCE_TYPES, VALID_NOTIFICATION_SCOPES, TENANT_REQUIRED_SCOPES, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER, SU_ROLES, TENANT_ADMIN_ROLES, TENANT_USER_ROLES
 from management.db.client import get_db_session
@@ -125,6 +126,7 @@ def create_notification(
         return {"notification_id": notification_id, "receiver_count": len(receivers)}
 
 
+@after_repository_commit
 def deactivate_notifications(
     *,
     event_type: str,
@@ -195,6 +197,8 @@ def list_notifications_by_user(
                     "notification_id": recv.notification_id,
                     "event_type": notif.event_type,
                     "resource_type": notif.resource_type,
+                    "review_id": str(notif.unique_id) if notif.unique_id is not None and notif.resource_type == "resource_review" else None,
+                    "repository_id": str(notif.unique_id) if notif.unique_id is not None and notif.resource_type in {"agent_repository", "skill_repository", "mcp_repository"} else None,
                     "details": notif.details,
                     "scope": notif.scope,
                     "is_read": recv.is_read,

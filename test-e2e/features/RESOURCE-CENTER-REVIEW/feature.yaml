@@ -1,0 +1,27 @@
+schema_version: '1.0'
+module:
+  id: RESOURCE-CENTER
+  name: 资源仓库与统一审核
+feature:
+  feature_id: RESOURCE-CENTER-REVIEW
+  name: 统一审核查询与操作
+  status: planned
+  description: 资源仓库统一设计；设计阶段，尚未实施或执行业务验收。
+  business_rules:
+  - rule_id: RESOURCE-CENTER-REVIEW-RULE-004
+    description: AC-004：审核表按原类型角色/租户范围读取，无资格仅本人，有资格不排除本人；统一count、submitted_at/review_id稳定分页；状态all含pending_review/approved/rejected，下架历史继续可见。
+  - rule_id: RESOURCE-CENTER-REVIEW-RULE-005
+    description: AC-005：列表详情决策以review_id标识；首次repository_id可空；授权范围一致，不可见404；仅原类型决策资格且pending时可处理；完成快照和结果不可改写。
+  - rule_id: RESOURCE-CENTER-REVIEW-RULE-006
+    description: AC-006：新decision不带expected_revision；意见trim、可空、1000 Unicode code points，参数400/身份401/权限403/不存在404/完成或映射冲突409；旧错误形状独立保持。
+  - rule_id: RESOURCE-CENTER-REVIEW-RULE-015
+    description: AC-015：失败保留弹窗、输入和可重试状态；成功后刷新审核列表/详情/普通仓库/我的视图关联缓存；响应丢失或超时先查询当前状态，不能自动重放决策，分页回落有效页；key包含资源类型、租户与记录ID，权限未就绪及切租户不读旧数据。
+  required_test_stages:
+  - D2
+  - D3
+  - D4
+  source:
+    requirement_ids:
+    - RESOURCE-CENTER-REQ-20261031
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    notes: 2026-10-31 full requirement design. Existing repository Features and D1 Cases remain unchanged.

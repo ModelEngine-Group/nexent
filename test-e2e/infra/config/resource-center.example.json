@@ -1,0 +1,6 @@
+{
+  "backend_container": "nexent-config",
+  "backend_directory": "/opt/backend",
+  "python": ".venv/bin/python",
+  "database_container": "nexent-postgresql"
+}

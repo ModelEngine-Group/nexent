@@ -3339,3 +3339,14 @@ def test_publish_version_api_emits_audit_entry(mocker, mock_auth_header, caplog)
     assert "event=agent_version_publish" in messages[0]
     assert '"agent_id":123' in messages[0]
     assert '"version_name":"v1.0.0"' in messages[0]
+
+
+@pytest.fixture(autouse=True)
+def isolate_latest_review_projection(monkeypatch):
+    """Keep paged Agent API unit tests isolated from review-summary persistence."""
+    import sys
+    import types
+    from unittest.mock import MagicMock
+    module = types.ModuleType("management.services.repository.reviews")
+    module.attach_latest_reviews = MagicMock()
+    monkeypatch.setitem(sys.modules, "management.services.repository.reviews", module)

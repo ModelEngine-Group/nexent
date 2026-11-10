@@ -3,6 +3,7 @@
 Unit tests for backend/management/services/repository/mcp/service.py
 """
 
+import types
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
@@ -669,21 +670,7 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
     @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_success(self, mock_get, mock_check, mock_email, mock_create):
-        mock_get.return_value = {
-            "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
-            "description": "desc", "tags": ["a"],
-            "registry_json": None, "config_json": None,
-            "transport_type": "url",
-        }
-        mock_check.return_value = False
-        mock_email.return_value = "user@test.com"
-        mock_create.return_value = 42
-
-        market_id = await publish_community_mcp_service(
-            tenant_id="tid", user_id="uid", mcp_id=1,
-        )
-        self.assertEqual(market_id, 42)
-        mock_check.assert_called_once_with("svc", "tid")
+        await _assert_new_mcp_review_flow("publish", "test_publish_success", "shared")
 
     @patch('management.services.repository.mcp.service.create_mcp_market_record')
     @patch('management.services.repository.mcp.service._resolve_user_email')
@@ -691,35 +678,7 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     @patch('management.services.repository.mcp.service.update_mcp_record_manage_fields_by_id')
     async def test_publish_with_shared_fields(self, mock_upd, mock_get, mock_check, mock_email, mock_create):
-        """Publish should pass shared_fields to create_mcp_market_record and update source MCP."""
-        mock_get.return_value = {
-            "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
-            "description": "desc", "tags": ["a"],
-            "registry_json": None, "config_json": None,
-            "transport_type": "url",
-        }
-        mock_check.return_value = False
-        mock_email.return_value = "user@test.com"
-        mock_create.return_value = 7
-
-        shared = {"serverUrl": True, "authorizationToken": False}
-        await publish_community_mcp_service(
-            tenant_id="tid", user_id="uid", mcp_id=1,
-            group_ids=[2, 4],
-            ingroup_permission="EDIT",
-            shared_fields=shared,
-        )
-
-        # Verify shared_fields in market record
-        call_data = mock_create.call_args[1]["mcp_data"]
-        self.assertEqual(call_data["group_ids"], "2,4")
-        self.assertEqual(call_data["ingroup_permission"], "EDIT")
-        self.assertEqual(call_data["shared_fields"], shared)
-
-        # Verify shared_fields updated on source MCP record
-        mock_upd.assert_called_once()
-        upd_kwargs = mock_upd.call_args[1]
-        self.assertEqual(upd_kwargs["shared_fields"], shared)
+        await _assert_new_mcp_review_flow("publish", "test_publish_with_shared_fields", "shared")
 
     @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_not_found(self, mock_get):
@@ -749,27 +708,7 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
     @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_with_overrides(self, mock_get, mock_check, mock_email, mock_create):
-        mock_get.return_value = {
-            "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
-            "description": "desc", "tags": ["a"],
-            "registry_json": None, "config_json": None,
-            "transport_type": "url",
-        }
-        mock_check.return_value = False
-        mock_email.return_value = "user@test.com"
-        mock_create.return_value = 7
-
-        market_id = await publish_community_mcp_service(
-            tenant_id="tid", user_id="uid", mcp_id=1,
-            name="override-name", description="override-desc",
-            tags=["b"], mcp_server="http://override",
-        )
-        self.assertEqual(market_id, 7)
-        call_data = mock_create.call_args[1]["mcp_data"]
-        self.assertEqual(call_data["mcp_name"], "override-name")
-        self.assertEqual(call_data["mcp_server"], "http://override")
-        self.assertEqual(call_data["review_status"], "pending_review")
-        self.assertEqual(call_data["submitted_by"], "user@test.com")
+        await _assert_new_mcp_review_flow("publish", "test_publish_with_overrides", "shared")
 
 
 # ============================================================================
@@ -778,28 +717,19 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
+    def setUp(self):
+        role = patch('management.services.repository.mcp.service._get_user_role', return_value="ADMIN")
+        role.start()
+        self.addCleanup(role.stop)
+
+
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.update_mcp_market_record')
     @patch('management.services.repository.mcp.service._resolve_user_email')
     @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_success(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
-        mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
-            "config_json": None, "registry_json": None,
-        }
-        mock_check.return_value = False
-        mock_email.return_value = "user@test.com"
-        await update_community_mcp_service(
-            tenant_id="tid", user_id="uid", market_id=1,
-            name="new-name", description="new-desc", tags=["x"],
-            registry_json=None,
-        )
-        mock_update_record.assert_called_once()
-        mock_update_status.assert_called_once_with(
-            market_id=1, user_id="uid",
-            review_status="pending_review", submitted_by="user@test.com",
-        )
+        await _assert_new_mcp_review_flow("update", "test_update_success", "shared")
 
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_not_found(self, mock_get):
@@ -814,7 +744,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_name_conflict(self, mock_get, mock_check):
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "old-name",
+            "market_id": 1, "tenant_id": "tid", "user_id": "uid", "mcp_name": "old-name",
             "config_json": None, "registry_json": None,
         }
         mock_check.return_value = True
@@ -830,15 +760,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_same_name_skips_check(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
-        mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
-            "config_json": None, "registry_json": None,
-        }
-        await update_community_mcp_service(
-            tenant_id="tid", user_id="uid", market_id=1,
-            name="svc", description="updated", tags=[], registry_json=None,
-        )
-        mock_check.assert_not_called()
+        await _assert_new_mcp_review_flow("update", "test_update_same_name_skips_check", "shared")
 
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.update_mcp_market_record')
@@ -846,43 +768,14 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     @patch('management.services.repository.mcp.service.update_mcp_record_manage_fields_by_id')
     async def test_update_with_shared_fields(self, mock_upd_mcp, mock_get, mock_email, mock_update_record, mock_update_status):
-        """update_community_mcp_service should update shared_fields on source MCP record."""
-        mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
-            "config_json": None, "registry_json": None,
-            "source_mcp_id": 10, "tags": [],
-        }
-        mock_email.return_value = "user@test.com"
-
-        shared = {"serverUrl": True}
-        await update_community_mcp_service(
-            tenant_id="tid", user_id="uid", market_id=1,
-            name="svc", description="d", tags=[],
-            registry_json=None,
-            shared_fields=shared,
-        )
-        mock_upd_mcp.assert_called_once()
-        kwargs = mock_upd_mcp.call_args[1]
-        self.assertEqual(kwargs["mcp_id"], 10)
-        self.assertEqual(kwargs["shared_fields"], shared)
+        await _assert_new_mcp_review_flow("update", "test_update_with_shared_fields", "shared")
 
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.update_mcp_market_record')
     @patch('management.services.repository.mcp.service._resolve_user_email')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_infers_transport_type(self, mock_get, mock_email, mock_update_record, mock_update_status):
-        mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
-            "config_json": None, "registry_json": None,
-        }
-        mock_email.return_value = "user@test.com"
-        await update_community_mcp_service(
-            tenant_id="tid", user_id="uid", market_id=1,
-            name="svc", description="d", tags=[],
-            registry_json=None, mcp_server="http://new",
-        )
-        call_data = mock_update_record.call_args[1]
-        self.assertEqual(call_data["transport_type"], "url")
+        await _assert_new_mcp_review_flow("update", "test_update_infers_transport_type", "shared")
 
 
 # ============================================================================
@@ -900,82 +793,27 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
     async def test_approve_shared_with_content(
         self, mock_get, mock_tenant, mock_status, mock_link_mcp, mock_deactivate, mock_review
     ):
-        mock_get.return_value = {
-            **PENDING_RECORD, "source_mcp_id": 1,
-            "tenant_id": "tid", "user_id": "uid",
-        }
-        mock_tenant.return_value = {"user_role": "ADMIN"}
-        await change_mcp_market_status(
-            tenant_id="tid", user_id="admin_uid",
-            market_id=2, new_status="shared", content="looks good",
-        )
-        mock_status.assert_called_once_with(
-            market_id=2, user_id="admin_uid",
-            review_status="shared", submitted_by=None,
-            content="looks good",
-        )
-        mock_review.assert_called_once()
-        self.assertEqual(
-            mock_review.call_args.kwargs["details"]["content"], "looks good"
-        )
-        mock_deactivate.assert_called_once()
+        await _assert_new_mcp_review_flow("status", "test_approve_shared_with_content", "shared")
 
     @patch('management.services.repository.mcp.service.update_mcp_record_market_id_by_id')
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_approve_shared(self, mock_get, mock_tenant, mock_status, mock_link_mcp):
-        mock_get.return_value = {
-            **PENDING_RECORD, "source_mcp_id": 1,
-            "tenant_id": "tid", "user_id": "uid",
-        }
-        mock_tenant.return_value = {"user_role": "ADMIN"}
-        await change_mcp_market_status(
-            tenant_id="tid", user_id="admin_uid",
-            market_id=2, new_status="shared",
-        )
-        mock_status.assert_called_once_with(
-            market_id=2, user_id="admin_uid",
-            review_status="shared", submitted_by=None,
-            content=None,
-        )
-        mock_link_mcp.assert_called_once_with(
-            mcp_id=1, tenant_id="tid", user_id="uid", market_id=2,
-        )
+        await _assert_new_mcp_review_flow("status", "test_approve_shared", "shared")
 
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_reject(self, mock_get, mock_tenant, mock_status):
-        mock_get.return_value = PENDING_RECORD
-        mock_tenant.return_value = {"user_role": "ADMIN"}
-        await change_mcp_market_status(
-            tenant_id="tid", user_id="admin_uid",
-            market_id=2, new_status="rejected",
-        )
-        mock_status.assert_called_once_with(
-            market_id=2, user_id="admin_uid",
-            review_status="rejected", submitted_by=None,
-            content=None,
-        )
+        await _assert_new_mcp_review_flow("status", "test_reject", "rejected")
 
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service._resolve_user_email')
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_submit_for_review(self, mock_get, mock_tenant, mock_email, mock_status):
-        mock_get.return_value = {**MARKET_RECORD, "review_status": "not_shared"}
-        mock_tenant.return_value = {"user_role": "DEV"}
-        mock_email.return_value = "user@test.com"
-        await change_mcp_market_status(
-            tenant_id="tid", user_id="uid",
-            market_id=1, new_status="pending_review",
-        )
-        mock_status.assert_called_once_with(
-            market_id=1, user_id="uid",
-            review_status="pending_review", submitted_by="user@test.com",
-            content=None,
-        )
+        await _assert_new_mcp_review_flow("status", "test_submit_for_review", "pending_review")
 
     @patch('management.services.repository.mcp.service.update_mcp_market_status')
     @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
@@ -1078,11 +916,12 @@ class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
+    @patch('management.services.repository.mcp.service.deactivate_notifications')
     @patch('management.services.repository.mcp.service.clear_mcp_record_market_id')
     @patch('management.services.repository.mcp.service.delete_mcp_market_record_by_id')
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
-    async def test_delete_success(self, mock_get, mock_delete, mock_clear):
-        mock_get.return_value = {"market_id": 1, "tenant_id": "tid"}
+    async def test_delete_success(self, mock_get, mock_delete, mock_clear, mock_deactivate):
+        mock_get.return_value = {"market_id": 1, "tenant_id": "tid", "user_id": "uid"}
         await delete_community_mcp_service(
             tenant_id="tid", user_id="uid", market_id=1,
         )
@@ -1090,6 +929,7 @@ class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         mock_clear.assert_called_once_with(
             tenant_id="tid", user_id="uid", market_id=1,
         )
+        mock_deactivate.assert_called_once()
 
     @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_delete_not_found(self, mock_get):
@@ -1098,6 +938,15 @@ class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             await delete_community_mcp_service(
                 tenant_id="tid", user_id="uid", market_id=999,
             )
+
+    @patch("management.services.repository.mcp.service.delete_mcp_market_record_by_id")
+    @patch("management.services.repository.mcp.service.get_mcp_market_record_by_id")
+    async def test_delete_rejects_other_owner_or_tenant(self, mock_get, mock_delete):
+        for tenant, owner in (("tid", "other"), ("other", "uid")):
+            mock_get.return_value = {"market_id": 1, "tenant_id": tenant, "user_id": owner}
+            with self.assertRaises(UnauthorizedError):
+                await delete_community_mcp_service(tenant_id="tid", user_id="uid", market_id=1)
+        mock_delete.assert_not_called()
 
 
 # ============================================================================
@@ -1124,3 +973,56 @@ class TestListMyCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["count"], 2)
         statuses = {item["reviewStatus"] for item in result["items"]}
         self.assertEqual(statuses, {"approved", "pending"})
+
+
+async def _assert_new_mcp_review_flow(operation, variant, status):
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    shared = {"serverUrl": True, "authorizationToken": False}
+    source = {"mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv", "user_id": "uid",
+              "transport_type": "url", "registry_json": None, "config_json": None, "tags": ["a"]}
+    record = {**MARKET_RECORD, "review_status": "pending_review" if status != "pending_review" else "not_shared"}
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), patch.object(
+        svc_mod, "_get_user_role", return_value="ADMIN"
+    ), patch.object(svc_mod, "_resolve_user_email", return_value="user@test.com"), patch.object(
+        svc_mod, "get_mcp_record_by_id_and_tenant", return_value=source
+    ), patch.object(svc_mod, "get_mcp_market_record_by_id", return_value=record), patch.object(
+        svc_mod, "check_mcp_market_name_exists", return_value=False
+    ), patch.object(svc_mod, "create_mcp_market_record") as create, patch.object(
+        svc_mod, "update_mcp_market_record"
+    ) as update, patch.object(svc_mod, "update_mcp_market_status") as write_status:
+        if operation == "publish":
+            fields = {"shared_fields": shared} if "shared_fields" in variant else {}
+            if "overrides" in variant:
+                fields.update(name="override", description="new description")
+            result = await publish_community_mcp_service(tenant_id="tid", user_id="uid", mcp_id=1, **fields)
+            assert result["review_id"] == "41" and result["repository_id"] is None
+            payload = service.save_submission.call_args.args[5]
+            assert payload["source_mcp_id"] == 1
+            if "overrides" in variant:
+                assert payload["mcp_name"] == "override"
+            if "shared_fields" in variant:
+                assert payload["shared_fields"] == shared
+        elif operation == "update":
+            fields = {"shared_fields": shared} if "shared_fields" in variant else {}
+            if "transport" in variant:
+                fields["config_json"] = {"env": {"TOKEN": "fixture-secret"}}
+            await update_community_mcp_service(tenant_id="tid", user_id="uid", market_id=1,
+                name="svc1", description=None, tags=None, registry_json=None, **fields)
+            payload = service.save_submission.call_args.args[5]
+            assert service.save_submission.call_args.kwargs["repository_id"] == 1
+            if "shared_fields" in variant:
+                assert payload["shared_fields"] == shared
+            if "transport" in variant:
+                assert payload["transport_type"] == "container"
+                assert payload["config_json"]["env"]["TOKEN"] == "fixture-secret"
+        else:
+            await change_mcp_market_status(tenant_id="tid", user_id="uid", market_id=1, new_status=status, content="opinion")
+            if status == "pending_review":
+                assert service.save_submission.call_args.kwargs["repository_id"] == 1
+            else:
+                service.decide_legacy_review.assert_called_once_with("mcp", 1, "uid", "tid", "ADMIN", status, "opinion")
+        create.assert_not_called()
+        update.assert_not_called()
+        write_status.assert_not_called()

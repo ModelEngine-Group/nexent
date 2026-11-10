@@ -6,6 +6,8 @@ import type {
   MyEditableAgentItem,
 } from "@/types/agentRepository";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
+import type { ModelOption } from "@/types/modelConfig";
+import type { KnowledgeBase } from "@/types/knowledgeBase";
 
 export interface MyAgentDetailView {
   title: string;
@@ -22,6 +24,14 @@ export interface MyAgentDetailView {
   repositoryInfo?: {
     downloads: number;
     createdAt: string | null;
+    publishedAt?: string | null;
+    updatedAt?: string | null;
+    modelNames?: string[];
+    models?: ModelOption[];
+    knowledgeDetails?: Map<string, KnowledgeBase>;
+    skillTags?: Map<string, string[]>;
+    toolTags?: Map<string, string[]>;
+    subAgentTags?: Map<string, string[]>;
   };
 }
 
@@ -120,12 +130,48 @@ export function mapRepositoryAgentDetail(
   listingDetail: AgentRepositoryListingDetail,
   tags: string[] = [],
   resources?: {
-    tools?: Pick<Tool, "id" | "name" | "origin_name">[];
-    skills?: Pick<Skill, "skill_id" | "name">[];
+    tools?: Pick<Tool, "id" | "name" | "origin_name" | "labels">[];
+    skills?: Pick<Skill, "skill_id" | "name" | "tags">[];
+    models?: ModelOption[];
+    knowledgeBases?: KnowledgeBase[];
+    subAgents?: Array<{ name: string; tags: string[] }>;
   }
 ): MyAgentDetailView {
+  const detail = mapMyAgentDetail(versionDetail, { tags }, resources);
+  const knowledgeByIndex = new Map(
+    resources?.knowledgeBases?.map((base) => [base.index_name || base.id, base])
+  );
+  const linkedKnowledge =
+    versionDetail.tools?.flatMap(({ params }) => {
+      return Array.isArray(params?.index_names)
+        ? params.index_names.flatMap((index) => {
+            const base = knowledgeByIndex.get(String(index));
+            return base ? [base] : [];
+          })
+        : [];
+    }) ?? [];
+  const knowledgeDetails = new Map(
+    linkedKnowledge.map((base) => [
+      (base.display_name || base.name).trim(),
+      base,
+    ])
+  );
+  const skillById = new Map(
+    resources?.skills?.map((skill) => [String(skill.skill_id), skill])
+  );
+  const toolById = new Map(
+    resources?.tools?.map((tool) => [String(tool.id), tool])
+  );
   return {
-    ...mapMyAgentDetail(versionDetail, { tags }, resources),
+    ...detail,
+    knowledgeBases: uniqueNames([
+      ...detail.knowledgeBases,
+      ...knowledgeDetails.keys(),
+    ]),
+    subAgents: uniqueNames([
+      ...detail.subAgents,
+      ...(resources?.subAgents?.map((agent) => agent.name) ?? []),
+    ]),
     authorCasUsername:
       versionDetail.author_cas_username ??
       (versionDetail.author?.trim() === listingDetail.author?.trim()
@@ -134,6 +180,42 @@ export function mapRepositoryAgentDetail(
     repositoryInfo: {
       downloads: listingDetail.downloads ?? 0,
       createdAt: listingDetail.created_at ?? null,
+      publishedAt: listingDetail.published_at ?? null,
+      updatedAt: versionDetail.version?.update_time ?? null,
+      modelNames: uniqueNames(versionDetail.model_names ?? []),
+      knowledgeDetails,
+      skillTags: new Map(
+        versionDetail.skills?.flatMap((instance) => {
+          const skill = skillById.get(String(instance.skill_id));
+          const name = (instance.name || skill?.name)?.trim();
+          return name && skill?.tags?.length
+            ? [[name, uniqueNames(skill.tags)] as const]
+            : [];
+        })
+      ),
+      toolTags: new Map(
+        versionDetail.tools?.flatMap((instance) => {
+          const tool = toolById.get(String(instance.tool_id));
+          const name = (
+            instance.origin_name ||
+            instance.name ||
+            tool?.origin_name ||
+            tool?.name
+          )?.trim();
+          return name && tool?.labels?.length
+            ? [[name, uniqueNames(tool.labels)] as const]
+            : [];
+        })
+      ),
+      subAgentTags: new Map(
+        resources?.subAgents?.map((agent) => [
+          agent.name.trim(),
+          uniqueNames(agent.tags),
+        ])
+      ),
+      models: resources?.models?.filter((model) =>
+        versionDetail.model_ids?.includes(model.id)
+      ),
     },
   };
 }

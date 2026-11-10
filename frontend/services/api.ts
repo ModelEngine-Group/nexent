@@ -19,6 +19,28 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  resourceReviews: {
+    list: (query: {
+      type: string;
+      status: string;
+      search: string;
+      page: number;
+      page_size: number;
+    }) => {
+      const params = new URLSearchParams({
+        type: query.type,
+        status: query.status,
+        search: query.search,
+        page: String(query.page),
+        page_size: String(query.page_size),
+      });
+      return `${API_BASE_URL}/reviews?${params.toString()}`;
+    },
+    submit: `${API_BASE_URL}/reviews`,
+    detail: (id: string) => `${API_BASE_URL}/reviews/${encodeURIComponent(id)}`,
+    decision: (id: string) =>
+      `${API_BASE_URL}/reviews/${encodeURIComponent(id)}/decision`,
+  },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
   agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
@@ -546,6 +568,9 @@ export const API_ENDPOINTS = {
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
     communityDelete: `${API_BASE_URL}/mcp-tools/community/delete`,
+    batchDelete: `${API_BASE_URL}/mcp-tools/batch_delete`,
+    communityStatus: (id: number) =>
+      `${API_BASE_URL}/mcp-tools/community/${id}/status`,
     communityMine: `${API_BASE_URL}/mcp-tools/community/mine`,
     communityReviewList: `${API_BASE_URL}/mcp-tools/community/review/list`,
     communityReviewApprove: `${API_BASE_URL}/mcp-tools/community/review/approve`,
@@ -633,6 +658,10 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_published_time)
+        queryParams.append("sort_by_published_time", "true");
+      if (params?.sort_by_downloads)
+        queryParams.append("sort_by_downloads", "true");
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
@@ -694,6 +723,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
+    deleteLocal: (skillId: number) =>
+      `${API_BASE_URL}/repository/skill/local/${skillId}`,
+    uninstallCopy: (repositoryId: number, skillId: number) =>
+      `${API_BASE_URL}/repository/skill/${repositoryId}/installations/${skillId}`,
+
     listings: (params?: SkillRepositoryListingListParams) => {
       const queryParams = new URLSearchParams();
       if (params?.status) queryParams.append("status", params.status);
@@ -719,9 +753,13 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_published_time)
+        queryParams.append("sort_by_published_time", "true");
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
+      if (params?.include_installations)
+        queryParams.append("include_installations", "true");
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill${queryString ? `?${queryString}` : ""}`;
     },
@@ -771,7 +809,7 @@ export const API_ENDPOINTS = {
       if (params?.category) queryParams.append("category", params.category);
       if (params?.tag) queryParams.append("tag", params.tag);
       if (params?.search) queryParams.append("search", params.search);
-      if (params?.lang) queryParams.append("lang", (params as any).lang);
+      if (params?.lang) queryParams.append("lang", params.lang);
 
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/market/agents${queryString ? `?${queryString}` : ""}`;

@@ -67,6 +67,12 @@ class _AgentRepositoryModel:
     description = MagicMock(name="description")
     author = MagicMock(name="author")
     submitted_by = MagicMock(name="submitted_by")
+    submitted_user_id = MagicMock(name="submitted_user_id")
+    submitted_at = MagicMock(name="submitted_at")
+    submit_description = MagicMock(name="submit_description")
+    review_comment = MagicMock(name="review_comment")
+    submission_revision = MagicMock(name="submission_revision")
+    published_at = MagicMock(name="published_at")
     tags = MagicMock(name="tags")
     tool_count = MagicMock(name="tool_count")
     icon_url = MagicMock(name="icon_url")
@@ -526,6 +532,9 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "downloads",
         "content",
         "create_time",
+        "submitted_user_id",
+        "publisher_user_id",
+        "published_at",
     }
 
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Format in-app notification messages from event_type + details via i18n.
  */
@@ -60,7 +62,17 @@ export function formatNotificationMessage(
   const content =
     asString(details.content) ?? t("notifications.events.emptyContent");
 
-  const messageKey = resolveMessageKey(item.event_type, item.resource_type);
+  const resourceType =
+    item.resource_type === NOTIFICATION_RESOURCE_TYPES.RESOURCE_REVIEW
+      ? (
+          {
+            agent: "agent_repository",
+            skill: "skill_repository",
+            mcp: "mcp_repository",
+          } as Record<string, string>
+        )[asString(details.resource_type) || ""]
+      : item.resource_type;
+  const messageKey = resolveMessageKey(item.event_type, resourceType);
   if (messageKey) {
     return t(messageKey, { name, content });
   }

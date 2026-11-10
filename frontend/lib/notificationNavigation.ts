@@ -1,20 +1,30 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Deep-link helpers for in-app notifications.
  */
 
-import type { NotificationDetails, NotificationItem } from "@/types/notification";
+import {
+  buildResourceRepositoryHref,
+  normalizeRepositoryId,
+} from "@/lib/resourceRepositoryRoutes";
+import type { ResourceType } from "@/types/resourceRepository";
+import type {
+  NotificationDetails,
+  NotificationItem,
+} from "@/types/notification";
 import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_RESOURCE_TYPES,
 } from "@/types/notification";
 
 function asPositiveInt(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
     return value;
   }
   if (typeof value === "string" && /^\d+$/.test(value)) {
     const parsed = Number.parseInt(value, 10);
-    return parsed > 0 ? parsed : null;
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
   }
   return null;
 }
@@ -142,12 +152,7 @@ export function buildAgentRepositoryReviewDeepLink(
   if (!ids) {
     return null;
   }
-  const params = new URLSearchParams({
-    tab: "mine",
-    agent_repository_id: String(ids.agentRepositoryId),
-    agent_id: String(ids.agentId),
-  });
-  return `/${locale}/agent-space?${params.toString()}`;
+  return `/${locale}/agents/${ids.agentId}`;
 }
 
 export function buildSkillRepositoryReviewDeepLink(
@@ -224,7 +229,9 @@ export function parseReviewDeepLinkParams(searchParams: URLSearchParams): {
   agentRepositoryId: number;
   agentId: number;
 } | null {
-  const agentRepositoryId = asPositiveInt(searchParams.get("agent_repository_id"));
+  const agentRepositoryId = asPositiveInt(
+    searchParams.get("agent_repository_id")
+  );
   const agentId = asPositiveInt(searchParams.get("agent_id"));
   if (agentRepositoryId == null || agentId == null) {
     return null;
@@ -256,4 +263,35 @@ export function parseMcpReviewDeepLinkParams(searchParams: URLSearchParams): {
     return null;
   }
   return { marketId, sourceMcpId };
+}
+
+export function buildUnifiedRepositoryReviewDeepLink(
+  locale: string,
+  item: NotificationItem
+): string | null {
+  if (item.resource_type === NOTIFICATION_RESOURCE_TYPES.RESOURCE_REVIEW) {
+    const reviewId =
+      normalizeRepositoryId(item.review_id) ||
+      normalizeRepositoryId(item.details?.review_id);
+    return buildResourceRepositoryHref(locale, {
+      tab: "review",
+      ...(reviewId ? { reviewId } : {}),
+    });
+  }
+  const types: Record<string, ResourceType> = {
+    agent_repository: "agent",
+    skill_repository: "skill",
+    mcp_repository: "mcp",
+  };
+  const type = types[item.resource_type];
+  if (
+    !type ||
+    (!isReviewResultEvent(item.event_type) &&
+      item.event_type !== NOTIFICATION_EVENT_TYPES.REPOSITORY_REVIEW_PENDING)
+  )
+    return null;
+  return buildResourceRepositoryHref(locale, {
+    tab: "review",
+    resourceType: type,
+  });
 }

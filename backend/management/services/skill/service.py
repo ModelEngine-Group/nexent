@@ -165,6 +165,7 @@ from management.services.skill.params import (
     _tooltip_for_commented_seq_index,
     _tuple_slot2,
 )
+from management.db.repository_transactions import repository_unit_of_work
 from management.services.skill.permission import (
     _apply_default_skill_permission_fields,
     _can_edit_skill,
@@ -522,6 +523,7 @@ class SkillService(SkillArchiveOperations):
         skip_duplicate_check: bool = False,
         ingroup_permission: Optional[str] = None,
         rewrite_name: bool = False,
+        source_repository_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Share parsing and persistence while keeping operation-specific policies."""
         if len(content) > MAX_SKILL_UPLOAD_SIZE_BYTES:
@@ -664,29 +666,58 @@ class SkillService(SkillArchiveOperations):
             if ingroup_permission is not None:
                 data["ingroup_permission"] = ingroup_permission
             _apply_default_skill_permission_fields(data, user_id)
-            result = skill_db.create_skill(data, tenant_id)
-
-        self.skill_manager.save_skill(data, tenant_id=tenant_id)
-        if is_zip:
-            overrides = None
-            if rewrite_name and str(parsed.get("name") or "") != name:
-                overrides = {
-                    manifest_path: _replace_skill_frontmatter_name(text, name).encode(
-                        "utf-8"
-                    )
-                }
-            if rewrite_name:
-                self._upload_zip_files(
-                    content,
-                    name,
-                    original_root,
-                    tenant_id=tenant_id,
-                    file_overrides=overrides,
-                )
+            if source_repository_id is not None:
+                data["source_repository_id"] = source_repository_id
+                result = None
             else:
-                self._upload_zip_files(
-                    content, name, original_root, tenant_id=tenant_id
-                )
+                result = skill_db.create_skill(data, tenant_id)
+
+        try:
+            self.skill_manager.save_skill(data, tenant_id=tenant_id)
+            if is_zip:
+                overrides = None
+                if rewrite_name and str(parsed.get("name") or "") != name:
+                    overrides = {
+                        manifest_path: _replace_skill_frontmatter_name(text, name).encode(
+                            "utf-8"
+                        )
+                    }
+                if rewrite_name:
+                    self._upload_zip_files(
+                        content,
+                        name,
+                        original_root,
+                        tenant_id=tenant_id,
+                        file_overrides=overrides,
+                    )
+                else:
+                    self._upload_zip_files(
+                        content, name, original_root, tenant_id=tenant_id
+                    )
+        except Exception:
+            if source_repository_id is not None:
+                self._delete_local_skill_files(name, tenant_id=tenant_id)
+            raise
+        if source_repository_id is not None:
+            from sqlalchemy import select
+            from management.db.skill.models import SkillRepository
+            from management.db.skill.catalog import increment_skill_repository_downloads
+
+            try:
+                with repository_unit_of_work() as session:
+                    listing = session.scalar(select(SkillRepository).where(
+                        SkillRepository.skill_repository_id == source_repository_id,
+                        SkillRepository.publisher_tenant_id == tenant_id,
+                        SkillRepository.status == "shared", SkillRepository.delete_flag != "Y",
+                    ).with_for_update())
+                    if listing is None:
+                        raise SkillException("Repository listing is no longer available")
+                    result = skill_db.create_skill(data, tenant_id)
+                    if increment_skill_repository_downloads(repository_id=source_repository_id, user_id=user_id) != 1:
+                        raise SkillException("Could not record repository installation")
+            except Exception:
+                self._delete_local_skill_files(name, tenant_id=tenant_id)
+                raise
         return self._enrich_configs_from_yaml(result)
 
     def update_skill_from_file(
@@ -1265,6 +1296,7 @@ class SkillService(SkillArchiveOperations):
         tenant_id: Optional[str] = None,
         skip_duplicate_check: bool = False,
         ingroup_permission: Optional[str] = None,
+        source_repository_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Import through the shared pipeline with optional frontmatter rename."""
         return self._save_skill_upload(
@@ -1274,6 +1306,7 @@ class SkillService(SkillArchiveOperations):
             tenant_id=tenant_id,
             user_id=user_id,
             source=source,
+            source_repository_id=source_repository_id,
             skip_duplicate_check=skip_duplicate_check,
             ingroup_permission=ingroup_permission,
             rewrite_name=True,

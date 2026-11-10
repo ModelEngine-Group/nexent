@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ReactNode } from "react";
 import { McpSpace } from "../../app/[locale]/mcp-space/agent-space";
-import AddMcpServiceCommunitySection from "../../app/[locale]/mcp-space/components/add/community/AddMcpServiceCommunitySection";
+import AddMcpServiceCommunitySection from "@/components/repository/mcp/components/add/community/AddMcpServiceCommunitySection";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { fetchCommunityMcpCards } from "@/services/mcpToolsService";
 import type { CommunityMcpCard } from "@/types/mcpTools";
@@ -19,6 +19,9 @@ import { MCP_TOOLS_QUERY_KEYS, McpTransportType } from "@/const/mcpTools";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
+}));
+vi.mock("@/hooks/auth/useUserDisplayName", () => ({
+  useUserDisplayName: () => (_cas: unknown, fallback: string) => fallback,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -33,7 +36,7 @@ vi.mock("@/services/mcpToolsService", () => ({
 vi.mock("@/hooks/mcpTools/useMcpCommunityQuickAdd", () => ({
   useMcpCommunityQuickAdd: () => ({ visible: false, open: vi.fn() }),
 }));
-vi.mock("../../app/[locale]/mcp-space/my-mcp", () => ({
+vi.mock("@/components/repository/mcp/my-mcp", () => ({
   PlaceholderBox: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -42,18 +45,18 @@ vi.mock("@/components/tag/RepositoryTagFilter", () => ({
   default: () => null,
 }));
 vi.mock(
-  "../../app/[locale]/mcp-space/components/McpToolsSearchFilterBar",
+  "@/components/repository/mcp/components/McpToolsSearchFilterBar",
   () => ({
     default: () => null,
   })
 );
-vi.mock("../../app/[locale]/mcp-space/components/RepositoryMcpCard", () => ({
+vi.mock("@/components/repository/mcp/components/RepositoryMcpCard", () => ({
   default: ({ service }: { service: CommunityMcpCard }) => (
     <p>{service.name}</p>
   ),
 }));
 vi.mock(
-  "../../app/[locale]/mcp-space/components/add/community/McpCommunityCard",
+  "@/components/repository/mcp/components/add/community/McpCommunityCard",
   () => ({
     default: ({ service }: { service: CommunityMcpCard }) => (
       <p>{service.name}</p>

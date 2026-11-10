@@ -229,6 +229,7 @@ export default function AgentListTable({
               </button>
             ) : null}
             <AgentConfigActions
+              agent={agent}
               agentId={agentId}
               agentName={agentName}
               readOnly={agent.permission === "READ_ONLY"}

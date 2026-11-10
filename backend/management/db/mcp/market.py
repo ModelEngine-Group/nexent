@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, text as sa_text
 
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
+from management.db.repository_transactions import current_repository_session, lock_repository_source
 from management.db.models import McpMarketRecord
 
 logger = logging.getLogger("market_mcp_db")
@@ -41,6 +42,7 @@ def get_mcp_market_records(
     page: int | None = None,
     limit: int = 30,
     user_id: str | None = None,
+    sort_by_published_time: bool = False,
     user_group_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """List shared market records using cursor or offset pagination."""
@@ -82,10 +84,13 @@ def get_mcp_market_records(
         if user_id is not None and user_group_ids is not None:
             query = _apply_group_permission_filter(query, user_id, user_group_ids)
 
+        ordering = (McpMarketRecord.published_at.desc().nullslast(), McpMarketRecord.market_id.desc()) if sort_by_published_time else (McpMarketRecord.market_id.desc(),)
+        if sort_by_published_time and page is None:
+            page = 1
         if page is not None:
             total = query.count()
             page_rows: List[McpMarketRecord] = (
-                query.order_by(McpMarketRecord.market_id.desc()).offset((page - 1) * limit).limit(limit).all()
+                query.order_by(*ordering).offset((page - 1) * limit).limit(limit).all()
             )
             return {
                 "count": len(page_rows),
@@ -161,6 +166,9 @@ def get_mcp_market_record_by_id(market_id: int) -> Dict[str, Any] | None:
             )
             .first()
         )
+        if record is not None and current_repository_session() is not None:
+            lock_repository_source(session, "mcp", record.tenant_id, record.source_mcp_id)
+            session.refresh(record)
         return as_dict(record) if record else None
 
 
@@ -180,24 +188,20 @@ def get_mcp_market_record_by_source_mcp_id(*, tenant_id: str, source_mcp_id: int
         return as_dict(record) if record else None
 
 
-def check_mcp_market_name_exists(mcp_name: str, tenant_id: str) -> bool:
+def check_mcp_market_name_exists(mcp_name: str, tenant_id: str, *, exclude_source_mcp_id: int | None = None) -> bool:
     """Check if a shared market record with the given name already exists in this tenant.
 
     Matches the partial unique index uq_mcp_market_name_active:
       WHERE delete_flag = 'N' AND review_status = 'shared'
     """
     with get_db_session() as session:
-        record = (
-            session.query(McpMarketRecord)
-            .filter(
-                McpMarketRecord.mcp_name == mcp_name,
-                McpMarketRecord.tenant_id == tenant_id,
-                McpMarketRecord.delete_flag != "Y",
-                McpMarketRecord.review_status == "shared",
-            )
-            .first()
-        )
-        return record is not None
+        query = session.query(McpMarketRecord).filter(
+            McpMarketRecord.mcp_name == mcp_name, McpMarketRecord.tenant_id == tenant_id,
+            McpMarketRecord.delete_flag != "Y", McpMarketRecord.review_status == "shared")
+        if exclude_source_mcp_id is not None:
+            query = query.filter(or_(McpMarketRecord.source_mcp_id.is_(None),
+                                    McpMarketRecord.source_mcp_id != exclude_source_mcp_id))
+        return query.first() is not None
 
 
 def update_mcp_market_record(
@@ -248,6 +252,8 @@ def update_mcp_market_record(
         ).update(update_fields)
 
 
+_SUBMISSION_DESCRIPTION_UNSET = object()
+
 def update_mcp_market_status(
     *,
     market_id: int,
@@ -255,6 +261,8 @@ def update_mcp_market_status(
     review_status: str,
     submitted_by: str | None = None,
     content: str | None = None,
+    is_resubmission: bool = False,
+    submit_description: str | None | object = _SUBMISSION_DESCRIPTION_UNSET,
 ) -> None:
     """Atomically update the review_status, optionally recording the submitter."""
     update_fields: Dict[str, Any] = {"updated_by": user_id, "review_status": review_status}
@@ -262,6 +270,7 @@ def update_mcp_market_status(
         update_fields["submitted_by"] = submitted_by
     if content is not None:
         update_fields["content"] = content
+
 
     with get_db_session() as session:
         session.query(McpMarketRecord).filter(
@@ -380,3 +389,14 @@ def get_mcp_market_tag_stats_by_tenant(tenant_id: str) -> List[Dict[str, Any]]:
             .all()
         )
         return [{"tag": str(row.tag), "count": int(row.count)} for row in rows if row.tag]
+
+
+def get_shared_mcp_market_ids(market_ids: list[int]) -> set[int]:
+    """Resolve current publication state independently of retained origin links."""
+    if not market_ids:
+        return set()
+    with get_db_session() as session:
+        rows = session.query(McpMarketRecord.market_id).filter(
+            McpMarketRecord.market_id.in_(market_ids), McpMarketRecord.review_status == "shared",
+            McpMarketRecord.delete_flag != "Y").all()
+        return {int(row[0]) for row in rows}

@@ -2,6 +2,7 @@
 
 
 from typing import Any
+from management.db.repository_transactions import after_repository_commit
 from typing import Dict
 from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
 from typing import Optional
@@ -20,6 +21,7 @@ _REVIEW_STATUS_TO_EVENT_TYPE = {
     STATUS_REJECTED: EVENT_TYPE_REPOSITORY_REVIEW_REJECTED,
 }
 
+@after_repository_commit
 def create_repository_review_notification(
     *,
     resource_type: str,
@@ -69,6 +71,7 @@ def create_repository_review_notification(
     )
 
 
+@after_repository_commit
 def create_repository_pending_review_notification(
     *,
     resource_type: str,

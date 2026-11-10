@@ -1,6 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
-from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerMcpServiceRequest, UpdateMcpServiceRequest, EnableMcpServiceRequest, DisableMcpServiceRequest, HealthcheckMcpServiceRequest, TestMcpConnectionRequest, ListMcpServicesQuery
 import logging
 import json
 import asyncio
@@ -12,7 +10,7 @@ from http import HTTPStatus
 
 from contracts.constants.environment import ENABLE_UPLOAD_IMAGE
 from contracts.errors.codes import ErrorCode
-from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
+from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError, ForbiddenError
 from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerMcpServiceRequest, UpdateMcpServiceRequest, EnableMcpServiceRequest, DisableMcpServiceRequest, HealthcheckMcpServiceRequest, TestMcpConnectionRequest, ListMcpServicesQuery
 from management.services.mcp.service import get_remote_mcp_server_list, check_mcp_health_and_update_db, delete_mcp_by_container_id, upload_and_start_mcp_image, update_remote_mcp_server_list, attach_mcp_container_permissions, get_mcp_record_by_id, list_mcp_service_tools_by_id, refresh_mcp_service_tool_count, add_container_mcp_service, update_mcp_service, update_mcp_service_enabled, delete_mcp_service, check_mcp_service_health, test_mcp_connection, check_container_port_conflict, suggest_container_port
 from management.services.mcp.registration import add_mcp_service
@@ -435,6 +433,8 @@ async def delete_mcp_by_id(
         )
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to delete MCP service: {e}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to delete MCP service")
@@ -514,8 +514,11 @@ async def get_mcp_list(
         effective_tenant_id = tenant_id or auth_tenant_id
 
         remote_mcp_list = await get_remote_mcp_server_list(
-            tenant_id=effective_tenant_id, user_id=user_id, is_need_auth=True
+            tenant_id=effective_tenant_id, user_id=user_id, is_need_auth=True, include_author=True
         )
+
+        from management.services.repository.reviews import attach_latest_reviews
+        attach_latest_reviews(remote_mcp_list, "mcp", "mcp_id", user_id, effective_tenant_id)
 
         return JSONResponse(
             status_code=HTTPStatus.OK,

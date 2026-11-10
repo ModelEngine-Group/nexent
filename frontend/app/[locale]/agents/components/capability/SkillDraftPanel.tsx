@@ -40,6 +40,7 @@ interface SkillDraftPanelProps {
   setActiveSkillTab: Dispatch<SetStateAction<string>>;
   isStreaming?: boolean;
   readOnly?: boolean;
+  repositoryLayout?: boolean;
   onNameChange?: (event: ChangeEvent<HTMLInputElement>) => void;
   textareaRefs?: MutableRefObject<Record<string, unknown>>;
   shouldAutoScrollRef?: MutableRefObject<Record<string, boolean>>;
@@ -62,6 +63,7 @@ export default function SkillDraftPanel({
   setActiveSkillTab,
   isStreaming = false,
   readOnly = false,
+  repositoryLayout = false,
   onNameChange,
   textareaRefs,
   shouldAutoScrollRef,
@@ -81,6 +83,7 @@ export default function SkillDraftPanel({
   const [expandedEditorPath, setExpandedEditorPath] = useState("");
   const [expandedEditorContent, setExpandedEditorContent] = useState("");
   const [sourceEditorPath, setSourceEditorPath] = useState("");
+  const [fileSearch, setFileSearch] = useState("");
 
   const dedupeSkillTabs = (tabs: SkillFileContent[]) =>
     tabs.filter(
@@ -89,6 +92,13 @@ export default function SkillDraftPanel({
     );
 
   const visibleSkillTabs = dedupeSkillTabs(skillTabs);
+  const fileSearchTerm = fileSearch.trim().toLowerCase();
+  const listedSkillTabs =
+    repositoryLayout && fileSearchTerm
+      ? visibleSkillTabs.filter((tab) =>
+          tab.path.toLowerCase().includes(fileSearchTerm)
+        )
+      : visibleSkillTabs;
   const activeFile =
     visibleSkillTabs.find((tab) => tab.path === activeSkillTab) ||
     visibleSkillTabs[0];
@@ -232,7 +242,7 @@ export default function SkillDraftPanel({
 
   return (
     <div
-      className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
+      className={`flex min-h-0 flex-col ${repositoryLayout ? "gap-6" : "h-full gap-2 overflow-hidden"} ${className || ""}`}
     >
       <div className="shrink-0 rounded-2xl border border-slate-200 bg-white px-5 pb-2 pt-3 shadow-sm">
         <Form
@@ -395,10 +405,16 @@ export default function SkillDraftPanel({
       </div>
 
       <div
-        className={`flex min-h-0 flex-1 flex-col ${readOnly ? "min-h-[300px]" : ""}`}
+        className={`flex min-h-0 flex-1 flex-col ${repositoryLayout ? "min-h-[692px]" : readOnly ? "min-h-[300px]" : ""}`}
       >
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60">
+          <div
+            className={
+              repositoryLayout
+                ? "flex w-[234px] max-w-[40%] shrink-0 flex-col gap-3 border-r border-[#191919]/8 bg-white p-3"
+                : "flex w-[28%] min-w-[140px] shrink-0 flex-col border-r border-slate-200 bg-slate-50/60"
+            }
+          >
             <div className="flex h-11 items-center justify-between border-b border-slate-200 px-3">
               <span className="text-sm font-medium text-slate-700">
                 {t("skillManagement.detail.file")}
@@ -422,8 +438,17 @@ export default function SkillDraftPanel({
                 />
               ) : null}
             </div>
+            {repositoryLayout && (
+              <Input
+                allowClear
+                aria-label={t("resourceCenter.search")}
+                placeholder={t("resourceCenter.search")}
+                value={fileSearch}
+                onChange={(event) => setFileSearch(event.target.value)}
+              />
+            )}
             <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto py-2">
-              {visibleSkillTabs
+              {listedSkillTabs
                 .filter((tab) => !tab.path.includes("/"))
                 .map((tab) => (
                   <div
@@ -460,7 +485,7 @@ export default function SkillDraftPanel({
                 ))}
               {Array.from(
                 new Set(
-                  visibleSkillTabs
+                  listedSkillTabs
                     .filter((tab) => tab.path.includes("/"))
                     .map((tab) => tab.path.split("/")[0])
                 )
@@ -472,7 +497,7 @@ export default function SkillDraftPanel({
                       {folderName}
                     </span>
                   </div>
-                  {visibleSkillTabs
+                  {listedSkillTabs
                     .filter((tab) => tab.path.startsWith(`${folderName}/`))
                     .map((tab) => (
                       <div
@@ -517,8 +542,12 @@ export default function SkillDraftPanel({
             </div>
           </div>
           {activeFile ? (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 px-4 text-sm font-medium text-slate-700">
+            <div
+              className={`flex min-w-0 flex-1 flex-col ${repositoryLayout ? "bg-[#191919]/3 text-[#191919]" : ""}`}
+            >
+              <div
+                className={`flex shrink-0 items-center justify-between border-b px-4 text-sm font-medium ${repositoryLayout ? "h-[52px] border-[#191919]/8 bg-white py-2 text-[#191919]" : "h-11 border-slate-200 text-slate-700"}`}
+              >
                 <span className="min-w-0 flex-1 truncate">
                   {activeFile.path}
                 </span>

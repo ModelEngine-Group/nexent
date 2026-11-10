@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D2
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-LIFECYCLE-D2-001
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-LIFECYCLE-RULE-010
+  title: 旧客户端请求与新增字段向后兼容
+  type: API-IT
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 旧客户端请求与新增字段向后兼容
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 使用旧页面及三类提交入口申请
+    expected: 旧路由保留，返回申请摘要且不伪造仓库ID，Agent版本0仍按原校验。
+  - order: 2
+    action: 用review_id详情/决策并以旧仓库ID适配唯一待审申请
+    expected: 新协议不要求revision；无唯一映射409，不猜最近完成记录。
+  - order: 3
+    action: 验证旧响应和新错误契约及依赖仓库ID的调用方
+    expected: 旧客户端依赖非空仓库ID需适配，不能把申请ID塞回仓库字段；新意见1000字符限制独立执行。
+  expected_results:
+  - 旧路由保留，返回申请摘要且不伪造仓库ID，Agent版本0仍按原校验。
+  - 新协议不要求revision；无唯一映射409，不猜最近完成记录。
+  - 旧客户端依赖非空仓库ID需适配，不能把申请ID塞回仓库字段；新意见1000字符限制独立执行。
+  forbidden_side_effects:
+  - 不得绕过审核表提前覆盖仓库内容或修改已完成申请。
+  - 失败事务不得留下仓库半写入或丢失申请数据。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-010
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 旧路由保留，返回申请摘要且不伪造仓库ID，Agent版本0仍按原校验。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 新协议不要求revision；无唯一映射409，不猜最近完成记录。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 旧客户端依赖非空仓库ID需适配，不能把申请ID塞回仓库字段；新意见1000字符限制独立执行。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  contract:
+    protocol: HTTP JSON; preserve router prefix
+    request_expectations:
+    - 按现有API-072/API-084/API-090的实际调用顺序执行旧列表、提交、详情、撤回及MCP更新
+    - 通过旧动作接口写content后从新详情读取；对revision=0历史待审用新decision显式携带0
+    - 比较旧接口历史错误响应与新接口400/401/403/404/409；旧接口发送原契约允许的1001字符说明/意见
+    response_expectations:
+    - 原路由、必需字段和合法状态码保持；接口可追加字段；Agent历史version_no=0请求仍按旧接口规则接受。
+    - 按提交/审核动作映射到独立字段；旧请求无revision仍可调用，新接口0轮次匹配可处理且后续提交递增。
+    - 新增接口规范不反向改变旧客户端依赖的错误payload或校验规则；旧ABA限制在文档/发布说明中明确。 旧长内容原样双写TEXT、不截断，新decision仍单独执行1000字符限制。

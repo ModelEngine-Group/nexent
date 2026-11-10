@@ -87,6 +87,15 @@ for _col in [
 ]:
     setattr(_MockMcpMarketRecord, _col, _MockColumn())
 
+# Preserve real SQL expression semantics for conditional review metadata writes.
+from sqlalchemy import column, DateTime, Integer, String, Text
+for _name, _type in {
+    "review_status": String, "submitted_user_id": String, "submitted_at": DateTime,
+    "submit_description": Text, "review_comment": Text, "submission_revision": Integer,
+    "published_at": DateTime,
+}.items():
+    setattr(_MockMcpMarketRecord, _name, column(_name, _type))
+
 db_models_mock = MagicMock()
 db_models_mock.McpMarketRecord = _MockMcpMarketRecord
 sys.modules['management.db.models'] = db_models_mock

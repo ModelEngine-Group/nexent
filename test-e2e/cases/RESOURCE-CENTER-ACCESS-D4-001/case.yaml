@@ -1,0 +1,155 @@
+schema_version: '1.0'
+stage: D4
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-ACCESS-D4-001
+  feature_id: RESOURCE-CENTER-ACCESS
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-ACCESS-RULE-001
+  - RESOURCE-CENTER-ACCESS-RULE-002
+  title: 新URL四Tab及审核本人/他人视图
+  type: E2E
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 新URL四Tab及审核本人/他人视图
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    entry_route_matrix: design.md 1.2.1/1.2.2全部映射，zh/en，具有/不具有审核资格，两租户，同数值跨类型ID；新窗口和登录前后。
+  steps:
+  - order: 1
+    action: 以有新URL登记的ADMIN、DEV及无新URL登记角色打开资源仓库
+    expected: 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。
+  - order: 2
+    action: 依次从侧栏、首页、通知、使用引导、Agent依赖资源入口、创建弹窗及工作台Skill结果进入仓库，并测试语言/Tab/view/资源身份参数
+    expected: 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版入口保持原行为；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。
+  - order: 3
+    action: 刷新合法深链、切四Tab、输入无效tab和同ID不同类型记录，切角色/租户
+    expected: Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
+  - order: 4
+    action: 在/zh与/en直接访问/agent-space、/skill-space、/mcp-space、/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单
+    expected: 旧页面及既有别名保持原行为，旧URL角色登记不删除；新版菜单可直达新URL，旧菜单及旧链路保留，分别按原授权访问。
+  - order: 5
+    action: 用独立新浏览器上下文从外部直接打开四种tab及skill&view=mine，刷新、复制新窗口并执行浏览器前进/后退
+    expected: 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
+  - order: 6
+    action: 在未登录状态打开带tab/type/repository_id的新深链，登录成功后进入；另测试无权限和不可见记录
+    expected: 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。
+  - order: 7
+    action: 审核者分别打开本人审核结果通知及他人待审通知，并从审核Tab读取本人申请
+    expected: 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。
+  expected_results:
+  - 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。
+  - 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版入口保持原行为；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。
+  - Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
+  - 旧页面及既有别名保持原行为，旧URL角色登记不删除；新版菜单可直达新URL，旧菜单及旧链路保留，分别按原授权访问。
+  - 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
+  - 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。
+  - 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。
+  forbidden_side_effects:
+  - 不得对有仓库权限的普通用户隐藏审核Tab。
+  - 不得删除旧入口或引入空入口；新页面不得误跳旧页面或错误Tab。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-001
+    - AC-002
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。（SPEC AC-001, AC-002）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版入口保持原行为；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。（SPEC
+      AC-001, AC-002）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。（SPEC AC-001, AC-002）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 旧页面及既有别名保持原行为，旧URL角色登记不删除；新版菜单可直达新URL，旧菜单及旧链路保留，分别按原授权访问。（SPEC AC-001,
+      AC-002）
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。（SPEC AC-001, AC-002）
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-06
+    description: 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。（SPEC AC-001, AC-002）
+    steps:
+    - 6
+    expected_results:
+    - 6
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-07
+    description: 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。（SPEC AC-001, AC-002）
+    steps:
+    - 7
+    expected_results:
+    - 7
+    forbidden_side_effects:
+    - 1
+    - 2
+  actor: 具备Case指定能力的租户用户及审核员
+  journey:
+  - 以有新URL登记的ADMIN、DEV及无新URL登记角色打开资源仓库
+  - 依次从侧栏、首页、通知、使用引导、Agent依赖资源入口、创建弹窗及工作台Skill结果进入仓库，并测试语言/Tab/view/资源身份参数
+  - 刷新合法深链、切四Tab、输入无效tab和同ID不同类型记录，切角色/租户
+  - 在/zh与/en直接访问/agent-space、/skill-space、/mcp-space、/agent-repository及旧查询串，检查页面路由、redirect/rewrite和URL构造清单
+  - 用独立新浏览器上下文从外部直接打开四种tab及skill&view=mine，刷新、复制新窗口并执行浏览器前进/后退
+  - 在未登录状态打开带tab/type/repository_id的新深链，登录成功后进入；另测试无权限和不可见记录
+  - 审核者分别打开本人审核结果通知及他人待审通知，并从审核Tab读取本人申请
+  final_business_result:
+  - 授权用户均显示四Tab；DEV可读本人申请且无审核操作；ADMIN审核列表包含本人及他人，按原有资格操作；无URL登记角色无页面。
+  - 新版活动入口直接访问新URL且按设计映射目标Tab/view；旧版入口保持原行为；MCP/Skill依赖进对应仓库，工作台Skill进mine，Agent引导保留agent_id/onboarding，待审通知进review，结果通知进对应资源mine并显示目标申请；不混用本地ID和仓库ID。
+  - Tab不因审核资格隐藏；合法状态可恢复，无效tab/不可见记录明确提示，不串数据；旧角色/租户结果不闪现。
+  - 旧页面及既有别名保持原行为，旧URL角色登记不删除；新版菜单可直达新URL，旧菜单及旧链路保留，分别按原授权访问。
+  - 首次加载和每次恢复均显示URL指定Tab/视图；显式tab不被默认agent/本地历史覆盖；切换Tab后地址更新可分享，缺省tab才默认agent。
+  - 登录后保留原受支持站内目标和查询串，不丢到首页/默认Tab；无权限拒绝，不可见记录明确提示，不换开同数值ID其他资源。
+  - 通知按业务目标定位到正确申请；审核列表包含本人和他人，不因自己提交返回404或额外隐藏；操作规则沿用现有实现。
+  failure_evidence:
+  - 脱敏截图、浏览器控制台、网络请求及响应、run_id和实际被测commit；不保存凭据。
