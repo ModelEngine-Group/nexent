@@ -45,6 +45,7 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
     )
     mounts = WorkbenchSkillMounts(mounts=[mount.model_dump(mode="json") for mount in prepared.workbench.skill_mounts])
     granted = False
+    keep_image_grant = False
     try:
         with CancelScope(shield=True):
             try:
@@ -55,10 +56,14 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
             except (RedisError, WorkbenchDebugGrantUnavailable) as exc:
                 raise HTTPException(status_code=503, detail={"code": "AGENTOS_WORKBENCH_SCOPE_UNAVAILABLE"}) from exc
             granted = True
-        # Runtime resolves the mounted files and tool bindings before opening the SSE response.
-        return await client.run_ephemeral(payload, user_id, tenant_id)
+        response = await client.run_ephemeral(payload, user_id, tenant_id)
+        # The browser may read signed images after Runtime has closed the stream.
+        keep_image_grant = response.status_code == 200 and any(
+            binding.tool_id == "ind_aidp_search" and binding.version == "4" for binding in payload.resource.tools
+        )
+        return response
     finally:
-        if granted:
+        if granted and not keep_image_grant:
             with CancelScope(shield=True):
                 try:
                     await run_blocking(

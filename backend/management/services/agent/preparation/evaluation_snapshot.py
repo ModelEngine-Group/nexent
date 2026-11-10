@@ -237,9 +237,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         prepared_workbench=PreparedWorkbench(config, plan, 0, 0),
         **compile_options,
     )
-    if snapshot is None or any(
-        binding.tool_id == "ind_aidp_search" and binding.version == "4" for binding in snapshot.resource.tools
-    ):
+    if snapshot is None:
         return None
     return PreparedDebug(PreparedEphemeralRun(
         **snapshot.model_dump(exclude={"conversation_id"}), run_id=uuid4().hex,

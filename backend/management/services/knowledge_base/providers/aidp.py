@@ -8,8 +8,10 @@ from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 import httpx
 from pydantic import ValidationError as PayloadValidationError
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
-from contracts.agentos import WorkbenchSkillLookup
+from contracts.agentos import WorkbenchDebugSkillLookup, WorkbenchSkillLookup
 
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agentos_identity import ServicePrincipal
@@ -27,6 +29,7 @@ from infrastructure.rdb.local_tool_records import read_skill_derived_local_tools
 from infrastructure.rdb.workbench_skill_records import read_workbench_derived_tools, read_workbench_skill_rows
 from management.db.conversation.prepared_turn import read_workbench_image_mounts
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
+from management.services.agent.workbench_debug_grant import WorkbenchDebugGrantUnavailable, read_workbench_debug_grant
 
 from nexent.core.concurrency import run_blocking
 
@@ -117,11 +120,19 @@ def _read_workbench_image_params(payload: dict, actor: ServicePrincipal | None) 
     if actor is None or actor.tenant_id != payload["tenant_id"]:
         raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
     try:
-        lookup = WorkbenchSkillLookup.model_validate(payload["workbench"])
+        scope = payload["workbench"]
+        if isinstance(scope, dict) and "conversation_id" in scope:
+            lookup = WorkbenchSkillLookup.model_validate(scope)
+        else:
+            lookup = WorkbenchDebugSkillLookup.model_validate(scope)
         tool_id = int(payload["tool_id"])
         if (lookup.agent_id, lookup.agent_version) != (payload["agent_id"], payload["version_no"]):
             raise ValueError("Inconsistent Workbench image scope")
-        mounts = read_workbench_image_mounts(lookup, actor.user_id, actor.tenant_id)
+        if isinstance(lookup, WorkbenchDebugSkillLookup):
+            grant = read_workbench_debug_grant(lookup, actor)
+            mounts = {mount.skill_id: mount.config_values for mount in grant.mounts} if grant is not None else None
+        else:
+            mounts = read_workbench_image_mounts(lookup, actor.user_id, actor.tenant_id)
         if mounts is None:
             raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
         rows = read_workbench_skill_rows(lookup.agent_id, lookup.agent_version, actor, mounts)
@@ -129,6 +140,8 @@ def _read_workbench_image_params(payload: dict, actor: ServicePrincipal | None) 
         matches = [row for row in tools if row["tool_id"] == tool_id and row["class_name"] == _IMAGE_CLASS_NAME]
     except (PayloadValidationError, ValidationError, TypeError, ValueError) as exc:
         raise IndependentAidpServiceError("Independent AIDP Workbench tool changed") from exc
+    except (RedisError, SQLAlchemyError, WorkbenchDebugGrantUnavailable) as exc:
+        raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable") from exc
     if len(matches) != 1:
         raise IndependentAidpServiceError("Independent AIDP Workbench tool is unavailable")
     row = matches[0]

@@ -14,7 +14,8 @@ from pydantic import ValidationError
 
 from contracts.agentos import (
     AgentRunReference, EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
-    ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun, WorkbenchSkillLookup,
+    ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun,
+    WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
@@ -211,6 +212,10 @@ def _materialize_agent(
         workbench_lookup = WorkbenchSkillLookup(
             conversation_id=public_reference.conversation_id, run_id=public_reference.run_id,
             agent_id=resource.agent_id, agent_version=resource.version_no, workbench_version=workbench_version,
+        )
+    elif workbench_debug_run_id is not None and mounted_tools:
+        workbench_lookup = WorkbenchDebugSkillLookup(
+            run_id=workbench_debug_run_id, agent_id=resource.agent_id, agent_version=resource.version_no,
         )
     local_tools.update(materialize_local_tools(
         resource, actor, language, allow_scoped_aidp=allow_scoped_aidp or native_knowledge,

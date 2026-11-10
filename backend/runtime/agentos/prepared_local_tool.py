@@ -7,7 +7,8 @@ from hmac import compare_digest
 from fastapi import HTTPException
 
 from contracts.agentos import (
-    AgentResource, ScopedSharedAidpBinding, SkillDerivedLocalToolBinding, StoredLocalToolBinding, WorkbenchSkillLookup,
+    AgentResource, ScopedSharedAidpBinding, SkillDerivedLocalToolBinding, StoredLocalToolBinding,
+    WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
 )
 from contracts.constants import environment
 from contracts.errors.exceptions import ValidationError
@@ -69,7 +70,7 @@ def _materialize_scoped_shared_aidp(reference, resource, actor, language) -> Too
 def materialize_local_tools(
     resource: AgentResource, actor: ServicePrincipal, language: str, *, allow_scoped_aidp: bool = False,
     require_scoped_aidp_instance: bool = False, workbench_tools=(),
-    workbench_lookup: WorkbenchSkillLookup | None = None,
+    workbench_lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup | None = None,
 ) -> dict[str, ToolConfig]:
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding, "4": SkillDerivedLocalToolBinding}

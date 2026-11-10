@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from contracts.agentos import WorkbenchSkillLookup
+from contracts.agentos import WorkbenchDebugSkillLookup, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.nexent_agent import NexentAgent
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("derived", [False, True, "workbench"])
+@pytest.mark.parametrize("derived", [False, True, "workbench", "debug"])
 async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_accepts(mocker, derived):
     from infrastructure import ind_aidp_images
     from management.services.agent.preparation import local_tool, tools
@@ -28,9 +28,10 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
             "tenant_id": "provider-a", "kds_list": ["private-kb"],
         }.items()],
     }
+    mounted = derived in {"workbench", "debug"}
     if derived:
         row.pop("tool_instance_id")
-        row["workbench_skill_ids" if derived == "workbench" else "skill_instance_ids"] = [42]
+        row["workbench_skill_ids" if mounted else "skill_instance_ids"] = [42]
     mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
     mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[row])
     mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={})
@@ -48,12 +49,12 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     resource = SimpleNamespace(
         agent_id=8, version_no=4, tools=[binding],
         skill_refs=[SimpleNamespace(instance_id=42)] if derived is True else [],
-        workbench_skill_refs=[SimpleNamespace(skill_id=42)] if derived == "workbench" else [],
+        workbench_skill_refs=[SimpleNamespace(skill_id=42)] if mounted else [],
     )
     actor = ServicePrincipal("user-a", "tenant-a")
     options = {}
-    if derived == "workbench":
-        lookup = WorkbenchSkillLookup(
+    if mounted:
+        lookup = WorkbenchDebugSkillLookup(agent_id=8, agent_version=4, run_id="a" * 32) if derived == "debug" else WorkbenchSkillLookup(
             agent_id=8, agent_version=4, conversation_id=12, run_id="a" * 32, workbench_version=3,
         )
         with pytest.raises(ValueError, match="Workbench"):
@@ -66,16 +67,25 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
     reference = instance.image_url_builder("/KnowledgeBase/Tenants/provider-a/KnowledgeBases/private-kb/p.png")
     assert reference.startswith("/api/ind-aidp/images/")
     payload = proxy._decode_image_ref(reference.rsplit("/", 1)[-1])
-    if derived == "workbench":
+    if mounted:
         assert payload["workbench"] == lookup.model_dump(mode="json")
         assert "runtime-aidp-fixture-key" not in str(payload) and "https://private-aidp.invalid" not in str(payload)
-        mounts = mocker.patch.object(proxy, "read_workbench_image_mounts", return_value={42: {}})
+        authorization = (
+            WorkbenchSkillMounts(mounts=[{"skill_id": 42, "config_values": {}}])
+            if derived == "debug" else {42: {}}
+        )
+        if derived == "debug":
+            mounts = mocker.patch.object(proxy, "read_workbench_debug_grant", return_value=authorization)
+            scope_args = (lookup, actor)
+        else:
+            mounts = mocker.patch.object(proxy, "read_workbench_image_mounts", return_value=authorization)
+            scope_args = (lookup, "user-a", "tenant-a")
         rows = mocker.patch.object(proxy, "read_workbench_skill_rows", return_value={42: {"skill_id": 42}})
         tools = mocker.patch.object(proxy, "read_workbench_derived_tools", return_value=[row])
         assert proxy._resolve_image_credentials(payload, actor) == (
             "https://private-aidp.invalid", "runtime-aidp-fixture-key", "provider-a", "private-kb/p.png",
         )
-        mounts.assert_called_once_with(lookup, "user-a", "tenant-a")
+        mounts.assert_called_once_with(*scope_args)
         rows.assert_called_once_with(8, 4, actor, {42: {}})
         for foreign in (None, ServicePrincipal("user-a", "other-tenant")):
             with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
@@ -83,7 +93,7 @@ async def test_independent_aidp_tool_rebuilds_a_reference_the_management_proxy_a
         mounts.return_value = None
         with pytest.raises(proxy.IndependentAidpServiceError, match="unavailable"):
             proxy._resolve_image_credentials(payload, ServicePrincipal("other-user", "tenant-a"))
-        mounts.return_value = {42: {}}
+        mounts.return_value = authorization
         row["workbench_skill_ids"] = [43]
         with pytest.raises(proxy.IndependentAidpServiceError, match="changed"):
             proxy._resolve_image_credentials(payload, actor)

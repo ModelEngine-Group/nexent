@@ -8,7 +8,7 @@ import json
 from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
 
-from contracts.agentos import WorkbenchSkillLookup
+from contracts.agentos import WorkbenchDebugSkillLookup, WorkbenchSkillLookup
 from contracts.constants import environment
 from contracts.constants.environment import IND_AIDP_IMAGE_SIGNING_KEY
 
@@ -77,7 +77,8 @@ def ind_aidp_skill_revision(
 
 
 def ind_aidp_workbench_revision(
-    lookup: WorkbenchSkillLookup, tenant_id: str, tool_id: int, skill_ids: list[int], params: dict,
+    lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup, tenant_id: str, tool_id: int,
+    skill_ids: list[int], params: dict,
 ) -> str:
     return _binding_revision(
         b"nexent/agentos/ind-aidp-workbench-image/v1",
@@ -101,7 +102,7 @@ def create_ind_aidp_image_url_builder(
     version_no: int,
     aidp_tenant_id: str,
     skill_revision: str | None = None,
-    workbench_lookup: WorkbenchSkillLookup | None = None,
+    workbench_lookup: WorkbenchSkillLookup | WorkbenchDebugSkillLookup | None = None,
 ) -> Callable[[str], str]:
     """Create a runtime callback that turns an AIDP path into a signed proxy URL."""
     normalized_aidp_tenant = _validate_tenant_id(aidp_tenant_id)

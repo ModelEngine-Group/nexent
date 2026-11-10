@@ -233,15 +233,18 @@ async def test_debug_scope_does_not_mask_runtime_rejection():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failed", [False, True])
-async def test_workbench_debug_skill_grant_wraps_runtime_preparation(mocker, failed):
+@pytest.mark.parametrize("image,status", [(False, 200), (True, 200), (True, 422), (True, None)])
+async def test_workbench_debug_skill_grant_wraps_runtime_preparation(mocker, image, status):
     from contracts.agent import WorkbenchSessionConfig
     from contracts.errors.exceptions import RuntimeServiceUnavailableError
 
     scope_calls = []
     prepare = SimpleNamespace(
         payload=SimpleNamespace(
-            run_id=CURSOR.run_id, resource=SimpleNamespace(agent_id=7, version_no=3, workbench_skill_refs=[object()]),
+            run_id=CURSOR.run_id, resource=SimpleNamespace(
+                agent_id=7, version_no=3, workbench_skill_refs=[object()],
+                tools=[SimpleNamespace(tool_id="ind_aidp_search", version="4")] if image else [],
+            ),
         ),
         workbench=WorkbenchSessionConfig(mode="generic_chat", skill_mounts=[{"skill_id": 5}]),
     )
@@ -259,18 +262,21 @@ async def test_workbench_debug_skill_grant_wraps_runtime_preparation(mocker, fai
         assert (scope.run_id, scope.agent_id, scope.agent_version) == (CURSOR.run_id, 7, 3)
         assert (actor.user_id, actor.tenant_id) == (user, tenant)
         assert mounts.mounts[0].skill_id == 5
-        if failed:
+        if status is None:
             raise RuntimeServiceUnavailableError("upstream failed")
         return result
 
-    result = response(b"data: {}\n\n")
+    result = response(b"data: {}\n\n", status_code=status or 500)
     client = SimpleNamespace(run_ephemeral=dispatch)
-    if failed:
+    if status is None:
         with pytest.raises(RuntimeServiceUnavailableError):
             await runtime_client._run_prepared_debug(client, prepare, "actor", "tenant")
     else:
         assert await runtime_client._run_prepared_debug(client, prepare, "actor", "tenant") is result
-    assert scope_calls[1:] == [(runtime_client.close_workbench_debug_grant, (CURSOR.run_id,))]
+    if image and status == 200:
+        assert scope_calls[1:] == []
+    else:
+        assert scope_calls[1:] == [(runtime_client.close_workbench_debug_grant, (CURSOR.run_id,))]
 
 
 @pytest.mark.asyncio
