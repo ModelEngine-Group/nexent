@@ -143,8 +143,10 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
 
 
 async def _run_public_conversation(agent_request, http_request, principal, resume):
+    if resume and (agent_request.is_debug or (agent_request.conversation_id or 0) <= 0):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RESUME_REQUEST"})
     try:
-        if resume and not agent_request.is_debug and (agent_request.conversation_id or 0) > 0:
+        if resume:
             return await resume_legacy_conversation(
                 agent_request.conversation_id, principal, workbench=agent_request.entrypoint == "workbench",
             )
@@ -153,7 +155,7 @@ async def _run_public_conversation(agent_request, http_request, principal, resum
             http_request=http_request,
             user_id=principal.user_id,
             tenant_id=principal.tenant_id,
-            resume=resume,
+            resume=False,
         )
     except ActiveExecutionError:
         return _execution_conflict_response()

@@ -663,6 +663,28 @@ async def test_agentos_cursorless_resume_bypasses_management_subscription(mocker
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id,is_debug", [(None, False), (0, False), (-1, False), (42, True)])
+async def test_agentos_invalid_resume_never_reaches_legacy_subscription(mocker, conversation_id, is_debug):
+    from fastapi import HTTPException
+
+    from contracts.agentos import CompatibilityConversationRun
+    from infrastructure.agentos_identity import ServicePrincipal
+    from runtime.api.agent import execution
+
+    runner = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock())
+    replay = mocker.patch.object(execution, "resume_legacy_conversation", new=AsyncMock())
+    payload = CompatibilityConversationRun(
+        request={"query": "", "conversation_id": conversation_id, "is_debug": is_debug}, resume=True,
+    )
+    with pytest.raises(HTTPException) as error:
+        await execution.run_agentos_conversation(payload, ServicePrincipal("actor", "tenant"))
+
+    assert (error.value.status_code, error.value.detail) == (422, {"code": "AGENTOS_INVALID_RESUME_REQUEST"})
+    runner.assert_not_awaited()
+    replay.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("owned", [True, False])
 async def test_agentos_stop_checks_conversation_scope_before_cancelling(mocker, owned):
     from infrastructure.agentos_identity import ServicePrincipal

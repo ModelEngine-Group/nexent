@@ -304,6 +304,21 @@ async def test_disabled_workbench_is_rejected_before_legacy_dispatch(mocker, res
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_id,is_debug", [(None, False), (0, False), (-1, False), (42, True)])
+async def test_invalid_cursorless_resume_is_rejected_before_runtime(mocker, conversation_id, is_debug):
+    client = mocker.patch.object(runtime_client, "_agentos_client")
+    payload = CompatibilityConversationRun(
+        request={"query": "", "conversation_id": conversation_id, "is_debug": is_debug}, resume=True,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await runtime_client.forward_conversation_run(payload, "actor", "tenant")
+
+    assert (error.value.status_code, error.value.detail) == (422, {"code": "AGENTOS_INVALID_RESUME_REQUEST"})
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("result", ["completed", "running", "missing", "wrong_run", "wrong_conversation", "no_message"])
 async def test_background_recovers_only_matching_completed_run_after_lost_response(mocker, result):
     from contracts.agent import AgentRequest

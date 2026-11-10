@@ -128,6 +128,8 @@ async def forward_conversation_run(
     northbound_fallback: Callable[[], Awaitable[StreamingResponse]] | None = None,
 ):
     request = AgentRequest.model_validate(payload.request)
+    if payload.resume and (request.is_debug or (request.conversation_id or 0) <= 0):
+        raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RESUME_REQUEST"})
     if request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=404, detail={"code": "WORKBENCH_DISABLED"})
 
