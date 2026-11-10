@@ -70,6 +70,10 @@ runtime, and `v2.9.0_001_local_user_accounts.sql`. Standard deployment selects t
 image automatically; preload it for offline deployment. The independent gateway
 image is not the migration image.
 
+`migrate.sh` is the host entry point for both Docker and Kubernetes.
+`migrate_docker.py` runs inside the worker container or Job. Recovery defaults
+for images, ports and service names are provided by `legacy.sh`.
+
 Existing deployment settings are reused. Exported values override the selected
 Shell-compatible `--env-file` (default `deploy/env/.env`). The source password
 prefers `SUPABASE_POSTGRES_PASSWORD`, then the original container/pod environment;
@@ -108,8 +112,13 @@ and source bridge networks, uses actual database internal ports/IPs and requires
 no published DB ports. A source on the host can use its published port; loopback
 addresses are translated to the worker network's host gateway. Host-network-only
 DB containers need a reachable explicit endpoint/bridge network. The worker has
-no Docker socket. An existing stopped Supabase container is started; a removed
-source must first be recovered from original storage.
+no Docker socket. Docker starts an existing stopped source. If the original DB
+container was removed, the migration recreates just the DB service using the
+recovery Compose YAML and `SUPABASE_DATA_DIR` or `ROOT_DIR/volumes/db/data`.
+Both the host and the container check for `PG_VERSION` and `global/pg_control`
+before PostgreSQL starts. Use the original database password. An applied,
+committed migration removes the recovered container and retains its data;
+failure or preview retains the container for retry.
 
 Kubernetes uses a separate Job before application Helm startup. The host resolves
 original database endpoints/credentials and preserves source Deployment/PVC/PV
@@ -153,7 +162,7 @@ bash deploy/sql/tools/supabase_to_postgres/migrate.sh --deployment kubernetes --
 
 `--database-target NAME` selects the target DB container or Kubernetes workload.
 `--source-container NAME` selects the original source; `--no-start-source` rejects
-stopped sources. `--wait-timeout` accepts 1–300 seconds (default 300). Kubernetes
+stopped sources and disables automatic Docker recovery. `--wait-timeout` accepts 1–300 seconds (default 300). Kubernetes
 `--config-target` selects the existing Config Deployment used only for registry
 pull references; no running Config is required. Preview rolls back all target
 schema/data changes and retains source workloads/storage.
@@ -165,7 +174,8 @@ consolidated 001 without recreating the retired status column.
 
 Recovery YAML, production overlay, Kong configuration and `legacy.env.example`
 remain beside this guide. Use original image versions, passwords and data files.
-The host Shell refuses recovery unless the data directory contains `PG_VERSION`:
+The host Shell refuses recovery unless the data directory contains `PG_VERSION`
+and `global/pg_control`:
 
 ```bash
 export ROOT_DIR=/absolute/path/to/original/nexent-data
@@ -256,7 +266,7 @@ a remote source requires manual cleanup, while preview and failure retain it.
 | --- | --- |
 | Account table exists but historical passwords were never imported | Check whether 001 or the new application was started manually first. Stop identity writes and recover a consistent pre-upgrade target backup, including original membership roles/emails, then run migration before application SQL. Reconcile newer local credentials before backup recovery. The script reports unresolved IDs and stops without automatically repairing or deleting existing account data |
 | SU bootstrap reports an existing SU membership or missing account profile | Verify original ID and membership/account consistency. Deleting only account rows leaves tenant ownership behind. Restore the matching target backup; do not replace the owner with a new UUID or delete memberships to bypass preflight |
-| Original Supabase database required / configured source missing | Recover the original stopped/removed container or restore its original data/backup, then use `up`. Verify explicit container name or remote endpoint. Never create an empty source to make migration pass |
+| Original source container or data directory missing | For Docker, set `SUPABASE_DATA_DIR` to the original PostgreSQL data directory or check `ROOT_DIR`. Restore that data from backup if needed, then retry deployment. Check the configured container name if another candidate exists. For Kubernetes or remote sources, restore the original workload or verify the remote endpoint |
 | Source stopped, no published port, or readiness timeout | The Shell coordinator starts an existing source and the worker uses internal endpoints. Check source readiness, both Docker bridge networks or Kubernetes services/network policies, and adjust `--wait-timeout` within its supported range |
 | Password unavailable or PostgreSQL authentication fails | Use the original `SUPABASE_POSTGRES_PASSWORD` and target credentials. Check the selected environment file and exported values; automatic local mode can read original container/pod settings. Changing a new container environment does not reset the old DB password |
 | Target account/role/email conflict, ambiguous source IDs, unsupported date or hash | Resolve the actual conflicting legacy metadata or recover its backup. Import must preserve stable IDs and supported hashes; do not invent UUIDs, roles or replacement passwords. Failure leaves the original target schema/data available for a clean retry |

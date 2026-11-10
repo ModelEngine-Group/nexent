@@ -18,14 +18,36 @@ def docker(*args, data=None):
     return result.stdout.decode().strip()
 
 
+def build_worker_image(root, image, run_id):
+    sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
+    context = io.BytesIO()
+    with tarfile.open(fileobj=context, mode="w") as archive:
+        content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
+                   "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
+                   "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
+                   "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
+                   'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
+        info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
+        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
+            archive.add(source, arcname=destination)
+    built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
+    assert built.returncode == 0, built.stderr
+
 def assert_automatic_upgrade(root, temporary):
-    run_id = uuid4().hex
+    # Exercise peer names containing "db" without treating Auth or Kong as the database.
+    run_id = "db" + uuid4().hex
     names = {key: "supabase-auto-" + key + "-" + run_id for key in ["db", "auth", "kong"]}
     target = "auth-auto-target-" + run_id
     worker = "auth-auto-config-" + run_id
     network = "auth-auto-network-" + run_id
     image = "nexent-account-worker-test:" + run_id
     source_network = network + "-source"
+    recovery_project = "auth-auto-recovery-" + run_id
+    recovery_volume = recovery_project + "_db-config"
+    recovery_network = recovery_project + "-network"
+    old_root = temporary / "original storage"
+    source_data = old_root / "volumes/db/data"
+    source_data.mkdir(parents=True)
     label = "codex.test=" + run_id
     password = "IsolatedAutoTest123"
     user_id = str(uuid4())
@@ -36,7 +58,11 @@ def assert_automatic_upgrade(root, temporary):
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",
            "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0", "NEXENT_IMAGE": image, "DEPLOYMENT_IMAGE_SOURCE": "local-latest"}
     # Automatic mode must recover the source password from the original container.
-    env.pop("SUPABASE_POSTGRES_PASSWORD", None)
+    for key in ("SUPABASE_POSTGRES_PASSWORD", "SUPABASE_POSTGRES_HOST", "SUPABASE_DATA_DIR", "SUPABASE_DB"):
+        env.pop(key, None)
+    env.update(ROOT_DIR=old_root.as_posix(), SUPABASE_MIGRATION_PROJECT=recovery_project,
+               SUPABASE_MIGRATION_NETWORK=recovery_network, SUPABASE_DB_CONFIG_VOLUME=recovery_volume,
+               SUPABASE_PUBLISHED_PORT="0")
     env_file = temporary / ".env"
     env_file.write_text("")
     no_python = temporary / "no-host-python"
@@ -62,24 +88,15 @@ def assert_automatic_upgrade(root, temporary):
     def query(sql):
         return docker("exec", "-i", target, "psql", "-U", "postgres", "-qAt", "-v", "ON_ERROR_STOP=1", data=sql)
 
-    context = io.BytesIO()
-    with tarfile.open(fileobj=context, mode="w") as archive:
-        content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
-                   "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
-                   "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
-                   "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
-                   'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
-        info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
-        for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
-            archive.add(source, arcname=destination)
-    built = subprocess.run(["docker", "build", "-t", image, "-"], input=context.getvalue(), capture_output=True)
-    assert built.returncode == 0, built.stderr
+    build_worker_image(root, image, run_id)
     docker("network", "create", "--label", label, network)
     docker("network", "create", "--label", label, source_network)
     try:
         for name in [target, names["db"]]:
+            storage = ["-v", f"{source_data.as_posix()}:/var/lib/postgresql/data",
+                       "-e", "POSTGRES_INITDB_ARGS=--locale=C"] if name == names["db"] else []
             docker("run", "-d", "--name", name, "--label", label, "--network", source_network if name == names["db"] else network,
-                   "-e", "POSTGRES_PASSWORD=" + password, "postgres:15-alpine")
+                   "-e", "POSTGRES_PASSWORD=" + password, *storage, "postgres:15-alpine")
         for name in [names["auth"], names["kong"]]:
             docker("run", "-d", "--name", name, "--label", label,
                    "--entrypoint", "sh", "postgres:15-alpine", "-c", "sleep 600")
@@ -89,7 +106,7 @@ def assert_automatic_upgrade(root, temporary):
                "--entrypoint", "sh", "nexent/nexent:latest", "-c", "sleep 600")
         for name in [target, names["db"]]:
             deadline = time.monotonic() + 30
-            while subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres"], capture_output=True, check=False).returncode:
+            while subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True, check=False).returncode:
                 assert time.monotonic() < deadline
                 time.sleep(0.2)
         docker("exec", "-i", names["db"], "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1",
@@ -120,8 +137,24 @@ def assert_automatic_upgrade(root, temporary):
         assert query(f"SELECT user_role,user_email FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "SU|conflict@example.com"
         assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
         assert not (temporary / ".migration-state").exists()
+        docker("stop", names["db"])
+        docker("rm", names["db"])
+        empty_dir = temporary / "empty-source"
+        empty_dir.mkdir()
+        env.update(SUPABASE_DATA_DIR=empty_dir.as_posix(), SUPABASE_POSTGRES_PASSWORD=password)
+        rejected = phase("prepare", success=False)
+        assert "refusing empty source initialization" in rejected.stderr, rejected.stdout + rejected.stderr
+        assert not list(empty_dir.iterdir())
+        assert names["db"] not in docker("ps", "-a", "--format", "{{.Names}}").splitlines()
+        del env["SUPABASE_DATA_DIR"]
+        rejected = phase("prepare", success=False)
+        assert user_id in rejected.stderr and "checking original PostgreSQL data" in rejected.stderr, rejected.stdout + rejected.stderr
+        assert docker("inspect", "--format", '{{index .Config.Labels "com.docker.compose.project"}}', names["db"]) == recovery_project
+        assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
         query(f"UPDATE nexent.user_tenant_t SET user_email='auto@example.com' WHERE user_id='{user_id}'")
         assert phase("prepare")["updated"] == 1
+        assert (source_data / "PG_VERSION").is_file()
+        assert (source_data / "global/pg_control").is_file()
         assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
         for file in [sql_file]:
@@ -169,10 +202,16 @@ def assert_automatic_upgrade(root, temporary):
     finally:
         existing = docker("ps", "-a", "--format", "{{.Names}}").splitlines()
         for name in [*names.values(), target, worker]:
-            if name in existing and docker("inspect", "--format", '{{index .Config.Labels "codex.test"}}', name) == run_id:
-                docker("rm", "-f", name)
+            if name in existing:
+                labels = json.loads(docker("inspect", "--format", "{{json .Config.Labels}}", name))
+                if labels.get("codex.test") == run_id or labels.get("com.docker.compose.project") == recovery_project:
+                    docker("rm", "-f", name)
         if docker("image", "inspect", "--format", '{{index .Config.Labels "codex.test"}}', image) == run_id:
             docker("image", "rm", image)
         for owned_network in (network, source_network):
             if docker("network", "inspect", "--format", '{{index .Labels "codex.test"}}', owned_network) == run_id:
                 docker("network", "rm", owned_network)
+        for kind, resource in (("network", recovery_network), ("volume", recovery_volume)):
+            resources = docker(kind, "ls", "--filter", f"label=com.docker.compose.project={recovery_project}", "--format", "{{.Name}}")
+            if resource in resources.splitlines():
+                docker(kind, "rm", resource)
