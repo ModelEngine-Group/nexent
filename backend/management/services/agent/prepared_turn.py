@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
 
-from contracts.agentos import AgentResume, AgentRunLookup, AgentRunReference, AgentStop
+from contracts.agentos import REPLAY_COUNT_HEADER, AgentResume, AgentRunLookup, AgentRunReference, AgentStop
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
@@ -23,7 +23,7 @@ from infrastructure.agent_tool_config import AUTOMATION_PROPOSAL_TOOL
 from infrastructure.rdb.agent_admission import AdmissionScopeError, conversation_claim_scope, set_conversation_admission
 from management.db.conversation import prepared_turn as store
 from management.db.conversation.repository import get_conversation, get_prepared_projection_receipt
-from management.services.agent.agentos_events import knowledge_scope_event_content, present_public_resume
+from management.services.agent.agentos_events import knowledge_scope_event_content, present_legacy_journal, present_public_resume
 from management.services.agent.context import strip_current_time_prefix
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot, prepare_native_knowledge
 from management.services.agent.prepared_projection import resume_assistant_projection
@@ -331,6 +331,42 @@ async def resume_cursorless(conversation_id, user_id, tenant_id, client):
         return JSONResponse({"status": current, "message": f"Stream already {current}: backend_{current}"})
     if current is not None:
         return await resume_turn(current, client)
+    return await _resume_tracked_legacy(conversation_id, user_id, tenant_id, client)
+
+
+async def _resume_tracked_legacy(conversation_id, user_id, tenant_id, client):
+    try:
+        run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
+        if run_id is None:
+            return None
+        state = await client.inspect_run(AgentRunLookup(conversation_id=conversation_id, run_id=run_id), user_id, tenant_id)
+    except RuntimeUpstreamError as exc:
+        if exc.status_code in {404, 503}:
+            return None
+        raise
+    if (state.conversation_id, state.run_id) != (conversation_id, run_id):
+        raise RuntimeServiceUnavailableError("AgentOS returned a different run")
+    if state.assistant_message_id is None:
+        return None
+    try:
+        last_unit = await _io("legacy-run-resume-index", store.read_legacy_resume_index,
+                              conversation_id, state.assistant_message_id, user_id, tenant_id)
+    except AdmissionScopeError as exc:
+        raise HTTPException(status_code=403, detail="Conversation is not accessible to the current identity") from exc
+    if last_unit is None:
+        return None
+
+    response = await client.resume(AgentResume(conversation_id=conversation_id, run_id=run_id), user_id, tenant_id)
+    if response.status_code not in {200, 404, 410, 503}:
+        return response
+    try:
+        count = int(response.headers.get(REPLAY_COUNT_HEADER, "-1"))
+    except ValueError:
+        count = -1
+    if response.status_code == 200 and count >= 0 and response.headers.get("X-AgentOS-Run-ID") == run_id:
+        return present_legacy_journal(response, run_id, last_unit, count)
+    if response.background is not None:
+        await response.background()
     return None
 
 

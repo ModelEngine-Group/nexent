@@ -213,6 +213,25 @@ async def test_forward_agent_run_closes_upstream_when_consumer_stops(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_agentos_stream_can_be_closed_before_reading(monkeypatch):
+    from contracts.agentos import AgentResume
+
+    stream = TrackingStream([b"data: one\n\n"])
+
+    async def handler(_request):
+        return httpx.Response(410, stream=stream)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
+    response = await proxy._agentos_client().resume(AgentResume(conversation_id=42, run_id="a" * 32), "user-a", "tenant-a")
+    assert not stream.closed and not client.is_closed
+
+    await response.background()
+
+    assert stream.closed and client.is_closed
+
+
+@pytest.mark.asyncio
 async def test_forward_agent_stop_returns_json(monkeypatch):
     captured = {}
 

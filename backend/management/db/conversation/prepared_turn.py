@@ -16,6 +16,7 @@ from infrastructure.rdb.agent_admission import AdmissionScopeError, Conversation
 from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
+from management.db.conversation.models import ConversationMessageUnit
 from management.db.conversation.repository import (
     _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
     _resolve_clarification_response,
@@ -103,6 +104,13 @@ def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> Prepared
         return _view(row) if row is not None else None
 
 
+def _latest_message_id(conversation_id):
+    message = ConversationMessage
+    return select(message.message_id).where(
+        message.conversation_id == conversation_id, message.delete_flag == "N",
+    ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1).correlate(None).scalar_subquery()
+
+
 def read_cursorless_resume(conversation_id: int, user_id: str, tenant_id: str) -> PreparedTurn | str | None:
     """Return the pending run or the terminal status of the latest closed prepared turn."""
     admission, message = ConversationRunAdmission, ConversationMessage
@@ -117,19 +125,35 @@ def read_cursorless_resume(conversation_id: int, user_id: str, tenant_id: str) -
             return _view(row)
 
         # Inspect the latest message before filtering so an earlier assistant cannot mask a newer turn.
-        latest_message_id = select(message.message_id).where(
-            message.conversation_id == conversation_id, message.delete_flag == "N",
-        ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1).correlate(None).scalar_subquery()
         return session.scalar(select(message.status).join(
             admission, admission.prepared_assistant_id == message.message_id,
         ).where(
-            message.message_id == latest_message_id, message.created_by == user_id,
+            message.message_id == _latest_message_id(conversation_id), message.created_by == user_id,
             message.message_role == "assistant", message.streaming_owner == "management",
             message.status.in_(("completed", "failed", "stopped")),
             admission.conversation_id == conversation_id, admission.created_by == user_id,
             admission.tenant_id == tenant_id, admission.delete_flag == "N",
             admission.status == "admitted", admission.prepared_message_index.is_(None),
         ).limit(1))
+
+
+def read_legacy_resume_index(conversation_id: int, message_id: int, user_id: str, tenant_id: str) -> int | None:
+    """Locate the last unit of the latest assistant message bound to the old run."""
+    message, unit = ConversationMessage, ConversationMessageUnit
+    with get_db_session() as session:
+        if _owned(session, conversation_id, user_id, tenant_id) is None:
+            raise AdmissionScopeError
+        current = session.scalar(select(message.message_id).where(
+            message.message_id == message_id, message.message_id == _latest_message_id(conversation_id),
+            message.created_by == user_id, message.message_role == "assistant",
+            message.streaming_owner.is_distinct_from("management"),
+        ))
+        if current is None:
+            return None
+        last = session.scalar(select(func.max(unit.unit_index)).where(
+            unit.message_id == message_id, unit.conversation_id == conversation_id, unit.delete_flag == "N",
+        ))
+        return -1 if last is None else last
 
 
 def read_workbench_skill_mounts(

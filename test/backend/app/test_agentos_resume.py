@@ -48,6 +48,18 @@ async def test_resume_replays_after_cursor_then_follows(journal):
 
 
 @pytest.mark.asyncio
+async def test_replay_count_excludes_the_terminal_frame(journal):
+    first = ("1-0", {"kind": "chunk", "data": "data: answer\n\n"})
+    terminal = ("2-0", {"kind": "terminal", "status": "completed"})
+    journal.replay.return_value = ([("0-1", {"kind": "start"})], [first, terminal], [terminal])
+
+    result = await resume.resume_run(AgentResume(conversation_id=42, run_id=RUN_ID), ACTOR)
+
+    assert result.headers["X-AgentOS-Replay-Count"] == "1"
+    assert len([part async for part in result.body_iterator]) == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("owned", "after", "status", "code"), [
     (False, None, 404, "AGENTOS_RUN_NOT_FOUND"),
     (True, f"{'b' * 32}:1", 409, "AGENTOS_CURSOR_RUN_MISMATCH"),

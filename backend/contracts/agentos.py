@@ -11,6 +11,7 @@ from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+REPLAY_COUNT_HEADER = "X-AgentOS-Replay-Count"
 PRINCIPAL_KEY = "nexent.agentos.principal"
 BODY_KEY = "nexent.agentos.body"
 RUN_ID_PATTERN = r"^[0-9a-f]{32}$"

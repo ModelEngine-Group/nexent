@@ -234,6 +234,67 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["available", "missing", "expired", "old_runtime", "missing_message", "broken"])
+async def test_cursorless_resume_adapts_retained_legacy_journal(flow, mocker, mode):
+    from contracts.agentos import AgentResume
+
+    _, _, client, _ = flow
+    fallback = StreamingResponse(iter(()))
+    client.run_conversation = AsyncMock(return_value=fallback)
+    client.find_active_run.return_value = None if mode == "missing" else REFERENCE.run_id
+    client.inspect_run = AsyncMock(return_value=SimpleNamespace(
+        **REFERENCE.model_dump(), assistant_message_id=None if mode == "missing_message" else 61,
+    ))
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value=None)
+    index = mocker.patch.object(prepared_turn.store, "read_legacy_resume_index", return_value=7)
+    closed = AsyncMock()
+
+    async def frames():
+        yield f'id: {REFERENCE.run_id}:1\ndata: {{"type":"answer","content":"earlier"}}\n\n'.encode()
+        if mode == "broken":
+            yield b'event: agentos_error\ndata: {"code":"AGENTOS_CURSOR_UNAVAILABLE"}\n\n'
+        else:
+            yield f'id: {REFERENCE.run_id}:2\nevent: agentos_terminal\ndata: {{"status":"stopped"}}\n\n'.encode()
+
+    client.resume.return_value = StreamingResponse(
+        frames(), status_code=410 if mode == "expired" else 200,
+        headers={"X-AgentOS-Replay-Count": "1", "X-AgentOS-Run-ID": REFERENCE.run_id} if mode != "old_runtime" else {},
+        background=closed,
+    )
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+    output = await runtime_client.forward_conversation_run(payload, *ACTOR)
+
+    client.find_active_run.assert_awaited_once_with(42, *ACTOR)
+    if mode in {"available", "broken"}:
+        assert output.headers["X-Stream-Status"] == "resumed"
+        assert output.headers["X-Last-Unit-Index"] == "8"
+        assert "X-AgentOS-Run-ID" not in output.headers and "X-AgentOS-Replay-Count" not in output.headers
+        chunks = [chunk async for chunk in output.body_iterator]
+        assert chunks[0].startswith(b"event: stream_status\n")
+        assert json.loads(chunks[0].split(b"data: ", 1)[1]) == {
+            "status": "resumed", "last_unit_index": 7, "replay_chunk_count": 1,
+        }
+        assert json.loads(chunks[1][6:]) == {"type": "answer", "content": "earlier"}
+        assert json.loads(chunks[-1].split(b"data: ", 1)[1]) == {
+            "status": "failed" if mode == "broken" else "stopped", "last_unit_index": 7,
+        }
+        if mode == "broken":
+            assert json.loads(chunks[2][6:])["type"] == "error"
+        client.run_conversation.assert_not_awaited()
+    else:
+        assert output is fallback
+        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+    if mode not in {"missing", "missing_message"}:
+        index.assert_called_once_with(42, 61, *ACTOR)
+        client.resume.assert_awaited_once_with(AgentResume(**REFERENCE.model_dump()), *ACTOR)
+    else:
+        index.assert_not_called()
+        client.resume.assert_not_awaited()
+    assert closed.await_count == (1 if mode in {"expired", "old_runtime"} else 0)
+
+
+@pytest.mark.asyncio
 async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(flow, mocker):
     from fastapi import HTTPException
 

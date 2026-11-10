@@ -3,6 +3,7 @@
 
 import httpx
 from pydantic import ValidationError
+from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from contracts.agentos import (
@@ -114,18 +115,27 @@ class AgentOSClient:
                 raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc
             raise
 
-        async def body_iterator():
-            try:
-                async for chunk in upstream.aiter_raw():
-                    yield chunk
-            finally:
+        closed = False
+
+        async def close_upstream():
+            nonlocal closed
+            if not closed:
+                closed = True
                 try:
                     await upstream.aclose()
                 finally:
                     await client.aclose()
 
+        async def body_iterator():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await close_upstream()
+
         return StreamingResponse(
             body_iterator(), status_code=upstream.status_code, headers=_response_headers(upstream.headers),
+            background=BackgroundTask(close_upstream),
         )
 
     async def run_prepared_evaluation(self, payload: PreparedEvaluationRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:

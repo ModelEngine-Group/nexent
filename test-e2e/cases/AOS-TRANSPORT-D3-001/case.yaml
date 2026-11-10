@@ -150,6 +150,9 @@ case:
   - order: 41
     action: Reconnect to a closed prepared conversation without a run ID, then try the same conversation from another tenant.
     expected: Management returns the legacy terminal JSON for the owner and refuses the foreign request without a Runtime call.
+  - order: 42
+    action: Reconnect to a registered legacy execution without a run ID and follow replay and live events over AgentOS.
+    expected: Management uses the registered execution and returns legacy status frames, replay count, and the final status.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -193,6 +196,7 @@ case:
   - Management emits the resolved debug scope before Runtime observer output and retains unavailable warnings locally.
   - Native metadata follows the prepared admission path, remains scoped to its conversation, and keeps the public version header.
   - A cursorless request for a terminal prepared turn is settled by Management using the owned projection.
+  - Registered legacy journals resume without invoking the compatibility execution router.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -465,4 +469,9 @@ case:
     description: Cursorless resume of the latest closed prepared turn preserves the public terminal result without Runtime.
     steps: [41]
     expected_results: [42]
+    forbidden_side_effects: [1, 2]
+  - id: AC-51
+    description: A cursorless legacy client receives a scoped AgentOS journal in the original public SSE format.
+    steps: [42]
+    expected_results: [43]
     forbidden_side_effects: [1, 2]

@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, AgentActiveRun, AgentOperation, AgentResume, AgentRunLookup,
+    BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentOperation, AgentResume, AgentRunLookup,
     AgentRunReference, AgentRunState, AgentStop, CompatibilityStop,
 )
 from infrastructure.rdb.agent_execution import active_execution, read_execution
@@ -145,8 +145,12 @@ async def resume_run(payload: AgentResume, actor):
             if not pending:
                 yield ": keep-alive\n\n"
 
+    tail_id, tail_fields = tail[0]
+    # Derive the boundary from the same Redis snapshot that supplied the initial replay.
+    replay_count = max(0, int(tail_id.split("-")[0]) - sequence - (tail_fields["kind"] == "terminal"))
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-AgentOS-Run-ID": payload.run_id,
+        REPLAY_COUNT_HEADER: str(replay_count),
     })
 
 

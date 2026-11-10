@@ -1186,12 +1186,16 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
 
 
 async def _assert_resume_over_signed_http(monkeypatch):
+    from infrastructure.rdb.agent_admission import AdmissionScopeError
+    from infrastructure.redis.agent_events import START
+    from management.api.agent import conversation_run
+    from management.services.agent import prepared_turn, runtime_client
     from runtime.agentos import resume
 
     run_id = "1" * 32
     reads = []
 
-    async def control_io(_task, function, *args, **kwargs):
+    async def control_io(_task, function, *args, lane=None, owner=None, **kwargs):
         return function(*args, **kwargs)
 
     class Journal:
@@ -1200,11 +1204,21 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
         def replay(self, after_id):
             reads.append(after_id)
+            if after_id == START:
+                return (
+                    [(START, {"kind": "start"})],
+                    [("1-0", {"kind": "chunk", "data": "data: earlier\n\n"}),
+                     ("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
+                    [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
+                )
             return (
                 [("1-0", {"kind": "chunk", "data": "data: earlier\n\n"})],
                 [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
                 [("2-0", {"kind": "chunk", "data": "data: replay\n\n"})],
             )
+
+        def run_state(self):
+            return "2-0", "running", False
 
         def wait(self, after_id):
             reads.append(after_id)
@@ -1226,12 +1240,38 @@ async def _assert_resume_over_signed_http(monkeypatch):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(resume.create_run_lifecycle_router())
 
+    def active(cid, user_id, tenant_id):
+        assert (cid, user_id, tenant_id) == (42, "user-a", "tenant-a")
+        return run_id
+
+    def inspect(rid, user_id, tenant_id, cid, **_options):
+        assert (rid, user_id, tenant_id, cid) == (run_id, "user-a", "tenant-a", 42)
+        return {"conversation_id": cid, "assistant_message_id": 61, "status": "running", "cancellation_requested": False}
+
+    def read_resume(cid, user_id, tenant_id):
+        if (cid, user_id, tenant_id) != (42, "user-a", "tenant-a"):
+            raise AdmissionScopeError
+        return None
+
+    def read_index(cid, mid, user_id, tenant_id):
+        assert (cid, mid, user_id, tenant_id) == (42, 61, "user-a", "tenant-a")
+        return 7
+
+    monkeypatch.setattr(resume, "active_execution", active)
+    monkeypatch.setattr(resume, "read_execution", inspect)
+    monkeypatch.setattr(prepared_turn, "run_blocking", control_io)
+    monkeypatch.setattr(prepared_turn.store, "read_cursorless_resume", read_resume)
+    monkeypatch.setattr(prepared_turn.store, "read_legacy_resume_index", read_index)
+    monkeypatch.setattr(conversation_run, "get_current_user_id", lambda token: ("user-a", token))
+    management = FastAPI()
+    management.include_router(conversation_run.router)
+
     with serve(runtime) as runtime_url:
         agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         request = AgentResume(conversation_id=42, run_id=run_id, after_event_id=f"{run_id}:1")
         response = await agentos.resume(request, "user-a", "tenant-a")
         output = b"".join([chunk async for chunk in response.body_iterator])
-        assert response.status_code == 200
+        assert response.status_code == 200 and response.headers["X-AgentOS-Replay-Count"] == "1"
         assert output.decode() == (
             f"id: {run_id}:2\ndata: replay\n\n"
             f"id: {run_id}:3\ndata: live\n\n"
@@ -1242,7 +1282,21 @@ async def _assert_resume_over_signed_http(monkeypatch):
         assert denied.status_code == 404
         assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([chunk async for chunk in denied.body_iterator])
 
-    assert reads == ["1-0", "2-0"]
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management), base_url="http://management") as browser:
+            body = {"query": "", "conversation_id": 42}
+            legacy = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-a"})
+            foreign = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-b"})
+        assert legacy.status_code == 200 and foreign.status_code == 403
+        assert legacy.headers["X-Stream-Status"] == "resumed" and legacy.headers["X-Last-Unit-Index"] == "8"
+        assert "X-AgentOS-Replay-Count" not in legacy.headers
+        assert legacy.text.split("\n\n") == [
+            'event: stream_status\ndata: {"status": "resumed", "last_unit_index": 7, "replay_chunk_count": 2}',
+            "data: earlier", "data: replay", "data: live",
+            'event: stream_status\ndata: {"status": "completed", "last_unit_index": 7}', "",
+        ]
+
+    assert reads == ["1-0", "2-0", START, "2-0"]
 
 
 

@@ -7,8 +7,8 @@ from contextlib import aclosing
 
 from starlette.responses import StreamingResponse
 
-from contracts.agentos import EVENT_ID_PATTERN, AgentResume
-from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE
+from contracts.agentos import EVENT_ID_PATTERN, REPLAY_COUNT_HEADER, AgentResume
+from contracts.constants.constants import LANGUAGE, SAFE_AGENT_STREAM_ERROR_MESSAGE, STREAM_STATUS_EVENT
 from management.services.agent.artifacts import enrich_file_uploads_with_presigned_urls, is_run_output_object
 from nexent.core.concurrency import run_blocking
 
@@ -156,6 +156,45 @@ def _public_sse(event: dict) -> bytes:
     return b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n"
 
 
+def present_legacy_journal(response: StreamingResponse, run_id: str, last_unit: int, replay_count: int) -> StreamingResponse:
+    """Adapt a scoped AgentOS replay to the cursorless client's public SSE format."""
+    cursor_pattern = re.compile(rb"id: " + run_id.encode("ascii") + rb":[1-9][0-9]*")
+
+    def status_event(status, **fields):
+        return STREAM_STATUS_EVENT.encode() + _public_sse({"status": status, "last_unit_index": last_unit, **fields})
+
+    async def events():
+        opening = True
+        async with aclosing(iter_sse_frames(response)) as frames:
+            async for frame in frames:
+                if opening:
+                    yield status_event("resumed", replay_chunk_count=replay_count)
+                    opening = False
+                if frame.startswith(b":"):
+                    yield frame + b"\n\n"
+                    continue
+                cursor, _, body = frame.partition(b"\n")
+                if not cursor_pattern.fullmatch(cursor) or not body:
+                    break
+                if body.startswith(b"event: agentos_terminal\n"):
+                    try:
+                        status = json.loads(body.split(b"\n", 1)[1].removeprefix(b"data: ")).get("status")
+                    except (ValueError, AttributeError):
+                        break
+                    if status in ("completed", "failed", "stopped"):
+                        yield status_event(status)
+                        return
+                    break
+                yield body + b"\n\n"
+        yield _PUBLIC_ERROR + b"\n\n"
+        yield status_event("failed")
+
+    internal = {"content-length", "x-agentos-run-id", REPLAY_COUNT_HEADER.lower()}
+    headers = {name: value for name, value in response.headers.items() if name.lower() not in internal}
+    headers.update({"X-Stream-Status": "resumed", "X-Last-Unit-Index": str(last_unit + 1)})
+    return StreamingResponse(events(), media_type="text/event-stream", headers=headers, background=response.background)
+
+
 def present_public_resume(
     response: StreamingResponse, request: AgentResume, user_id: str, *,
     on_terminal=None, created=False, include_journal_controls=True, opening_events=(),
@@ -204,7 +243,7 @@ def present_public_resume(
                 error_presented |= is_error
                 yield (cursor + b"\n" if include_journal_controls else b"") + data + b"\n\n"
 
-    excluded_headers = {"content-length"}
+    excluded_headers = {"content-length", REPLAY_COUNT_HEADER.lower()}
     if not include_journal_controls:
         excluded_headers.add("x-agentos-run-id")
     headers = {name: value for name, value in response.headers.items() if name not in excluded_headers}
