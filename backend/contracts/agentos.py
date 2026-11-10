@@ -284,6 +284,15 @@ class AnalysisToolBinding(RunSpecModel):
     usage: str | None = None
 
 
+class StoredLocalToolBinding(RunSpecModel):
+    instance_id: PositiveInt
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    description_zh: str | None = None
+    inputs: str | None = None
+    reranker: RevisionedModelBinding | None = None
+    default_reranker: RevisionedModelBinding | None = None
+
+
 class KnowledgeSearchBinding(RunSpecModel):
     description: FileToolDescription
     index_names: list[str]

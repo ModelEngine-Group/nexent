@@ -7,18 +7,19 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from contracts.agentos import EvaluationAnalysisTool
+from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.constants.environment import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
 )
-from contracts.agentos import EvaluationAnalysisTool
-from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
 from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
-from management.db.agent.repository import search_agent_info_by_agent_id
+from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES
 from infrastructure.object_storage.client import minio_client
+from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.knowledge_base.repository import (
     get_knowledge_name_map_by_index_names,
 )
@@ -662,11 +663,7 @@ async def create_tool_config_list(
                     f"Please configure an embedding model for this knowledge base."
                 )
             tool_config.metadata["embedding_model"] = embedding_model
-        elif tool_config.class_name in [
-            "DifySearchTool",
-            "DataMateSearchTool",
-            "RAGFlowSearchTool",
-        ]:
+        elif tool_config.class_name in LOCAL_RERANK_TOOL_CLASSES and not portable_evaluation:
             rerank = tool_config.params.get("rerank", False)
             rerank_model_name = tool_config.params.get("rerank_model_name", "")
             rerank_model = None

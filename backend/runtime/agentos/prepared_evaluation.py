@@ -44,6 +44,7 @@ from runtime.agentos.evaluation import collect_observer_output
 from runtime.agentos.prepared_analysis import materialize_analysis_tools
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_knowledge import materialize_knowledge_search
+from runtime.agentos.prepared_local_tool import materialize_local_tools
 from runtime.agentos.prepared_mcp import PreparedMCP
 from runtime.agentos.prepared_skills import materialize_skill_tools, skill_stage_path
 from runtime.executions import AgentRunAlreadyActiveError, agent_run_manager
@@ -162,6 +163,7 @@ def _materialize_agent(
     used_aliases.add(alias)
 
     local_tools = materialize_skill_tools(resource, actor, workspace_path)
+    local_tools.update(materialize_local_tools(resource, actor, language))
     local_tools.update(_materialize_parallel_executor(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
     ))

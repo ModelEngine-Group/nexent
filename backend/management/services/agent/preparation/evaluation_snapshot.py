@@ -17,13 +17,16 @@ from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import create_model_config_from_record, model_record_revision
 from infrastructure.agent_tool_config import build_parallel_executor_tool_config
+from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES
 from infrastructure.mcp_execution import build_mcp_tool, mcp_binding_identity, mcp_execution_revision, select_mcp_server
+from infrastructure.rdb.local_tool_records import read_bound_local_tools
 from infrastructure.rdb.mcp_execution_records import (
     read_bound_mcp_tools, read_mcp_execution_servers, read_skill_derived_mcp_tools,
 )
 from infrastructure.rdb.model_records import get_model_records
 from infrastructure.rdb.skill_execution_records import read_bound_skills
 from infrastructure.skill_execution import capture_skill_files, skill_execution_revision, validate_skill_context
+from management.services.agent.preparation.local_tool import export_local_tool
 from nexent.core.agents.prompt.composer import EXECUTOR_CONTEXT_IDS
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -167,7 +170,7 @@ def _export_skill_bindings(agent, tenant_id, context_items):
     ]
 
 
-def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
+def _export_resource(agent, aliases, tenant_id, language, read_servers, tool_servers):
     if any((
         agent.pre_run_tool_events,
         agent.sandbox_policy is not None, agent.enable_planning,
@@ -192,6 +195,8 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
             if set(row["skill_instance_ids"]) <= authorized
         )
     mcp_servers = read_servers(tenant_id) if mcp_names else []
+    local_names = [tool.name for tool in agent.tools if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES]
+    local_candidates = read_bound_local_tools(agent.agent_id, agent.version_no, tenant_id, local_names) if local_names else []
     for tool in agent.tools:
         if tool.source == "mcp":
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
@@ -200,6 +205,8 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
             binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name in set(EvaluationAnalysisTool):
             binding = _export_analysis_binding(tool)
+        elif tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES:
+            binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in set(EvaluationSkillTool):
@@ -225,7 +232,7 @@ def _export_resource(agent, aliases, tenant_id, read_servers, tool_servers):
         max_steps=agent.max_steps, tools=tools, skill_refs=skill_refs, model_alias=agent.model_name,
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
         evaluation_options=EvaluationAgentOptions(**profile),
-        subagents=[_export_resource(child, aliases, tenant_id, read_servers, tool_servers) for child in agent.worker_agents],
+        subagents=[_export_resource(child, aliases, tenant_id, language, read_servers, tool_servers) for child in agent.worker_agents],
         external_a2a=[
             ExternalA2AExecutionBinding(
                 agent_id=int(external.agent_id), invocation_name=external.invocation_name,
@@ -262,7 +269,7 @@ def export_snapshot(agent, models, query, history, *, tenant_id, conversation_id
 
     try:
         aliases = {}
-        resource = _export_resource(agent, aliases, tenant_id, cache(read_mcp_execution_servers), {})
+        resource = _export_resource(agent, aliases, tenant_id, language, cache(read_mcp_execution_servers), {})
         bindings = [_export_model(alias, models, tenant_id) for alias in aliases]
         identity = resolve_tool_user_context(agent, user_id, tenant_id) if user_id is not None else None
         tool_caller = ToolCallerContext(**{

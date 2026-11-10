@@ -190,12 +190,111 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         ("background", 43, principal),
     ]
     await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path)
+    with monkeypatch.context() as tool_patches:
+        await _assert_stored_local_tool_over_signed_http(tool_patches, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
     await _assert_public_conversation_over_signed_http(monkeypatch)
     with monkeypatch.context() as lifecycle_patches:
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
+
+
+async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
+    from fastapi import Request
+
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import evaluation_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import prepared_evaluation, prepared_local_tool
+    from runtime.executions import LocalExecutionRegistry
+
+    model_record = {
+        "model_id": 18, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
+        "model_name": "fixture-model", "model_repo": None, "display_name": "eval_llm",
+        "api_key": "local-llm", "base_url": "https://provider.invalid/v1", "update_time": "revision-1",
+    }
+    provider = FastAPI()
+    calls = []
+
+    @provider.post("/v1/datasets/fixture-private-dataset/retrieve")
+    async def retrieve(request: Request):
+        payload = await request.json()
+        calls.append((request.headers.get("authorization"), payload["query"], payload["retrieval_model"]["top_k"]))
+        return {"records": [{"score": 0.8, "segment": {"content": "scoped Dify result"}}]}
+
+    async def run(info, thread_manager):
+        tool_config, = info.agent_config.tools
+        assert tool_config.name == "dify_search"
+        tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), tool_config)
+        answer = await asyncio.to_thread(tool.forward, "fixture query")
+        assert "scoped Dify result" in answer
+        yield json.dumps({"type": "thought", "content": "lookup"})
+        yield json.dumps({"type": "final_answer", "content": "scoped Dify result"})
+
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_evaluation_router())
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "local-tool-runs"))
+    monkeypatch.setattr(prepared_evaluation, "agent_run_manager", LocalExecutionRegistry())
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda model_id, tenant_id: model_record)
+    monkeypatch.setattr(prepared_evaluation, "agent_run", run)
+    monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda _filters, _tenant: [model_record])
+
+    with serve(provider) as provider_url, serve(runtime) as runtime_url:
+        row = {
+            "tool_instance_id": 23, "tool_id": 5, "name": "dify_search", "class_name": "DifySearchTool",
+            "source": "local", "description": "Provider search", "usage": None, "inputs": None,
+            "output_type": "string", "instance_params": {"top_k": 2},
+            "params": [{"name": name, "default": value} for name, value in {
+                "server_url": f"{provider_url}/v1", "api_key": "synthetic-runtime-dify-key",
+                "dataset_ids": '["fixture-private-dataset"]', "top_k": 5,
+                "search_method": "semantic_search", "rerank": False, "rerank_model_name": "",
+            }.items()],
+        }
+        enabled = [row]
+
+        def read_tools(agent_id, version_no, tenant_id, names):
+            assert (agent_id, version_no, names) == (8, 4, ["dify_search"])
+            return enabled if tenant_id == "tenant-a" else []
+
+        for module in (evaluation_snapshot, prepared_local_tool):
+            monkeypatch.setattr(module, "read_bound_local_tools", read_tools)
+        model = create_model_config_from_record(model_record)
+        agent = AgentConfig(
+            agent_id=8, version_no=4, name="eval", description="Scoped tool",
+            prompt_templates={"system_prompt": "Evaluate the search"}, model_name=model.cite_name,
+            tools=[build_local_tool(row, "en", None, None)],
+        )
+        prepared = evaluation_snapshot.export_snapshot(
+            agent, [model], "question", None, tenant_id="tenant-a", conversation_id=-60, language="en",
+        )
+        assert isinstance(prepared, PreparedEvaluationRun)
+        for secret in (provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset"):
+            assert secret not in prepared.model_dump_json()
+
+        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        result = await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert result.events == [
+            {"type": "thought", "content": "lookup"}, {"type": "final_answer", "content": "scoped Dify result"},
+        ]
+        row["instance_params"]["top_k"] = 4
+        with pytest.raises(RuntimeUpstreamError) as changed:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert changed.value.status_code == 409
+        assert "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH" in changed.value.content.decode()
+        with pytest.raises(RuntimeUpstreamError) as other_tenant:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-b")
+        assert other_tenant.value.status_code == 404
+        enabled.clear()
+        with pytest.raises(RuntimeUpstreamError) as disabled:
+            await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
+        assert disabled.value.status_code == 404
+        assert "AGENTOS_LOCAL_TOOL_NOT_FOUND" in disabled.value.content.decode()
+
+    assert calls == [("Bearer synthetic-runtime-dify-key", "fixture query", 2)]
 
 
 async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):

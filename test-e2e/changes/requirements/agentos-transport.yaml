@@ -47,6 +47,7 @@ change:
     - The production evaluation compiler exports the required parallel executor for the root and each child; Runtime restores it without changing tool order.
     - Prepared knowledge search preserves authorized index and document scope, pins model revisions, and refuses revoked permission before accessing the vector store.
     - Prepared analysis passes model references and rechecks tenant scope, model revisions and S3 object access in Runtime.
+    - Prepared local tools reconstruct the configured tenant and Agent version instance in Runtime without forwarding credentials.
     - Runtime compatibility ingress requires a signed Gateway session, and compatibility inspect and stop use the Runtime registry with user and tenant ownership checks.
     reason: Extend existing runtime proxy tests and verify authentication and neutral
       protocol boundaries.
@@ -61,6 +62,7 @@ change:
     - test/backend/app/test_agentos_evaluation_compiler.py
     - test/backend/app/test_agentos_prepared_knowledge.py
     - test/backend/app/test_agentos_prepared_analysis.py
+    - test/backend/app/test_agentos_prepared_local_tool.py
     - test/sdk/core/tools/test_parallel_executor.py
     - test/backend/agents/test_sandbox_config.py
     - test/sdk/core/agents/test_agent_prompt_composer.py
