@@ -34,8 +34,8 @@ case:
     expected: Authentication failures are 401; the unsupported path is 404; no rejected
       call enters the execution sink.
   - order: 3
-    action: Run a synthetic evaluation case and attempt to submit a persistent conversation ID.
-    expected: Runtime returns the answer and ordered observer events for the synthetic case and rejects the positive ID.
+    action: Run a prepared synthetic evaluation and probe the retired compatibility route.
+    expected: Prepared evaluation preserves events and rejects a positive ID. The retired route returns 401 without signing, 422 for invalid input and 410 for a valid signed request.
   - order: 4
     action: Submit signed background and inspect calls and disconnect a background client.
     expected: Runtime receives the signed actor, returns the assistant message and status, and cancels execution after disconnect.
@@ -102,7 +102,7 @@ case:
     - 1
     - 2
   - id: AC-03
-    description: Signed evaluation case transport preserves events and rejects a real conversation key.
+    description: Signed prepared evaluation preserves events and rejects real conversation keys. The retired route never runs an evaluation.
     steps: [3]
     expected_results: [3]
     forbidden_side_effects: [2]

@@ -616,14 +616,10 @@ def service_module(monkeypatch):
         agent_evaluation_service = importlib.import_module("management.services.evaluation.runs")
 
         async def forward_case(payload, user_id, tenant_id):
-            from infrastructure.agentos_identity import ServicePrincipal
-            from runtime.agentos.evaluation import _collect_case_events
+            from runtime.agentos.evaluation import collect_observer_output
 
-            return await _collect_case_events(
-                payload, ServicePrincipal(user_id, tenant_id),
-                agent_evaluation_service.prepare_agent_run, agent_evaluation_service.agent_run,
-                agent_evaluation_service.agent_run_manager, MagicMock(),
-            )
+            info, _ = await agent_evaluation_service.prepare_agent_run()
+            return await collect_observer_output(info, agent_evaluation_service.agent_run, MagicMock())
 
         runtime_client = types.ModuleType("management.services.agent.runtime_client")
         runtime_client.forward_evaluation_case = forward_case
@@ -636,7 +632,6 @@ def service_module(monkeypatch):
         _services_pkg.agent_evaluation_service = agent_evaluation_service
         bind_import_attribute(agent_evaluation_service, 'invoke_chat_prompt_in_worker', MagicMock())
         bind_import_attribute(agent_evaluation_service, 'openpyxl', openpyxl_mock)
-        bind_import_attribute(agent_evaluation_service, 'agent_run_manager', MagicMock())
         # ``management.services.evaluation.runs`` may or may not do
         # ``from openpyxl import Workbook`` at module load depending on the
         # current code shape; either way we install a patch under the module
@@ -1024,41 +1019,21 @@ def test_dispatch_agent_evaluation_run_uses_management_dispatcher(service_module
     )
 
 
-def test_run_agent_to_final_answer_releases_registered_run_on_error(service_module):
+def test_run_agent_to_final_answer_propagates_agentos_error(service_module, monkeypatch):
     import asyncio
 
-    bind_import_attribute(service_module, 'AgentRequest', MagicMock())
-    run_info = MagicMock(name="run_info")
-    bind_import_attribute(service_module, 'prepare_agent_run', AsyncMock(return_value=(run_info, MagicMock(name='memory_ctx'))))
-
-    async def _failing_agent_run(_run_info, **_kwargs):
-        raise RuntimeError("agent failed")
-        yield  # pragma: no cover
-
-    bind_import_attribute(service_module, 'agent_run', _failing_agent_run)
-    unregister = MagicMock()
-    bind_import_attribute(service_module, 'agent_run_manager', MagicMock())
-    service_module.agent_run_manager.unregister_agent_run = unregister
-
-    async def invoke_failing_run():
-        return await service_module._run_agent_to_final_answer(
-            agent_id=1,
-            tenant_id="t1",
-            user_id="u1",
-            query="q",
-            version_no=1,
-            conversation_id=-123,
-        )
+    runtime_client = sys.modules["management.services.agent.runtime_client"]
+    forward = AsyncMock(side_effect=RuntimeError("agent failed"))
+    monkeypatch.setattr(runtime_client, "forward_evaluation_case", forward)
 
     with pytest.raises(RuntimeError, match="agent failed"):
-        asyncio.run(invoke_failing_run())
+        asyncio.run(service_module._run_agent_to_final_answer(
+            agent_id=1, tenant_id="t1", user_id="u1", query="q", version_no=1, conversation_id=-123,
+        ))
 
-    unregister.assert_called_once_with(
-        -123,
-        "u1",
-        status="failed",
-        agent_run_info=run_info,
-    )
+    payload, user_id, tenant_id = forward.await_args.args
+    assert (payload.agent_id, payload.version_no, payload.query, payload.conversation_id) == (1, 1, "q", -123)
+    assert (user_id, tenant_id) == ("u1", "t1")
 
 
 def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module):

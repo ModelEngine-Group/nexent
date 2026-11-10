@@ -10,6 +10,7 @@ from contracts.agentos import (
     EvaluationAgentRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import RUNTIME_SERVICE_URL
+from contracts.errors.exceptions import ValidationError
 from management.clients.agentos import AgentOSClient
 
 
@@ -55,10 +56,9 @@ async def forward_evaluation_case(payload: EvaluationAgentRun, user_id: str, ten
     from management.services.agent.preparation.evaluation_snapshot import prepare_evaluation_snapshot
 
     prepared = await prepare_evaluation_snapshot(payload, user_id, tenant_id)
-    client = _agentos_client()
-    if prepared is not None:
-        return await client.run_prepared_evaluation(prepared, user_id, tenant_id)
-    return await client.run_evaluation_case(payload, user_id, tenant_id)
+    if prepared is None:
+        raise ValidationError("Evaluation resources could not be prepared for AgentOS")
+    return await _agentos_client().run_prepared_evaluation(prepared, user_id, tenant_id)
 
 
 async def forward_active_run(conversation_id: int, user_id: str, tenant_id: str) -> str | None:

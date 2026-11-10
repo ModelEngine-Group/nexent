@@ -27,6 +27,7 @@ from infrastructure import agentos_identity
 from infrastructure.agentos_identity import ServicePrincipal, sign_call
 from management.clients.agentos import AgentOSClient
 from runtime.agentos.compatibility import create_background_router, create_compatibility_router
+from runtime.agentos import prepared_evaluation
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.agentos.middleware import AgentOSMiddleware
 
@@ -105,10 +106,12 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_compatibility_router(run, stop))
-    runtime.include_router(create_evaluation_router(evaluate))
+    runtime.include_router(create_evaluation_router())
     runtime.include_router(create_background_router(background, inspect))
 
-    with serve(runtime) as runtime_url:
+    with monkeypatch.context() as evaluation_stub, serve(runtime) as runtime_url:
+        evaluation_stub.setattr(prepared_evaluation, "execute_prepared_evaluation", evaluate)
+
         def client_factory(**kwargs):
             return httpx.AsyncClient(trust_env=False, **kwargs)
 
@@ -153,18 +156,42 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
                 assert result.status_code == status
                 assert "conversation_id" not in result.text
 
-            case = EvaluationAgentRun(agent_id=7, version_no=3, query="question", conversation_id=-12)
-            result = await agentos.run_evaluation_case(case, principal.user_id, principal.tenant_id)
+            case = PreparedEvaluationRun.model_validate({
+                "mode": "nexent",
+                "resource": {
+                    "agent_id": 7, "version_no": 3, "name": "agent",
+                    "description": "agent", "prompt_templates": {},
+                },
+                "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "revision-1"}},
+                "input": {"query": "question"},
+                "conversation_id": -12,
+            })
+            result = await agentos.run_prepared_evaluation(case, principal.user_id, principal.tenant_id)
             assert result.answer == "answer"
             assert result.events == case_events
             invalid = json.dumps(case.model_dump() | {"conversation_id": 42}).encode()
-            signed = sign_call(CompatibilityOperation.EVALUATION_CASE, invalid, principal)
+            signed = sign_call(AgentOperation.EVALUATION_CASE, invalid, principal)
             response = await client.post(
-                f"{runtime_url}/api{CompatibilityOperation.EVALUATION_CASE.value}",
+                f"{runtime_url}/api{AgentOperation.EVALUATION_CASE.value}",
                 content=invalid,
                 headers={"Authorization": f"Bearer {signed}"},
             )
             assert response.status_code == 422
+
+            retired = CompatibilityOperation.EVALUATION_CASE
+            old_case = EvaluationAgentRun(agent_id=7, version_no=3, query="question", conversation_id=-12)
+            old_body = old_case.model_dump_json().encode()
+            invalid_old_body = json.dumps(old_case.model_dump() | {"conversation_id": 42}).encode()
+            retired_url = f"{runtime_url}/api{retired.value}"
+            for content, credential, status, code in (
+                (old_body, None, 401, "AGENTOS_UNAUTHORIZED"),
+                (invalid_old_body, sign_call(retired, invalid_old_body, principal), 422, "AGENTOS_INVALID_REQUEST"),
+                (old_body, sign_call(retired, old_body, principal), 410, "AGENTOS_EVALUATION_PREPARED_REQUIRED"),
+            ):
+                headers = {"Authorization": f"Bearer {credential}"} if credential else {}
+                response = await client.post(retired_url, content=content, headers=headers)
+                assert response.status_code == status
+                assert response.json() == {"code": code}
 
             background_result = await agentos.run_background({"conversation_id": 42}, principal.user_id, principal.tenant_id)
             assert background_result.model_dump() == {"conversation_id": 42, "assistant_message_id": 17, "chunks": 3}

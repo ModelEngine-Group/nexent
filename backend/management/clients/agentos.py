@@ -22,7 +22,6 @@ from contracts.agentos import (
     CompatibilityRun,
     CompatibilityStop,
     EvaluationAgentResult,
-    EvaluationAgentRun,
     ModelInvocation,
     ModelMetadata,
     ModelOperation,
@@ -105,12 +104,6 @@ class AgentOSClient:
         return StreamingResponse(
             body_iterator(), status_code=upstream.status_code, headers=_response_headers(upstream.headers),
         )
-
-    async def run_evaluation_case(self, payload: EvaluationAgentRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
-        result = await self._post_json(
-            CompatibilityOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
-        )
-        return self._validate_result(EvaluationAgentResult, result)
 
     async def run_prepared_evaluation(self, payload: PreparedEvaluationRun, user_id: str, tenant_id: str) -> EvaluationAgentResult:
         result = await self._post_json(

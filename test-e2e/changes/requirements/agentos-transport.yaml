@@ -30,6 +30,7 @@ change:
     - Automation schedules run and inspect through AgentOS, and Runtime cancels an abandoned background request.
     - Prepared evaluation resolves an exact tenant model revision and constructs SDK objects inside Runtime.
     - Management sends a supported evaluation snapshot once and Runtime rebinds builtin file access to the signed actor.
+    - Evaluations require a prepared snapshot. The signed legacy evaluation route rejects execution with HTTP 410.
     - Signed resume authorizes the conversation and replays a strict run-scoped cursor.
     - Ordinary conversation admission uses the signed AgentOS compatibility transport and preserves request and SSE context.
     - Ordinary assistant projections replay by run ID and payload digest after committing their receipt in the same transaction.
