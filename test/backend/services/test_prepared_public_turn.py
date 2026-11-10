@@ -188,7 +188,9 @@ async def test_cursorless_resume_uses_the_pending_prepared_turn(flow, mocker):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("state", ["completed", "failed", "stopped", "awaiting", "unknown", "foreign", "disabled"])
+@pytest.mark.parametrize("state", [
+    "completed", "failed", "stopped", "awaiting", "unknown", "foreign", "disabled", "no_assistant_message",
+])
 async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker, state):
     from fastapi import HTTPException
 
@@ -221,6 +223,9 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
             assert result is client.run_conversation.return_value
         elif state == "awaiting":
             assert json.loads(result.body) == {"status": "streaming", "message": "Waiting for Runtime admission"}
+        elif state == "no_assistant_message":
+            assert json.loads(result.body) == {"status": None, "message": "Stream already None: no_assistant_message"}
+            client.find_active_run.assert_not_awaited()
         else:
             assert json.loads(result.body) == {"status": state, "message": f"Stream already {state}: backend_{state}"}
     lookup.assert_called_once_with(42, *ACTOR)
@@ -230,6 +235,38 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
         client.run_conversation.assert_not_awaited()
     assert operations == []
     client.start_prepared_run.assert_not_awaited()
+    client.resume.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "failed", "stopped", "running", "mismatch", "missing"])
+async def test_cursorless_resume_confirms_legacy_receipt_with_agentos(flow, mocker, status):
+    _, _, client, _ = flow
+    receipt = prepared_turn.store.LegacyResumeReceipt(
+        REFERENCE.run_id, 61, status if status in {"completed", "failed", "stopped"} else "completed",
+    )
+    mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value=receipt)
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
+    client.run_conversation = AsyncMock()
+    client.inspect_run = AsyncMock(return_value=SimpleNamespace(
+        **REFERENCE.model_dump(), assistant_message_id=62 if status == "mismatch" else 61,
+        status=receipt.status if status == "mismatch" else status,
+    ))
+    if status == "missing":
+        client.inspect_run.side_effect = RuntimeUpstreamError(status_code=404, content=b"", headers={})
+    payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
+
+    response = await runtime_client.forward_conversation_run(payload, *ACTOR)
+
+    client.inspect_run.assert_awaited_once_with(AgentRunLookup(**REFERENCE.model_dump()), *ACTOR)
+    if status in {"completed", "failed", "stopped"}:
+        assert json.loads(response.body) == {"status": status, "message": f"Stream already {status}: backend_{status}"}
+        client.find_active_run.assert_not_awaited()
+        client.run_conversation.assert_not_awaited()
+    else:
+        assert response is client.run_conversation.return_value
+        client.find_active_run.assert_awaited_once_with(42, *ACTOR)
+        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
     client.resume.assert_not_awaited()
 
 

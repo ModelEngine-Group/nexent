@@ -156,6 +156,9 @@ case:
   - order: 43
     action: Send unsigned, tampered, invalid signed, and valid signed requests to both retired conversation-scoped background routes.
     expected: Runtime authenticates and validates the requests, returns 410 for valid signed input, and does not dispatch any work.
+  - order: 44
+    action: Reconnect without a cursor after the legacy projection is committed and the journal is unavailable, then repeat with a foreign tenant and an owned conversation without an assistant.
+    expected: Management confirms the receipt through the signed run inspection operation. Foreign scope is refused before inspection, and the empty conversation does not contact Runtime.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -201,6 +204,7 @@ case:
   - A cursorless request for a terminal prepared turn is settled by Management using the owned projection.
   - Registered legacy journals resume without invoking the compatibility execution router.
   - Retired background start and inspection require a run ID and cannot enter an execution handler.
+  - Management preserves the terminal and empty conversation JSON without using the compatibility execution route.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -483,4 +487,9 @@ case:
     description: Retired conversation-scoped background start and inspection reject unauthenticated or invalid requests and never dispatch an execution.
     steps: [43]
     expected_results: [44]
+    forbidden_side_effects: [1, 2]
+  - id: AC-53
+    description: Cursorless recovery confirms a legacy terminal receipt using the exact signed run ID and answers an empty conversation locally.
+    steps: [44]
+    expected_results: [45]
     forbidden_side_effects: [1, 2]

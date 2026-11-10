@@ -17,6 +17,7 @@ from infrastructure.rdb.client import get_db_session
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.models import ConversationMessageUnit
+from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 from management.db.conversation.repository import (
     _assert_workbench_topology, _enforce_conversation_turn_limit, _lock_conversation_limit_scope,
     _resolve_clarification_response,
@@ -37,6 +38,17 @@ class PreparedTurn:
     assistant_message_id: int | None
     staged_at: datetime
     memory_agent_id: int | None = None
+
+
+@dataclass(frozen=True)
+class LegacyResumeReceipt:
+    run_id: str
+    assistant_message_id: int
+    status: str
+
+
+NO_ASSISTANT_MESSAGE = "no_assistant_message"
+_TERMINAL_RESUME_STATUSES = ("completed", "failed", "stopped")
 
 
 def _owned(session, conversation_id, user_id, tenant_id, *, lock=False):
@@ -111,8 +123,10 @@ def _latest_message_id(conversation_id):
     ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1).correlate(None).scalar_subquery()
 
 
-def read_cursorless_resume(conversation_id: int, user_id: str, tenant_id: str) -> PreparedTurn | str | None:
-    """Return the pending run or the terminal status of the latest closed prepared turn."""
+def read_cursorless_resume(
+    conversation_id: int, user_id: str, tenant_id: str,
+) -> PreparedTurn | LegacyResumeReceipt | str | None:
+    """Resolve a pending turn, terminal projection, or absence of an assistant."""
     admission, message = ConversationRunAdmission, ConversationMessage
     with get_db_session() as session:
         conversation = _owned(session, conversation_id, user_id, tenant_id, lock=True)
@@ -125,16 +139,34 @@ def read_cursorless_resume(conversation_id: int, user_id: str, tenant_id: str) -
             return _view(row)
 
         # Inspect the latest message before filtering so an earlier assistant cannot mask a newer turn.
-        return session.scalar(select(message.status).join(
+        terminal = session.scalar(select(message.status).join(
             admission, admission.prepared_assistant_id == message.message_id,
         ).where(
             message.message_id == _latest_message_id(conversation_id), message.created_by == user_id,
             message.message_role == "assistant", message.streaming_owner == "management",
-            message.status.in_(("completed", "failed", "stopped")),
+            message.status.in_(_TERMINAL_RESUME_STATUSES),
             admission.conversation_id == conversation_id, admission.created_by == user_id,
             admission.tenant_id == tenant_id, admission.delete_flag == "N",
             admission.status == "admitted", admission.prepared_message_index.is_(None),
         ).limit(1))
+        if terminal is not None:
+            return terminal
+
+        receipt = ConversationProjectionReceipt
+        legacy = session.execute(select(receipt.run_id, message.message_id, message.status).join(
+            message, message.message_id == receipt.message_id,
+        ).where(
+            message.message_id == _latest_message_id(conversation_id), message.created_by == user_id,
+            message.message_role == "assistant", message.streaming_owner.is_distinct_from("management"),
+            message.status.in_(_TERMINAL_RESUME_STATUSES), receipt.created_by == user_id,
+            receipt.tenant_id == tenant_id, receipt.delete_flag == "N",
+        ).limit(2)).all()
+        if len(legacy) == 1:
+            return LegacyResumeReceipt(*legacy[0])
+        assistant = session.scalar(select(message.message_id).where(
+            message.conversation_id == conversation_id, message.delete_flag == "N", message.message_role == "assistant",
+        ).limit(1))
+        return NO_ASSISTANT_MESSAGE if assistant is None else None
 
 
 def read_legacy_resume_index(conversation_id: int, message_id: int, user_id: str, tenant_id: str) -> int | None:

@@ -1213,6 +1213,10 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
     run_id = "1" * 32
     reads = []
+    inspections = []
+    active_calls = []
+    resolution = None
+    execution_status = "running"
 
     async def control_io(_task, function, *args, lane=None, owner=None, **kwargs):
         return function(*args, **kwargs)
@@ -1261,16 +1265,21 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
     def active(cid, user_id, tenant_id):
         assert (cid, user_id, tenant_id) == (42, "user-a", "tenant-a")
+        active_calls.append(cid)
         return run_id
 
     def inspect(rid, user_id, tenant_id, cid, **_options):
         assert (rid, user_id, tenant_id, cid) == (run_id, "user-a", "tenant-a", 42)
-        return {"conversation_id": cid, "assistant_message_id": 61, "status": "running", "cancellation_requested": False}
+        inspections.append(rid)
+        return {
+            "conversation_id": cid, "assistant_message_id": 61, "status": execution_status,
+            "cancellation_requested": False,
+        }
 
     def read_resume(cid, user_id, tenant_id):
         if (cid, user_id, tenant_id) != (42, "user-a", "tenant-a"):
             raise AdmissionScopeError
-        return None
+        return resolution
 
     def read_index(cid, mid, user_id, tenant_id):
         assert (cid, mid, user_id, tenant_id) == (42, 61, "user-a", "tenant-a")
@@ -1305,8 +1314,20 @@ async def _assert_resume_over_signed_http(monkeypatch):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=management), base_url="http://management") as browser:
             body = {"query": "", "conversation_id": 42}
             legacy = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-a"})
+            execution_status = "completed"
+            resolution = prepared_turn.store.LegacyResumeReceipt(run_id, 61, execution_status)
+            monkeypatch.setattr(resume, "runtime_state_service", SimpleNamespace(enabled=False))
+            closed = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-a"})
             foreign = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-b"})
+            resolution = prepared_turn.store.NO_ASSISTANT_MESSAGE
+            empty = await browser.post("/agent/run?resume=true", json=body, headers={"Authorization": "tenant-a"})
         assert legacy.status_code == 200 and foreign.status_code == 403
+        assert closed.status_code == 200 and closed.json() == {
+            "status": "completed", "message": "Stream already completed: backend_completed",
+        }
+        assert empty.status_code == 200 and empty.json() == {
+            "status": None, "message": "Stream already None: no_assistant_message",
+        }
         assert legacy.headers["X-Stream-Status"] == "resumed" and legacy.headers["X-Last-Unit-Index"] == "8"
         assert "X-AgentOS-Replay-Count" not in legacy.headers
         assert legacy.text.split("\n\n") == [
@@ -1316,6 +1337,7 @@ async def _assert_resume_over_signed_http(monkeypatch):
         ]
 
     assert reads == ["1-0", "2-0", START, "2-0"]
+    assert inspections == [run_id, run_id] and active_calls == [42]
 
 
 

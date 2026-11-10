@@ -327,6 +327,14 @@ async def resume_cursorless(conversation_id, user_id, tenant_id, client):
         raise HTTPException(status_code=403, detail="Conversation is not accessible to the current identity") from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    if current == store.NO_ASSISTANT_MESSAGE:
+        return JSONResponse({"status": None, "message": "Stream already None: no_assistant_message"})
+    if isinstance(current, store.LegacyResumeReceipt):
+        state = await _inspect_legacy_run(conversation_id, current.run_id, user_id, tenant_id, client)
+        current = current.status if (
+            state is not None and state.assistant_message_id == current.assistant_message_id
+            and state.status == current.status
+        ) else None
     if isinstance(current, str):
         return JSONResponse({"status": current, "message": f"Stream already {current}: backend_{current}"})
     if current is not None:
@@ -334,11 +342,8 @@ async def resume_cursorless(conversation_id, user_id, tenant_id, client):
     return await _resume_tracked_legacy(conversation_id, user_id, tenant_id, client)
 
 
-async def _resume_tracked_legacy(conversation_id, user_id, tenant_id, client):
+async def _inspect_legacy_run(conversation_id, run_id, user_id, tenant_id, client):
     try:
-        run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
-        if run_id is None:
-            return None
         state = await client.inspect_run(AgentRunLookup(conversation_id=conversation_id, run_id=run_id), user_id, tenant_id)
     except RuntimeUpstreamError as exc:
         if exc.status_code in {404, 503}:
@@ -346,7 +351,20 @@ async def _resume_tracked_legacy(conversation_id, user_id, tenant_id, client):
         raise
     if (state.conversation_id, state.run_id) != (conversation_id, run_id):
         raise RuntimeServiceUnavailableError("AgentOS returned a different run")
-    if state.assistant_message_id is None:
+    return state
+
+
+async def _resume_tracked_legacy(conversation_id, user_id, tenant_id, client):
+    try:
+        run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
+    except RuntimeUpstreamError as exc:
+        if exc.status_code in {404, 503}:
+            return None
+        raise
+    if run_id is None:
+        return None
+    state = await _inspect_legacy_run(conversation_id, run_id, user_id, tenant_id, client)
+    if state is None or state.assistant_message_id is None:
         return None
     try:
         last_unit = await _io("legacy-run-resume-index", store.read_legacy_resume_index,
