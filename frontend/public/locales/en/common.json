@@ -4771,6 +4771,7 @@
   "nl2agent.requirementClarification.other": "Other",
   "nl2agent.requirementClarification.submit": "Submit",
   "nl2agent.requirementClarification.submitted": "Submitted",
+  "nl2agent.cardAction.continuedSummary": "Agent creation continued",
   "nl2agent.requirementClarification.submittedSummary": "Requirements submitted",
   "nl2agent.resourceBinding.title": "Bind installed resources",
   "nl2agent.resourceBinding.description": "Select and configure matching resources, then bind them together.",

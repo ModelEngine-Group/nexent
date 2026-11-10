@@ -2,6 +2,7 @@
 
 "use client";
 
+import { formatNl2AgentActionSummary } from "../ui/nl2agent-action-summary";
 import { normalizeNexentHistory } from "@/lib/nexentOutputAdapter";
 import type { NexentOutputStatus } from "@/types/nexentOutput";
 
@@ -523,13 +524,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             action.agent_id > 0
           ) {
             historicalCardAction = action;
-            text =
-              {
-                requirement_clarification: "Requirements submitted",
-                suggested_resource_installation:
-                  "Resource installation completed",
-                installed_resource_binding: "Resource selection completed",
-              }[action.subtype] || "Agent creation continued";
+            text = formatNl2AgentActionSummary(action.subtype);
           }
         } catch {
           // Ordinary user text is not a structured card action.

@@ -10,6 +10,24 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
   const config = JSON.parse(
     readFileSync(process.env.NEXENT_REAL_AGENT_CREATOR_CONFIG!, "utf8"),
   );
+  const locale = config.locale || "zh";
+  expect(["zh", "en"]).toContain(locale);
+  const labels =
+    locale === "zh"
+      ? {
+          create: "智能体创建",
+          send: "发送",
+          submit: "提交",
+          submitted: "已提交",
+          summary: "已提交需求信息",
+        }
+      : {
+          create: "Create Agent",
+          send: "Send",
+          submit: "Submit",
+          submitted: "Submitted",
+          summary: "Requirements submitted",
+        };
   const container = config.container || "nexent-runtime";
   const target =
     "/tmp/agent_card_" + randomUUID().replaceAll("-", "").slice(0, 12);
@@ -177,8 +195,10 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
     ).toHaveCount(0);
   };
   await contract.step(steps[0], async () => {
-    await page.goto(base + "/zh/workbench");
-    await page.getByRole("button", { name: "智能体创建", exact: true }).click();
+    await page.goto(`${base}/${locale}/workbench`);
+    await page
+      .getByRole("button", { name: labels.create, exact: true })
+      .click();
     await page
       .getByRole("textbox")
       .last()
@@ -190,7 +210,7 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
         r.request().method() === "POST" && r.url().includes("/nl2agent/run"),
       { timeout: 30000 },
     );
-    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByRole("button", { name: labels.send, exact: true }).click();
     const response = await pending;
     cid =
       response.request().postDataJSON().conversation_id ||
@@ -211,7 +231,7 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       expect(terminal?.end_reason).toBe("awaiting_input");
     await expect(card()).toBeVisible();
     await expect(
-      card().getByRole("button", { name: "提交", exact: true }),
+      card().getByRole("button", { name: labels.submit, exact: true }),
     ).toBeVisible();
     await noErrors();
     audit = fixture("audit", cid);
@@ -226,26 +246,28 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
     const draftLink = page.getByTestId("workbench-edit-agent-draft");
     await expect(draftLink).toHaveAttribute(
       "href",
-      `/zh/agents/${audit.target_id}`,
+      `/${locale}/agents/${audit.target_id}`,
     );
   });
   await contract.step(steps[1], async () => {
-    await page.goto(`${base}/zh/workbench?thread_id=${cid}`);
+    await page.goto(`${base}/${locale}/workbench?thread_id=${cid}`);
     await expect(card()).toBeVisible();
     await publicHistory();
     await expect(
       page.locator('[data-slot="agent-creation-result"]'),
     ).toHaveCount(0);
     await page.getByTestId("workbench-edit-agent-draft").click();
-    await expect(page).toHaveURL(new RegExp(`/zh/agents/${audit.target_id}$`));
-    await page.goto(`${base}/zh/workbench?thread_id=${cid}`);
+    await expect(page).toHaveURL(
+      new RegExp(`/${locale}/agents/${audit.target_id}$`),
+    );
+    await page.goto(`${base}/${locale}/workbench?thread_id=${cid}`);
     await expect(card()).toBeVisible();
     await expect(
       page.locator('[data-slot="agent-creation-result"]'),
     ).toHaveCount(0);
     await expect(
       page.getByTestId("workbench-edit-agent-draft"),
-    ).toHaveAttribute("href", `/zh/agents/${audit.target_id}`);
+    ).toHaveAttribute("href", `/${locale}/agents/${audit.target_id}`);
     const restored = fixture("audit", cid);
     expect(restored.messages_hash).toBe(audit.messages_hash);
     expect(restored.units_hash).toBe(audit.units_hash);
@@ -271,10 +293,15 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
         r.request().method() === "POST" && r.url().includes("/nl2agent/run"),
       { timeout: 30000 },
     );
-    await card().getByRole("button", { name: "提交", exact: true }).click();
+    await card()
+      .getByRole("button", { name: labels.submit, exact: true })
+      .click();
     const submittedResponse = await pending;
     submittedAction = JSON.parse(
       submittedResponse.request().postDataJSON().query,
+    );
+    await expect(page.getByText(labels.summary, { exact: true })).toHaveCount(
+      1,
     );
     const next = await events(submittedResponse);
     expect(next.some((e: any) => e.type === "error")).toBe(false);
@@ -292,16 +319,17 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
     ).toHaveCount(1);
     await expect(
       page.locator('[data-slot="agent-creation-result"]'),
-    ).toHaveAttribute("href", `/zh/agents/${audit.target_id}`);
+    ).toHaveAttribute("href", `/${locale}/agents/${audit.target_id}`);
     expect(fixture("audit", cid).description.trim().length).toBeGreaterThan(0);
     resumed = true;
     const after = fixture("audit", cid);
     for (let i = 0; i < 2; i++) {
-      if (i === 0) await page.goto(`${base}/zh/workbench?thread_id=${cid}`);
+      if (i === 0)
+        await page.goto(`${base}/${locale}/workbench?thread_id=${cid}`);
       else await page.reload();
       await expect(card()).toBeVisible();
       await expect(
-        card().getByRole("button", { name: "已提交", exact: true }),
+        card().getByRole("button", { name: labels.submitted, exact: true }),
       ).toBeDisabled();
       await expect(card().locator("fieldset").first()).toHaveAttribute(
         "disabled",
@@ -340,6 +368,9 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
             );
         }
       }
+      await expect(page.getByText(labels.summary, { exact: true })).toHaveCount(
+        1,
+      );
       await noErrors();
       await publicHistory();
       await expect(
@@ -347,12 +378,22 @@ journey("JIUWEN-AGENT-CREATOR-D4-001", async ({ page, expect, contract }) => {
       ).toHaveCount(1);
       await expect(
         page.locator('[data-slot="agent-creation-result"]'),
-      ).toHaveAttribute("href", `/zh/agents/${audit.target_id}`);
+      ).toHaveAttribute("href", `/${locale}/agents/${audit.target_id}`);
       const current = fixture("audit", cid);
       expect(current.messages_hash).toBe(after.messages_hash);
       expect(current.units_hash).toBe(after.units_hash);
       expect(runs).toBe(2);
     }
+    writeFileSync(
+      join(contract.caseDir, "localized-summary.json"),
+      JSON.stringify({
+        core: selectedCore,
+        locale,
+        summary: labels.summary,
+        liveAndReloadAgree: true,
+        runs,
+      }),
+    );
     historyVerified = true;
     await page.screenshot({
       path: join(contract.caseDir, "submitted-card.png"),

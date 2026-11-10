@@ -20,7 +20,7 @@ case:
   preconditions:
   - Operator-selected Local smolagents or Jiuwen deployment, authorized Workbench
     account and real model. The outer campaign owns any deployment changes and restoration;
-    this Case never deploys.
+    this Case never deploys. The campaign selects Chinese and English locales.
   test_data:
     profile: real_smoke
   steps:
@@ -36,6 +36,7 @@ case:
       history retains the card and answers without terminal errors or extra automatic
       generation. The draft action targets the same owned Agent, creates no run, and
       only a matching completion event creates one result card; live and history agree.
+      The submitted action summary uses the selected page language before and after reload.
   - order: 3
     action: Remove only the uniquely owned draft and conversation, verify original
       data and remove private auth files.
@@ -46,7 +47,7 @@ case:
     separate draft action remains available without a premature result card.
   - Card submission resumes once and pending/submitted history is restored correctly.
     Exactly one generated-result card follows verified completion, never a final-answer
-    fallback.
+    fallback. The selected Chinese or English submission summary is identical live and after reload.
   - Cleanup removes only owned data and restores machine test configuration.
   forbidden_side_effects:
   - No mocked provider, source record changes, fake terminal, credential disclosure
@@ -84,3 +85,8 @@ case:
     - 3
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Chinese and English submission summaries agree live and in history under either deployment Core.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]

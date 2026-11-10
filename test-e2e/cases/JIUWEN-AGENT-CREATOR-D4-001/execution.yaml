@@ -10,6 +10,8 @@ timeout_seconds: 900
 acceptance_bindings:
   AC-01:
   - JIUWEN-AGENT-CREATOR-D4-001
+  AC-02:
+  - JIUWEN-AGENT-CREATOR-D4-001
 preparation:
   families: []
   anchors: false

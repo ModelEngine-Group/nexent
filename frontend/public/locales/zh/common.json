@@ -4710,6 +4710,7 @@
   "nl2agent.requirementClarification.other": "其他",
   "nl2agent.requirementClarification.submit": "提交",
   "nl2agent.requirementClarification.submitted": "已提交",
+  "nl2agent.cardAction.continuedSummary": "已继续智能体创建",
   "nl2agent.requirementClarification.submittedSummary": "已提交需求信息",
   "nl2agent.resourceBinding.title": "绑定已安装资源",
   "nl2agent.resourceBinding.description": "与智能体需求匹配的已安装资源，勾选并完成配置后统一绑定。",
