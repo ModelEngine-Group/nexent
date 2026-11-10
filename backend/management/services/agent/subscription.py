@@ -24,19 +24,16 @@ from management.services.agent.lifecycle import (
     require_legacy_thread_manager,
 )
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.constants.constants import LANGUAGE
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import (
     AgentRunAlreadyActiveError,
-    AgentRunConcurrencyExceededError,
     AppException,
     ConversationNotFoundError,
     ForbiddenError,
-    RuntimeCapacityExceededError,
     RuntimeMetadataValidationError,
     RuntimeMetadataVersionConflict,
-    RuntimeQueueTimeoutError,
     ValidationError,
     WorkbenchError,
 )
@@ -68,12 +65,8 @@ from management.services.agent.run import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from nexent.core.agents.run_agent import DeferredAgentRun
 from nexent.core.concurrency import (
-    ManagedTaskSpec,
-    ThreadCapacityExceeded,
     ThreadManager,
-    ThreadQueueTimedOut,
     run_blocking,
 )
 from nexent.monitor import (
@@ -638,68 +631,12 @@ async def run_agent_stream(
             is_remote_running=is_remote_running,
         )
 
-    # Normal mode: start new stream
-    deferred_run = DeferredAgentRun()
     run_identifier = _agent_run_identifier(agent_request)
-    execution = None
-    agent_capacity_token = None
     try:
-        agent_capacity_token = host.registry.reserve_agent_capacity(
-            agent_request.agent_id,
-            RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-        )
-        execution = thread_manager.submit(
-            "agent-run",
-            ManagedTaskSpec(
-                task_name="agent-run",
-                owner="backend.management.services.agent.run",
-                run_id=str(run_identifier),
-                close_hook=deferred_run.cancel,
-                pass_cancel_event=True,
-            ),
-            deferred_run.run,
-        )
-        execution.future.add_done_callback(
-            lambda _future: host.registry.release_agent_capacity(
-                agent_capacity_token
-            )
-        )
-        await thread_manager.wait_until_started(execution)
-    except AgentRunConcurrencyExceededError as exc:
-        raise RuntimeCapacityExceededError() from exc
-    except ThreadCapacityExceeded as exc:
-        if execution is None and agent_capacity_token is not None:
-            host.registry.release_agent_capacity(agent_capacity_token)
-        raise RuntimeCapacityExceededError() from exc
-    except ThreadQueueTimedOut as exc:
-        deferred_run.cancel()
-        raise RuntimeQueueTimeoutError(exc.timeout_seconds) from exc
-    except BaseException:
-        deferred_run.cancel()
-        if execution is not None:
-            thread_manager.cancel(
-                execution.execution_id,
-                reason="agent admission failed",
-                wait_timeout=0,
-                mark_stuck_on_timeout=False,
-            )
-        elif agent_capacity_token is not None:
-            host.registry.release_agent_capacity(agent_capacity_token)
-        raise
-
-    try:
-        reservation_token = host.registry.reserve_agent_run(
-            run_identifier,
-            resolved_user_id,
+        deferred_run, execution, reservation_token = await host.admit(
+            thread_manager, agent_request.agent_id, run_identifier, resolved_user_id,
         )
     except AgentRunAlreadyActiveError:
-        deferred_run.cancel()
-        thread_manager.cancel(
-            execution.execution_id,
-            reason="agent run already active",
-            wait_timeout=0,
-            mark_stuck_on_timeout=False,
-        )
         logger.warning(
             "Rejected concurrent agent run, user_id=%s, conversation_id=%s",
             resolved_user_id,

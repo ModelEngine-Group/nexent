@@ -443,8 +443,15 @@ def _unregister_legacy_run(*args, **kwargs):
     return _thread_lifecycle_module.unregister_after_worker_exit(legacy_execution_host.registry, *args, **kwargs)
 
 
+async def _admit_legacy_run(*args):
+    from runtime.agentos.legacy_admission import admit_legacy_execution
+
+    return await admit_legacy_execution(legacy_execution_host.registry, *args)
+
+
 legacy_execution_host = types.SimpleNamespace(
     registry=_agent_run_manager_mock,
+    admit=_admit_legacy_run,
     unregister=_unregister_legacy_run,
     producer_tasks=_thread_lifecycle_module.agent_stream_producer_tasks,
     cleanup_tasks=_thread_lifecycle_module.channel_cleanup_tasks,
@@ -723,6 +730,8 @@ from management.services.agent.service import (
 )
 from management.services.agent.run import save_messages, prepare_agent_run, stop_agent_tasks
 from contracts.constants.constants import STREAM_STATUS_EVENT
+from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS
+from contracts.errors.exceptions import AgentRunConcurrencyExceededError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError
 from management.services.agent.subscription import run_agent_stream, _resolve_user_tenant_language
 from test.backend.services.agent_legacy_helpers import (
     delete_related_agent_impl,
@@ -5048,7 +5057,7 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('wait_error', 'expected_error'), [(None, agent_subscription.RuntimeCapacityExceededError), (_ThreadQueueTimedOut(0.05), agent_subscription.RuntimeQueueTimeoutError)])
+@pytest.mark.parametrize(('wait_error', 'expected_error'), [(None, RuntimeCapacityExceededError), (_ThreadQueueTimedOut(0.05), RuntimeQueueTimeoutError)])
 async def test_ut_be_tlm_027_runtime_overload_precedes_run_side_effects(monkeypatch, mock_agent_request, mock_http_request, wait_error, expected_error):
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **kwargs: ('user-a', 'tenant-a', 'en'))
     save_user_message = MagicMock()
@@ -5074,13 +5083,13 @@ async def test_ut_be_tlm_027_runtime_overload_precedes_run_side_effects(monkeypa
 async def test_ut_be_tlm_033_agent_id_capacity_rejects_before_managed_execution(monkeypatch, mock_agent_request, mock_http_request):
     """UT-BE-TLM-033 rejects a full agent id before global lane submission."""
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **kwargs: ('user-a', 'tenant-a', 'en'))
-    reserve_capacity = MagicMock(side_effect=agent_subscription.AgentRunConcurrencyExceededError())
+    reserve_capacity = MagicMock(side_effect=AgentRunConcurrencyExceededError())
     submit = MagicMock()
     monkeypatch.setattr(legacy_execution_host.registry, 'reserve_agent_capacity', reserve_capacity)
     monkeypatch.setattr(legacy_thread_manager, 'submit', submit)
-    with pytest.raises(agent_subscription.RuntimeCapacityExceededError):
+    with pytest.raises(RuntimeCapacityExceededError):
         await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
-    reserve_capacity.assert_called_once_with(mock_agent_request.agent_id, agent_subscription.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
+    reserve_capacity.assert_called_once_with(mock_agent_request.agent_id, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
     submit.assert_not_called()
 
 
