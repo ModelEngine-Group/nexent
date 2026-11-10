@@ -17,7 +17,7 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 
 from management.services.agent.lifecycle import (
-    agent_run_manager,
+    require_legacy_execution_host,
     require_legacy_thread_manager,
 )
 from contracts.constants.constants import MESSAGE_ROLE
@@ -81,24 +81,12 @@ from infrastructure.redis.run_state import (
 from management.services.agent.channels import (
     streaming_channel_manager,
 )
-from runtime.thread_management import (
-    agent_stream_producer_tasks as _agent_stream_producer_tasks,
-    channel_cleanup_tasks as _channel_cleanup_tasks,
-    external_memory_ingest_tasks as _external_memory_ingest_tasks,
-    fa_extraction_tasks as _fa_extraction_tasks,
-    unregister_after_worker_exit,
-    shutdown_agent_stream_tasks as shutdown_agent_stream_tasks,
-)
 from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 
 logger = logging.getLogger(__name__)
 AGENTOS_PREPARATION_STOP = "agentos preparation stop"
-
-
-def _unregister_agent_run_after_execution(conversation_id, user_id, status, agent_run_info=None) -> bool:
-    return unregister_after_worker_exit(agent_run_manager, conversation_id, user_id, status, agent_run_info)
 
 
 async def _cleanup_channel_later(
@@ -128,8 +116,11 @@ async def _consume_agent_stream_producer(
     agent_metadata,
     conversation_id: int,
     user_id: str,
+    *,
+    execution_host=None,
 ) -> None:
     """Consume a non-debug agent stream independently from its SSE subscriber."""
+    host = require_legacy_execution_host(execution_host)
     fallback_status = "failed"
     producer_error = False
     try:
@@ -172,10 +163,10 @@ async def _consume_agent_stream_producer(
                     conversation_id,
                 )
             try:
-                run_info = agent_run_manager.get_agent_run_info(
+                run_info = host.registry.get_agent_run_info(
                     conversation_id, user_id
                 )
-                _unregister_agent_run_after_execution(
+                host.unregister(
                     conversation_id,
                     user_id,
                     status=fallback_status,
@@ -204,8 +195,8 @@ async def _consume_agent_stream_producer(
                     expected_channel=channel,
                 )
             )
-            _channel_cleanup_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+            host.cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(host.cleanup_tasks.discard)
         identity = getattr(channel, "execution_identity", None)
         if isinstance(identity, RunIdentity):
             await run_blocking(
@@ -217,9 +208,9 @@ async def _consume_agent_stream_producer(
             "active_channels=%s active_producers=%s replay_bytes=%s",
             conversation_id,
             "failed" if not channel.is_completed else channel.completion_status,
-            agent_run_manager.get_active_run_count(),
+            host.registry.get_active_run_count(),
             streaming_channel_manager.get_active_channel_count(),
-            len(_agent_stream_producer_tasks),
+            len(host.producer_tasks),
             streaming_channel_manager.get_retained_history_bytes(),
         )
 
@@ -309,6 +300,7 @@ async def _stream_agent_chunks(
     deferred_run: Optional[DeferredAgentRun] = None,
     *,
     thread_manager: ThreadManager | None = None,
+    execution_host=None,
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -322,6 +314,7 @@ async def _stream_agent_chunks(
     """
 
     thread_manager = require_legacy_thread_manager(thread_manager)
+    host = require_legacy_execution_host(execution_host)
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
@@ -658,7 +651,7 @@ async def _stream_agent_chunks(
             except RuntimeError:
                 pass
 
-        _unregister_agent_run_after_execution(
+        host.unregister(
             _agent_run_identifier(agent_request),
             user_id,
             status=terminal_status,
@@ -678,8 +671,8 @@ async def _stream_agent_chunks(
                     expected_channel=channel,
                 )
             )
-            _channel_cleanup_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+            host.cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(host.cleanup_tasks.discard)
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
         # background ``add_memory_in_levels`` call has been removed because
@@ -725,8 +718,8 @@ async def _stream_agent_chunks(
                     logger.warning("Per-turn supplement failed: %s", exc)
 
             supplement_task = asyncio.create_task(_per_turn_supplement())
-            _external_memory_ingest_tasks.add(supplement_task)
-            supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
+            host.ingest_tasks.add(supplement_task)
+            supplement_task.add_done_callback(host.ingest_tasks.discard)
 
         if (
             final_answer_content
@@ -777,8 +770,8 @@ async def _stream_agent_chunks(
                     logger.exception("fa_memory_extraction: unexpected error")
 
             extraction_task = asyncio.create_task(_run_fa_extraction())
-            _fa_extraction_tasks.add(extraction_task)
-            extraction_task.add_done_callback(_fa_extraction_tasks.discard)
+            host.extraction_tasks.add(extraction_task)
+            extraction_task.add_done_callback(host.extraction_tasks.discard)
 
 
 def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:

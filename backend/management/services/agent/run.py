@@ -11,8 +11,7 @@ from typing import (
 )
 
 from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    agent_run_manager,
+    require_legacy_execution_host,
     require_legacy_thread_manager,
 )
 from management.services.agent.preparation.run import LegacyRunMaterializer, create_agent_run_info
@@ -21,7 +20,7 @@ from management.services.agent.preprocessing import (
 )
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
-from contracts.errors.exceptions import MemoryPreparationException
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, MemoryPreparationException
 from contracts.agent import AgentRequest
 from management.services.agent.context import (
     build_authorized_context_input,
@@ -34,7 +33,6 @@ from management.services.agent.execution import (
     _journal_stop_requested,
     _run_journal,
     _stream_agent_chunks,
-    _unregister_agent_run_after_execution,
 )
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
@@ -124,11 +122,13 @@ async def prepare_agent_run(
     resource_versions: dict | None = None,
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
+    execution_host=None,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
     """
 
+    host = require_legacy_execution_host(execution_host)
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
     )
@@ -257,7 +257,7 @@ async def prepare_agent_run(
     register_kwargs = {}
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
-    agent_run_manager.register_agent_run(
+    host.registry.register_agent_run(
         _agent_run_identifier(agent_request),
         agent_run_info,
         user_id,
@@ -298,6 +298,7 @@ async def generate_stream(
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
     thread_manager: ThreadManager | None = None,
+    execution_host=None,
 ):
     """Unified streaming entry point.
 
@@ -314,6 +315,7 @@ async def generate_stream(
             is created lazily when memory is enabled.
     """
     thread_manager = require_legacy_thread_manager(thread_manager)
+    host = require_legacy_execution_host(execution_host)
 
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
@@ -372,6 +374,7 @@ async def generate_stream(
                 tenant_id=tenant_id,
                 language=language,
                 allow_memory_search=memory_enabled_runtime,
+                execution_host=host,
                 **prepare_kwargs,
             )
         except AgentRunAlreadyActiveError:
@@ -394,7 +397,7 @@ async def generate_stream(
                 "agentos-execution-running", mark_running, journal, resource_versions,
                 lane="control-io", owner="runtime",
             ):
-                agent_run_manager.stop_local_run(_agent_run_identifier(agent_request), user_id, agent_run_info)
+                host.registry.stop_local_run(_agent_run_identifier(agent_request), user_id, agent_run_info)
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
@@ -406,6 +409,7 @@ async def generate_stream(
             execution=execution,
             deferred_run=deferred_run,
             thread_manager=thread_manager,
+            execution_host=host,
         ):
             yield data_chunk
 
@@ -414,10 +418,10 @@ async def generate_stream(
         if agent_run_info is not None:
             run_identifier = _agent_run_identifier(agent_request)
             if journal is None:
-                agent_run_manager.stop_agent_run(run_identifier, user_id)
+                host.registry.stop_agent_run(run_identifier, user_id)
             else:
-                agent_run_manager.stop_local_run(run_identifier, user_id, agent_run_info)
-            _unregister_agent_run_after_execution(
+                host.registry.stop_local_run(run_identifier, user_id, agent_run_info)
+            host.unregister(
                 run_identifier,
                 user_id,
                 status="stopped",
@@ -453,6 +457,7 @@ async def generate_stream(
                 deferred_run=deferred_run,
                 legacy_materializer=legacy_materializer,
                 thread_manager=thread_manager,
+                execution_host=host,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -498,20 +503,21 @@ async def generate_stream(
         # The detached producer owns terminal publication and releases a
         # stopped preparation's reservation in its done callback.
         if reservation_token is not None and not scoped_preparation_stop:
-            agent_run_manager.release_agent_run_reservation(
+            host.registry.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 user_id,
                 reservation_token,
             )
 
 
-def stop_agent_tasks(conversation_id: int | str, user_id: str):
+def stop_agent_tasks(conversation_id: int | str, user_id: str, *, execution_host=None):
     """
     Stop an agent run by its conversation ID or ephemeral debug run ID.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
-    agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+    host = require_legacy_execution_host(execution_host)
+    agent_stopped = host.registry.stop_agent_run(conversation_id, user_id)
 
     # Preprocess tasks are associated only with persisted conversations.
     preprocess_stopped = (
@@ -536,5 +542,6 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
         return {"status": "success", "message": message, "already_stopped": True}
 
 
-def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
+def is_agent_running(conversation_id: int, user_id: str, *, execution_host=None) -> bool:
+    host = require_legacy_execution_host(execution_host)
+    return host.registry.get_agent_run_info(conversation_id, user_id) is not None

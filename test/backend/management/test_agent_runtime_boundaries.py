@@ -76,6 +76,10 @@ class BlockRuntime(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockRuntime())
 with patch("nexent.core.nlp.stopwords.load_stopwords"):
     from management.api.application import app
+    from management.services.agent import execution, lifecycle, run, subscription
+
+assert not hasattr(lifecycle, "agent_run_manager")
+assert not hasattr(subscription, "_agent_stream_producer_tasks")
 
 assert "post" in app.openapi()["paths"]["/agent/run"]
 
@@ -136,6 +140,19 @@ def test_management_run_and_subscription_do_not_import_runtime_thread_manager():
                 module.removeprefix("backend.").split(".")[:2] == ["runtime", "thread_management"]
                 for module in modules
             ), (path, node.lineno)
+
+
+def test_management_sources_do_not_import_runtime():
+    for path in (ROOT / "backend/management").rglob("*.py"):
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                modules = [f"{node.module or ''}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            assert all(module.removeprefix("backend.").split(".")[0] != "runtime" for module in modules), (path, node.lineno)
 
 
 def test_ut_be_arb_002_factory_preserves_prepared_values(monkeypatch):

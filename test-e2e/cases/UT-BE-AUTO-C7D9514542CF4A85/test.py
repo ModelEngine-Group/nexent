@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from management.services.agent.lifecycle import (
+from runtime.executions import (
     AgentRunConcurrencyExceededError,
     AgentRunManager,
 )

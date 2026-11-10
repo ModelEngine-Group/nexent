@@ -4,20 +4,13 @@ import threading
 import uuid
 from typing import TYPE_CHECKING, Dict, Union
 
+from contracts.errors.exceptions import AgentRunAlreadyActiveError, AgentRunConcurrencyExceededError
 from infrastructure.redis.run_state import runtime_state_service
 
 if TYPE_CHECKING:
     from nexent.core.agents.agent_model import AgentRunInfo
 
 logger = logging.getLogger("agent_run_manager")
-
-
-class AgentRunAlreadyActiveError(RuntimeError):
-    """Raised when a conversation already has an active agent run."""
-
-
-class AgentRunConcurrencyExceededError(RuntimeError):
-    """Raised when one agent id has reached its admitted run limit."""
 
 
 class LocalExecutionRegistry:

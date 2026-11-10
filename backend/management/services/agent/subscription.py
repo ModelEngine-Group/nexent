@@ -20,9 +20,7 @@ from typing import (
 
 from management.services.agent.agentos_events import active_run_error_response, knowledge_scope_event_content
 from management.services.agent.lifecycle import (
-    AgentRunAlreadyActiveError,
-    AgentRunConcurrencyExceededError,
-    agent_run_manager,
+    require_legacy_execution_host,
     require_legacy_thread_manager,
 )
 from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, MESSAGE_ROLE
@@ -30,7 +28,19 @@ from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_AGEN
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import STREAM_STATUS_EVENT
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, ValidationError, WorkbenchError
+from contracts.errors.exceptions import (
+    AgentRunAlreadyActiveError,
+    AgentRunConcurrencyExceededError,
+    AppException,
+    ConversationNotFoundError,
+    ForbiddenError,
+    RuntimeCapacityExceededError,
+    RuntimeMetadataValidationError,
+    RuntimeMetadataVersionConflict,
+    RuntimeQueueTimeoutError,
+    ValidationError,
+    WorkbenchError,
+)
 from contracts.agent import AgentRequest
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -48,7 +58,6 @@ from management.services.agent.context import (
 )
 from management.services.agent.execution import (
     _agent_run_identifier,
-    _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
 from management.services.agent.preparation.run import LegacyRunMaterializer
@@ -197,6 +206,7 @@ async def run_agent_stream(
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
     thread_manager: ThreadManager | None = None,
+    execution_host=None,
 ):
     """
     Start an agent run and stream responses.
@@ -215,6 +225,8 @@ async def run_agent_stream(
     )
     if not resume:
         thread_manager = require_legacy_thread_manager(thread_manager)
+    host = require_legacy_execution_host(execution_host)
+    if not resume:
         from management.services.model import run_controls
 
         run_controls.validate_agent_model_selection(
@@ -592,8 +604,8 @@ async def run_agent_stream(
                 },
             )
 
-        # Check if the agent is still running by querying the agent_run_manager
-        existing_run_info = agent_run_manager.get_agent_run_info(
+        # Check the Runtime registry for an active local run.
+        existing_run_info = host.registry.get_agent_run_info(
             user_id=resolved_user_id, conversation_id=agent_request.conversation_id
         )
         run_state = await runtime_state_service.get_run_state_async(
@@ -762,7 +774,7 @@ async def run_agent_stream(
     execution = None
     agent_capacity_token = None
     try:
-        agent_capacity_token = agent_run_manager.reserve_agent_capacity(
+        agent_capacity_token = host.registry.reserve_agent_capacity(
             agent_request.agent_id,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
@@ -778,7 +790,7 @@ async def run_agent_stream(
             deferred_run.run,
         )
         execution.future.add_done_callback(
-            lambda _future: agent_run_manager.release_agent_capacity(
+            lambda _future: host.registry.release_agent_capacity(
                 agent_capacity_token
             )
         )
@@ -787,7 +799,7 @@ async def run_agent_stream(
         raise RuntimeCapacityExceededError() from exc
     except ThreadCapacityExceeded as exc:
         if execution is None and agent_capacity_token is not None:
-            agent_run_manager.release_agent_capacity(agent_capacity_token)
+            host.registry.release_agent_capacity(agent_capacity_token)
         raise RuntimeCapacityExceededError() from exc
     except ThreadQueueTimedOut as exc:
         deferred_run.cancel()
@@ -802,11 +814,11 @@ async def run_agent_stream(
                 mark_stuck_on_timeout=False,
             )
         elif agent_capacity_token is not None:
-            agent_run_manager.release_agent_capacity(agent_capacity_token)
+            host.registry.release_agent_capacity(agent_capacity_token)
         raise
 
     try:
-        reservation_token = agent_run_manager.reserve_agent_run(
+        reservation_token = host.registry.reserve_agent_run(
             run_identifier,
             resolved_user_id,
         )
@@ -910,7 +922,7 @@ async def run_agent_stream(
                     agent_request.conversation_id, resolved_user_id, expected_channel=channel,
                 )
         finally:
-            agent_run_manager.release_agent_run_reservation(
+            host.registry.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 resolved_user_id,
                 reservation_token,
@@ -926,6 +938,7 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
         "thread_manager": thread_manager,
+        "execution_host": host,
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
@@ -1012,7 +1025,7 @@ async def run_agent_stream(
                     mark_stuck_on_timeout=False,
                 )
             if channel is None:
-                agent_run_manager.release_agent_run_reservation(
+                host.registry.release_agent_run_reservation(
                     _agent_run_identifier(agent_request),
                     resolved_user_id,
                     reservation_token,
@@ -1050,12 +1063,12 @@ async def run_agent_stream(
     if channel is not None:
         def release_producer_resources(task: asyncio.Task) -> None:
             """Retain preparation ownership until the detached producer exits."""
-            _agent_stream_producer_tasks.discard(task)
+            host.producer_tasks.discard(task)
             if tracked_execution is not None:
                 untrack_execution(tracked_execution)
             if not task.cancelled() and task.exception() is not None:
                 logger.error("Agent stream producer did not finalize", exc_info=task.exception())
-            reservation_released = agent_run_manager.release_agent_run_reservation(
+            reservation_released = host.registry.release_agent_run_reservation(
                 run_identifier,
                 resolved_user_id,
                 reservation_token,
@@ -1082,9 +1095,10 @@ async def run_agent_stream(
                 agent_metadata=agent_metadata,
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
+                execution_host=host,
             )
         )
-        _agent_stream_producer_tasks.add(producer_task)
+        host.producer_tasks.add(producer_task)
         producer_task.add_done_callback(release_producer_resources)
         if tracked_execution is not None:
             response.agentos_producer = producer_task

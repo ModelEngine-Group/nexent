@@ -144,7 +144,7 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     monkeypatch.setattr(agent_run, "create_agent_run_info", create_run)
     monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=None))
     monkeypatch.setattr(agent_run, "build_authorized_context_input", MagicMock(return_value="context"))
-    monkeypatch.setattr(agent_run.agent_run_manager, "register_agent_run", register)
+    monkeypatch.setattr(legacy.legacy_execution_host.registry, "register_agent_run", register)
     workbench = ModuleType("management.services.agent.workbench")
     compile_plan = MagicMock(return_value=executable_tree)
     workbench.compile_runtime_mount_plan = compile_plan
@@ -212,9 +212,9 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     execution = MagicMock()
     execution.execution_id = 'execution-a'
     execution.future.done.return_value = True
-    monkeypatch.setattr(agent_subscription.agent_run_manager, 'reserve_agent_capacity', MagicMock(return_value='cap'))
-    monkeypatch.setattr(agent_subscription.agent_run_manager, 'reserve_agent_run', MagicMock(return_value='run'))
-    monkeypatch.setattr(agent_subscription.agent_run_manager, 'release_agent_run_reservation', MagicMock())
+    monkeypatch.setattr(legacy.legacy_execution_host.registry, 'reserve_agent_capacity', MagicMock(return_value='cap'))
+    monkeypatch.setattr(legacy.legacy_execution_host.registry, 'reserve_agent_run', MagicMock(return_value='run'))
+    monkeypatch.setattr(legacy.legacy_execution_host.registry, 'release_agent_run_reservation', MagicMock())
     monkeypatch.setattr(legacy.legacy_thread_manager, 'submit', MagicMock(return_value=execution))
     monkeypatch.setattr(legacy.legacy_thread_manager, 'wait_until_started', AsyncMock())
     monkeypatch.setattr(agent_subscription.runtime_state_service, 'reset_stream_async', AsyncMock())

@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from . import test_agent_service as service_tests
+
 from management.services.agent import run as agent_run_service
 from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments, is_stream_unit_continuation as _is_continuation, rollback_model_attempt_units as _rollback_model_attempt_units
 from management.services.agent import execution as agent_execution
@@ -84,7 +86,7 @@ def _configure_stream_mocks(monkeypatch, persisted_batches):
         lambda **kwargs: persisted_batches.append(kwargs),
     )
     monkeypatch.setattr(
-        agent_run_service, "_unregister_agent_run_after_execution", MagicMock()
+        service_tests.legacy_execution_host, "unregister", MagicMock()
     )
     monkeypatch.setattr(
         agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock()
@@ -97,7 +99,7 @@ def _configure_stream_mocks(monkeypatch, persisted_batches):
     async def wait_for_cancel(*_args, **_kwargs):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(agent_run_service.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "run", run_managed)
     monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", wait_for_cancel)
 
 

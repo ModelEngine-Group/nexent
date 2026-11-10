@@ -546,6 +546,14 @@ class ModelProviderError(Exception):
         super().__init__(f"{upstream_status}: {message}")
 
 
+class AgentRunAlreadyActiveError(RuntimeError):
+    """Raised when a conversation already has an active agent run."""
+
+
+class AgentRunConcurrencyExceededError(RuntimeError):
+    """Raised when an agent has reached its admitted run limit."""
+
+
 class RuntimeCapacityExceededError(RuntimeError):
     """Raised when Runtime agent worker and queue capacity is full."""
 

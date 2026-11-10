@@ -14,7 +14,8 @@ from runtime.api.agent import execution
 @pytest.mark.asyncio
 async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(mocker):
     from runtime.adapters.nexent.factory import materialize_legacy_run
-    from runtime.thread_management import runtime_thread_manager
+    from runtime.executions import agent_run_manager
+    from runtime.thread_management import agent_stream_producer_tasks, channel_cleanup_tasks, runtime_thread_manager
 
     actor = ServicePrincipal("actor", "tenant")
     legacy_stream = mocker.patch.object(execution, "run_legacy_agent_stream", return_value=StreamingResponse(iter(())))
@@ -25,6 +26,9 @@ async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(moc
     options = legacy_stream.await_args.kwargs
     assert options["legacy_materializer"] is materialize_legacy_run
     assert options["thread_manager"] is runtime_thread_manager
+    assert options["execution_host"].registry is agent_run_manager
+    assert options["execution_host"].producer_tasks is agent_stream_producer_tasks
+    assert options["execution_host"].cleanup_tasks is channel_cleanup_tasks
     assert options["agent_request"]._track_execution
     assert options["skip_user_save"]
     assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
@@ -41,6 +45,19 @@ async def test_compatibility_stream_requires_a_pool_before_starting_a_conversati
     with pytest.raises(RuntimeError, match="requires a thread manager"):
         await subscription.run_agent_stream(AgentRequest(query="run"), None, "actor", "tenant")
 
+    create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compatibility_stream_requires_runtime_state_before_conversation_writes(mocker):
+    from contracts.agent import AgentRequest
+    from management.services.agent import subscription
+
+    create = mocker.patch.object(subscription, "create_new_conversation")
+    with pytest.raises(RuntimeError, match="requires a Runtime host"):
+        await subscription.run_agent_stream(
+            AgentRequest(query="run"), None, "actor", "tenant", thread_manager=object(),
+        )
     create.assert_not_called()
 
 

@@ -13,12 +13,10 @@ import time
 sys.path.insert(0, "/opt/backend")
 
 import management.services.agent.channels as streaming_module
-from management.services.agent.lifecycle import agent_run_manager
+from runtime.executions import agent_run_manager
 from fastapi import FastAPI
-from management.services.agent.service import (
-    _agent_stream_producer_tasks,
-    _finalize_buffered_unit_fragments,
-)
+from runtime.thread_management import agent_stream_producer_tasks as _agent_stream_producer_tasks
+from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments
 from management.services.agent.channels import StreamingChannel, StreamingChannelManager
 
 app = FastAPI()

@@ -121,6 +121,7 @@ def runtime_fixture(monkeypatch):
             monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
+            monkeypatch.setattr(agent_app_execution, "runtime_thread_manager", manager)
             monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
             for name, module in list(sys.modules.items()):
                 if name.startswith(("services.", "management.", "tool_collection.")) and getattr(module, "runtime_thread_manager", None) is runtime_thread_manager:

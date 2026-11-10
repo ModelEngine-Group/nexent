@@ -27,8 +27,7 @@ async def lifecycle(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     manager = module.AgentRunManager()
-    monkeypatch.setattr(service, "agent_run_manager", manager)
-    monkeypatch.setattr(producer, "agent_run_manager", manager)
+    monkeypatch.setattr(service_tests.legacy_execution_host, "registry", manager)
     monkeypatch.setattr(service, "AgentRunAlreadyActiveError", module.AgentRunAlreadyActiveError)
     monkeypatch.setattr(service, "_resolve_user_tenant_language", MagicMock(return_value=("u", "t", "en")))
     monkeypatch.setattr(service, "get_conversation_service", MagicMock(return_value={"conversation_id": 123}))
@@ -41,10 +40,10 @@ async def lifecycle(monkeypatch):
     execution = SimpleNamespace(future=future, execution_id="lifecycle-worker")
     deferred = MagicMock()
     monkeypatch.setattr(service, "DeferredAgentRun", MagicMock(return_value=deferred))
-    monkeypatch.setattr(service.runtime_thread_manager, "submit", MagicMock(return_value=execution))
-    monkeypatch.setattr(service.runtime_thread_manager, "wait_until_started", AsyncMock())
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "submit", MagicMock(return_value=execution))
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "wait_until_started", AsyncMock())
     cancel = MagicMock(side_effect=lambda *_args, **_kwargs: future.cancel())
-    monkeypatch.setattr(service.runtime_thread_manager, "cancel", cancel)
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "cancel", cancel)
     channel = service_tests.AsyncChannelMock()
     monkeypatch.setattr(service.streaming_channel_manager, "get_or_create_channel", AsyncMock(return_value=channel))
 
@@ -67,7 +66,7 @@ async def lifecycle(monkeypatch):
 
     env.start = start
     yield env
-    tasks = list(service._agent_stream_producer_tasks)
+    tasks = list(service_tests.legacy_execution_host.producer_tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -89,14 +88,14 @@ async def test_headers_only_response_starts_producer_and_replays_completed_histo
 
     response = await env.start(source)
     assert response.headers["conversation_id"] == "123"
-    tasks = list(env.service._agent_stream_producer_tasks)
+    tasks = list(service_tests.legacy_execution_host.producer_tasks)
     assert len(tasks) == 1
     # No response iterator has been started, as in a headers-only HTTP client.
     await asyncio.wait_for(asyncio.gather(*tasks), timeout=1)
     await asyncio.sleep(0)
     assert calls == ["run"]
     assert not env.manager._reservations
-    assert not env.service._agent_stream_producer_tasks
+    assert not service_tests.legacy_execution_host.producer_tasks
     assert env.manager.get_agent_capacity_count(1) == 0
     env.cancel.assert_not_called()
     env.deferred.cancel.assert_not_called()
@@ -132,7 +131,7 @@ async def test_disconnect_during_preparation_preserves_reservation_and_rejects_d
     assert not env.future.done()
     env.cancel.assert_not_called()
     proceed.set()
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    await asyncio.wait_for(asyncio.gather(*service_tests.legacy_execution_host.producer_tasks), timeout=1)
     await asyncio.sleep(0)
     assert len(registered) == 1
     assert env.channel.completion_status == "completed"
@@ -149,13 +148,13 @@ async def test_preparation_failure_releases_reservation_worker_and_capacity(life
         yield "unreachable"
 
     response = await env.start(source)
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    await asyncio.wait_for(asyncio.gather(*service_tests.legacy_execution_host.producer_tasks), timeout=1)
     await asyncio.sleep(0)
     assert env.channel.completion_status == "failed"
     assert len(env.channel._history) == 1
     assert "private provider details" not in env.channel._history[0]
     assert not env.manager._reservations
-    assert not env.service._agent_stream_producer_tasks
+    assert not service_tests.legacy_execution_host.producer_tasks
     assert env.future.cancelled()
     assert env.manager.get_agent_capacity_count(1) == 0
     env.deferred.cancel.assert_called_once()
@@ -174,7 +173,7 @@ async def test_completed_producer_does_not_cancel_bound_worker_cleanup(lifecycle
         yield "done"
 
     response = await env.start(source)
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    await asyncio.wait_for(asyncio.gather(*service_tests.legacy_execution_host.producer_tasks), timeout=1)
     await asyncio.sleep(0)
     assert not env.future.done()
     assert env.manager.get_agent_capacity_count(1) == 1
@@ -201,7 +200,7 @@ async def test_producer_cancellation_releases_preparation_even_before_first_iter
             closed.set()
 
     response = await env.start(source)
-    tasks = list(env.service._agent_stream_producer_tasks)
+    tasks = list(service_tests.legacy_execution_host.producer_tasks)
     assert len(tasks) == 1
     if after_start:
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -211,7 +210,7 @@ async def test_producer_cancellation_releases_preparation_even_before_first_iter
     await asyncio.sleep(0)
     assert closed.is_set() == after_start
     assert not env.manager._reservations
-    assert not env.service._agent_stream_producer_tasks
+    assert not service_tests.legacy_execution_host.producer_tasks
     assert env.future.cancelled()
     assert env.manager.get_agent_capacity_count(1) == 0
     env.deferred.cancel.assert_called_once()
@@ -230,7 +229,7 @@ async def test_debug_disconnect_still_cancels_direct_worker(lifecycle):
         await asyncio.Event().wait()
 
     response = await env.start(source)
-    assert not env.service._agent_stream_producer_tasks
+    assert not service_tests.legacy_execution_host.producer_tasks
     assert await anext(response.body_iterator) == "data: debug\n\n"
     await response.body_iterator.aclose()
     env.deferred.cancel.assert_called_once()
@@ -245,7 +244,7 @@ async def test_explicit_stop_after_subscriber_disconnect_still_reaches_worker(li
     started = asyncio.Event()
     info = SimpleNamespace(
         stop_event=asyncio.Event(), cancellation_scope=MagicMock(),
-        thread_manager=env.service.runtime_thread_manager,
+        thread_manager=service_tests.legacy_thread_manager,
         thread_execution_id=env.execution.execution_id,
     )
 
@@ -263,7 +262,7 @@ async def test_explicit_stop_after_subscriber_disconnect_still_reaches_worker(li
     await response.body_iterator.aclose()
     env.cancel.assert_not_called()
     assert env.manager.stop_agent_run(123, "u") is True
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    await asyncio.wait_for(asyncio.gather(*service_tests.legacy_execution_host.producer_tasks), timeout=1)
     info.cancellation_scope.cancel.assert_called_once()
     env.cancel.assert_called_once()
     assert env.channel.completion_status == "stopped"
@@ -325,7 +324,7 @@ async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle
         env.future.set_result(None)
 
     response = await env.start(source)
-    await asyncio.wait_for(asyncio.gather(*env.service._agent_stream_producer_tasks), timeout=1)
+    await asyncio.wait_for(asyncio.gather(*service_tests.legacy_execution_host.producer_tasks), timeout=1)
 
     assert response.headers["X-AgentOS-Run-ID"] == run_id
     env.channel.start_journal.assert_awaited_once_with("t", run_id)
@@ -357,7 +356,7 @@ async def test_failed_admission_binding_cleans_journal_before_releasing_reservat
     env.channel.finish_journal.assert_awaited_once_with("failed")
     source.assert_not_called()
     assert not env.manager._reservations
-    assert not env.service._agent_stream_producer_tasks
+    assert not service_tests.legacy_execution_host.producer_tasks
     assert env.future.cancelled()
 
 
@@ -383,7 +382,7 @@ async def test_agentos_stop_during_preparation_releases_worker_after_terminal_pu
         assert env.manager._reservations
         env.channel.complete(kwargs["status"])
 
-    monkeypatch.setattr(run, "agent_run_manager", env.manager)
+    monkeypatch.setattr(service_tests.legacy_execution_host, "registry", env.manager)
     monkeypatch.setattr(run, "prepare_agent_run", prepare)
     monkeypatch.setattr(run, "_stream_agent_chunks", MagicMock())
     monkeypatch.setattr(run, "_journal_stop_requested", poll_stop)
@@ -392,7 +391,7 @@ async def test_agentos_stop_during_preparation_releases_worker_after_terminal_pu
     monkeypatch.setattr(execution.streaming_channel_manager, "complete_channel", complete_channel)
 
     await env.start(run.generate_stream)
-    producer, = env.service._agent_stream_producer_tasks
+    producer, = service_tests.legacy_execution_host.producer_tasks
     await asyncio.wait_for(preparing.wait(), timeout=1)
     stop.set()
     with pytest.raises(asyncio.CancelledError):
@@ -454,7 +453,7 @@ async def test_agentos_stop_between_preparation_and_sdk_dispatch(lifecycle, monk
     async def poll_stop(journal):
         return prepared
 
-    monkeypatch.setattr(run, "agent_run_manager", env.manager)
+    monkeypatch.setattr(service_tests.legacy_execution_host, "registry", env.manager)
     monkeypatch.setattr(run, "prepare_agent_run", prepare)
     monkeypatch.setattr(run, "_journal_stop_requested", poll_stop)
     monkeypatch.setattr(worker, "_journal_stop_requested", poll_stop)
@@ -468,7 +467,7 @@ async def test_agentos_stop_between_preparation_and_sdk_dispatch(lifecycle, monk
     env.deferred.cancel.side_effect = lambda: env.future.set_result(None)
 
     await env.start(run.generate_stream)
-    producer, = env.service._agent_stream_producer_tasks
+    producer, = service_tests.legacy_execution_host.producer_tasks
     await asyncio.wait_for(producer, timeout=1)
     assert env.channel.completion_status == "stopped"
     assert not env.manager._reservations

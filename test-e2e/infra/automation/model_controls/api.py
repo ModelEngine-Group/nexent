@@ -54,7 +54,9 @@ class ApiFixture:
 def install_fixture_gateway_session(app, user_id, tenant_id):
     @app.middleware("http")
     async def gateway_session(request: Request, call_next):
-        if request.url.path != "/api/agent/run" or not request.headers.get("Authorization"):
+        is_run = request.method == "POST" and request.url.path == "/api/agent/run"
+        is_stop = request.method == "GET" and request.url.path.startswith("/api/agent/stop/")
+        if not (is_run or is_stop) or not request.headers.get("Authorization"):
             return await call_next(request)
         token = identity_context.set({"kind": "session", "user_id": user_id, "tenant_id": tenant_id})
         try:

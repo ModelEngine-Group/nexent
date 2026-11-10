@@ -22,10 +22,10 @@ def stream_capture(monkeypatch):
     async def run_managed(_lane, _task, fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(service.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(service_tests.legacy_thread_manager, "run", run_managed)
     monkeypatch.setattr(service, "save_message", MagicMock(return_value=42))
     monkeypatch.setattr(service, "persist_assistant_run_batch", lambda **kwargs: batches.append(kwargs))
-    monkeypatch.setattr(service, "_unregister_agent_run_after_execution", MagicMock())
+    monkeypatch.setattr(service_tests.legacy_execution_host, "unregister", MagicMock())
     monkeypatch.setattr(service.streaming_channel_manager, "complete_channel", AsyncMock())
     monkeypatch.setattr(service, "_cleanup_channel_later", AsyncMock())
 

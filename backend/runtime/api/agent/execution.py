@@ -2,6 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -22,8 +25,15 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
-from runtime.executions import stop_registered_run
-from runtime.thread_management import runtime_thread_manager
+from runtime.executions import AgentRunManager, agent_run_manager, stop_registered_run
+from runtime.thread_management import (
+    agent_stream_producer_tasks,
+    channel_cleanup_tasks,
+    external_memory_ingest_tasks,
+    fa_extraction_tasks,
+    runtime_thread_manager,
+    unregister_after_worker_exit,
+)
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -33,9 +43,30 @@ agent_runtime_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
 
 
+@dataclass(frozen=True)
+class LegacyExecutionHost:
+    registry: AgentRunManager
+    unregister: Callable[..., bool]
+    producer_tasks: set[asyncio.Task]
+    cleanup_tasks: set[asyncio.Task]
+    ingest_tasks: set[asyncio.Task]
+    extraction_tasks: set[asyncio.Task]
+
+
+_legacy_execution_host = LegacyExecutionHost(
+    registry=agent_run_manager,
+    unregister=partial(unregister_after_worker_exit, agent_run_manager),
+    producer_tasks=agent_stream_producer_tasks,
+    cleanup_tasks=channel_cleanup_tasks,
+    ingest_tasks=external_memory_ingest_tasks,
+    extraction_tasks=fa_extraction_tasks,
+)
+
+
 async def run_agent_stream(**options):
     return await run_legacy_agent_stream(
         **options, legacy_materializer=materialize_legacy_run, thread_manager=runtime_thread_manager,
+        execution_host=_legacy_execution_host,
     )
 
 
