@@ -10,6 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import httpx
 import uvicorn
@@ -17,6 +18,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from runtime.api.agent import execution as agent_app_execution
+from management.api.agent import creator as agent_creator_api, nl2agent_callback as callback_api
+from management.services.agent import nl2agent_callback
+from runtime.agentos import prepared_agent_creator
 from contracts.constants import environment
 from management.api.skill import creation as skill_app_creation
 from management.clients.agentos import AgentOSClient
@@ -27,7 +31,6 @@ from management.services.agent.preparation import run as agent_preparation
 from model_controls.api import install_fixture_gateway_session
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
-from services import nl2agent_service as nl2agent_service
 from runtime.thread_management import runtime_thread_manager
 from nexent.core.concurrency.helpers import shutdown_fallback_thread_manager
 from nexent.core.concurrency import ThreadManager
@@ -138,12 +141,12 @@ def runtime_fixture(monkeypatch):
             rbac.init_rbac()
             # Ordinary Agent preparation resolves MCP through this imported
             # boundary as well. Never fall back to a developer's deployment URL.
-            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, agent_preparation)
-            monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+            _bind_case_mcp(monkeypatch, mcp_url, agent_preparation)
+            monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
             runs = []
-            for module in (nl2agent_service, ephemeral, ordinary):
+            for module in (ephemeral, ordinary):
                 original = module.agent_run
                 async def observe(run_info, *args, _original=original, **kwargs):
                     runs.append(run_info)
@@ -174,12 +177,21 @@ def runtime_fixture(monkeypatch):
             app = FastAPI()
             install_fixture_gateway_session(app, owner, tenant)
             app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            app.include_router(agent_creator_api.router, prefix="/api")
+            app.include_router(callback_api.router, prefix="/api")
+            grants = {}
+            monkeypatch.setattr(nl2agent_callback, "get_db_session", storage["sessions"])
+            monkeypatch.setattr(nl2agent_callback, "get_redis_client", lambda: SimpleNamespace(
+                set=lambda key, value, **_: grants.setdefault(key, value),
+                get=grants.get, delete=lambda key: grants.pop(key, None),
+            ))
             app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
             runtime = FastAPI(root_path="/api")
             runtime.add_middleware(AgentOSMiddleware)
             runtime.include_router(ephemeral.create_ephemeral_run_router())
             monkeypatch.setattr(environment, "JWT_SECRET", "model-controls-fixture-agentos-key")
-            with serve_fixture(runtime) as runtime_url, TestClient(app) as http:
+            with serve_fixture(runtime) as runtime_url, serve_fixture(app) as management_url, TestClient(app) as http:
+                monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", management_url)
                 monkeypatch.setattr(runtime_client, "_agentos_client", lambda: AgentOSClient(
                     runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs),
                 ))

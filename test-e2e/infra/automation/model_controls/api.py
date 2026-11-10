@@ -11,8 +11,10 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from runtime.api.agent import execution as agent_app_execution
+from management.api.agent import creator as agent_creator_api
 from management.api.skill import creation as skill_app_creation
 from management.services.skill import creation as skill_service
+from management.services.model import creator_snapshot
 from gateway.security.context import identity_context
 from infrastructure import agent_model_config
 from infrastructure.agent_model_overrides import apply_turn_model_generation
@@ -65,6 +67,7 @@ def api_fixture(monkeypatch):
     app = FastAPI()
     install_fixture_gateway_session(app, "fixture-owner", "tenant")
     app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+    app.include_router(agent_creator_api.router, prefix="/api")
     app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
     records = {}
     for index, label in enumerate(["effort", "budget", "plain", "unavailable", "foreign", "embedding"], start=1):
@@ -91,18 +94,18 @@ def api_fixture(monkeypatch):
         "CREATOR": {"agent:create", "skill:create"}, "NO-AGENT-CREATE": {"skill:create"},
         "NO-SKILL-CREATE": {"agent:create"},
     })
-    monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(agent_creator_api, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
-    monkeypatch.setattr(agent_app_execution, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
+    monkeypatch.setattr(agent_creator_api, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
     monkeypatch.setattr(skill_app_creation, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
 
     def lookup(model_id, tenant_id):
         return next((r for r in records.values() if r["model_id"] == model_id and r["tenant_id"] == tenant_id), None)
 
     monkeypatch.setattr(run_controls, "get_model_by_model_id", lookup)
-    monkeypatch.setattr(skill_service, "get_model_by_model_id", lookup)
-    monkeypatch.setattr(skill_service, "_resolve_input_budget", lambda _: (32768, {}, None))
-    monkeypatch.setattr(skill_service, "_resolve_context_budget", lambda **_: None)
+    monkeypatch.setattr(creator_snapshot, "get_model_by_model_id", lookup)
+    monkeypatch.setattr(creator_snapshot, "_resolve_input_budget", lambda _: (32768, {}, None))
+    monkeypatch.setattr(creator_snapshot, "_resolve_context_budget", lambda **_: None)
     for module in (run_bindings, agent_model_config):
         monkeypatch.setattr(module, "_resolve_reasoning_capability",
                             lambda model_name, **kwargs: BUDGET if model_name == "budget" else
@@ -135,11 +138,12 @@ def api_fixture(monkeypatch):
     async def agent_run_stream(agent_request, **kwargs):
         return StreamingResponse(await stream(agent_request, True), media_type="text/event-stream")
 
-    async def creator_stream(request, **kwargs):
+    async def compile_agent(request, actor, language):
         return await stream(request)
 
     monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
-    monkeypatch.setattr(agent_app_execution, "create_nl2agent_stream", creator_stream)
+    monkeypatch.setattr(agent_creator_api, "prepare_nl2agent_snapshot", compile_agent)
+    monkeypatch.setattr(agent_creator_api, "create_nl2agent_stream", lambda prepared, actor: prepared)
     def compile_skill(request, *scope):
         snapshot = skill_service.prepare_nl2skill_snapshot(request, *scope)
         state.calls.append(request.model_dump(exclude_unset=True))

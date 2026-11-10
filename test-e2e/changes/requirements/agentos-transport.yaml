@@ -117,6 +117,7 @@ change:
     - test/backend/services/test_workbench_service_coverage.py
     - test/backend/app/test_agentos_workbench_tools.py
     - test/backend/app/test_agentos_nl2skill.py
+    - test/backend/app/test_agentos_nl2agent_tool_callback.py
     - test/sdk/core/tools/test_read_skill_config_tool.py
     - test/sdk/core/agents/test_managed_mcp.py
     - test/backend/agents/test_create_agent_info.py

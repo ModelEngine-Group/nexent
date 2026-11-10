@@ -561,20 +561,31 @@ class SkillCreatorDraft(RunSpecModel):
     content: str
 
 
-class PreparedSkillCreatorRun(RunSpecModel):
-    """Request-owned Skill creator dispatched through AgentOS Agent.run."""
-
-    mode: Literal["nl2skill"]
+class PreparedCreatorRun(RunSpecModel):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
     input: RunInput
     model: RunModelBinding
     language: Literal["zh", "en"] = "zh"
-    draft: SkillCreatorDraft | None = None
-    target_files: list[str] = Field(default_factory=list)
     input_budget: PositiveInt
     context_window_tokens: PositiveInt
     capacity_snapshot: dict[str, JsonValue] | None = None
     context_budget_snapshot: dict[str, JsonValue] | None = None
+
+
+class PreparedSkillCreatorRun(PreparedCreatorRun):
+    """Request-owned Skill creator dispatched through AgentOS Agent.run."""
+
+    mode: Literal["nl2skill"]
+    draft: SkillCreatorDraft | None = None
+    target_files: list[str] = Field(default_factory=list)
+
+
+class PreparedAgentCreatorRun(PreparedCreatorRun):
+    """Request-owned creator for one editable Agent draft."""
+
+    mode: Literal["nl2agent"]
+    agent_id: PositiveInt
+    bound_resources: str = Field(min_length=1)
 
 
 class PreparedEvaluationRun(AgentRunSpec):
@@ -633,9 +644,20 @@ class AgentMemoryStored(RunSpecModel):
     conversation_id: PositiveInt
 
 
+class NL2AgentToolCall(RunSpecModel):
+    run_id: str = Field(pattern=RUN_ID_PATTERN)
+    agent_id: PositiveInt
+    tool: Literal[
+        "search_installed_resources", "search_uninstalled_resources", "recommend_resources", "wrapper",
+        "save_agent_draft_fields",
+    ]
+    arguments: dict[str, JsonValue]
+
+
 class ManagementOperation(str, Enum):
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
+    NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
 
 
 MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in ManagementOperation)

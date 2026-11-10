@@ -28,7 +28,12 @@ from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.agent import NL2AgentRunRequest
 from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError
+from management.services.agent.nl2agent import Nl2AgentDraftSaveError
+from infrastructure.agentos_identity import ServicePrincipal
+# Load the Runtime dependencies before the local SDK stubs.
+import runtime.agentos.ephemeral
+import management.services.model.adapter
+from management.api.agent.creator import nl2agent_run_api, require_agent_create_permission, router as agent_creator_router
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -154,7 +159,7 @@ sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
 from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
-from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
+from runtime.api.agent.execution import agent_runtime_router
 from backend.http.server.app_factory import register_exception_handlers
 
 
@@ -162,7 +167,9 @@ from backend.http.server.app_factory import register_exception_handlers
 # Create FastAPI apps for runtime and config routers
 runtime_app = FastAPI()
 runtime_app.include_router(agent_runtime_router)
-runtime_app.dependency_overrides[require_agent_create_permission] = lambda: None
+config_creator_app = FastAPI()
+config_creator_app.include_router(agent_creator_router)
+config_creator_app.dependency_overrides[require_agent_create_permission] = lambda: None
 runtime_client = TestClient(runtime_app)
 
 config_app = FastAPI()
@@ -362,18 +369,16 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    prepared = object()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -391,41 +396,40 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
     assert request.persist_history is False
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     mocker, mock_auth_header
 ):
-    mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch("management.api.agent.creator.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=object())
+    mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
     prepare = mocker.patch(
-        "runtime.api.agent.execution.prepare_creation_history", return_value=(42, 1)
+        "management.api.agent.creator.prepare_creation_history", return_value=(42, 1)
     )
+
+    async def inline(_name, function, *args, lane, owner, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch("management.api.agent.creator.run_blocking", side_effect=inline)
     persist = mocker.patch(
-        "runtime.api.agent.execution.persist_creation_stream",
+        "management.api.agent.creator.persist_creation_stream",
         side_effect=lambda stream, **kwargs: stream,
     )
     response = await nl2agent_run_api(
@@ -685,18 +689,16 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
     async def mock_stream():
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-        return_value=mock_stream(),
-    )
+    prepared = object()
+    compile_run = mocker.patch("management.api.agent.creator.prepare_nl2agent_snapshot", return_value=prepared)
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream", return_value=mock_stream())
 
     response = await nl2agent_run_api(
         nl2agent_request=NL2AgentRunRequest(
@@ -714,29 +716,23 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     assert response.status_code == 200
     assert response.media_type == "text/event-stream"
     assert "final_answer" in "".join(chunks)
-    request = create_stream.call_args.kwargs["request"]
+    request, actor, language = compile_run.call_args.args
     assert request.query == "Build a weather agent"
     assert request.agent_id == 42
-    assert (
-        create_stream.call_args.kwargs["authorization"]
-        == mock_auth_header["Authorization"]
-    )
+    create_stream.assert_called_once_with(prepared, ServicePrincipal("user-a", "tenant-a"))
     assert request.conversation_id is None
     assert request.persist_history is False
-    assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
-    assert create_stream.call_args.kwargs["language"] == "en"
+    assert actor == ServicePrincipal("user-a", "tenant-a")
+    assert language == "en"
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         side_effect=UnauthorizedError("Invalid access token"),
     )
-    create_stream = mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
-        new_callable=AsyncMock,
-    )
+    create_stream = mocker.patch("management.api.agent.creator.create_nl2agent_stream")
 
     with pytest.raises(HTTPException) as exc_info:
         await nl2agent_run_api(
@@ -750,17 +746,17 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid access token"
-    create_stream.assert_not_awaited()
+    create_stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=RuntimeError("private model configuration"),
     )
@@ -802,11 +798,11 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
     expected_code,
 ):
     mocker.patch(
-        "runtime.api.agent.execution.get_current_user_info",
+        "management.api.agent.creator.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "runtime.api.agent.execution.create_nl2agent_stream",
+        "management.api.agent.creator.prepare_nl2agent_snapshot",
         new_callable=AsyncMock,
         side_effect=error,
     )
@@ -828,7 +824,7 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_requires_agent_id():
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=runtime_app),
+        transport=httpx.ASGITransport(app=config_creator_app),
         base_url="http://test",
     ) as client:
         response = await client.post(

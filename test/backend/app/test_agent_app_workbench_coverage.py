@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request
 from test.backend.app import test_agent_app as legacy
 
 
+from management.api.agent import creator as creator_api
 from runtime.api.agent import execution as runtime_agent
 
 agent_app = __import__("management.api.agent.agent", fromlist=["get_workbench_bootstrap_api"])
@@ -141,13 +142,13 @@ async def test_agent_run_maps_workbench_errors(monkeypatch, error, status, detai
 
 @pytest.mark.asyncio
 async def test_nl2agent_history_is_hidden_when_workbench_disabled(monkeypatch):
-    monkeypatch.setattr(runtime_agent, "ENABLE_AGENT_WORKBENCH", False)
-    request = runtime_agent.NL2AgentRunRequest(
+    monkeypatch.setattr(creator_api, "ENABLE_AGENT_WORKBENCH", False)
+    request = creator_api.NL2AgentRunRequest(
         query="Create an agent", agent_id=7, persist_history=True
     )
 
     with pytest.raises(HTTPException) as caught:
-        await runtime_agent.nl2agent_run_api(
+        await creator_api.nl2agent_run_api(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",

@@ -1,51 +1,56 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""D5 cancellation and thread-lifecycle contract for NL2Agent streaming."""
+"""Verify closing or cancelling the NL2Agent response revokes its run grant."""
 
-from __future__ import annotations
-
-from contracts.authentication import AuthenticatedIdentity
 import asyncio
-import threading
 from types import SimpleNamespace
 
 import pytest
+from starlette.responses import StreamingResponse
 
-import services.nl2agent_service as service
+from infrastructure.agentos_identity import ServicePrincipal
+from management.services.agent import creator_run
 
 
-@pytest.mark.stage('D5')
-@pytest.mark.case_id('REL-AUTO-D8CA17756DF9BC52')
+@pytest.mark.stage("D5")
+@pytest.mark.case_id("REL-AUTO-D8CA17756DF9BC52")
 @pytest.mark.asyncio
-async def test_nl2agent_stream_sets_stop_event_on_close_and_cancellation(monkeypatch) -> None:
-    stop_event = threading.Event()
-    run_info = SimpleNamespace(stop_event=stop_event)
+async def test_nl2agent_stream_sets_stop_event_on_close_and_cancellation(monkeypatch):
+    actor = ServicePrincipal("owner", "tenant")
+    payload = SimpleNamespace(run_id="a" * 32, agent_id=7, input=SimpleNamespace(query="Create"))
+    grants = set()
 
-    async def build(**_kwargs):
-        return run_info
+    async def inline(_name, function, *args, **kwargs):
+        return function(*args)
 
-    async def one_chunk(_run_info, *, thread_manager):
-        assert thread_manager is service.runtime_thread_manager
-        yield '{"type":"progress","content":"started"}'
-        await asyncio.Event().wait()
-    monkeypatch.setattr(service, 'build_nl2agent_run_info', build)
-    monkeypatch.setattr(service, 'agent_run', one_chunk)
-    stream = await service.create_nl2agent_stream(request=SimpleNamespace(), tenant_id='tenant-a', language='zh', authorization='token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
-    assert 'started' in await anext(stream)
-    await stream.aclose()
-    assert stop_event.is_set()
-    cancelled_stop = threading.Event()
-    cancelled_info = SimpleNamespace(stop_event=cancelled_stop)
+    monkeypatch.setattr(creator_run, "run_blocking", inline)
+    monkeypatch.setattr(creator_run, "open_nl2agent_tool_grant", lambda run, *_: grants.add(run))
+    monkeypatch.setattr(creator_run, "close_nl2agent_tool_grant", grants.remove)
+    for cancelled in (False, True):
+        closed = False
+        entered = asyncio.Event()
 
-    async def build_cancelled(**_kwargs):
-        return cancelled_info
+        async def chunks():
+            nonlocal closed
+            try:
+                yield b'data: {"type":"progress","content":"started"}\n\n'
+                entered.set()
+                await asyncio.Event().wait()
+            finally:
+                closed = True
 
-    async def cancelled_run(_run_info, *, thread_manager):
-        if False:
-            yield ''
-        raise asyncio.CancelledError
-    monkeypatch.setattr(service, 'build_nl2agent_run_info', build_cancelled)
-    monkeypatch.setattr(service, 'agent_run', cancelled_run)
-    cancelled_stream = await service.create_nl2agent_stream(request=SimpleNamespace(), tenant_id='tenant-a', language='zh', authorization='token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
-    with pytest.raises(asyncio.CancelledError):
-        await anext(cancelled_stream)
-    assert cancelled_stop.is_set()
+        async def run(*_):
+            return StreamingResponse(chunks())
+
+        monkeypatch.setattr(creator_run, "forward_creator_run", run)
+        stream = creator_run.create_nl2agent_stream(payload, actor)
+        assert "started" in await anext(stream)
+        assert payload.run_id in grants
+        if cancelled:
+            consumer = asyncio.create_task(anext(stream))
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            consumer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consumer
+        else:
+            await stream.aclose()
+        assert closed and not grants

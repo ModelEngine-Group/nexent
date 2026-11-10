@@ -1077,7 +1077,7 @@ async def recommend_installed_resources_impl(
                         user_id=user_id,
                         tenant_id=tenant_id,
                         lane="control-io",
-                        owner="services.nl2agent_service",
+                        owner="management",
                     )
                 range_name = "kds_list" if tool_name == "aidp_search" else "index_names"
                 current_params = {}

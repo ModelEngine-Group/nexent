@@ -10,6 +10,7 @@ import pytest
 
 from contracts.agent import NL2SkillRunRequest
 from management.services.skill import creation as skill_service
+from management.services.model import creator_snapshot
 from management.services.skill.nl2skill import (
     _assemble_draft_content,
     _decorate_event,
@@ -130,13 +131,13 @@ def test_snapshot_model_selection(mocker, model_id, configured, expected):
     def record(model_id):
         return {"model_id": model_id, "display_name": str(model_id), "update_time": "v1", "model_type": "llm"}
 
-    mocker.patch.object(skill_service, "preflight_turn_controls")
-    mocker.patch.object(skill_service, "get_model_by_model_id", return_value=record(7))
-    mocker.patch.object(skill_service.tenant_config_manager, "get_model_config",
+    mocker.patch.object(creator_snapshot, "preflight_turn_controls")
+    mocker.patch.object(creator_snapshot, "get_model_by_model_id", return_value=record(7))
+    mocker.patch.object(creator_snapshot.tenant_config_manager, "get_model_config",
                         return_value=record(configured) if configured else None)
-    mocker.patch.object(skill_service, "get_model_records", return_value=[record(9)])
-    mocker.patch.object(skill_service, "_resolve_input_budget", return_value=(8192, {}, None))
-    mocker.patch.object(skill_service, "_resolve_context_budget", return_value=None)
+    mocker.patch.object(creator_snapshot, "get_model_records", return_value=[record(9)])
+    mocker.patch.object(creator_snapshot, "_resolve_input_budget", return_value=(8192, {}, None))
+    mocker.patch.object(creator_snapshot, "_resolve_context_budget", return_value=None)
     request = NL2SkillRunRequest(query="Create", model_id=model_id, history=[
         {"role": "user", "content": "old"}, {"role": "system", "content": "ignored"},
     ])
@@ -146,8 +147,8 @@ def test_snapshot_model_selection(mocker, model_id, configured, expected):
 
 
 def test_snapshot_requires_a_model(mocker):
-    mocker.patch.object(skill_service.tenant_config_manager, "get_model_config", return_value={})
-    mocker.patch.object(skill_service, "get_model_records", return_value=[])
+    mocker.patch.object(creator_snapshot.tenant_config_manager, "get_model_config", return_value={})
+    mocker.patch.object(creator_snapshot, "get_model_records", return_value=[])
     with pytest.raises(ValueError, match="No LLM model"):
         skill_service.prepare_nl2skill_snapshot(NL2SkillRunRequest(query="Create"), "owner", "tenant", "en")
 

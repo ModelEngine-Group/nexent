@@ -13,6 +13,8 @@ from management.api.automation.agent_automation import (
     router as agent_automation_router,
 )
 from management.api.skill.creation import skill_creator_router
+from management.api.agent.creator import router as agent_creator_router
+from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
 from management.api.automation.agentos_callback import router as automation_callback_router
 from management.api.memory.agentos_callback import router as memory_callback_router
 from management.api.conversation.conversation_management import router as conversation_router
@@ -172,9 +174,11 @@ async def thread_capacity():
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)
+app.include_router(agent_creator_router)
 app.include_router(conversation_run_router)
 app.include_router(agent_automation_router)
 app.include_router(automation_callback_router)
+app.include_router(nl2agent_callback_router)
 app.include_router(memory_callback_router)
 app.include_router(conversation_automation_router)
 app.include_router(workbench_pins_router)

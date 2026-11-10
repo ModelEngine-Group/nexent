@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from pydantic import Field, TypeAdapter, ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedEphemeralRun, PreparedSkillCreatorRun
+from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, AgentOperation, PreparedAgentCreatorRun, PreparedEphemeralRun, PreparedSkillCreatorRun
 from contracts.constants.constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
 from contracts.constants.environment import RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from contracts.errors.exceptions import RuntimeQueueTimeoutError, sampling_configuration_error_payload
@@ -22,13 +22,14 @@ from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
 from runtime.agentos.compatibility import run_until_disconnect
 from runtime.agentos.debug import debug_owner
 from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load_prepared_run, prepare_run_snapshot
+from runtime.agentos.prepared_agent_creator import prepare_agent_creator_run
 from runtime.agentos.prepared_skill_creator import prepare_skill_creator_run
 from runtime.executions import AgentRunConcurrencyExceededError, agent_run_manager
 from runtime.thread_management import runtime_thread_manager, unregister_after_worker_exit
 
 logger = logging.getLogger(__name__)
 _EPHEMERAL_PAYLOAD = TypeAdapter(Annotated[
-    PreparedEphemeralRun | PreparedSkillCreatorRun, Field(discriminator="mode"),
+    PreparedEphemeralRun | PreparedSkillCreatorRun | PreparedAgentCreatorRun, Field(discriminator="mode"),
 ])
 
 
@@ -44,7 +45,7 @@ async def _watch_debug_stop(run_id, owner, info):
         await asyncio.sleep(RUNTIME_CANCEL_POLL_INTERVAL_SECONDS)
 
 
-async def _observer_stream(info, execution, deferred, *, skill_creator=False):
+async def _observer_stream(info, execution, deferred, *, creator_mode=None):
     try:
         async with aclosing(agent_run(
             info, thread_manager=runtime_thread_manager, execution=execution, deferred_run=deferred,
@@ -53,7 +54,9 @@ async def _observer_stream(info, execution, deferred, *, skill_creator=False):
                 event = json.loads(chunk)
                 if isinstance(event, dict) and event.get("type") != "skill_artifact":
                     yield _sse(event)
-        if skill_creator:
+                    if creator_mode == "nl2agent" and event.get("type") == "nl2a":
+                        return
+        if creator_mode:
             # The SDK drains observer messages and consumes worker exceptions without re-raising.
             execution.future.result()
             yield 'event: agentos_execution_complete\ndata: {}\n\n'
@@ -61,10 +64,18 @@ async def _observer_stream(info, execution, deferred, *, skill_creator=False):
         # Explicit cancellation ends the stream. Preserve ASGI task cancellation on disconnect.
         if not info.stop_event.is_set() or asyncio.current_task().cancelling():
             raise
+        if creator_mode == "nl2agent" and info.observer.boundary_reached:
+            # A card can set the stop event before the SDK drains its observer queue.
+            for chunk in info.observer.get_cached_message():
+                event = json.loads(chunk)
+                yield _sse(event)
+                if event.get("type") == "nl2a":
+                    return
     except Exception as exc:
         logger.exception("Ephemeral AgentOS execution failed")
-        if skill_creator:
-            error = sampling_configuration_error_payload(exc) or {"type": "error", "content": "NL2Skill execution failed."}
+        if creator_mode:
+            name = "NL2Agent" if creator_mode == "nl2agent" else "NL2Skill"
+            error = sampling_configuration_error_payload(exc) or {"type": "error", "content": f"{name} execution failed."}
             yield "event: agentos_execution_error\n" + _sse(error)
         else:
             yield _sse({"type": "error", "content": SAFE_AGENT_STREAM_ERROR_MESSAGE})
@@ -80,13 +91,13 @@ def _close_execution(execution, deferred):
 
 
 class _EphemeralResponse(StreamingResponse):
-    def __init__(self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, skill_creator=False):
+    def __init__(self, info, execution, deferred, metadata: AgentRunMetadata, *, debug_owner=None, creator_mode=None):
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
         self.debug_run_id = f"debug-{info.workspace_run_id}" if debug_owner is not None else None
         if self.debug_run_id is not None:
             headers["run_id"] = self.debug_run_id
         super().__init__(
-            _observer_stream(info, execution, deferred, skill_creator=skill_creator), media_type="text/event-stream", headers=headers,
+            _observer_stream(info, execution, deferred, creator_mode=creator_mode), media_type="text/event-stream", headers=headers,
         )
         self.info = info
         self.execution = execution
@@ -139,11 +150,15 @@ class _EphemeralResponse(StreamingResponse):
 
 async def _open_ephemeral(payload, actor):
     deferred = DeferredAgentRun()
-    skill_creator = isinstance(payload, PreparedSkillCreatorRun)
-    agent_id = None if skill_creator else payload.resource.agent_id
-    capacity = None if skill_creator else agent_run_manager.reserve_agent_capacity(
-        agent_id, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-    )
+    creator_mode = None if isinstance(payload, PreparedEphemeralRun) else payload.mode
+    if isinstance(payload, PreparedEphemeralRun):
+        agent_id = payload.resource.agent_id
+        capacity = agent_run_manager.reserve_agent_capacity(agent_id, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS)
+        materialize = prepare_run_snapshot
+    elif isinstance(payload, PreparedAgentCreatorRun):
+        agent_id, capacity, materialize = payload.agent_id, None, prepare_agent_creator_run
+    else:
+        agent_id, capacity, materialize = None, None, prepare_skill_creator_run
     execution = None
     try:
         execution = runtime_thread_manager.submit(
@@ -157,7 +172,6 @@ async def _open_ephemeral(payload, actor):
         if capacity is not None:
             execution.future.add_done_callback(lambda _: agent_run_manager.release_agent_capacity(capacity))
         await runtime_thread_manager.wait_until_started(execution)
-        materialize = prepare_skill_creator_run if skill_creator else prepare_run_snapshot
         info = await load_prepared_run(payload, actor, materialize)
     except BaseException:
         if execution is not None:
@@ -176,7 +190,7 @@ async def _open_ephemeral(payload, actor):
     )
     debug = isinstance(payload, PreparedEphemeralRun) and payload.debug
     return _EphemeralResponse(
-        info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, skill_creator=skill_creator,
+        info, execution, deferred, metadata, debug_owner=debug_owner(actor) if debug else None, creator_mode=creator_mode,
     )
 
 

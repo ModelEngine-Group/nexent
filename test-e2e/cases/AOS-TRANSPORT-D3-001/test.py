@@ -2918,6 +2918,7 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     from management.services.agent import runtime_client
     from management.services.conversation import creation_history
     from management.services.skill import creation as skill_service
+    from management.services.model import creator_snapshot
     from nexent.core.agents import run_agent as sdk_runner
     from nexent.core.concurrency import LanePolicy, ThreadManager
     from nexent.core.utils.observer import ProcessType
@@ -2950,10 +2951,10 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     def read_model(model_id, tenant_id):
         return record if (model_id, tenant_id) == (11, actor.tenant_id) else None
 
-    monkeypatch.setattr(skill_service, "get_model_by_model_id", read_model)
-    monkeypatch.setattr(skill_service, "preflight_turn_controls", lambda *_: None)
-    monkeypatch.setattr(skill_service, "_resolve_input_budget", lambda _: (8192, {}, None))
-    monkeypatch.setattr(skill_service, "_resolve_context_budget", lambda **_: None)
+    monkeypatch.setattr(creator_snapshot, "get_model_by_model_id", read_model)
+    monkeypatch.setattr(creator_snapshot, "preflight_turn_controls", lambda *_: None)
+    monkeypatch.setattr(creator_snapshot, "_resolve_input_budget", lambda _: (8192, {}, None))
+    monkeypatch.setattr(creator_snapshot, "_resolve_context_budget", lambda **_: None)
     monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", read_model)
     calls = []
     stopped = threading.Event()
@@ -3028,5 +3029,152 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
                         if line.startswith("data: "):
                             break
                 assert await asyncio.to_thread(stopped.wait, 4)
+    finally:
+        await manager.shutdown(timeout=5)
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.asyncio
+async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
+    from contextlib import nullcontext
+
+    from contracts.agentos import ManagementOperation, NL2AgentToolCall
+    from infrastructure.nl2agent_tool_config import NL2A_WRAPPER_NAME, SAVE_AGENT_DRAFT_FIELDS_NAME
+    from management.api.agent import creator, nl2agent_callback as callback_api
+    from management.services.agent import creator_run, nl2agent_callback, nl2agent, runtime_client
+    from management.services.model import creator_snapshot
+    from nexent.core.agents import run_agent as sdk_runner
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from nexent.core.concurrency import LanePolicy, ThreadManager
+    from nexent.core.utils.observer import ProcessType
+    from runtime.agentos import ephemeral, prepared_agent_creator
+
+    actor = ServicePrincipal("creator-user", "creator-tenant")
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-nl2agent-transport-secret")
+    monkeypatch.setattr(creator, "get_current_user_info", lambda *_: (actor.user_id, actor.tenant_id, "en"))
+    grants = {}
+
+    def set_grant(key, value, *, ex, nx):
+        assert ex > 0 and nx
+        if key in grants:
+            return None
+        grants[key] = value
+        return True
+
+    monkeypatch.setattr(nl2agent_callback, "get_redis_client", lambda: SimpleNamespace(
+        set=set_grant, get=grants.get, delete=lambda key: grants.pop(key, None),
+    ))
+    monkeypatch.setattr(nl2agent_callback, "get_db_session", lambda: nullcontext(object()))
+    monkeypatch.setattr(nl2agent_callback, "tenant_membership_matches", lambda _, user, tenant: (
+        user, tenant,
+    ) == (actor.user_id, actor.tenant_id))
+
+    async def verified(**scope):
+        assert scope == {"agent_id": 7, "user_id": actor.user_id, "tenant_id": actor.tenant_id}
+        return SimpleNamespace(content={"text": "Verified editable draft"})
+
+    monkeypatch.setattr(creator_run, "_build_verified_bound_resources_context", verified)
+    record = {
+        "model_id": 11, "tenant_id": actor.tenant_id, "model_type": "llm", "model_factory": "openai",
+        "delete_flag": "N", "display_name": "creator", "model_name": "demo", "model_repo": None,
+        "base_url": "http://provider.invalid/v1", "api_key": "synthetic-model-key", "update_time": "2026-11-10T00:00:00",
+    }
+    monkeypatch.setattr(creator_snapshot, "preflight_turn_controls", lambda *_: None)
+    monkeypatch.setattr(creator_snapshot, "get_model_by_model_id", lambda *_: record)
+    monkeypatch.setattr(creator_snapshot, "_resolve_input_budget", lambda _: (8192, {}, None))
+    monkeypatch.setattr(creator_snapshot, "_resolve_context_budget", lambda **_: None)
+    monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda *_: record)
+    writes = []
+    observed_runs = []
+    stopped = threading.Event()
+
+    def save(**args):
+        writes.append(args)
+        return {"status": "success", "agent_id": 7, "created": False, "updated_fields": ["description"]}
+
+    def authorize(**scope):
+        assert scope == {"agent_id": 7, "user_id": actor.user_id, "tenant_id": actor.tenant_id}
+
+    monkeypatch.setattr(nl2agent, "save_agent_draft_fields_impl", save)
+    from management.services.agent import authorization
+    monkeypatch.setattr(authorization, "require_agent_draft_edit", authorize)
+
+    def worker(info):
+        observed_runs.append(info.workspace_run_id)
+        assert info.agent_config.context_items[-1].content["text"] == "Verified editable draft"
+        assert info.mcp_host is None and info.model_config_list[0].api_key == record["api_key"]
+        configs = {tool.name: tool for tool in info.agent_config.tools}
+        if "clarification card" in info.query:
+            tool = NexentAgent.create_langchain_tool(None, configs[NL2A_WRAPPER_NAME])
+            content = tool.forward(agent_id=7, subtype="requirement_clarification", resource_result=None,
+                                   questions=[{"question_id": "intent", "question_type": "text", "title": "What is needed?"}])
+            info.observer.add_message("creator", ProcessType.EXECUTION_LOGS, content)
+            info.observer.add_message("creator", ProcessType.FINAL_ANSWER, "must not follow the card")
+        elif "wait for disconnect" in info.query:
+            info.observer.add_message("creator", ProcessType.FINAL_ANSWER, "started")
+            if info.stop_event.wait(5):
+                stopped.set()
+        else:
+            tool = NexentAgent.create_langchain_tool(None, configs[SAVE_AGENT_DRAFT_FIELDS_NAME])
+            forbidden = tool.forward(agent_id=8, fields={"description": "bad scope"})
+            assert forbidden["code"] == "agent_context_mismatch" and not writes
+            content = tool.forward(agent_id=7, fields={"description": "new description"})
+            assert '"status":"success"' in content
+            info.observer.add_message("creator", ProcessType.FINAL_ANSWER, "saved")
+
+    monkeypatch.setattr(sdk_runner, "agent_run_thread", worker)
+    manager = ThreadManager("agent-creator-transport", {
+        "agent-run": LanePolicy(name="agent-run", max_workers=2, max_queue_size=0, queue_timeout_seconds=2),
+    })
+    monkeypatch.setattr(ephemeral, "runtime_thread_manager", manager)
+
+    async def blocking(_name, function, *args, lane=None, owner=None, **kwargs):
+        return await asyncio.to_thread(function, *args, **kwargs)
+
+    for module in (creator, creator_run, nl2agent_callback, prepared_evaluation):
+        monkeypatch.setattr(module, "run_blocking", blocking)
+    runtime = FastAPI(root_path="/api")
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(ephemeral.create_ephemeral_run_router())
+    management = FastAPI(root_path="/api")
+    management.include_router(creator.router)
+    management.include_router(callback_api.router)
+    management.dependency_overrides[creator.require_agent_create_permission] = lambda: None
+    manager.start()
+    try:
+        with serve(runtime) as upstream, serve(management) as public:
+            client = AgentOSClient(upstream, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+            monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", public)
+            async with httpx.AsyncClient(trust_env=False, timeout=8) as http:
+                body = {"agent_id": 7, "model_id": 11}
+                path = public + "/api/agent/nl2agent/run"
+                response = await http.post(path, json={**body, "query": "Update the draft"})
+                assert response.status_code == 200 and "saved" in response.text, response.text
+                assert len(writes) == 1 and not grants
+                assert writes[0]["agent_id"] == 7 and writes[0]["tenant_id"] == actor.tenant_id
+                assert writes[0]["user_id"] == actor.user_id and writes[0]["fields"].description == "new description"
+                operation = ManagementOperation.NL2AGENT_TOOL
+                callback = NL2AgentToolCall(run_id=observed_runs[0], agent_id=7, tool="save_agent_draft_fields",
+                                           arguments={"fields": {"description": "closed grant"}}).model_dump_json().encode()
+                denied = await http.post(public + "/api" + operation.value, content=callback, headers={
+                    "Authorization": "Bearer " + sign_call(operation, callback, actor),
+                })
+                assert denied.status_code == 404 and len(writes) == 1
+                card = await http.post(path, json={**body, "query": "Ask for a clarification card"})
+                events = [json.loads(line[6:]) for line in card.text.splitlines() if line.startswith("data: ")]
+                assert [item["type"] for item in events][-1:] == ["nl2a"], card.text
+                assert "must not follow the card" not in card.text and not grants
+                async with http.stream("POST", path, json={**body, "query": "wait for disconnect"}) as stream:
+                    async for line in stream.aiter_lines():
+                        if "started" in line:
+                            break
+                assert await asyncio.to_thread(stopped.wait, 4)
+                for _ in range(40):
+                    if not grants:
+                        break
+                    await asyncio.sleep(0.05)
+                assert not grants
     finally:
         await manager.shutdown(timeout=5)

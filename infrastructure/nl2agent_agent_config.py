@@ -1,6 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Build the ephemeral NL2Agent configuration."""
 
 import json
@@ -10,7 +8,7 @@ from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.prompt.meta import compose_nl2agent_system
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from tool_collection.mcp.nl2agent_mcp_tools import (
+from infrastructure.nl2agent_tool_config import (
     MAX_BINDING_CANDIDATES,
     NL2A_WRAPPER_NAME,
     RECOMMEND_RESOURCES_NAME,
@@ -48,11 +46,11 @@ def build_nl2agent_system_prompt(
     )
 
 
-def create_nl2agent_agent_config(language: str) -> AgentConfig:
+def create_nl2agent_agent_config(language: str, tools: list[ToolConfig] | None = None) -> AgentConfig:
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
     system_prompt = build_nl2agent_system_prompt(language)
-    tools = create_nl2agent_mcp_tool_configs()
+    tools = create_nl2agent_mcp_tool_configs() if tools is None else list(tools)
     tools.append(
         ToolConfig(
             class_name=ParallelExecutorTool.__name__,

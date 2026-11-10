@@ -643,8 +643,8 @@
       "method": "POST",
       "path": "/api/agent/nl2agent/run",
       "transport": "http",
-      "target": "runtime",
-      "source": "backend/runtime/api/agent/execution.py",
+      "target": "management",
+      "source": "backend/management/api/agent/creator.py",
       "route_id": "route-fd91b9ac9324dc2e",
       "credential_kinds": [
         "session"

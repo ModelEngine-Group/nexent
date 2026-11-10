@@ -4,17 +4,16 @@
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import ValidationError
 
 from contracts.agentos import PreparedSkillCreatorRun
 from infrastructure.agentos_identity import ServicePrincipal
 from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo
-from nexent.core.agents.context import ContextItemInput, ContextItemType, ContextManagerConfig
+from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.context_input import build_authorized_context_input
 from nexent.core.agents.prompt.meta import compose_nl2skill
-from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from runtime.adapters.nexent.factory import build_run_info
+from runtime.agentos.creator_context import apply_creator_budget
 from runtime.agentos.prepared_attachments import materialize_evaluation_input
 from runtime.agentos.prepared_evaluation import _materialize_model
 
@@ -114,20 +113,7 @@ def prepare_skill_creator_run(payload: PreparedSkillCreatorRun, actor: ServicePr
         user_request=query, target_files=payload.target_files,
     )
     agent = create_nl2skill_agent_config(template.get("system_prompt", ""), model.cite_name)
-    try:
-        budget = (ContextBudgetSnapshot.model_validate(payload.context_budget_snapshot)
-                  if payload.context_budget_snapshot is not None else None)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}) from exc
-    agent.capacity_snapshot = payload.capacity_snapshot
-    agent.context_budget_snapshot = budget
-    agent.context_manager_config = ContextManagerConfig(
-        token_threshold=budget.compaction_trigger_threshold_tokens if budget else payload.input_budget,
-        context_window_tokens=payload.context_window_tokens,
-        effective_input_limit_tokens=budget.effective_input_limit_tokens if budget else 0,
-        compaction_trigger_threshold_tokens=budget.compaction_trigger_threshold_tokens if budget else 0,
-        compaction_target_tokens=budget.compaction_target_tokens if budget else 0,
-    )
+    budget = apply_creator_budget(payload, agent)
     info = build_run_info(
         language=payload.language, observer=_SkillCreatorObserver(lang=payload.language),
         query=template.get("user_prompt") or query, agent_config=agent,

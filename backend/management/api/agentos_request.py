@@ -13,7 +13,7 @@ Payload = TypeVar("Payload", bound=BaseModel)
 
 
 async def read_agentos_callback(
-    request: Request, operation: ManagementOperation, schema: type[Payload],
+    request: Request, operation: ManagementOperation, schema: type[Payload], *, max_bytes: int = 1024,
 ) -> tuple[Payload, ServicePrincipal]:
     authorization = request.headers.getlist("authorization")
     if len(authorization) != 1 or not authorization[0].startswith("Bearer "):
@@ -22,9 +22,9 @@ async def read_agentos_callback(
         raise HTTPException(status_code=400, detail={"code": "AGENTOS_INVALID_REQUEST"})
     buffer = bytearray()
     async for chunk in request.stream():
-        buffer.extend(chunk)
-        if len(buffer) > 1024:
+        if len(buffer) + len(chunk) > max_bytes:
             raise HTTPException(status_code=413, detail={"code": "AGENTOS_REQUEST_TOO_LARGE"})
+        buffer.extend(chunk)
     body = bytes(buffer)
     try:
         actor = verify_call(authorization[0].removeprefix("Bearer "), operation, body)

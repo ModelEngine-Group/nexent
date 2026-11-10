@@ -10,7 +10,7 @@ from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
     AgentResume, AgentStop, BackgroundAgentResult, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
-    EvaluationAgentRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
+    EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
 )
 from contracts.constants.environment import RUNTIME_SERVICE_URL
 from contracts.errors.exceptions import RunModelControlsError, RuntimeUpstreamError, ValidationError
@@ -31,8 +31,8 @@ async def forward_agent_run(
     return await _agentos_client().run(agent_request.model_dump(mode="json"), user_id, tenant_id)
 
 
-async def forward_skill_creator_run(
-    payload: PreparedSkillCreatorRun, user_id: str, tenant_id: str,
+async def forward_creator_run(
+    payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
 ) -> StreamingResponse:
     return await _agentos_client().run_ephemeral(payload, user_id, tenant_id)
 

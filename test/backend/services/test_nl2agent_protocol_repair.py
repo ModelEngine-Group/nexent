@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from infrastructure.nl2agent_agent_config import build_nl2agent_system_prompt
 from management.services.agent import nl2agent as service
 from tool_collection.mcp import nl2agent_mcp_tools as tools
 

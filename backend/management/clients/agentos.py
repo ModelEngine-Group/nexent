@@ -31,6 +31,7 @@ from contracts.agentos import (
     ModelOperation,
     ModelReference,
     ModelResult,
+    PreparedAgentCreatorRun,
     PreparedAgentRun,
     PreparedEphemeralRun,
     PreparedEvaluationRun,
@@ -93,7 +94,7 @@ class AgentOSClient:
         return self._validate_result(AgentMemoryReceipt, result)
 
     async def run_ephemeral(
-        self, payload: PreparedEphemeralRun | PreparedSkillCreatorRun, user_id: str, tenant_id: str,
+        self, payload: PreparedEphemeralRun | PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
     ) -> StreamingResponse:
         return await self._open_stream(AgentOperation.RUN_EPHEMERAL, payload, user_id, tenant_id)
 

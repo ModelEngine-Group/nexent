@@ -1,26 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.authentication import AuthenticatedIdentity
 import asyncio
 import logging
 from http import HTTPStatus
 from typing import Optional
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError as PayloadValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
-from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
-from contracts.agent import AgentRequest, NL2AgentRunRequest
+from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
-from permissions.depends import require
-from permissions.models import CurrentUser
 from management.services.agent.service import run_agent_background, run_agent_stream
-from contracts.errors.exceptions import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
-from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from management.services.permission.identity.session import get_current_user_info
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
@@ -34,7 +26,6 @@ from runtime.executions import agent_run_manager, stop_registered_run
 agent_runtime_router = APIRouter(prefix="/agent")
 
 
-require_agent_create_permission = require("agent:create")
 
 
 logger = logging.getLogger("agent_app")
@@ -321,97 +312,6 @@ async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, ten
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Agent run error.",
-        ) from exc
-
-
-@agent_runtime_router.post("/nl2agent/run")
-async def nl2agent_run_api(
-    nl2agent_request: NL2AgentRunRequest,
-    http_request: Request,
-    authorization: Optional[str] = Header(None),
-    _current_user: CurrentUser = Depends(require_agent_create_permission),
-):
-    """Run NL2Agent; Workbench turns opt into conversation persistence."""
-    if (
-        nl2agent_request.persist_history or nl2agent_request.workbench_config is not None
-    ) and not ENABLE_AGENT_WORKBENCH:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
-
-    try:
-        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
-        stream = await create_nl2agent_stream(
-            request=nl2agent_request,
-            tenant_id=tenant_id,
-            language=language,
-            identity=AuthenticatedIdentity(user_id, tenant_id),
-            authorization=authorization,
-        )
-        if nl2agent_request.persist_history:
-            conversation_id, assistant_index = prepare_creation_history(
-                conversation_id=nl2agent_request.conversation_id,
-                mode="agent_create",
-                query=nl2agent_request.query,
-                minio_files=nl2agent_request.minio_files,
-                workbench_config=nl2agent_request.workbench_config,
-                agent_id=nl2agent_request.agent_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                retry_user_message_id=nl2agent_request.retry_user_message_id,
-                retry_message_index=nl2agent_request.retry_message_index,
-            )
-            stream = persist_creation_stream(
-                stream,
-                conversation_id=conversation_id,
-                assistant_index=assistant_index,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={"conversation_id": str(conversation_id)},
-            )
-        return StreamingResponse(stream, media_type="text/event-stream")
-    except UnauthorizedError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED,
-            detail=str(exc),
-        ) from exc
-    except AgentDraftEditError as exc:
-        status_code = (
-            HTTPStatus.NOT_FOUND
-            if exc.code == "agent_not_found"
-            else HTTPStatus.FORBIDDEN
-            if exc.code in {"agent_deleted", "agent_read_only"}
-            else HTTPStatus.BAD_REQUEST
-        )
-        raise HTTPException(
-            status_code=status_code,
-            detail={"code": exc.code, "message": "Agent draft cannot be reused."},
-        ) from exc
-    except RunModelControlsError as exc:
-        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
-        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
-    except Nl2AgentDraftSaveError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"code": exc.code, "message": "Agent context is invalid."},
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail="Invalid Workbench creation session.",
-        ) from exc
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="Agent draft cannot be reused.",
-        ) from exc
-    except Exception as exc:
-        logger.exception("NL2Agent run error")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="NL2Agent run error.",
         ) from exc
 
 

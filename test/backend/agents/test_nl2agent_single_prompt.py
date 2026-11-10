@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from management.services.agent.creation import build_nl2agent_system_prompt
+from infrastructure.nl2agent_agent_config import build_nl2agent_system_prompt
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])

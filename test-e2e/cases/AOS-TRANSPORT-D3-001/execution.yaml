@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-45:
+  - test_nl2agent_run_and_signed_draft_callback
   AC-44:
   - test_nl2skill_creation_over_signed_agentos
   AC-43:

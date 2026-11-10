@@ -12,6 +12,7 @@ from starlette.responses import StreamingResponse
 from contracts.agent import NL2SkillRunRequest
 from management.api.skill import creation
 from management.services.skill import creation as skill_service
+from management.services.model import creator_snapshot
 
 _ACTOR = ("user-a", "tenant-a", "en")
 
@@ -22,13 +23,13 @@ async def _inline(_name, function, *args, lane, owner, **kwargs):
 
 @pytest.mark.asyncio
 async def test_snapshot_uses_scoped_model_reference_and_normalized_draft(mocker):
-    mocker.patch.object(skill_service, "preflight_turn_controls")
-    lookup = mocker.patch.object(skill_service, "get_model_by_model_id", return_value={
+    mocker.patch.object(creator_snapshot, "preflight_turn_controls")
+    lookup = mocker.patch.object(creator_snapshot, "get_model_by_model_id", return_value={
         "model_id": 21, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
         "display_name": "selected", "api_key": "private-model-key", "update_time": "v1",
     })
-    mocker.patch.object(skill_service, "_resolve_input_budget", return_value=(8192, {}, None))
-    mocker.patch.object(skill_service, "_resolve_context_budget", return_value=None)
+    mocker.patch.object(creator_snapshot, "_resolve_input_budget", return_value=(8192, {}, None))
+    mocker.patch.object(creator_snapshot, "_resolve_context_budget", return_value=None)
     payload = skill_service.prepare_nl2skill_snapshot(NL2SkillRunRequest(
         query='<use_script path="scripts/run.py" />', model_id=21, generation_config={"temperature": 0.3},
         draft_snapshot={"name": "draft", "files": [{"path": "scripts/run.py", "content": "print(1)"}]},
@@ -70,7 +71,7 @@ async def test_runtime_failure_closes_upstream_and_has_no_success_terminal(mocke
         finally:
             closed = True
 
-    remote = mocker.patch.object(skill_service, "forward_skill_creator_run", return_value=StreamingResponse(events()))
+    remote = mocker.patch.object(skill_service, "forward_creator_run", return_value=StreamingResponse(events()))
     snapshot = SimpleNamespace(target_files=[])
     stream = skill_service.create_nl2skill_stream(snapshot, "user-a", "tenant-a")
     remote.assert_not_awaited()
