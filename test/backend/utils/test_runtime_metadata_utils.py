@@ -177,3 +177,25 @@ def test_ut_be_pass_005_accepts_values_at_the_size_limit():
     value = {"_mcp_headers": {"Cookie": "a" * MAX_MCP_HEADER_VALUE_BYTES}}
 
     assert validate_runtime_metadata(value) is value
+
+
+def test_ut_be_pass_004_blank_header_key_is_never_allowed():
+    # The public validator rejects blank keys earlier; the predicate must stay
+    # safe on its own for any future caller.
+    from infrastructure.serialization import runtime_metadata as module
+
+    assert module._is_passthrough_header_allowed("   ") is False
+
+
+def test_validate_runtime_metadata_wraps_serialization_failures(monkeypatch):
+    from infrastructure.serialization import runtime_metadata as module
+
+    def _raise_type_error(_value):
+        raise TypeError("not serializable")
+
+    monkeypatch.setattr(module, "runtime_metadata_size_bytes", _raise_type_error)
+
+    with pytest.raises(RuntimeMetadataValidationError) as exc_info:
+        validate_runtime_metadata({"project_id": "P001"})
+
+    assert exc_info.value.code == RuntimeMetadataValidationCode.INVALID_METADATA_TYPE

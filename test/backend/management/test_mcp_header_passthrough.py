@@ -366,3 +366,37 @@ def test_ut_be_pass_012_switch_off_drops_real_placeholder_but_keeps_escapes():
     assert resolved == {"X-Literal": "${Cookie}", "X-Plain": "plain"}
     assert names == []
     assert unresolved == []
+
+
+# ---------------------------------------------------------------------------
+# UT-BE-PASS-013 — defensive routing / shape-preservation branches
+# ---------------------------------------------------------------------------
+
+def test_ut_be_pass_013_route_without_mode_returns_empty():
+    # Callers guard on mode, but the helper must stay safe when it is None.
+    assert route_passthrough_headers(None, {"cookie": "sid=1"}, "http://a/mcp") == {}
+
+
+def test_ut_be_pass_013_switch_off_by_server_logs_routed_keys(agent_switch, caplog):
+    caplog.set_level(logging.WARNING, logger="northbound-mcp-passthrough")
+    agent_switch["record"] = _agent_record(allow_mcp_header_passthrough=False)
+    hosts = [{"url": "http://a/mcp", "headers": {}}]
+
+    _apply(hosts, {"_mcp_headers_by_server": {"http://a/mcp": {"Cookie": "sid=raw"}}})
+
+    assert hosts[0]["headers"] == {}
+    text = caplog.text
+    assert "reason=agent_switch_off" in text
+    assert "mode=by_server" in text
+    assert "sid=raw" not in text
+
+
+def test_ut_be_pass_013_by_server_leaves_unrouted_server_headerless(agent_switch):
+    # A server without a routed block must keep its original shape (no headers
+    # key at all), not grow an empty dict.
+    hosts = [{"url": "http://a/mcp", "headers": {}}, {"url": "http://b/mcp"}]
+
+    _apply(hosts, {"_mcp_headers_by_server": {"http://a/mcp": {"Cookie": "sid=a"}}})
+
+    assert hosts[0]["headers"] == {"cookie": "sid=a"}
+    assert "headers" not in hosts[1]
