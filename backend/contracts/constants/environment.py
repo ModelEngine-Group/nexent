@@ -445,6 +445,12 @@ MODEL_CATALOG_JSON_PATH = os.getenv('MODEL_CATALOG_JSON_PATH', str(_CONFIG_DIREC
 MODELS_DEV_CATALOG_JSON_PATH = os.getenv('MODELS_DEV_CATALOG_JSON_PATH', str(_CONFIG_DIRECTORY / 'models_dev_catalog.json'))
 # models.dev capability catalog downloaded during the backend image build.
 
+# Multi-model task routing. Opt-in: when False, model selection keeps the
+# pre-routing behavior exactly (first available configured model).
+MODEL_ROUTING_ENABLED = os.getenv('MODEL_ROUTING_ENABLED', 'false').lower() in ('true', '1', 'yes', 'on')
+# Routing vocabulary/config file path (tier keywords, task tags, risk terms).
+MODEL_ROUTING_RULES_JSON_PATH = os.getenv('MODEL_ROUTING_RULES_JSON_PATH', str(_CONFIG_DIRECTORY / 'model_routing_rules.json'))
+
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv('MEMORY_PROVIDER_PLUGINS_DIR', '')
 
