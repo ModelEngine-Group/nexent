@@ -318,6 +318,7 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch.object(compiler, "resolve_sub_agent_version_no", return_value=5)
     mocker.patch.object(compiler, "_get_external_a2a_agents", return_value=[])
     compile_tools = mocker.patch.object(compiler, "create_tool_config_list", return_value=[])
+    compile_builtin_tools = mocker.patch.object(compiler, "_get_skill_script_tools", wraps=compiler._get_skill_script_tools)
     mocker.patch.object(compiler, "get_model_by_model_id", return_value=record)
     mocker.patch.object(compiler, "_resolve_context_budget", return_value=None)
     mocker.patch.object(compiler.tenant_config_manager, "get_context_policy", return_value=None)
@@ -327,6 +328,8 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
     mocker.patch("management.services.skill.service.SkillService.get_enabled_skills_for_agent", return_value=[])
     mocker.patch.object(compiler, "RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS", 37)
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
+    allocate_workspace = mocker.patch.object(run, "_build_run_workspace", side_effect=AssertionError("Runtime owns the workspace"))
+    stage_skills = mocker.patch.object(run, "_materialize_runtime_skill_snapshot", side_effect=AssertionError("Runtime stages Skill files"))
     mocker.patch.object(run, "create_model_config_list", return_value=[model])
     if persisted_body:
         mocker.patch.object(run, "get_model_by_model_id", return_value=record)
@@ -562,6 +565,10 @@ async def test_production_compiler_routes_root_and_child_parallel_executor_to_ru
         info = prepared_evaluation.prepare_evaluation_run(payload, ServicePrincipal(user, tenant))
 
     assert [call.kwargs["portable_evaluation"] for call in compile_tools.await_args_list] == [True, True]
+    allocate_workspace.assert_not_called()
+    stage_skills.assert_not_called()
+    assert compile_builtin_tools.call_count == 2
+    assert all(call.kwargs["runtime_file_context"] is None for call in compile_builtin_tools.call_args_list)
     assert prepared.resource.subagents[0].version_no == 5
     assert info.agent_config.enable_planning is planning
     if planning:

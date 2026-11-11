@@ -23,7 +23,6 @@ from infrastructure.agent_model_overrides import apply_turn_model_generation, me
 from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
-from infrastructure.object_storage.client import minio_client
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.agent.preparation.inputs import (
@@ -161,14 +160,7 @@ async def create_agent_run_info(
         validate_selected_record(
             get_model_by_model_id(override_model_id, tenant_id=tenant_id)
         )
-    workspace_run_id = uuid.uuid4().hex
-    workspace_path = _build_run_workspace(user_id, workspace_run_id)
-    if runtime_skill_snapshot is not None and not export_resources:
-        runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
-            runtime_skill_snapshot,
-            workspace_path,
-            tenant_id,
-        )
+    runtime_file_context = None
     if export_resources:
         from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 
@@ -177,18 +169,24 @@ async def create_agent_run_info(
         except (TypeError, ValueError):
             return None
     else:
+        from infrastructure.object_storage.client import minio_client
+
+        workspace_run_id = uuid.uuid4().hex
+        workspace_path = _build_run_workspace(user_id, workspace_run_id)
+        if runtime_skill_snapshot is not None:
+            runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
+                runtime_skill_snapshot, workspace_path, tenant_id,
+            )
         effective_minio_files = _collect_run_minio_files(minio_files, history)
         _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
-    runtime_file_context = {
-        "workspace_path": workspace_path,
-        "minio_client": minio_client,
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "run_id": workspace_run_id,
-        "validate_url_access": lambda urls: validate_urls_access(
-            urls, user_id, tenant_id
-        ),
-    }
+        runtime_file_context = {
+            "workspace_path": workspace_path,
+            "minio_client": minio_client,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "run_id": workspace_run_id,
+            "validate_url_access": lambda urls: validate_urls_access(urls, user_id, tenant_id),
+        }
 
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
