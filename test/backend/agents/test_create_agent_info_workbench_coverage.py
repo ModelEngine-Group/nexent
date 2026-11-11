@@ -15,13 +15,12 @@ WorkbenchError = legacy.WorkbenchError
 
 
 import management.services.agent.preparation.compiler as preparation_compiler
-import management.services.agent.preparation.inputs as input_preparation
 import management.services.agent.resource_resolver as resource_resolver
 import management.services.agent.preparation.run as run_preparation
 import management.services.agent.preparation.tools as tool_preparation
 
 def test_materialize_runtime_skill_snapshot_writes_frozen_files(tmp_path):
-    result = input_preparation._materialize_runtime_skill_snapshot(
+    result = runtime_factory.materialize_legacy_skill_snapshot(
         [
             {
                 "name": "demo",
@@ -56,7 +55,7 @@ def test_materialize_runtime_skill_snapshot_rejects_unsafe_or_incomplete_input(
     tmp_path, tenant_id, snapshot
 ):
     with pytest.raises(WorkbenchError, match="RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE"):
-        input_preparation._materialize_runtime_skill_snapshot(
+        runtime_factory.materialize_legacy_skill_snapshot(
             snapshot, str(tmp_path), tenant_id
         )
 
@@ -71,7 +70,7 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
     monkeypatch.setattr(run_preparation, "get_model_by_model_id", lambda *a, **k: {"model_type": "llm", "connect_status": "available"})
     agent_config.sandbox_policy = None
     create_config = AsyncMock(return_value=agent_config)
-    monkeypatch.setattr(run_preparation, "_materialize_runtime_skill_snapshot", materialize)
+    monkeypatch.setattr(runtime_factory, "materialize_legacy_skill_snapshot", materialize)
     monkeypatch.setattr(run_preparation, "_validate_run_minio_files", MagicMock())
     monkeypatch.setattr(
         run_preparation,

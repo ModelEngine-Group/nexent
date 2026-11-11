@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from management.services.agent.preparation.inputs import _materialize_runtime_skill_snapshot
+from runtime.adapters.nexent.legacy_workspace import materialize_legacy_skill_snapshot
 from management.services.agent.preparation.run import apply_root_generation_overlay
 from contracts.agent import WorkbenchGenerationConfig
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
@@ -157,7 +157,7 @@ def test_ut_be_wb_011_materializes_an_immutable_run_skill_snapshot(tmp_path):
         ],
     }]
 
-    effective = _materialize_runtime_skill_snapshot(
+    effective = materialize_legacy_skill_snapshot(
         source,
         str(tmp_path / "run"),
         "tenant",

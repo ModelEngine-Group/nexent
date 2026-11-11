@@ -4,8 +4,7 @@
 
 import logging
 import uuid
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol
 
 from contracts.agentos import PreparedConversationScope, TurnModelGeneration
 from contracts.constants.environment import TOKEN
@@ -18,10 +17,8 @@ from management.db.agent.version import query_current_version_no, update_agent_s
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
 from management.services.agent.preparation.inputs import (
-    _build_run_workspace,
     _collect_run_minio_files,
     _convert_history_with_minio_files,
-    _materialize_runtime_skill_snapshot,
     _validate_run_minio_files,
     join_minio_file_description_to_query,
 )
@@ -42,7 +39,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
-LegacyRunMaterializer = Callable[..., "AgentRunInfo"]
+class LegacyRunMaterializer(Protocol):
+    def prepare_workspace(
+        self, user_id: str, tenant_id: str, run_id: str, skill_snapshot: list[dict[str, Any]] | None,
+    ) -> tuple[str, list[dict[str, Any]] | None]: ...
+
+    def __call__(self, **values: Any) -> "AgentRunInfo": ...
 
 
 def _ensure_agent_reasoning_snapshot(
@@ -164,11 +166,9 @@ async def create_agent_run_info(
         from infrastructure.object_storage.client import minio_client
 
         workspace_run_id = uuid.uuid4().hex
-        workspace_path = _build_run_workspace(user_id, workspace_run_id)
-        if runtime_skill_snapshot is not None:
-            runtime_skill_snapshot = _materialize_runtime_skill_snapshot(
-                runtime_skill_snapshot, workspace_path, tenant_id,
-            )
+        workspace_path, runtime_skill_snapshot = legacy_materializer.prepare_workspace(
+            user_id, tenant_id, workspace_run_id, runtime_skill_snapshot,
+        )
         effective_minio_files = _collect_run_minio_files(minio_files, history)
         _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
         runtime_file_context = {

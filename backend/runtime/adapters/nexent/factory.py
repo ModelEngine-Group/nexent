@@ -1,15 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Construct SDK run objects without business lookups or deployment configuration."""
+"""Construct SDK run objects from prepared values and local execution settings."""
 
 import threading
 from pathlib import Path
+from typing import Any
 
 from contracts.constants import environment
 from infrastructure.redis.client import get_redis_client
 from infrastructure.sandbox_deployment import get_sandbox_minio_client
+from infrastructure.workspace_paths import create_run_workspace
 from nexent.core.agents.agent_model import AgentRunInfo
 from nexent.core.utils.observer import MessageObserver
+from runtime.adapters.nexent.legacy_workspace import materialize_legacy_skill_snapshot
 
 
 def build_run_info(*, language="zh", **prepared_values) -> AgentRunInfo:
@@ -21,23 +24,37 @@ def build_run_info(*, language="zh", **prepared_values) -> AgentRunInfo:
     return AgentRunInfo(**prepared_values)
 
 
-def materialize_legacy_run(*, agent_config, workspace_path, **values) -> AgentRunInfo:
-    """Resolve Runtime deployment settings for the in-process compatibility path."""
-    from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
+class LegacyRunFactory:
+    """Prepare and materialize a compatibility run in the Runtime process."""
 
-    return materialize_run(
-        agent_config=agent_config,
-        workspace_path=workspace_path,
-        workspace_root=environment.AGENT_WORKSPACE_ROOT,
-        mcp_request_timeout_seconds=environment.MCP_REQUEST_TIMEOUT_SECONDS,
-        mcp_tool_timeout_seconds=environment.RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-        mcp_close_timeout_seconds=environment.RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-        tool_fastpath_enabled=environment.NEXENT_TOOL_FASTPATH_ENABLED,
-        tool_fastpath_allowed_tools=list(environment.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
-        redis_client=get_redis_client(),
-        sandbox_config=resolve_deployed_sandbox(getattr(agent_config, "sandbox_policy", None)),
-        **values,
-    )
+    def prepare_workspace(
+        self, user_id: str, tenant_id: str, run_id: str, skill_snapshot: list[dict[str, Any]] | None,
+    ) -> tuple[str, list[dict[str, Any]] | None]:
+        workspace = create_run_workspace(user_id, run_id, workspace_root=environment.AGENT_WORKSPACE_ROOT)
+        if skill_snapshot is not None:
+            skill_snapshot = materialize_legacy_skill_snapshot(skill_snapshot, workspace, tenant_id)
+        return workspace, skill_snapshot
+
+    def __call__(self, *, agent_config, workspace_path, **values) -> AgentRunInfo:
+        """Resolve Runtime deployment settings for the in-process compatibility path."""
+        from runtime.adapters.nexent.sandbox import resolve_deployed_sandbox
+
+        return materialize_run(
+            agent_config=agent_config,
+            workspace_path=workspace_path,
+            workspace_root=environment.AGENT_WORKSPACE_ROOT,
+            mcp_request_timeout_seconds=environment.MCP_REQUEST_TIMEOUT_SECONDS,
+            mcp_tool_timeout_seconds=environment.RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+            mcp_close_timeout_seconds=environment.RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+            tool_fastpath_enabled=environment.NEXENT_TOOL_FASTPATH_ENABLED,
+            tool_fastpath_allowed_tools=list(environment.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
+            redis_client=get_redis_client(),
+            sandbox_config=resolve_deployed_sandbox(getattr(agent_config, "sandbox_policy", None)),
+            **values,
+        )
+
+
+materialize_legacy_run = LegacyRunFactory()
 
 
 def materialize_run(*, agent_config, workspace_path, workspace_root, sandbox_config, **values) -> AgentRunInfo:

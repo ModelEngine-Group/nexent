@@ -577,7 +577,7 @@ setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
 # Import the canonical preparation owners using the isolated collaborators above.
 import management.services.agent.preparation.compiler as preparation_compiler
-import management.services.agent.preparation.inputs as input_preparation
+from runtime.adapters.nexent import factory as runtime_factory
 import management.services.agent.preparation.resources as resource_preparation
 import management.services.agent.preparation.run as run_preparation
 import management.services.agent.preparation.tools as tool_preparation
@@ -631,12 +631,12 @@ def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        input_preparation,
+        runtime_factory.environment,
         "AGENT_WORKSPACE_ROOT",
         str(tmp_path),
     )
 
-    workspace = input_preparation._build_run_workspace("user-1", "run-1")
+    workspace, _ = runtime_factory.materialize_legacy_run.prepare_workspace("user-1", "tenant-1", "run-1", None)
 
     assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
 
