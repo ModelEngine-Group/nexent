@@ -3,8 +3,6 @@
 
 import logging
 
-from pydantic import ValidationError as SchemaValidationError
-
 from contracts.agentos import FileToolDescription, KnowledgeSearchBinding, KnowledgeSearchIndexBinding, RevisionedModelBinding
 from contracts.errors.exceptions import ValidationError
 from infrastructure.agent_model_config import model_record_revision
@@ -54,9 +52,11 @@ def prepare_knowledge_search(tool, user_id: str, tenant_id: str, document_paths)
             display_name_to_index={},
             document_paths=document_paths,
             usage=tool.usage,
-            **{name: params[name] for name in ("top_k", "search_mode", "rerank", "rerank_model_name") if name in params},
+            # Match the SDK constructor before the strict wire contract sees the value.
+            top_k=max(1, min(int(params.get("top_k") or 3), 100)),
+            **{name: params[name] for name in ("search_mode", "rerank", "rerank_model_name") if name in params},
         )
-    except SchemaValidationError:
+    except (ValueError, TypeError, OverflowError):
         return False
 
     rows = read_knowledge_search_records(tenant_id, binding.index_names)

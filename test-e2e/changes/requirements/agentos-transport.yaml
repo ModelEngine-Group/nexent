@@ -23,6 +23,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Knowledge search preserves legacy SDK top_k conversion for null, numeric strings, floats and booleans before strict AgentOS serialization without constructing legacy clients; invalid SDK values retain their error behavior.
     - Internal new conversations admit and confirm only the assistant at the original history-derived index; restart recovery retains the omission marker and rejects a competing message before writing.
     - Assistant-only Memory completion retains the original query in its owned admission record after projection closes and checks run, assistant, Agent, tenant and lease before extraction.
     - Service credential binds the exact operation and payload and expires.
@@ -118,6 +119,7 @@ change:
     - test/backend/app/test_agentos_prepared_evaluation.py
     - test/backend/app/test_agentos_evaluation_compiler.py
     - test/backend/app/test_agentos_prepared_knowledge.py
+    - test/backend/app/test_agentos_knowledge_legacy_parameters.py
     - test/backend/app/test_agentos_prepared_analysis.py
     - test/backend/app/test_agentos_prepared_local_tool.py
     - test/backend/app/test_agentos_prepared_independent_aidp.py

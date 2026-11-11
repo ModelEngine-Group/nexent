@@ -774,7 +774,15 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     ]
 
 
-async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("top_k", [None, "7", "0"])
+@pytest.mark.asyncio
+async def test_knowledge_legacy_top_k_over_signed_agentos(monkeypatch, tmp_path, top_k):
+    await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, legacy_top_k=top_k)
+
+
+async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *, legacy_top_k=4):
     from types import SimpleNamespace
     from infrastructure import agent_attachments
     from infrastructure.object_storage.client import minio_client
@@ -979,7 +987,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
     monkeypatch.setattr(prepared_knowledge, "create_elasticsearch_core", lambda **kwargs: SimpleNamespace(accurate_search=accurate_search))
     kb_tool = ToolConfig(
         class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
-        params={"index_names": ["kb-open", "kb-blocked"], "search_mode": "accurate", "top_k": 4},
+        params={"index_names": ["kb-open", "kb-blocked"], "search_mode": "accurate", "top_k": legacy_top_k},
     )
     assert knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
 
@@ -1043,7 +1051,28 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path):
         result = knowledge.forward("facts", ["Blocked"])
         assert "authorized-document" in result and "secret-document" not in result
         assert "no read permission" in result
-        assert knowledge_queries == [{"index_names": ["kb-open"], "query_text": "facts", "top_k": 4}]
+        from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
+
+        original_queries = []
+
+        def original_search(**kwargs):
+            original_queries.append(kwargs)
+            return [
+                {"index": "kb-open", "score": 1, "document": {"content": content, "path_or_url": path}}
+                for content, path in [("authorized-document", "reports/allowed.txt"), ("secret-document", "reports/hidden.txt")]
+            ]
+
+        original = KnowledgeBaseSearchTool(
+            top_k=legacy_top_k, index_names=["kb-open", "kb-blocked"], search_mode="accurate",
+            observer=None, rerank=False, rerank_model_name="", embedding_model=None, rerank_model=None,
+            allowed_index_names=["kb-open"], document_paths=["reports/allowed.txt"],
+            display_name_to_index_map={"Open": "kb-open", "Blocked": "kb-blocked"},
+            vdb_core=SimpleNamespace(accurate_search=original_search),
+        )
+        assert original.forward("facts", ["Blocked"]) == result
+        assert knowledge_queries == original_queries == [{
+            "index_names": ["kb-open"], "query_text": "facts", "top_k": original.top_k,
+        }]
         image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["analyze_image"])
         assert image.selected_model_id == 93 and image.vlm_model is media_adapter
         skill_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["dify_search"])

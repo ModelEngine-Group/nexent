@@ -154,7 +154,7 @@ async def test_cancellation_keeps_run_registered_until_worker_exits(mocker):
     mocker.patch.object(prepared_evaluation, "run_blocking", return_value=info)
     registry = LocalExecutionRegistry()
     mocker.patch.object(prepared_evaluation, "agent_run_manager", registry)
-    unregister = mocker.spy(registry, "unregister_agent_run")
+    unregister = mocker.patch.object(registry, "unregister_agent_run", wraps=registry.unregister_agent_run)
     mocker.patch.object(prepared_evaluation, "collect_observer_output", side_effect=asyncio.CancelledError)
 
     with pytest.raises(asyncio.CancelledError):

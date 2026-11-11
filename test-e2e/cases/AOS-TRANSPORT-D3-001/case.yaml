@@ -189,6 +189,9 @@ case:
   - order: 54
     action: Send an original non-debug internal request without a conversation through signed Management and Runtime endpoints with zero and four prior user turns.
     expected: Management admits a new conversation with an assistant-only marker at the original history-derived position, executes standard AgentOS once and projects its answer. It preserves the created event, hidden journal controls and original default language; a foreign tenant cannot stage or execute.
+  - order: 55
+    action: Export knowledge search with null and string top_k values, cross signed AgentOS and execute the actual SDK tool alongside the legacy effective SDK configuration.
+    expected: Both SDK tools issue the same authorized vector query and return the same document-filtered result. The portable compiler retains the original valid-value conversion, keeps credentials local and cannot expand knowledge permissions.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -245,6 +248,7 @@ case:
   - Raw generation settings export without legacy execution and retain original root/child provider request bodies, including the shared model behavior of legacy reasoning-only requests.
   - Old automation records recover the existing source before standard AgentOS execution without appending a user, overwriting a competing source or finalizing the caller's schedule.
   - Original internal new conversations keep their assistant-only persistence and history-derived index while executing through standard AgentOS.
+  - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -582,4 +586,9 @@ case:
     description: Internal new conversations stage assistant-only history and execute standard AgentOS under the original scope, event and index semantics without exposing a new public user-save switch.
     steps: [54]
     expected_results: [55]
+    forbidden_side_effects: [1, 2]
+  - id: AC-64
+    description: SDK-valid legacy knowledge top_k values export through AgentOS and retain the actual query and result while preserving knowledge authorization.
+    steps: [55]
+    expected_results: [56]
     forbidden_side_effects: [1, 2]
