@@ -120,6 +120,24 @@ COPY backend/data_process/app.py /opt/backend/data_process/
 COPY backend/data_process/services/conversion.py /opt/backend/data_process/services/
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 
+# Runtime target excludes Management business code.
+FROM backend-common AS runtime
+
+COPY backend/__init__.py /opt/backend/
+COPY backend/runtime /opt/backend/runtime
+COPY backend/contracts /opt/backend/contracts
+COPY backend/configs /opt/backend/configs
+COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/
+COPY backend/permissions/__init__.py backend/permissions/dac.py backend/permissions/models.py /opt/backend/permissions/
+COPY backend/ext_components /opt/backend/ext_components
+COPY backend/adapters /opt/backend/adapters
+COPY backend/http/runtime_service.py backend/http/client.py backend/http/logging.py /opt/backend/http/
+COPY backend/http/server /opt/backend/http/server
+COPY backend/gateway/__init__.py /opt/backend/gateway/
+COPY backend/gateway/downstream /opt/backend/gateway/downstream
+COPY backend/gateway/security/__init__.py backend/gateway/security/context.py backend/gateway/security/identity.py backend/gateway/security/policy.py backend/gateway/security/service_tokens.py backend/gateway/security/token_codec.py /opt/backend/gateway/security/
+COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
+
 # Keep the existing full backend as the default build target.
 FROM backend-common AS final
 COPY backend /opt/backend

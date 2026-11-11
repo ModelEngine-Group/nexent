@@ -44,7 +44,7 @@ logger = logging.getLogger("runtime_app")
 
 
 async def recover_runtime_state():
-    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
+    from runtime.workspace_cleanup import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
         "control-io",
