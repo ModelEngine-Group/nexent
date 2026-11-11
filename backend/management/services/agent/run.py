@@ -22,11 +22,11 @@ from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import AgentRunAlreadyActiveError, MemoryPreparationException
 from contracts.agent import AgentRequest
+from contracts.agentos import AGENTOS_PREPARATION_STOP
 from management.services.agent.context import (
     build_authorized_context_input,
 )
 from management.services.agent.execution import (
-    AGENTOS_PREPARATION_STOP,
     _agent_run_identifier,
     _cancel_preparation_on_agentos_stop,
     _cancel_task_on_runtime_signal,

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,15 @@ from contracts.constants.constants import STREAM_STATUS_EVENT
 if TYPE_CHECKING:
     from infrastructure.agent_stream_channels import StreamingChannelManager
     from infrastructure.redis.run_state import RuntimeStateService
+
+
+async def cleanup_channel_later(
+    manager: StreamingChannelManager, conversation_id: int, user_id: str, delay: float = 5.0, expected_channel=None,
+) -> None:
+    """Leave the terminal channel available while subscribers receive the final frames."""
+    await asyncio.sleep(delay)
+    remove_options = {} if expected_channel is None else {"expected_channel": expected_channel}
+    await manager.remove_channel(conversation_id, user_id, **remove_options)
 
 
 def replay_legacy_stream(

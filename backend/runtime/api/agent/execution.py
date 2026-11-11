@@ -26,6 +26,7 @@ from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execut
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.legacy_admission import admit_legacy_execution
+from runtime.agentos.legacy_producer import consume_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
 from runtime.executions import AgentRunManager, agent_run_manager, stop_registered_run
 from runtime.thread_management import (
@@ -49,6 +50,7 @@ logger = logging.getLogger("agent_app")
 class LegacyExecutionHost:
     registry: AgentRunManager
     admit: Callable
+    consume_producer: Callable
     unregister: Callable[..., bool]
     producer_tasks: set[asyncio.Task]
     cleanup_tasks: set[asyncio.Task]
@@ -59,6 +61,7 @@ class LegacyExecutionHost:
 _legacy_execution_host = LegacyExecutionHost(
     registry=agent_run_manager,
     admit=partial(admit_legacy_execution, agent_run_manager),
+    consume_producer=consume_legacy_producer,
     unregister=partial(unregister_after_worker_exit, agent_run_manager),
     producer_tasks=agent_stream_producer_tasks,
     cleanup_tasks=channel_cleanup_tasks,

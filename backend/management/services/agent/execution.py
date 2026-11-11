@@ -25,6 +25,7 @@ from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.constants.environment import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
 from contracts.constants.constants import STREAM_STATUS_EVENT
 from contracts.agent import AgentRequest
+from contracts.agentos import AGENTOS_PREPARATION_STOP
 from contracts.conversation import MessageRequest
 from management.db.conversation.repository import get_units_by_message
 from management.services.agent.artifacts import (
@@ -58,9 +59,6 @@ from nexent.core.utils.observer import (
 from nexent.memory.models import (
     MemoryIngestUnit,
 )
-from nexent.monitor import (
-    agent_monitoring_context,
-)
 from management.services.conversation.service import (
     persist_assistant_run_batch,
     save_message,
@@ -73,7 +71,8 @@ from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
-from infrastructure.rdb.agent_execution import RunIdentity, finish_execution, stop_requested
+from infrastructure.legacy_stream_replay import cleanup_channel_later
+from infrastructure.rdb.agent_execution import RunIdentity, stop_requested
 from infrastructure.redis.agent_events import RunJournal
 from infrastructure.redis.run_state import (
     runtime_state_service,
@@ -86,7 +85,6 @@ from management.services.configuration.tenant.settings import (
 )
 
 logger = logging.getLogger(__name__)
-AGENTOS_PREPARATION_STOP = "agentos preparation stop"
 
 
 async def _cleanup_channel_later(
@@ -99,120 +97,7 @@ async def _cleanup_channel_later(
     Remove the streaming channel after a delay to allow subscribers to finish.
     This gives reconnected clients time to receive the final chunks before cleanup.
     """
-    await asyncio.sleep(delay)
-    remove_kwargs = {}
-    if expected_channel is not None:
-        remove_kwargs["expected_channel"] = expected_channel
-    await streaming_channel_manager.remove_channel(
-        conversation_id,
-        user_id,
-        **remove_kwargs,
-    )
-
-
-async def _consume_agent_stream_producer(
-    stream_gen,
-    channel,
-    agent_metadata,
-    conversation_id: int,
-    user_id: str,
-    *,
-    execution_host=None,
-) -> None:
-    """Consume a non-debug agent stream independently from its SSE subscriber."""
-    host = require_legacy_execution_host(execution_host)
-    fallback_status = "failed"
-    producer_error = False
-    try:
-        with agent_monitoring_context(agent_metadata):
-            async for _ in stream_gen:
-                pass
-    except asyncio.CancelledError as exc:
-        if exc.args == (AGENTOS_PREPARATION_STOP,):
-            fallback_status = "stopped"
-        try:
-            await stream_gen.aclose()
-        except (AttributeError, RuntimeError):
-            logger.debug(
-                "Agent stream generator was already closing conversation=%s",
-                conversation_id,
-            )
-        raise
-    except Exception as stream_exc:
-        producer_error = True
-        logger.error(
-            "Agent stream response error: %r",
-            stream_exc,
-            exc_info=True,
-        )
-        if not channel.is_completed:
-            try:
-                await channel.publish(_safe_agent_stream_error_chunk(stream_exc))
-            except Exception:
-                logger.exception(
-                    "Failed to publish producer error conversation=%s",
-                    conversation_id,
-                )
-    finally:
-        # _stream_agent_chunks normally owns persistence and terminal state.
-        # This fallback covers failures before that generator is entered.
-        if not channel.is_completed:
-            if fallback_status == "failed" and not producer_error:
-                logger.error(
-                    "Agent stream producer exited without terminal state conversation=%s",
-                    conversation_id,
-                )
-            try:
-                run_info = host.registry.get_agent_run_info(
-                    conversation_id, user_id
-                )
-                host.unregister(
-                    conversation_id,
-                    user_id,
-                    status=fallback_status,
-                    agent_run_info=run_info,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to unregister incomplete producer conversation=%s",
-                    conversation_id,
-                )
-            try:
-                await streaming_channel_manager.complete_channel(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    status=fallback_status,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to complete producer channel conversation=%s",
-                    conversation_id,
-                )
-            cleanup_task = asyncio.create_task(
-                _cleanup_channel_later(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    expected_channel=channel,
-                )
-            )
-            host.cleanup_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(host.cleanup_tasks.discard)
-        identity = getattr(channel, "execution_identity", None)
-        if isinstance(identity, RunIdentity):
-            await run_blocking(
-                "agentos-execution-finish", finish_execution, identity, channel.completion_status or fallback_status,
-                lane="control-io", owner="runtime",
-            )
-        logger.info(
-            "Agent stream cleanup conversation=%s status=%s active_runs=%s "
-            "active_channels=%s active_producers=%s replay_bytes=%s",
-            conversation_id,
-            "failed" if not channel.is_completed else channel.completion_status,
-            host.registry.get_active_run_count(),
-            streaming_channel_manager.get_active_channel_count(),
-            len(host.producer_tasks),
-            streaming_channel_manager.get_retained_history_bytes(),
-        )
+    await cleanup_channel_later(streaming_channel_manager, conversation_id, user_id, delay, expected_channel)
 
 
 def _run_journal(channel) -> RunIdentity | RunJournal | None:

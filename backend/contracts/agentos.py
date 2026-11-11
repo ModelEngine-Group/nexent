@@ -10,6 +10,7 @@ from contracts.model import WorkbenchGenerationConfig
 from contracts.runtime_metadata import validate_runtime_metadata
 
 NAMESPACE = "/internal/agentos/"
+AGENTOS_PREPARATION_STOP = "agentos preparation stop"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 REPLAY_COUNT_HEADER = "X-AgentOS-Replay-Count"
 PRINCIPAL_KEY = "nexent.agentos.principal"

@@ -109,6 +109,7 @@ def pass_through_decorator(*args, **kwargs):
 
 
 monitoring_stub = types.ModuleType("monitor")
+monitoring_stub.agent_monitoring_context = MagicMock()
 monitoring_manager_mock = MagicMock()
 monitoring_manager_mock.monitor_endpoint = pass_through_decorator
 monitoring_manager_mock.monitor_llm_call = pass_through_decorator

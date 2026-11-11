@@ -54,7 +54,6 @@ from management.services.agent.context import (
 )
 from management.services.agent.execution import (
     _agent_run_identifier,
-    _consume_agent_stream_producer,
 )
 from management.services.agent.preparation.run import LegacyRunMaterializer
 from management.services.agent.run import (
@@ -896,13 +895,14 @@ async def run_agent_stream(
         # Start independently of response-body iteration so clients may close
         # the connection as soon as they receive the conversation ID header.
         producer_task = asyncio.create_task(
-            _consume_agent_stream_producer(
+            host.consume_producer(
                 stream_gen=stream_gen,
                 channel=channel,
                 agent_metadata=agent_metadata,
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
                 execution_host=host,
+                render_error=_safe_agent_stream_error_chunk,
             )
         )
         host.producer_tasks.add(producer_task)

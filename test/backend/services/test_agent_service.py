@@ -449,9 +449,16 @@ async def _admit_legacy_run(*args):
     return await admit_legacy_execution(legacy_execution_host.registry, *args)
 
 
+async def _consume_legacy_producer(**kwargs):
+    from runtime.agentos.legacy_producer import consume_legacy_producer
+
+    await consume_legacy_producer(**kwargs)
+
+
 legacy_execution_host = types.SimpleNamespace(
     registry=_agent_run_manager_mock,
     admit=_admit_legacy_run,
+    consume_producer=_consume_legacy_producer,
     unregister=_unregister_legacy_run,
     producer_tasks=_thread_lifecycle_module.agent_stream_producer_tasks,
     cleanup_tasks=_thread_lifecycle_module.channel_cleanup_tasks,
@@ -5298,25 +5305,25 @@ async def test_cancelled_producer_explicitly_closes_stream_generator(monkeypatch
     async def complete_channel(*args, **kwargs):
         channel.complete(kwargs.get("status", "failed"))
 
+    from runtime.agentos import legacy_producer
+
+    monkeypatch.setattr(legacy_producer, "agent_monitoring_context", monitoring_context)
     monkeypatch.setattr(
-        agent_execution,
-        "agent_monitoring_context",
-        monitoring_context,
-    )
-    monkeypatch.setattr(
-        agent_execution.streaming_channel_manager,
+        legacy_producer.streaming_channel_manager,
         "complete_channel",
         AsyncMock(side_effect=complete_channel),
     )
-    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(legacy_producer, "cleanup_channel_later", AsyncMock())
 
     producer = asyncio.create_task(
-        agent_subscription._consume_agent_stream_producer(
+        legacy_producer.consume_legacy_producer(
             stream_gen=stream_generator(),
             channel=channel,
             agent_metadata={},
             conversation_id=999,
             user_id="user1",
+            execution_host=legacy_execution_host,
+            render_error=agent_subscription._safe_agent_stream_error_chunk,
         )
     )
     await started.wait()
