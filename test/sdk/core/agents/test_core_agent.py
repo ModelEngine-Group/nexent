@@ -2459,10 +2459,11 @@ class TestRunStreamRealExecution:
         records = [r for r in caplog.records if r.name == "model_call.core_agent"]
         assert any(r.getMessage().startswith("MODEL OUTPUT") for r in records)
 
-    def test_step_stream_turns_exhausted_empty_response_into_silent_protocol_repair(
-        self, monkeypatch
+    @pytest.mark.parametrize("protocol", ["code_action", "final_envelope"])
+    def test_step_stream_preserves_exhausted_empty_response_as_terminal(
+        self, monkeypatch, protocol
     ):
-        """Physical empty retries hand off to the hidden semantic repair loop."""
+        """An exhausted physical empty-response budget cannot start semantic repair."""
         module = core_agent_module
         CoreAgent = module.CoreAgent
         monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
@@ -2483,7 +2484,7 @@ class TestRunStreamRealExecution:
         agent._history_step_count = 0
         agent._context_tools = MagicMock(return_value=[])
         agent._use_structured_outputs_internally = False
-        agent.output_protocol = "code_action"
+        agent.output_protocol = protocol
         agent.verification_controller = None
         terminal = module.ModelInvocationTerminalError(
             module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
@@ -2493,11 +2494,11 @@ class TestRunStreamRealExecution:
         agent.model = MagicMock(side_effect=terminal)
 
         action_step = MagicMock(model_output=None)
-        with pytest.raises(module.ModelOutputProtocolError) as exc_info:
+        with pytest.raises(module.ModelInvocationTerminalError) as exc_info:
             next(agent._step_stream(action_step))
 
-        assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
-        assert exc_info.value.__cause__ is terminal
+        assert exc_info.value is terminal
+        agent.model.assert_called_once()
 
     def test_step_stream_closed_protocol_omits_legacy_provider_stop_sequences(
         self, monkeypatch
@@ -3125,6 +3126,66 @@ class TestRunStreamRealExecution:
         agent.observer.commit_model_attempt.assert_called_once_with("legacy-attempt", 1)
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
+
+    def test_step_stream_mcp_failure_uses_friendly_message(self, caplog, monkeypatch):
+        """Classified MCP failures inside code execution surface friendly text."""
+        module = core_agent_module
+        captured = {}
+
+        class FakeAgentExecutionError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+                captured["message"] = message
+
+        monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
+        monkeypatch.setattr(
+            module,
+            "ToolInputBlockedError",
+            type("FakeToolInputBlockedError", (Exception,), {}),
+        )
+        agent, action_step, _ = self._create_cmsr_007_step_agent('<code>print("x")</code>')
+        agent.python_executor = MagicMock(side_effect=BaseExceptionGroup(
+            "unhandled errors in a taskgroup", [ConnectionRefusedError()],
+        ))
+
+        with pytest.raises(FakeAgentExecutionError):
+            list(agent._step_stream(action_step))
+
+        message = captured["message"]
+        assert "MCP tool service connection failed" in message
+        assert "unhandled errors in a taskgroup" not in message
+        error_records = [
+            record
+            for record in caplog.records
+            if "event=mcp_code_execution_failure" in record.getMessage()
+        ]
+        assert error_records and error_records[0].levelname == "ERROR"
+
+    def test_step_stream_unclassified_error_keeps_raw_message(self, caplog, monkeypatch):
+        """Unclassified code-execution failures keep their original text."""
+        module = core_agent_module
+
+        class FakeAgentExecutionError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
+        monkeypatch.setattr(
+            module,
+            "ToolInputBlockedError",
+            type("FakeToolInputBlockedError", (Exception,), {}),
+        )
+        agent, action_step, _ = self._create_cmsr_007_step_agent('<code>print("x")</code>')
+        agent.python_executor = MagicMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(FakeAgentExecutionError, match="boom"):
+            list(agent._step_stream(action_step))
+
+        assert not [
+            record
+            for record in caplog.records
+            if "event=mcp_code_execution_failure" in record.getMessage()
+        ]
 
     def test_cmsr_008_disabled_code_with_clarification_enabled_is_nonterminal(
         self, monkeypatch

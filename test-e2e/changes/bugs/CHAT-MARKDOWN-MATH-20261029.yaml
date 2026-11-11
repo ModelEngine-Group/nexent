@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-MARKDOWN-MATH-20261029
+  change_type: bugfix
+  bug_id: CHAT-MARKDOWN-MATH-20261029
+  title: Restore math rendering in conversation answers and reasoning
+  description: Share math plugins and delimiter preprocessing across answer and running/completed reasoning while preserving common Markdown behavior.
+  observed_behavior: Newchat only registers GFM and citations; valid LaTeX formulas display literally in answers and reasoning.
+  expected_behavior: Dollar and bracket formulas render as KaTeX, malformed formulas fail locally, and code/prices/common Markdown remain intact.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing static Markdown UT and mocked reasoning regression do not assert real math DOM; add focused frontend UT rather than duplicate formal D1.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-065]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-AUTO-86600D51047336D3]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Render inline, display, bracket and table-cell formulas using the real parser and KaTeX.
+    - Preserve code, prices, common Markdown, citation wiring and Mermaid dispatch; tolerate malformed and partial math.
+    - Keep running and completed reasoning math consistent.
+    test_selectors:
+    - frontend/tests/workbench/MarkdownRendering.test.tsx
+    - frontend/tests/workbench/SkillFileCard.test.tsx
+    - frontend/tests/newchatMarkdownRendering.test.ts
+    reason: Local renderer assertions need real DOM regression coverage; Python and API behavior are unchanged.
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-markdown-math-rendering/design.md.
+    Existing reasoning Case script needs mock compatibility for shared preprocessing and rehype props only; acceptance remains unchanged.
+    Existing deletion-to-span contract is intentionally retained. Browser visual acceptance and full renderer consolidation are outside this fix.

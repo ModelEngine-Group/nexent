@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: DOCKER-QUIESCE-MIGRATION-20261030
+  change_type: bugfix
+  bug_id: DOCKER-QUIESCE-MIGRATION-20261030
+  title: Limit Docker shutdown to legacy writers during pending Workbench consolidation
+  description: Check for legacy Config writers and the durable consolidation marker before stopping a container.
+  observed_behavior: Every Config deployment stops all running business services before publication even if Workbench consolidation has already completed.
+  expected_behavior: Stop only running legacy Config writers when the one-shot consolidation is pending. Fresh, already consolidated and non-Config deployments have no explicit stop. Preserve publication before startup.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing deployment UT expected unconditional shutdown and did not distinguish legacy Config, shared Config and already consolidated databases.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/deploy/test_workbench_publication.py
+    behaviors:
+      - Validate Compose, selected images and initialization files without SQL before stopping old writers.
+      - Stop only legacy Config containers with the exact nexent Compose project and service labels while the consolidation marker is absent.
+      - No running legacy Config skips the marker query; completed consolidation skips shutdown; partial non-Config deployment goes directly to Compose startup.
+      - Failed inspection, marker check or stop prevents publication; failed publication prevents startup.
+      - Windows native path conversion remains correct for both preflight and publication with both Compose command forms.
+    reason: Exercise real Bash orchestration and guard ordering with controlled Docker/Compose collaborators; database migration/publication code is unchanged.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, Docker migration quiescence follow-up.
+    Existing SYS-AGENT-D5-001 proves database transactions and completion-marker replay behavior. The Docker guard adds a read-only marker probe and does not change the migration SQL.
+    No new D1 duplicates shell orchestration UT; no live deployment/process shutdown acceptance is inferred.
+    Scope is the user's current Docker deployment; K8s rollout is unchanged. No SQL edits or Skill target compensation.

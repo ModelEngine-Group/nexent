@@ -262,41 +262,6 @@ async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
     ]
 
 
-@pytest.mark.asyncio
-async def test_schedule_workbench_main_backfill_runs_in_background(monkeypatch):
-    """UT-BE-SAL-006: historical bootstrap must not block config startup."""
-    backfill = MagicMock(return_value={"total": 2, "succeeded": 2, "failed": 0})
-    tenant_service_module = types.ModuleType("management.services.permission.identity.tenants")
-    tenant_service_module.backfill_workbench_main_agents = backfill
-    monkeypatch.setitem(sys.modules, "management.services.permission.identity.tenants", tenant_service_module)
-    startup_recovery_service._system_agent_backfill_tasks.clear()
-
-    startup_recovery_service.schedule_workbench_main_backfill()
-    pending = list(startup_recovery_service._system_agent_backfill_tasks)
-    assert pending
-
-    await asyncio.gather(*pending)
-
-    backfill.assert_called_once_with()
-
-
-@pytest.mark.asyncio
-async def test_upload_recovery_uses_management_lane_and_returns_owned_task(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    fail_uploads = MagicMock(return_value=0)
-    monkeypatch.setattr(startup_recovery_service, "fail_interrupted_uploads", fail_uploads)
-    monkeypatch.setattr(startup_recovery_service, "UPLOAD_RECOVERY_GRACE_SECONDS", 0)
-
-    async def run(lane, spec, fn, *args):
-        assert lane == "control-io"
-        assert spec.owner == "management.recovery"
-        return fn(*args)
-
-    manager = MagicMock()
-    manager.run = AsyncMock(side_effect=run)
-    task = await startup_recovery_service.schedule_interrupted_upload_cleanup("nexent-config", thread_manager=manager)
-    await task
-    assert manager.run.await_count == 2
-    assert fail_uploads.call_count == 2
-    assert all(call.args[1] == "nexent-config" for call in fail_uploads.call_args_list)
+def test_startup_has_no_system_agent_backfill():
+    assert not hasattr(startup_recovery_service, "schedule_workbench_main_backfill")
+    assert not hasattr(startup_recovery_service, "_system_agent_backfill_tasks")

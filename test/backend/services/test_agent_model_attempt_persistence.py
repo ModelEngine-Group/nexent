@@ -67,6 +67,7 @@ def _agent_request():
 def _agent_run_info(outcome: str = "completed"):
     return SimpleNamespace(
         agent_config=SimpleNamespace(pre_run_tool_events=()),
+        observer=SimpleNamespace(),
         cancellation_scope=None,
         stop_event=asyncio.Event(),
         human_interaction=None,

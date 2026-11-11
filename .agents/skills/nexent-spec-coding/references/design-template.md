@@ -6,21 +6,31 @@ Create or update `design.md` according to [SPEC maintenance guidance](spec-maint
 
 For a bug with no usable SPEC, use [bugfix-design-template.md](bugfix-design-template.md), which shares the association matrix below. For an existing SPEC, retain its matrix and add only relevant updates. A matrix inventories coverage; it does not require every listed Case to change or run in the current change.
 
+## Writing guidance
+
+- Explain the overall approach before component, API or data details. For multi-step user journeys or frontend/backend coordination, include an overall interaction diagram, preferably a Mermaid flowchart or sequence diagram. Connect the user's entry action, frontend feedback, backend processing and relevant dependencies to the final visible outcome; identify responsibility and state changes at each boundary. Simple changes do not require a diagram, and no fixed diagram type or count applies.
+- Keep the main path readable and show behavior-changing branches: for example, required user input or confirmation, failure, cancellation, or resuming after a manual step, where applicable. State when control passes back to the user and how the flow continues or ends. Reference detailed contracts and proposal scenarios rather than listing every request field or repeating every branch in prose.
+- Separate the current baseline from the proposed change. Summarize what is reused, modified or added once; distinguish code observations, agreed requirements and unverified assumptions. Link detailed evidence instead of repeating investigation notes throughout the design.
+- Explain significant current decisions with their context, chosen approach, rationale and consequences. Discuss realistic alternatives only where they help explain the current choice. Replace or remove outdated decisions and update their references; do not keep superseded versions, abandoned proposals or change histories in the current design by default.
+- Expand only the technical detail needed to implement the affected behavior. Cover relevant interfaces, data, states, failures, permissions and compatibility together at their owning boundary. Examples clarify a contract; code paths locate an implementation. Neither replaces the explanation, and pseudocode is optional.
+- Reference proposal requirements and AC IDs instead of restating the motivation or full business rules. Define each contract in one place and link from other sections. Keep evidence sufficient for engineering decisions without reproducing raw logs or a line-by-line code walkthrough.
+- Scale sections to the change. Omit inapplicable interface, migration or model-runtime sections; retain applicable test responsibilities below. Put planned proof and its boundaries here, and actual commands, results and evidence links in task.md. Do not claim a runtime result from static inspection or unit tests.
+
 # Design — <Feature Name>
 
 ## Context
 
-<Describe the current flow, relevant code boundaries, constraints and evidence. Preserve links to the current requirements and functional scope.>
-
-## Decisions
-
-### D-001 — <Decision>
-
-<State the chosen approach, rationale, related acceptance criteria and meaningful alternatives.>
+<Give only the current behavior and constraints needed to understand the change. Identify the dated/revisioned baseline and summarize reused, modified and new parts; reference proposal.md for motivation, scope and ACs.>
 
 ## Proposed Design
 
-<Describe target control/data flow, component responsibilities, interfaces, state changes and failure handling. Preserve unaffected behavior explicitly.>
+<Start with the overall approach. For multi-step user journeys or frontend/backend coordination, add an overall interaction diagram from the user's entry action to the visible outcome, including relevant handoffs, state changes and behavior-changing branches. Then explain affected component responsibilities and the necessary interfaces/data and failure handling. Distinguish retained behavior from changes. Put each detailed contract in one place; link conditional sections below when they own that detail.>
+
+## Decisions
+
+### D-001 — <Significant decision>
+
+<Explain the current choice, context, rationale, meaningful alternatives and consequences; link relevant ACs. Include only decisions that need explanation. Update replaced decisions in place and remove obsolete text and references.>
 
 ## Traditional UT + D1-D5 Test Responsibilities
 

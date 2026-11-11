@@ -11,13 +11,13 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "next/navigation";
-import { App, Alert, Button, ConfigProvider, Form, Modal } from "antd";
+import { App, Alert, Button, ConfigProvider, Form, Card } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { StandardCard } from "@/components/common/StandardCard";
+
 import { useAgentStore } from "@/stores/agentStore";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
@@ -59,6 +59,7 @@ import {
   ScrollText,
   RefreshCw,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 
 type ConfigSectionKey =
@@ -169,7 +170,8 @@ function ConfigSection({
     </div>
   );
   return card ? (
-    <StandardCard
+    <Card
+      variant="borderless"
       data-testid={testId}
       className={`${CONFIG_CARD_SURFACE} group/section shrink-0 !rounded-lg !bg-white !px-6 !py-5`}
       styles={{ body: { padding: 0 } }}
@@ -180,7 +182,7 @@ function ConfigSection({
       }
     >
       {section}
-    </StandardCard>
+    </Card>
   ) : (
     section
   );
@@ -221,6 +223,26 @@ export default function AgentConfig({
   const searchParams = useSearchParams();
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [configScrollRegion, setConfigScrollRegion] =
+    useState<HTMLDivElement | null>(null);
+  const [configScrollbarWidth, setConfigScrollbarWidth] = useState(0);
+
+  useEffect(() => {
+    if (!configScrollRegion) return;
+
+    const updateScrollbarWidth = () => {
+      setConfigScrollbarWidth(
+        Math.max(
+          0,
+          configScrollRegion.offsetWidth - configScrollRegion.clientWidth
+        )
+      );
+    };
+    updateScrollbarWidth();
+    const observer = new ResizeObserver(updateScrollbarWidth);
+    observer.observe(configScrollRegion);
+    return () => observer.disconnect();
+  }, [configScrollRegion]);
   const publishIntentHandledForAgentRef = useRef<number | null>(null);
   const [isRefreshingAvailability, setIsRefreshingAvailability] =
     useState(false);
@@ -480,7 +502,6 @@ export default function AgentConfig({
             '"Huawei Sans", "HarmonyOS Sans SC", system-ui, sans-serif',
           fontSize: 14,
           lineHeight: 22 / 14,
-          colorPrimary: "#2673E5",
           colorText: "#191919",
           colorTextPlaceholder: "#AEAEAE",
           colorBorder: "#C9C9C9",
@@ -531,15 +552,21 @@ export default function AgentConfig({
           </ConfigProvider>
         )}
         <div
+          style={
+            debugVisible
+              ? { columnGap: Math.max(0, 24 - configScrollbarWidth) }
+              : undefined
+          }
           className={
             publicationVisible
               ? "hidden"
               : debugVisible
-                ? "flex min-h-0 min-w-0 flex-1 gap-5 px-4 pb-5"
+                ? "flex min-h-0 min-w-0 flex-1 gap-6 px-6 pb-5"
                 : "flex min-h-0 min-w-0 flex-1"
           }
         >
           <div
+            ref={setConfigScrollRegion}
             data-testid="agent-config-scroll-region"
             style={{
               containerType: "inline-size",
@@ -550,7 +577,7 @@ export default function AgentConfig({
                 ? "hidden"
                 : debugVisible
                   ? "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto"
-                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-6"
             }
           >
             {unavailableReasonLabels.length > 0 && (
@@ -615,7 +642,8 @@ export default function AgentConfig({
                 <AgentPrmopt highFidelity onOptimizePrompt={onOptimizePrompt} />
               </ConfigSection>
             </div>
-            <StandardCard
+            <Card
+              variant="borderless"
               data-agent-guide="resources"
               data-testid="agent-config-card-resources"
               className={`${CONFIG_CARD_SURFACE} shrink-0 !rounded-lg !bg-white !p-0`}
@@ -711,7 +739,7 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-            </StandardCard>
+            </Card>
             <ConfigSection
               testId="agent-config-card-welcome"
               title={t("agent.highFidelity.guideTitle")}
@@ -739,6 +767,20 @@ export default function AgentConfig({
               <AgentDeployment highFidelity />
             </ConfigSection>
             <ConfigSection
+              testId="agent-config-card-guardrail"
+              title={t("agent.config.section.guardrail.title")}
+              description={t("agent.config.section.guardrail.description")}
+              icon={<ShieldCheck className="size-[18px] shrink-0" />}
+              open={openSections.guardrail}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("guardrail", open)
+              }
+              containerRef={guardrailSectionRef}
+              headerActions={<GuardrailConfigActions />}
+            >
+              <GuardrailConfigContent />
+            </ConfigSection>
+            <ConfigSection
               testId="agent-config-card-advanced"
               title={t("agent.highFidelity.advancedTitle")}
               description=""
@@ -748,37 +790,9 @@ export default function AgentConfig({
                 handleSectionOpenChange("run_strategy", open)
               }
               containerRef={runStrategySectionRef}
-              headerActions={
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t("agent.highFidelity.moreSettings")}
-                  icon={<Settings2 size={16} />}
-                  onClick={() => handleSectionOpenChange("guardrail", true)}
-                  className="!size-6 !p-0"
-                />
-              }
             >
               <AgentRunPolicy highFidelity />
             </ConfigSection>
-            <Modal
-              title={t("agent.highFidelity.moreSettings")}
-              open={openSections.guardrail}
-              onCancel={() => handleSectionOpenChange("guardrail", false)}
-              footer={null}
-              forceRender
-              width={800}
-            >
-              <div ref={guardrailSectionRef} className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-medium">
-                    {t("agent.config.section.guardrail.title")}
-                  </span>
-                  <GuardrailConfigActions />
-                </div>
-                <GuardrailConfigContent />
-              </div>
-            </Modal>
           </div>
           <ConfigProvider componentDisabled={false}>
             {debugPanel}

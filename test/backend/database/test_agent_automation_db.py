@@ -76,8 +76,8 @@ def _install_recording_session(monkeypatch, result):
     session = _RecordingSession(result)
 
     @contextmanager
-    def fake_get_db_session():
-        yield session
+    def fake_get_db_session(db_session=None):
+        yield db_session if db_session is not None else session
 
     monkeypatch.setattr(agent_automation_db, "get_db_session", fake_get_db_session)
     monkeypatch.setattr(agent_automation_db, "as_dict", lambda value: value)

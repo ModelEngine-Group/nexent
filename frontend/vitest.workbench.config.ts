@@ -15,6 +15,7 @@ export default defineConfig({
     ],
   },
   test: {
+    server: { deps: { inline: ["@assistant-ui/react-markdown"] } },
     environment: "jsdom",
     include: ["tests/workbench/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/workbench/setup.ts"],

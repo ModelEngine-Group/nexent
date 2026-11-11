@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -12,6 +12,9 @@ from ..configuration import parse_positive_float, parse_positive_int, _require_p
 # avoids silently replacing operator-provided service addresses.
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
+
+# Operations service configuration
+OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
@@ -66,6 +69,8 @@ AGENT_AUTOMATION_LEASE_SECONDS = int(os.getenv('AGENT_AUTOMATION_LEASE_SECONDS',
 AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS = int(os.getenv('AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS', '1800'))
 AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS = int(os.getenv('AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS', '30'))
 AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(os.getenv('AGENT_AUTOMATION_MIN_INTERVAL_SECONDS', '5'))
+# Timeout in seconds for invoking external A2A agents (runtime sub-agent path and northbound direct calls)
+A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIMEOUT_SECONDS', '900'))
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')
@@ -292,13 +297,6 @@ WORKER_NAME = os.getenv('WORKER_NAME')
 # Keep the historical default when the variable is not provided.
 WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_COUNT + 1)))
 
-# Voice Service Configuration
-APPID = os.getenv('APPID', '')
-TOKEN = os.getenv('TOKEN', '')
-CLUSTER = os.getenv('CLUSTER', 'volcano_tts')
-VOICE_TYPE = os.getenv('VOICE_TYPE', 'zh_male_jieshuonansheng_mars_bigtts')
-SPEED_RATIO = float(os.getenv('SPEED_RATIO', '1.3'))
-
 # ===== Memory System =====
 # MMR (Maximal Marginal Relevance) configuration
 MMR_LAMBDA = float(os.getenv('MMR_LAMBDA', '0.7'))
@@ -339,6 +337,7 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(os.getenv('PROVIDER_REQUEST_TIMEOUT_SECON
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv('NEXENT_MCP_SERVER')
+NEXENT_MCP_INTERNAL_TOKEN = os.getenv('NEXENT_MCP_INTERNAL_TOKEN', '')
 MCP_MANAGEMENT_API = os.getenv('MCP_MANAGEMENT_API', 'http://localhost:5015')
 
 # Maximum number of configured MCP services per tenant.
@@ -461,7 +460,6 @@ MEMORY_PROVIDER_PLUGINS_DIR = os.getenv('MEMORY_PROVIDER_PLUGINS_DIR', '')
 NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm_models.json')
 
 # Exact, operator-verified endpoint/model reasoning transport overrides.
-MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv('MODEL_REASONING_WIRE_PROFILES_PATH', str(_CONFIG_DIRECTORY / 'model_reasoning_wire_profiles.json'))
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv

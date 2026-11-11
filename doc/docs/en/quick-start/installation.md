@@ -42,7 +42,6 @@ After running the command, the script opens Bash TUI menus for deployment option
 - **infrastructure (required)**: Elasticsearch, PostgreSQL, Redis, MinIO
 - **application (selected by default, optional)**: config, runtime, mcp, northbound, web
 - **data-process (selected by default, optional)**: data processing service
-- **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
@@ -64,10 +63,10 @@ You can also pass options directly:
 bash deploy.sh docker --defaults
 
 # Default component set, development port policy, standard image source
-bash deploy.sh docker --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+bash deploy.sh docker --components infrastructure,application,data-process --port-policy development --image-source general
 
 # Add the terminal tool to the default component set
-bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh docker --components infrastructure,application,data-process,terminal
 
 # Use mainland China image sources
 bash deploy.sh docker --image-source mainland
@@ -104,24 +103,7 @@ After a successful deployment, non-sensitive choices are saved to `deploy/docker
 
 > This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/resource-management).
 
-2️⃣ To recreate the `suadmin` account, follow these steps:
-
-```bash
-# Step 1: Delete su account record in supabase container
-docker exec -it supabase-db-mini bash
-psql -U postgres
-select id, email from auth.users;
-# Get the user_id of suadmin@nexent.com account
-delete from auth.users where id = 'your_user_id';
-delete from auth.identities where user_id = 'your_user_id';
-
-# Step 2: Delete su account record in nexent database
-docker exec -it nexent-postgresql bash
-psql -U root -d nexent
-delete from nexent.user_tenant_t where user_id = 'your_user_id';
-
-# Step 3: Redeploy; non-interactive mode uses the configured or default password
-```
+2️⃣ For historical account upgrades, administrator failures and data recovery, use the [consolidated migration runbook](https://github.com/ModelEngine-Group/nexent/blob/develop/deploy/sql/tools/supabase_to_postgres/README.md). Preserve the original account ID and tenant ownership; recover consistent data as described there.
 
 ### Offline Deployment
 
@@ -206,13 +188,6 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-minio | S3-compatible object storage |
 | redis | Cache, distributed locks, and task message broker |
 
-**Supabase Services (when `supabase` is selected):**
-| Service | Description |
-|---------|-------------|
-| supabase-kong | API Gateway |
-| supabase-auth | Authentication service |
-| supabase-db-mini | Database service |
-
 **Optional Services:**
 | Service | Description |
 |---------|-------------|
@@ -238,7 +213,6 @@ Nexent uses Docker volumes for data persistence:
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
 | Agent runtime workspace | nexent-agent-workspace | Docker named volume configured by `NEXENT_SANDBOX_WORKSPACE_VOLUME` |
-| Supabase DB (when `supabase` is selected) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `deploy/env/.env`).
 
@@ -357,10 +331,10 @@ MONITORING_DASHBOARD_URL=
 
 ### OAuth Login Configuration
 
-OAuth login requires the `supabase` component. When enabling third-party login, deploy `supabase` and set `OAUTH_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL.
+OAuth login uses local accounts in the application component. When enabling third-party login, set `OAUTH_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL.
 
 ```bash
-bash deploy.sh docker --components infrastructure,application,supabase
+bash deploy.sh docker --components infrastructure,application
 ```
 
 For Docker, configure OAuth in `deploy/env/.env`:
@@ -414,7 +388,7 @@ For local Docker, a GitHub callback example is `http://localhost:3000/api/user/o
 
 ### CAS Login Configuration
 
-CAS SSO does not require the `supabase` component. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
+CAS SSO uses local application accounts. Set `CAS_CALLBACK_BASE_URL` to the browser-accessible Nexent Web URL without a trailing `/`. `CAS_SERVER_URL` is the CAS Server root URL and should also not include a trailing `/`.
 
 For Docker, configure CAS in `deploy/env/.env`:
 

@@ -1,0 +1,820 @@
+{
+  "bindings": {
+    "adapter": {
+      "ref": "openai_chat_v1",
+      "version": 1
+    },
+    "auth": {
+      "ref": "adapter_fixture_v1",
+      "version": 1
+    },
+    "code_converter": {
+      "ref": "adapter_fixture_v1",
+      "version": 1
+    },
+    "native_converter": {
+      "ref": "adapter_fixture_v1",
+      "version": 1
+    },
+    "protocol": {
+      "ref": "openai_chat_completions",
+      "version": 1
+    },
+    "role_mapping": {
+      "ref": "system_only_v1",
+      "version": 1
+    }
+  },
+  "capabilities": {
+    "context": {
+      "combined_window": 1000000,
+      "input_limit": null,
+      "output_limit": 65536
+    },
+    "modalities": {
+      "input": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "reasoning": {
+      "controls": [
+        {
+          "mode": "toggle",
+          "parameter_key": "enable_thinking",
+          "values": [
+            false,
+            true
+          ]
+        },
+        {
+          "max": 81920,
+          "min": null,
+          "mode": "budget_tokens",
+          "parameter_key": "reasoning_budget_tokens",
+          "special_values": []
+        }
+      ],
+      "response_paths": [],
+      "status": "supported"
+    },
+    "response": {
+      "stream_format": null,
+      "supported_finish_reasons": null
+    },
+    "sampling": {
+      "temperature": {
+        "status": "supported"
+      },
+      "top_p": {
+        "status": "unknown"
+      }
+    },
+    "structured_output": {
+      "status": "supported"
+    },
+    "tools": {
+      "result_format": null,
+      "schema_constraints": null,
+      "status": "supported"
+    },
+    "usage": {
+      "input_includes_cached": "unknown",
+      "output_includes_reasoning": "unknown",
+      "semantics_id": null
+    }
+  },
+  "config_revision": 1,
+  "connection": {
+    "base_url": "https://example.test/v1",
+    "concurrency_limit": null,
+    "credential_ref": {
+      "kind": "model_record",
+      "model_id": null
+    },
+    "ssl_verify": true,
+    "timeout_seconds": 10
+  },
+  "connection_rules": {
+    "credential_kind": "model_record",
+    "headers": {},
+    "method": "POST",
+    "relative_path": "/chat/completions"
+  },
+  "context_configuration": {
+    "capability_profile_version": null,
+    "capacity_source": "profile",
+    "output_reserve_tokens": null,
+    "tokenizer_family": null
+  },
+  "extra_api_parameters": [],
+  "identity": {
+    "display_name": "outlet",
+    "model_profile_key": "alibaba/qwen3.5-plus",
+    "model_type": "llm",
+    "provider_id": "alibaba",
+    "provider_key": "alibaba-cn",
+    "request_model_id": "qwen3.5-plus",
+    "tenant_id": "tenant"
+  },
+  "instruction_mapping": {
+    "instruction_hierarchy": [
+      "system",
+      "user"
+    ],
+    "mappings": {
+      "application_instruction": "system",
+      "assistant_history": "assistant",
+      "platform_instruction": "system",
+      "reference_data": "user",
+      "tool_result": "tool",
+      "user_input": "user"
+    },
+    "ordering": [
+      "platform_instruction",
+      "agent_instruction",
+      "activated_skill_instruction"
+    ],
+    "reference_placement": "user_data_block",
+    "strategy_id": "system_only",
+    "strategy_version": 1,
+    "supported_roles": [
+      "system",
+      "user",
+      "assistant",
+      "tool"
+    ]
+  },
+  "outlet_id": null,
+  "parameter_rules": [
+    {
+      "allowed_scopes": [
+        "outlet",
+        "conversation"
+      ],
+      "api_binding": {
+        "path": "/enable_thinking",
+        "transform_ref": "identity_v1",
+        "transform_version": 1
+      },
+      "default_value": true,
+      "editable": true,
+      "key": "enable_thinking",
+      "owner": "combination",
+      "required": false,
+      "schema": {
+        "type": "boolean"
+      },
+      "source": {
+        "evidence": "https://www.alibabacloud.com/help/zh/model-studio/deep-thinking",
+        "ref": "alibaba_cn_qwen35_plus_thinking_v1",
+        "version": 1
+      },
+      "ui_group": "reasoning",
+      "visible": true
+    },
+    {
+      "allowed_scopes": [
+        "outlet",
+        "conversation"
+      ],
+      "api_binding": {
+        "path": "/thinking_budget",
+        "transform_ref": "identity_v1",
+        "transform_version": 1
+      },
+      "condition": {
+        "key": "enable_thinking",
+        "op": "eq",
+        "value": true
+      },
+      "editable": true,
+      "key": "reasoning_budget_tokens",
+      "owner": "combination",
+      "required": false,
+      "schema": {
+        "maximum": 81920,
+        "type": "integer"
+      },
+      "source": {
+        "evidence": "Pinned models.dev providers/alibaba-cn/models/qwen3.5-plus.toml: reasoning_options budget_tokens max=81920; lower bound remains unknown",
+        "ref": "alibaba_cn_qwen35_plus_thinking_v1",
+        "version": 1
+      },
+      "ui_group": "reasoning",
+      "visible": true
+    },
+    {
+      "allowed_scopes": [
+        "outlet"
+      ],
+      "api_binding": {
+        "path": "/stop",
+        "transform_ref": "identity_v1",
+        "transform_version": 1
+      },
+      "editable": true,
+      "key": "stop",
+      "owner": "combination",
+      "required": false,
+      "schema": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minLength": 1,
+        "type": [
+          "string",
+          "array"
+        ]
+      },
+      "source": {
+        "evidence": "https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-chat-completions (checked 2026-10-14); string stop subset consumed by CodeAgent and planning",
+        "ref": "alibaba_cn_qwen35_plus_thinking_v1",
+        "version": 2
+      },
+      "ui_group": "runtime",
+      "visible": false
+    },
+    {
+      "allowed_scopes": [
+        "outlet",
+        "conversation"
+      ],
+      "api_binding": {
+        "path": "/max_tokens",
+        "transform_ref": "identity_v1",
+        "transform_version": 1
+      },
+      "editable": true,
+      "key": "max_output_tokens",
+      "owner": "combination",
+      "required": false,
+      "schema": {
+        "maximum": 65536,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "source": {
+        "evidence": "Pinned alibaba-cn/qwen3.5-plus limit.output=65536; https://www.alibabacloud.com/help/zh/model-studio/qwen-api-via-openai-chat-completions (checked 2026-10-14): max_tokens limits answer tokens for this model, excluding reasoning",
+        "ref": "alibaba_cn_qwen35_plus_thinking_v1",
+        "version": 3
+      },
+      "ui_group": "generation",
+      "visible": true
+    }
+  ],
+  "parameter_values": {
+    "enable_thinking": false
+  },
+  "provenance": {
+    "atomic_refs": {
+      "model": {
+        "catalog_revision": "866754d616ccddfe39493e177ce880913677b8826540a4c1ff584156522f4537",
+        "content_sha256": "15c6b3b7f334219ee6d43c76d1a004e57469e4a4e780e4b254c91474d5cb1bd4",
+        "file_path": "models/alibaba/qwen3.5-plus.toml",
+        "key": "alibaba/qwen3.5-plus"
+      },
+      "provider": {
+        "catalog_revision": "866754d616ccddfe39493e177ce880913677b8826540a4c1ff584156522f4537",
+        "content_sha256": "0060172cf93a8db8b8427021030a3ad5c388c919f7fc47df9723ba8b08d5f54b",
+        "file_path": "providers/alibaba-cn/provider.toml",
+        "key": "alibaba-cn"
+      },
+      "provider_model": {
+        "catalog_revision": "866754d616ccddfe39493e177ce880913677b8826540a4c1ff584156522f4537",
+        "content_sha256": "5bd06ed609ab5ceeeecf8012a4ea587d5365fcd49c17f10bfb729f1a436fee0e",
+        "file_path": "providers/alibaba-cn/models/qwen3.5-plus.toml",
+        "key": "alibaba-cn/qwen3.5-plus"
+      }
+    },
+    "field_sources": [
+      {
+        "atom_kind": "model",
+        "rule_id": "model.name",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#name",
+        "target_path": "/identity/name"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.description",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#description",
+        "target_path": "/identity/description"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.family",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#family",
+        "target_path": "/identity/family"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.release_date",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#release_date",
+        "target_path": "/reference_metadata/release_date"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.last_updated",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#last_updated",
+        "target_path": "/reference_metadata/last_updated"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.attachment",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#attachment",
+        "target_path": "/reference_metadata/attachment"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.reasoning",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#reasoning",
+        "target_path": "/capabilities/reasoning/status"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.temperature",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#temperature",
+        "target_path": "/capabilities/sampling/temperature/status"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.tool_call",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#tool_call",
+        "target_path": "/capabilities/tools/status"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.knowledge",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#knowledge",
+        "target_path": "/reference_metadata/knowledge"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.open_weights",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#open_weights",
+        "target_path": "/reference_metadata/open_weights"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.limit.context",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#limit.context",
+        "target_path": "/capabilities/context/combined_window"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.limit.output",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#limit.output",
+        "target_path": "/capabilities/context/output_limit"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#modalities.input[0]",
+        "target_path": "/capabilities/modalities/input/0"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#modalities.input[1]",
+        "target_path": "/capabilities/modalities/input/1"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#modalities.input[2]",
+        "target_path": "/capabilities/modalities/input/2"
+      },
+      {
+        "atom_kind": "model",
+        "rule_id": "model.modalities.output[]",
+        "rule_version": 1,
+        "source_path": "models/alibaba/qwen3.5-plus.toml#modalities.output[0]",
+        "target_path": "/capabilities/modalities/output/0"
+      },
+      {
+        "atom_kind": "provider",
+        "rule_id": "provider.name",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/provider.toml#name",
+        "target_path": "/identity/name"
+      },
+      {
+        "atom_kind": "provider",
+        "rule_id": "provider.env[]",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/provider.toml#env[0]",
+        "target_path": "/reference_metadata/env/0"
+      },
+      {
+        "atom_kind": "provider",
+        "rule_id": "provider.npm",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/provider.toml#npm",
+        "target_path": "/reference_metadata/npm"
+      },
+      {
+        "atom_kind": "provider",
+        "rule_id": "provider.doc",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/provider.toml#doc",
+        "target_path": "/reference_metadata/doc"
+      },
+      {
+        "atom_kind": "provider",
+        "rule_id": "provider.api",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/provider.toml#api",
+        "target_path": "/connection_suggestions/base_url"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.name",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#name",
+        "target_path": "/identity/name"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.description",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#description",
+        "target_path": "/identity/description"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.family",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#family",
+        "target_path": "/identity/family"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.release_date",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#release_date",
+        "target_path": "/reference_metadata/release_date"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.last_updated",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#last_updated",
+        "target_path": "/reference_metadata/last_updated"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.attachment",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#attachment",
+        "target_path": "/reference_metadata/attachment"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning",
+        "target_path": "/capabilities/reasoning/status"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.structured_output",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#structured_output",
+        "target_path": "/capabilities/structured_output/status"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.temperature",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#temperature",
+        "target_path": "/capabilities/sampling/temperature/status"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.knowledge",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#knowledge",
+        "target_path": "/reference_metadata/knowledge"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.tool_call",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#tool_call",
+        "target_path": "/capabilities/tools/status"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.open_weights",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#open_weights",
+        "target_path": "/reference_metadata/open_weights"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[0].type",
+        "target_path": "/capabilities/reasoning/controls/0/mode"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[1].type",
+        "target_path": "/capabilities/reasoning/controls/1/mode"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].max",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[1].max",
+        "target_path": "/capabilities/reasoning/controls/1/max"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.interleaved.field",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#interleaved.field",
+        "target_path": "/reference_metadata/interleaved/field"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.input",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.input",
+        "target_path": "/reference_metadata/cost/input"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.output",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.output",
+        "target_path": "/reference_metadata/cost/output"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.reasoning",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.reasoning",
+        "target_path": "/reference_metadata/cost/reasoning"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].tier.type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[0].tier.type",
+        "target_path": "/reference_metadata/cost/tiers/0/tier/type"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].tier.size",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[0].tier.size",
+        "target_path": "/reference_metadata/cost/tiers/0/tier/size"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].input",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[0].input",
+        "target_path": "/reference_metadata/cost/tiers/0/input"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].output",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[0].output",
+        "target_path": "/reference_metadata/cost/tiers/0/output"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].reasoning",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[0].reasoning",
+        "target_path": "/reference_metadata/cost/tiers/0/reasoning"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].tier.type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[1].tier.type",
+        "target_path": "/reference_metadata/cost/tiers/1/tier/type"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].tier.size",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[1].tier.size",
+        "target_path": "/reference_metadata/cost/tiers/1/tier/size"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].input",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[1].input",
+        "target_path": "/reference_metadata/cost/tiers/1/input"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].output",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[1].output",
+        "target_path": "/reference_metadata/cost/tiers/1/output"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.cost.tiers[].reasoning",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#cost.tiers[1].reasoning",
+        "target_path": "/reference_metadata/cost/tiers/1/reasoning"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.limit.context",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#limit.context",
+        "target_path": "/capabilities/context/combined_window"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.limit.output",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#limit.output",
+        "target_path": "/capabilities/context/output_limit"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#modalities.input[0]",
+        "target_path": "/capabilities/modalities/input/0"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#modalities.input[1]",
+        "target_path": "/capabilities/modalities/input/1"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.modalities.input[]",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#modalities.input[2]",
+        "target_path": "/capabilities/modalities/input/2"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.modalities.output[]",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#modalities.output[0]",
+        "target_path": "/capabilities/modalities/output/0"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[0].type",
+        "target_path": "/capabilities/reasoning/controls/0/parameter_key"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[0].type",
+        "target_path": "/capabilities/reasoning/controls/0/values/0"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[0].type",
+        "target_path": "/capabilities/reasoning/controls/0/values/1"
+      },
+      {
+        "atom_kind": "provider_model",
+        "rule_id": "provider_model.reasoning_options[].type",
+        "rule_version": 1,
+        "source_path": "providers/alibaba-cn/models/qwen3.5-plus.toml#reasoning_options[1].type",
+        "target_path": "/capabilities/reasoning/controls/1/parameter_key"
+      }
+    ],
+    "interpretation_versions": {
+      "composer": {
+        "ref": "profile_policy_composer_v6",
+        "version": 4
+      },
+      "source_mapping": {
+        "ref": "models_dev_source_v1",
+        "version": 1
+      },
+      "source_parser": {
+        "ref": "models_dev_source_catalog_v3",
+        "version": 1
+      },
+      "supplement_schema": {
+        "ref": "nexent_supplements_v1",
+        "version": 1
+      }
+    },
+    "overrides": [
+      {
+        "evidence": "https://www.alibabacloud.com/help/zh/model-studio/deep-thinking#supported-models (checked 2026-10-13)",
+        "original_value": [
+          {
+            "mode": "toggle",
+            "parameter_key": "enable_thinking",
+            "values": [
+              true,
+              false
+            ]
+          },
+          {
+            "max": 81920,
+            "min": null,
+            "mode": "budget_tokens",
+            "parameter_key": "reasoning_budget_tokens",
+            "special_values": []
+          }
+        ],
+        "path": "/reasoning/controls",
+        "reason": "Preserve the copied toggle and budget controls; register their distinct API bindings",
+        "source": "rules/providers/alibaba-cn/qwen3.5-plus.toml"
+      }
+    ],
+    "provider_metadata": {
+      "model": {
+        "attachment": false,
+        "knowledge": "2025-04",
+        "last_updated": "2026-02-16",
+        "open_weights": false,
+        "release_date": "2026-02-16"
+      },
+      "provider": {
+        "doc": "https://www.alibabacloud.com/help/en/model-studio/models",
+        "env": [
+          "DASHSCOPE_API_KEY"
+        ],
+        "npm": "@ai-sdk/openai-compatible"
+      },
+      "provider_model": {
+        "attachment": true,
+        "cost": {
+          "input": 0.115,
+          "output": 0.688,
+          "reasoning": 0.688,
+          "tiers": [
+            {
+              "input": 0.287,
+              "output": 1.72,
+              "reasoning": 1.72,
+              "tier": {
+                "size": 128000,
+                "type": "context"
+              }
+            },
+            {
+              "input": 0.573,
+              "output": 3.44,
+              "reasoning": 3.44,
+              "tier": {
+                "size": 256000,
+                "type": "context"
+              }
+            }
+          ]
+        },
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "knowledge": "2025-04",
+        "last_updated": "2026-09-22",
+        "open_weights": false,
+        "release_date": "2026-02-16"
+      }
+    }
+  },
+  "schema_version": 1
+}

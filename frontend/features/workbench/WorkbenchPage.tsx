@@ -6,7 +6,6 @@ import {
   ComposerAttachment,
   ComposerDictation,
 } from "@/app/newchat/assistant-ui/composer-tools";
-import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
 import {
@@ -14,7 +13,6 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type FC,
@@ -39,14 +37,14 @@ import {
 import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
 import { useConversationScopedState } from "./hooks/useConversationScopedState";
+import { useCreationModeConfirmation } from "./hooks/useCreationModeConfirmation";
+import { CreationModeConfirmationContext } from "@/components/interaction/creation-mode-context";
 import { WorkbenchConversationLayout } from "./components/WorkbenchConversationLayout";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useConfig } from "@/hooks/useConfig";
-import { withDefaultWorkbenchModel } from "./modelOptions";
 import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
-import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
@@ -60,6 +58,7 @@ import {
   changeAgentTopology,
   changeCreationThread,
   returnFromCreation,
+  startWorkbenchConversation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
 import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
@@ -69,7 +68,11 @@ import {
   buildSkillSavePayload,
   initialSkillCreationDraft,
 } from "./creationRuntime";
-import { createSkill, searchAgentInfo } from "@/services/agentConfigService";
+import {
+  createSkill,
+  updateSkillById,
+  searchAgentInfo,
+} from "@/services/agentConfigService";
 import { prepareWorkbenchAgentDraft } from "./agentCreationDraft";
 import {
   isAgentCreationAwaitingDraft,
@@ -131,18 +134,11 @@ const HomeContent: FC = () => {
     dispatchWorkbench,
     conversationDetails,
   } = useWorkbenchSession();
-  const { availableLlmModels, isLoading: isLoadingModels } = useModelList();
-  const { modelConfig } = useConfig();
-  const effectiveWorkbenchConfig = useMemo(
-    () =>
-      withDefaultWorkbenchModel(
-        workbenchState.config,
-        availableLlmModels,
-        modelConfig?.llm?.id
-      ),
-    [workbenchState.config, availableLlmModels, modelConfig?.llm?.id]
-  );
+  const { llmModels, isLoading: isLoadingModels } = useModelList();
+  const { defaultLlmModelConfig } = useConfig();
+  const effectiveWorkbenchConfig = workbenchState.config;
   const { t, i18n } = useTranslation();
+
   const { hasPermission, user } = useAuthorizationContext();
   const {
     resetFlow: resetNl2AgentFlow,
@@ -154,11 +150,6 @@ const HomeContent: FC = () => {
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
-  const [isSavingModel, setIsSavingModel] = useState(false);
-  const [modelSettingsRevision, setModelSettingsRevision] = useState(0);
-  const rememberedModelControls = useRef(
-    new Map<string, typeof workbenchState.config.generation_config>()
-  );
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -168,8 +159,8 @@ const HomeContent: FC = () => {
   const [recoverableCreationThreads, setRecoverableCreationThreads] = useState<
     ReadonlySet<string>
   >(new Set());
-  const modelSavePending = useRef(false);
   const skillDraftRef = useRef(initialSkillCreationDraft);
+  const skillTargets = useRef<Record<string, number>>({});
   const [skillDraft, setSkillDraft] = useState(initialSkillCreationDraft);
   const [savedSkillName, setSavedSkillName] = useState<string | null>(null);
   const creationReturnRef = useRef<string | null>(null);
@@ -187,6 +178,7 @@ const HomeContent: FC = () => {
     >()
   );
   const resumedConversationIdsRef = useRef(new Set<number>());
+  const standaloneCreatorIds = useRef(new Set<number>());
   const [knowledgeCache, setKnowledgeCache] = useState(
     new Map<
       string,
@@ -436,6 +428,20 @@ const HomeContent: FC = () => {
     }
   }, []);
 
+  // Read files at request time without notifying the runtime for every token.
+  const getSkillDraftSnapshot = useCallback(
+    () => ({
+      ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
+      files: Object.entries(skillDraftRef.current.files).map(
+        ([path, content]) => ({
+          path,
+          content,
+        })
+      ),
+    }),
+    []
+  );
+
   const nl2AgentSnapshotRefresh = useRef<Promise<void>>(Promise.resolve());
   const handleNl2AgentState = useCallback(
     (event: Nl2AgentStateEvent) => {
@@ -536,6 +542,9 @@ const HomeContent: FC = () => {
         if (cancelled) return;
         const restored = await resolveRestoredWorkbench(conversation);
         if (cancelled) return;
+        if (conversation.workbench_config == null)
+          standaloneCreatorIds.current.add(numericConversationId);
+        else standaloneCreatorIds.current.delete(numericConversationId);
         dispatchWorkbench({
           type: "set-skill-names",
           names: restored.skillNames,
@@ -548,15 +557,18 @@ const HomeContent: FC = () => {
         if (!serverConversationIdsRef.current.has(activeThreadId)) {
           const artifacts = restoreCreationHistory(conversation);
           if (restored.config.mode === "skill_create") {
+            if (conversation.target?.type === "skill")
+              skillTargets.current[activeThreadId] = conversation.target.id;
             skillDraftRef.current = artifacts.skillDraft;
             setSkillDraft(artifacts.skillDraft);
             setSavedSkillName(null);
           } else if (
             restored.config.mode === "agent_create" &&
-            Number.isInteger(Number(conversation.agent_id)) &&
-            Number(conversation.agent_id) > 0
+            conversation.target?.type === "agent" &&
+            Number.isInteger(conversation.target.id) &&
+            conversation.target.id > 0
           ) {
-            const agentId = Number(conversation.agent_id);
+            const agentId = conversation.target.id;
             const result = await searchAgentInfo(agentId, undefined, 0);
             if (cancelled) return;
             if (!result.success || !result.data) {
@@ -734,6 +746,18 @@ const HomeContent: FC = () => {
       config: import("@/features/workbench").WorkbenchSessionConfig
     ) => {
       try {
+        if (standaloneCreatorIds.current.has(conversationId)) {
+          // Standalone creator controls are local UI state, not persisted Workbench configuration.
+          dispatchWorkbench({
+            type: "restore",
+            config,
+            version: workbenchState.configVersion,
+          });
+          return {
+            workbench_config: config,
+            workbench_config_version: workbenchState.configVersion,
+          };
+        }
         const result = await conversationService.updateWorkbenchConfig(
           conversationId,
           config,
@@ -930,110 +954,6 @@ const HomeContent: FC = () => {
     ]
   );
 
-  const handleModelChange = async (modelId: string) => {
-    if (modelSavePending.current) return;
-    const id = Number(modelId);
-    if (!Number.isInteger(id) || id <= 0) return;
-    if (workbenchState.config.model_id === id) return;
-    const scope = `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}`;
-    if (effectiveWorkbenchConfig.model_id != null) {
-      rememberedModelControls.current.set(
-        `${scope}:${effectiveWorkbenchConfig.model_id}`,
-        {
-          deep_thinking:
-            effectiveWorkbenchConfig.generation_config.deep_thinking,
-          thinking_effort:
-            effectiveWorkbenchConfig.generation_config.thinking_effort,
-          reasoning_budget_tokens:
-            effectiveWorkbenchConfig.generation_config.reasoning_budget_tokens,
-          temperature: effectiveWorkbenchConfig.generation_config.temperature,
-          top_p: effectiveWorkbenchConfig.generation_config.top_p,
-        }
-      );
-    }
-    const remembered = rememberedModelControls.current.get(`${scope}:${id}`);
-    const config = selectWorkbenchModel(
-      workbenchState.config,
-      availableLlmModels,
-      id,
-      remembered
-    );
-    const conversationId = Number(activeConversationId);
-    const isExistingConversation =
-      Number.isInteger(conversationId) && conversationId > 0;
-    modelSavePending.current = true;
-    setIsSavingModel(true);
-    try {
-      if (isExistingConversation) {
-        await saveWorkbenchConfig(conversationId, config);
-      } else {
-        dispatchWorkbench({
-          type: "restore",
-          config,
-          version: workbenchState.configVersion,
-        });
-      }
-    } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : t("ui.localization.modelSaveFailed")
-      );
-    } finally {
-      modelSavePending.current = false;
-      setIsSavingModel(false);
-    }
-  };
-
-  const handleThinkingChange = async (
-    patch: Partial<
-      import("@/features/workbench").WorkbenchSessionConfig["generation_config"]
-    >
-  ) => {
-    if (modelSavePending.current) return;
-    const base =
-      patch.deep_thinking === true &&
-      !effectiveWorkbenchConfig.generation_config.deep_thinking &&
-      effectiveWorkbenchConfig.model_id != null
-        ? selectWorkbenchModel(
-            effectiveWorkbenchConfig,
-            availableLlmModels,
-            effectiveWorkbenchConfig.model_id
-          )
-        : effectiveWorkbenchConfig;
-    const config = {
-      ...base,
-      generation_config: {
-        ...base.generation_config,
-        ...patch,
-      },
-    };
-    modelSavePending.current = true;
-    setIsSavingModel(true);
-    try {
-      if (Number(activeConversationId) > 0) {
-        await saveWorkbenchConfig(Number(activeConversationId), config);
-      } else {
-        dispatchWorkbench({
-          type: "restore",
-          config,
-          version: workbenchState.configVersion,
-        });
-      }
-    } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : t("ui.localization.reasoningSaveFailed")
-      );
-      // Discard only the failed numeric edit; never display it as saved intent.
-      setModelSettingsRevision((current) => current + 1);
-    } finally {
-      modelSavePending.current = false;
-      setIsSavingModel(false);
-    }
-  };
-
   const shouldRestoreAgentRef = useRef(true);
   const previousActiveThreadIdRef = useRef(activeThreadId);
 
@@ -1159,19 +1079,20 @@ const HomeContent: FC = () => {
         : workbenchState.config.mode === "skill_create"
           ? {
               runtimeMode: "nl2skill" as const,
+              creationTarget:
+                activeThreadId && skillTargets.current[activeThreadId]
+                  ? {
+                      type: "skill" as const,
+                      id: skillTargets.current[activeThreadId],
+                    }
+                  : undefined,
               persistCreationHistory: true,
               creationWorkbenchConfig: effectiveWorkbenchConfig,
               complexity: "complicated" as const,
               language: i18n.language?.startsWith("en")
                 ? ("en" as const)
                 : ("zh" as const),
-              modelId: effectiveWorkbenchConfig.model_id,
-              draftSnapshot: {
-                ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
-                files: Object.entries(skillDraftRef.current.files).map(
-                  ([path, content]) => ({ path, content })
-                ),
-              },
+              getDraftSnapshot: getSkillDraftSnapshot,
               onNl2SkillEvent: handleNl2SkillEvent,
             }
           : {}),
@@ -1208,7 +1129,7 @@ const HomeContent: FC = () => {
     resetNl2AgentFlow,
     i18n.language,
     user?.email,
-    skillDraft,
+    getSkillDraftSnapshot,
     knowledgeScope,
     runtimeMetadata,
     runtimeMetadataDirty,
@@ -1272,6 +1193,29 @@ const HomeContent: FC = () => {
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
+  const cacheCurrentThread = useCallback(() => {
+    const currentId = runtime.threads.getState().mainThreadId;
+    if (!currentId) return;
+    const snapshot = {
+      state: structuredClone(workbenchState),
+      skillDraft: structuredClone(skillDraftRef.current),
+      savedSkillName,
+      selectedAgent,
+      scope: knowledgeScope,
+      preview: knowledgePreview,
+    };
+    setLocalThreadSnapshots((snapshots) =>
+      new Map(snapshots).set(currentId, snapshot)
+    );
+  }, [
+    runtime,
+    workbenchState,
+    savedSkillName,
+    selectedAgent,
+    knowledgeScope,
+    knowledgePreview,
+  ]);
+
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
     shouldRestoreAgentRef.current = false;
@@ -1279,14 +1223,32 @@ const HomeContent: FC = () => {
   }, [onBack]);
 
   const handleNewConversation = useCallback(async () => {
-    handlePrepareNewConversation();
-    await runtime.threads.switchToNewThread();
-    // Re-fetch the conversation list: the thread the user just left only
-    // became a server-side conversation when its first message was sent, and
-    // without a reload it would disappear from the sidebar until a manual
-    // page refresh (the newchat page already reloads at this point).
-    await runtime.threads.reload();
-  }, [handlePrepareNewConversation, runtime]);
+    try {
+      cacheCurrentThread();
+      await startWorkbenchConversation(runtime, () => {
+        handlePrepareNewConversation();
+        creationReturnRef.current = null;
+        skillDraftRef.current = initialSkillCreationDraft;
+        setSkillDraft(initialSkillCreationDraft);
+        setSavedSkillName(null);
+        resetNl2AgentFlow(null);
+      });
+      // Include the conversation just persisted by its first send.
+      await runtime.threads.reload();
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.conversationCreateFailed")
+      );
+    }
+  }, [
+    cacheCurrentThread,
+    handlePrepareNewConversation,
+    runtime,
+    resetNl2AgentFlow,
+    t,
+  ]);
 
   const applyAgentMounts = useCallback(
     async (mounts: import("@/features/workbench").WorkbenchAgentMount[]) => {
@@ -1384,19 +1346,7 @@ const HomeContent: FC = () => {
       }
       if (mode === workbenchState.config.mode) return true;
       const currentId = runtime.threads.getState().mainThreadId;
-      if (currentId) {
-        const snapshot = {
-          state: structuredClone(workbenchState),
-          skillDraft: structuredClone(skillDraftRef.current),
-          savedSkillName,
-          selectedAgent,
-          scope: knowledgeScope,
-          preview: knowledgePreview,
-        };
-        setLocalThreadSnapshots((snapshots) =>
-          new Map(snapshots).set(currentId, snapshot)
-        );
-      }
+      cacheCurrentThread();
       if (mode === "generic_chat" && creationReturnRef.current) {
         const returnId = creationReturnRef.current;
         await returnFromCreation(runtime, returnId, () => {
@@ -1438,13 +1388,35 @@ const HomeContent: FC = () => {
     }
   };
 
+  const creationConfirmation = useCreationModeConfirmation({
+    runtime,
+    mode: workbenchState.config.mode,
+    conversationId: activeConversationId,
+    canCreateAgent: hasPermission("agent:create"),
+    canCreateSkill: hasPermission("skill:create"),
+    changeMode: changeCreationMode,
+    onSaved: (id) => conversationDetails.invalidate(id),
+  });
+
   const handleSaveSkill = async (
     payload: NonNullable<ReturnType<typeof buildSkillSavePayload>>
   ) => {
-    const result = await createSkill(payload);
+    const thread = activeThreadId;
+    const previous = thread ? skillTargets.current[thread] : undefined;
+    const result = previous
+      ? await updateSkillById(previous, payload)
+      : await createSkill(payload);
     if (!result.success) {
       message.error(result.message || t("ui.localization.skillSaveFailed"));
       return;
+    }
+    const id = Number(result.data?.skill_id ?? previous);
+    if (thread && id > 0) {
+      skillTargets.current[thread] = id;
+      await conversationService.bindTarget(Number(activeConversationId), {
+        type: "skill",
+        id,
+      });
     }
     setSavedSkillName(payload.name);
     message.success(t("ui.localization.skillSaved"));
@@ -1503,54 +1475,13 @@ const HomeContent: FC = () => {
               }
               selectedAgent={null}
               modelSelectionScope="tenant"
+              selectedModelId={defaultLlmModelConfig?.id?.toString()}
               fallbackAgentName={t(
                 "workbench.genericAgentName",
                 "智能体工作台"
               )}
               landingContent={<WorkbenchGreeting />}
-              selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
-              deepThinking={
-                effectiveWorkbenchConfig.generation_config.deep_thinking
-              }
-              onDeepThinkingChange={(enabled) =>
-                void handleThinkingChange({ deep_thinking: enabled })
-              }
-              thinkingEffort={
-                effectiveWorkbenchConfig.generation_config.thinking_effort
-              }
-              onThinkingEffortChange={(effort) =>
-                void handleThinkingChange({ thinking_effort: effort })
-              }
               showModelSelector={true}
-              reasoningBudgetTokens={
-                effectiveWorkbenchConfig.generation_config
-                  .reasoning_budget_tokens ?? 0
-              }
-              onReasoningBudgetTokensChange={(budget) =>
-                void handleThinkingChange({
-                  reasoning_budget_tokens: budget,
-                  thinking_effort: "auto",
-                })
-              }
-              modelParameterSettings={{
-                scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}:${modelSettingsRevision}`,
-                value: {
-                  temperature:
-                    effectiveWorkbenchConfig.generation_config.temperature ??
-                    undefined,
-                  top_p:
-                    effectiveWorkbenchConfig.generation_config.top_p ??
-                    undefined,
-                },
-                defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
-                disabled: isThreadRunning || isSavingModel,
-                onChange: (value) =>
-                  void handleThinkingChange({
-                    temperature: value.temperature,
-                    top_p: value.top_p,
-                  }),
-              }}
-              onModelChange={(id) => void handleModelChange(id)}
               onAgentSelected={handleAgentSelectedFromLanding}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
@@ -1570,7 +1501,6 @@ const HomeContent: FC = () => {
               onRuntimeMetadataChange={handleRuntimeMetadataChange}
               readOnly={
                 !workbenchSendability.canSend ||
-                isSavingModel ||
                 (workbenchState.config.mode === "agent_create" &&
                   isAgentCreationAwaitingDraft(
                     activeThread?.remoteId,
@@ -1584,13 +1514,11 @@ const HomeContent: FC = () => {
                   nl2AgentComposerDisabled)
               }
               readOnlyReason={
-                isSavingModel
-                  ? t("ui.localization.savingModel")
-                  : !isCreating && effectiveWorkbenchConfig.model_id == null
-                    ? isLoadingModels
-                      ? t("ui.localization.loadingModels")
-                      : t("ui.localization.noModels")
-                    : workbenchSendability.reason
+                !isCreating && llmModels.length === 0
+                  ? isLoadingModels
+                    ? t("ui.localization.loadingModels")
+                    : t("ui.localization.noModels")
+                  : workbenchSendability.reason
               }
               skillFiles={
                 workbenchState.config.mode === "skill_create" &&
@@ -1717,6 +1645,8 @@ const HomeContent: FC = () => {
   );
 
   return (
-    <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
+    <CreationModeConfirmationContext.Provider value={creationConfirmation}>
+      <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
+    </CreationModeConfirmationContext.Provider>
   );
 };

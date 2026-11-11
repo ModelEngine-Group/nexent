@@ -756,48 +756,19 @@ async def test_confirm_proposal_rejects_and_marks_expired_proposal(monkeypatch):
 
 
 def test_cancel_run_marks_running_run_canceled(monkeypatch):
-    stopped = {}
-
-    def fake_stop(conversation_id, user_id):
-        stopped["conversation_id"] = conversation_id
-        stopped["user_id"] = user_id
-
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "get_run",
-        lambda run_id, tenant_id, user_id: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "task_id": 88,
-            "conversation_id": 99,
-            "status": AutomationRunStatus.RUNNING.value,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "cancel_run",
-        lambda run_id, tenant_id, user_id, reason: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "status": AutomationRunStatus.CANCELED.value,
-            "error_message": reason,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
-    )
-
+    from management.services.automation import runner
+    from unittest.mock import Mock
+    active = dict(run_id=7, task_id=88, conversation_id=99, status="RUNNING")
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *a: active)
+    finalizer = Mock(return_value=({**active, "status": "CANCELED"}, True))
+    monkeypatch.setattr(runner.agent_automation_runner, "cancel_run_by_user", finalizer)
     service = AgentAutomationFacade()
-    monkeypatch.setattr(service, "_request_conversation_stop", fake_stop)
-
-    canceled = service.cancel_run(7, "tenant", "user")
-
-    assert canceled["status"] == AutomationRunStatus.CANCELED.value
-    assert stopped == {"conversation_id": 99, "user_id": "user"}
+    monkeypatch.setattr(service, "get_task", lambda *a: {"task_id": 88})
+    stop = Mock()
+    monkeypatch.setattr(service, "_request_conversation_stop", stop)
+    assert service.cancel_run(7, "tenant", "user")["status"] == "CANCELED"
+    finalizer.assert_called_once_with(active, {"task_id": 88})
+    stop.assert_called_once_with(99, "user", 7)
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):

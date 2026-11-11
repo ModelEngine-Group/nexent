@@ -4,8 +4,10 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useMemo,
+  useState,
   type FC,
   type ReactNode,
 } from "react";
@@ -40,6 +42,42 @@ export interface SourcesPanelContextValue {
   open: (payload: SourcesPanelSelection) => void;
   toggle: (payload: SourcesPanelSelection) => void;
   close: () => void;
+}
+
+export function useSourcesPanelState(
+  onOpen?: () => void,
+  closeEpoch = 0
+): SourcesPanelContextValue {
+  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
+    null
+  );
+  const [previousCloseEpoch, setPreviousCloseEpoch] = useState(closeEpoch);
+  if (previousCloseEpoch !== closeEpoch) {
+    setPreviousCloseEpoch(closeEpoch);
+    setSelection(null);
+  }
+  const open = useCallback(
+    (payload: SourcesPanelSelection) => {
+      onOpen?.();
+      setSelection(payload);
+    },
+    [onOpen]
+  );
+  const toggle = useCallback(
+    (payload: SourcesPanelSelection) => {
+      const isClosing =
+        selection?.messageId === payload.messageId &&
+        selection?.groupId === payload.groupId;
+      if (!isClosing) onOpen?.();
+      setSelection(isClosing ? null : payload);
+    },
+    [selection, onOpen]
+  );
+  const close = useCallback(() => setSelection(null), []);
+  return useMemo(
+    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
+    [selection, open, toggle, close]
+  );
 }
 
 const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(

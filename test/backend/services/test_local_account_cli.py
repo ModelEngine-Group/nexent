@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from contracts.errors.exceptions import AccountConflictError
-from management.cli import account as cli
-from gateway.security.passwords import verify_password
+from infrastructure.security import account_cli as cli
+from infrastructure.security.passwords import verify_password
 
 
 @pytest.fixture
@@ -41,15 +41,15 @@ def test_bootstrap_creates_identity_and_su_membership_in_one_transaction(store):
 
 @pytest.mark.parametrize("check_only", [True, False])
 def test_existing_su_is_idempotent_without_password_work(store, check_only):
-    store.lookup.return_value = {"user_id": "original", "account_status": "active"}
+    store.lookup.return_value = {"user_id": "original", "delete_flag": "N"}
     assert cli.bootstrap_super_admin("su@example.com", "", check_only=check_only) == {"exists": True}
     store.create.assert_not_called()
     store.member.assert_not_called()
 
 
-@pytest.mark.parametrize("status,roles", [("disabled", ["SU"]), ("active", []), ("active", ["SU", "USER"])])
-def test_unavailable_or_non_su_identity_cannot_be_promoted(store, status, roles):
-    store.lookup.return_value = {"user_id": "original", "account_status": status}
+@pytest.mark.parametrize("flag,roles", [("Y", ["SU"]), ("N", []), ("N", ["SU", "USER"])])
+def test_unavailable_or_non_su_identity_cannot_be_promoted(store, flag, roles):
+    store.lookup.return_value = {"user_id": "original", "delete_flag": flag}
     store.session.execute.return_value.scalars.return_value.all.return_value = [SimpleNamespace(user_role=r) for r in roles]
     with pytest.raises(AccountConflictError, match="unavailable or non-SU"):
         cli.bootstrap_super_admin("su@example.com", "Password123")

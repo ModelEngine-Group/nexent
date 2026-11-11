@@ -443,6 +443,7 @@ function AgentSetupContent({
                 onStopped={handleGenerationStopped}
                 onRunStart={markRunStarted}
                 onRunEnd={markRunFinished}
+                onConversationChange={handleGenerationStopped}
               />
             </div>
           </PanelCard>
@@ -472,8 +473,8 @@ function AgentSetupContent({
                 agentInfo?.name ||
                 t("agent.page.panel.config"),
             })}
-            className="ml-2 flex-1 xl:ml-3"
-            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-4 py-3"
+            className={"flex-1"}
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-6 py-3"
             leftAction={
               <Button
                 type="text"
@@ -588,7 +589,7 @@ function AgentSetupContent({
                 }}
                 onOptimizePrompt={() => {
                   setIsGenerationVisible(true);
-                  nl2AgentChatPanelRef.current?.sendPrompt(
+                  nl2AgentChatPanelRef.current?.fillPrompt(
                     t("nl2agent.optimization.prompt.input")
                   );
                 }}

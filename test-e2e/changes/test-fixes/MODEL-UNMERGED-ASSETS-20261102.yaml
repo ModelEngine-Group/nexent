@@ -1,0 +1,16 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-UNMERGED-ASSETS-20261102
+  change_type: test-fix
+  title: Align this stack's unmerged model test assets with the current target rules
+  description: Normalize five new Case IDs absent from develop and assign their new Features to the existing model responsibility domain. Preserve all test scripts and assertions, all stable develop IDs, and the runtime preparation and cleanup contracts; add no naming exemptions.
+  affected_features:
+    existing: []
+    added: []
+    modified: [BE-MODEL-OUTLET-PERSISTENCE, SDK-MODEL-OUTLET-RESOLUTION, SDK-MODEL-OUTLET-STORAGE, SDK-MODEL-PROFILE-CATALOG, SDK-MODEL-PROFILE-COMPOSITION, SDK-MODEL-PROFILE-CONTRACTS, SDK-MODEL-PROFILE-NORMALIZATION, SDK-MODEL-PROFILE-PARAMETERS, SDK-MODEL-TRANSPORT]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [MODEL-OUTLET-PERSISTENCE-D3-001, MODEL-PROFILE-COMPOSITION-D1-001, MODEL-PROFILE-NORMALIZATION-D1-001, MODEL-PROFILE-RESOLUTION-D1-001, MODEL-SERVICE-TRANSPORT-D3-001]
+    retired: []

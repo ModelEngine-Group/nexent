@@ -4,7 +4,7 @@
 
 import { Button, Modal, Tooltip } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
-import { RotateCw } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import {
   forwardRef,
   type HTMLAttributes,
@@ -16,7 +16,6 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { StandardCloseButton } from "@/components/common/StandardCloseButton";
 import styles from "./ParamDialog.module.css";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
@@ -32,11 +31,17 @@ export function ParamDialog({
   maskClosable = false,
   confirmDisabled = false,
   confirmLoading = false,
+  onReset,
+  resetText,
+  resetDisabled = false,
   cancelDisabled = false,
   destroyOnHidden = false,
+  footer,
   children,
   variant,
+  splitLayout = false,
 }: {
+  splitLayout?: boolean;
   variant?: "skill" | "tool" | "model" | "publish";
   open: boolean;
   title: ReactNode;
@@ -49,8 +54,13 @@ export function ParamDialog({
   maskClosable?: boolean;
   confirmDisabled?: boolean;
   confirmLoading?: boolean;
+  onReset?: () => void;
+  resetText?: string;
+  resetDisabled?: boolean;
   cancelDisabled?: boolean;
   destroyOnHidden?: boolean;
+  /** Replace the default footer; pass null to let the body render its own. */
+  footer?: ReactNode | null;
   children: ReactNode;
 }) {
   const { t } = useTranslation("common");
@@ -59,7 +69,7 @@ export function ParamDialog({
       open={open}
       onCancel={onClose}
       centered
-      width={480}
+      width={splitLayout ? "min(1040px, calc(100vw - 32px))" : 480}
       footer={null}
       closable={false}
       zIndex={zIndex}
@@ -74,7 +84,11 @@ export function ParamDialog({
         body: { padding: 0 },
       }}
     >
-      <div className={styles.dialog} data-config-variant={variant}>
+      <div
+        className={styles.dialog}
+        data-config-variant={variant}
+        data-config-layout={splitLayout ? "split" : undefined}
+      >
         <div
           data-config-part="heading"
           className="flex shrink-0 flex-col gap-2"
@@ -86,8 +100,11 @@ export function ParamDialog({
             <span className="min-w-0 text-[16px] font-bold leading-6 text-[#1A1A1A]">
               {title}
             </span>
-            <StandardCloseButton
-              ariaLabel={t("common.close")}
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("common.close")}
+              icon={<X size={14} />}
               onClick={onClose}
             />
           </div>
@@ -103,30 +120,44 @@ export function ParamDialog({
         <div data-config-part="body" className={styles.body}>
           {children}
         </div>
-        <div
-          data-config-part="footer"
-          className="flex h-8 shrink-0 justify-end gap-4"
-        >
-          <Button
-            autoInsertSpace={false}
-            onClick={onClose}
-            disabled={cancelDisabled}
-            className={styles.cancelButton}
+        {footer === undefined ? (
+          <div
+            data-config-part="footer"
+            className="flex h-8 shrink-0 justify-end gap-4"
           >
-            {cancelText ?? t("common.cancel")}
-          </Button>
-          {onConfirm && (
+            {onReset ? (
+              <button
+                type="button"
+                className={styles.resetLink}
+                disabled={resetDisabled}
+                onClick={onReset}
+              >
+                {resetText ?? t("common.reset")}
+              </button>
+            ) : null}
             <Button
               autoInsertSpace={false}
-              onClick={onConfirm}
-              disabled={confirmDisabled}
-              loading={confirmLoading}
-              className={styles.confirmButton}
+              onClick={onClose}
+              disabled={cancelDisabled}
+              className={styles.cancelButton}
             >
-              {confirmText ?? t("common.confirm")}
+              {cancelText ?? t("common.cancel")}
             </Button>
-          )}
-        </div>
+            {onConfirm && (
+              <Button
+                autoInsertSpace={false}
+                onClick={onConfirm}
+                disabled={confirmDisabled}
+                loading={confirmLoading}
+                className={styles.confirmButton}
+              >
+                {confirmText ?? t("common.confirm")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          footer
+        )}
       </div>
     </Modal>
   );
@@ -302,7 +333,7 @@ export function ParamLabel({
           *
         </span>
       )}
-      {label}
+      <span data-config-label-text>{label}</span>
       {infoNode &&
         (showInfo && infoText ? (
           <Tooltip title={infoText}>{infoNode}</Tooltip>

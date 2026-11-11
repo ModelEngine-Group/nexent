@@ -285,6 +285,7 @@ def test_runner_publish_precedes_notification_without_changing_failure_results(
     settings = {"hooks": {name: [["synthetic-command"]] for name in ("build", "deploy", "preflight")},
                 "case_timeout_seconds": 20, "command_timeout_seconds": 20, "notify": True}
     with patch.object(suite, "machine_environment", return_value={}), \
+            patch("validation_policy.evaluate", return_value=({"ready": True, "status": "VALID", "issues": [], "blocked_cases": []}, [record])), \
             patch.object(suite, "fingerprint", return_value={"head": "a" * 40}), \
             patch.object(suite, "enrich_ownership", return_value=([record], [])), \
             patch.object(suite, "static_inventory", return_value=[]), \

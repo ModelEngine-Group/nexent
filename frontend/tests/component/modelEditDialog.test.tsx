@@ -98,3 +98,10 @@ it("keeps personal edits on the single-model endpoint", async () => {
   });
   expect(updateManageTenantModel).not.toHaveBeenCalled();
 });
+
+it("ME-04 migration failures use the existing edit dialog with an inline warning", () => {
+  renderDialog({ model: { ...llmModel, migrationStatus: "failed" } });
+  expect(screen.getByRole("alert")).toHaveTextContent("modelMigration.failedHint");
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(screen.queryByText("modelMigration.reviewTitle")).not.toBeInTheDocument();
+});

@@ -3,14 +3,14 @@ change:
   change_id: CHAT-AUTOMATION-RUN-BACKFILL-20261027
   change_type: bugfix
   bug_id: CHAT-AUTOMATION-RUN-BACKFILL-20261027
-  title: Backfill automation message sources using run references only
-  description: Replace correlated source classification with direct run message references, without accessing message units or explicit deduplication.
-  observed_behavior: Source backfill scans the large message-unit table and repeatedly checks automation runs for ordinary messages.
-  expected_behavior: Expand both run message IDs with LATERAL VALUES and directly update only matching CHAT messages; duplicate references preserve the constant AUTOMATION result and unlinked historical messages remain unchanged.
+  title: Backfill automation sources without historical activity writes
+  description: Use direct run message references without unit-table access or explicit deduplication; omit historical activity backfill and retain creation-time fallback until the next visible message.
+  observed_behavior: Source classification scans message units and repeatedly checks runs; activity backfill rescans the message table for each pending conversation.
+  expected_behavior: Expand run message IDs and update only matching CHAT messages; preserve NULL and existing activity without rewriting conversation rows. Lists fall back to creation time, and new visible messages initialize activity.
   escaped_stage: D5
   coverage_gap:
     type: missing_assertion
-    description: Existing migration fixtures always create the unit table and omit duplicate, NULL, missing and wrong-conversation run references.
+    description: Existing fixtures create the unit table and omit incomplete run references; activity assertions require historical population rather than NULL preservation and omit the next-message transition.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -20,7 +20,7 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [CHAT-ACTIVITY-D5-001]
+    modified: [CHAT-ACTIVITY-D5-001, AUTO-QUOTA-D3-001]
     retired: []
   traditional_ut:
     decision: reuse
@@ -40,5 +40,5 @@ change:
     a later migration would still execute after the original slow backfill.
     Preserve all other migration sections, runtime code, existing D1 Cases and
     historical evidence. Only disposable PostgreSQL fixtures are mutated.
-    Failure-status interpretation and early run/message association are explicitly
-    deferred. Product deployment remains outside this change's scope.
+    Runtime outcome and run/message association code is outside this SQL change.
+    The latest user decision supersedes aggregate activity backfill with no backfill. Product deployment remains outside this change's scope.

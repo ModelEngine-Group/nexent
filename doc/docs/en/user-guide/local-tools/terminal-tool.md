@@ -44,7 +44,7 @@ When running the deployment script, choose to enable the Terminal tool container
 
 ```bash
 # Run deployment script from the repository root
-bash deploy.sh docker --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh docker --components infrastructure,application,data-process,terminal
 
 # During script execution, select:
 # During script execution, select or keep the terminal component enabled.

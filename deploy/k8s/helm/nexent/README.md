@@ -96,6 +96,8 @@ K8s deployments read runtime configuration from `deploy/env/.env`, the same file
 
 Config, Runtime, MCP, Northbound, and Data Process load every variable declared in `.env` through the backend-only `nexent-env` Secret, including newly added variables without a Helm mapping. Config and Runtime additionally load `deploy/env/monitoring.env` through `nexent-monitoring-env`. These scopes match the production Docker Compose configuration. Web and infrastructure do not reference either complete env Secret; they keep their service-specific environment configuration.
 
+Internal MCP authentication uses `NEXENT_MCP_INTERNAL_TOKEN`. The deployment script carries an existing `TOKEN` assignment forward when the new key is missing. For direct Helm upgrades, move any existing `nexent-common.config.voiceService.token` override to `nexent-common.secrets.mcpInternalToken`. When `NEXENT_MCP_INTERNAL_TOKEN` is present in the deployment environment file, it takes precedence over the Helm value.
+
 Environment precedence, from lowest to highest, is the existing ConfigMap, `.env`, `monitoring.env` where applicable, finalized deployment credentials, and explicit container environment settings. Kubernetes mode, namespace, SQL startup/checksum, selected MCP/sandbox images, and sandbox execution level remain deployment-controlled. Env files use the existing trusted Bash-compatible syntax: empty strings, quoting, JSON, substitutions, and multiline strings are preserved. Only variables assigned in the file are emitted; unrelated exported host variables are excluded.
 
 Application Secret values are rendered after credentials are finalized and written atomically with mode `0600`. The chart exposes `nexent-common.envFiles.rootData` and `monitoringData` as Base64-encoded string mappings; both default to `{}` so direct Helm rendering works without generated env files. Editing `.env` takes effect on the next deployment, when the environment checksum replaces backend Pods. Fresh Secret maps also remove deleted variables. Generated values contain sensitive configuration and must stay outside Git and shared logs.
@@ -461,4 +463,4 @@ Released PVs are automatically cleaned during deployment. To manually clean:
 kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
 
-Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../sql/tools/supabase_to_postgres/README.md) covers historical credentials and cutover.

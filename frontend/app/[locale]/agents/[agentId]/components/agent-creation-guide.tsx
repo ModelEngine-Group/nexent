@@ -9,14 +9,11 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { Button } from "antd";
+import { Button, Tour } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { StandardTour } from "@/components/common/StandardTour";
-import {
-  completeAgentCreationGuide,
-  hasCompletedAgentCreationGuide,
-} from "@/lib/agentCreationGuide";
+import { useGuidePreference } from "@/hooks/useGuidePreference";
+import { hasCompletedAgentCreationGuide } from "@/lib/agentCreationGuide";
 
 const TARGETS = ["assistant", "core", "resources", "workflow"] as const;
 const PLACEMENTS = ["right", "bottomLeft", "topLeft", "bottomRight"] as const;
@@ -31,6 +28,10 @@ export function AgentCreationGuide({
   workspaceRef,
 }: AgentCreationGuideProps) {
   const { t } = useTranslation("common");
+  const { dismiss: dismissPreference } = useGuidePreference(
+    "agent-creation",
+    preferenceKey
+  );
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(0);
   // The local anchor is available before the parent's workspace ref is attached.
@@ -59,14 +60,14 @@ export function AgentCreationGuide({
   );
 
   const dismiss = useCallback(() => {
-    completeAgentCreationGuide(preferenceKey);
+    dismissPreference();
     setOpen(false);
     window.requestAnimationFrame(() => {
       findTarget("assistant")
         ?.querySelector<HTMLTextAreaElement>("textarea")
         ?.focus({ preventScroll: true });
     });
-  }, [findTarget, preferenceKey]);
+  }, [findTarget, dismissPreference]);
 
   useEffect(() => {
     if (!open) return;
@@ -93,12 +94,15 @@ export function AgentCreationGuide({
   return (
     <>
       <span ref={initializeGuide} hidden />
-      <StandardTour
+      <Tour
         open={open}
         current={current}
         onChange={setCurrent}
         onClose={dismiss}
-        rootClassName={`agent-creation-guide guide-step-${current + 1}`}
+        rootClassName="agent-creation-guide"
+        closable={false}
+        disabledInteraction
+        indicatorsRender={() => null}
         actionsRender={(actions) =>
           current === 0 ? (
             <>
@@ -111,25 +115,13 @@ export function AgentCreationGuide({
             actions
           )
         }
-        gap={{
-          offset:
-            current === 0
-              ? [1, -9]
-              : current === 3
-                ? 0
-                : current === 2
-                  ? [17, 6.5]
-                  : [17, 8],
-          radius: 8,
-        }}
+        gap={{ radius: 8 }}
         scrollIntoViewOptions={{ block: "nearest", inline: "nearest" }}
         steps={TARGETS.map((name, index) => ({
           title: t(`agent.creationGuide.${name}.title`),
           description: t(`agent.creationGuide.${name}.description`),
           target: () => findTarget(name) ?? workspaceRef.current!,
           placement: PLACEMENTS[index],
-          className: index === 2 ? "guide-resources" : undefined,
-          style: { width: index === 0 ? 292 : 300 },
           prevButtonProps: { children: t("agent.creationGuide.previous") },
           nextButtonProps: {
             children: t(

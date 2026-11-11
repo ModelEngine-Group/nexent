@@ -37,12 +37,22 @@ class AgentRunManager(LocalExecutionRegistry):
             conversation_id, user_id, status, agent_run_info
         )
         if removed:
+            generation = agent_run_info.__dict__.get("_automation_runtime_generation") if agent_run_info is not None else None
+            generation_kwargs = {"generation": generation} if generation is not None else {}
             runtime_state_service.mark_run_finished(
-                user_id=user_id, conversation_id=conversation_id, status=status
+                user_id=user_id, conversation_id=conversation_id, status=status, **generation_kwargs
             )
         return removed
 
-    def stop_agent_run(self, conversation_id, user_id):
+    def stop_agent_run(self, conversation_id, user_id, expected_generation=None):
+        if expected_generation is not None:
+            info = self.get_agent_run_info(conversation_id, user_id)
+            remote_signal_set = runtime_state_service.set_cancel_signal(
+                user_id, conversation_id, expected_generation=expected_generation,
+            )
+            if info is not None and info.__dict__.get("_automation_runtime_generation") == expected_generation:
+                return super().stop_agent_run(conversation_id, user_id, expected_run_info=info) or remote_signal_set
+            return remote_signal_set
         remote_signal_set = runtime_state_service.set_cancel_signal(
             user_id=user_id, conversation_id=conversation_id
         )

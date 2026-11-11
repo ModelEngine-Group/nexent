@@ -1141,13 +1141,126 @@ prepare_directory_and_data() {
   echo ""
 }
 
+prepare_core_service_deployment() {
+  local service image
+  local prepared_images=" "
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+    echo "Error: invalid Compose configuration; existing business services remain running." >&2
+    return 1
+  fi
+
+  for service in "$@"; do
+    case "$service" in
+      nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
+      nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
+      *) image="${NEXENT_IMAGE:-}" ;;
+    esac
+    if [ -z "$image" ]; then
+      echo "Error: no image configured for $service." >&2
+      return 1
+    fi
+    case "$prepared_images" in *" $image "*) continue ;; esac
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      if [ "${DEPLOYMENT_IMAGE_SOURCE:-}" = "local-latest" ]; then
+        echo "Error: local image $image is missing; build it before deploying." >&2
+        return 1
+      fi
+      docker pull "$image" || return 1
+    fi
+    prepared_images="$prepared_images$image "
+  done
+
+  case " $* " in
+    *" nexent-config "*)
+      # Override the SQL entrypoint: this preflight must not modify the database.
+      if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
+        ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+        run --rm --no-deps --workdir /opt/backend --entrypoint sh nexent-config \
+        -c 'test -r management/services/agent/system_initialize.py && test -r management/services/agent/system_release.py'; then
+        echo "Error: the backend image cannot initialize/publish Workbench; rebuild the image before deploying." >&2
+        return 1
+      fi
+      ;;
+  esac
+}
+
+stop_legacy_workbench_writers() {
+  local matches container_id capability state
+  local writers=()
+  # Before shared Workbench, Config created tenant drafts from Agent and tenant requests.
+  matches="$(docker ps -q \
+    --filter "label=com.docker.compose.project=nexent" \
+    --filter "label=com.docker.compose.service=nexent-config")" || return 1
+  while IFS= read -r container_id; do
+    [ -n "$container_id" ] || continue
+    if ! capability="$(docker exec "$container_id" sh -c '
+      if [ -r /opt/backend/management/services/agent/system_initialize.py ] &&
+         [ -r /opt/backend/management/services/agent/system_release.py ]; then
+        printf shared
+      else
+        printf legacy
+      fi')"; then
+      echo "Error: could not inspect the running Config service; migration will not run." >&2
+      return 1
+    fi
+    case "$capability" in
+      shared) ;;
+      legacy) writers+=("$container_id") ;;
+      *) echo "Error: unexpected Config capability; migration will not run." >&2; return 1 ;;
+    esac
+  done <<< "$matches"
+  [ "${#writers[@]}" -gt 0 ] || return 0
+
+  # Use the planned Config service's connection settings without its migration entrypoint.
+  if ! state="$(
+    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+      run --rm --no-deps -T --entrypoint sh nexent-config -ec '
+        PGPASSWORD="${NEXENT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}" PGCONNECT_TIMEOUT=5 \
+          exec psql -XqAt -v ON_ERROR_STOP=1 -h "${POSTGRES_HOST:-nexent-postgresql}" \
+            -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-root}" -d "${POSTGRES_DB:-nexent}"
+      ' < "$SCRIPT_DIR/../sql/tools/check_shared_workbench.sql"
+  )"; then
+    echo "Error: could not check shared Workbench migration state." >&2
+    return 1
+  fi
+  case "$state" in
+    complete) return 0 ;;
+    pending) ;;
+    *) echo "Error: unexpected shared Workbench migration state." >&2; return 1 ;;
+  esac
+  echo "Stopping legacy Config writers for the pending shared Workbench migration..."
+  if ! docker stop --time 60 "${writers[@]}"; then
+    echo "Error: legacy Config writers could not be stopped; migration will not run." >&2
+    return 1
+  fi
+}
+
+publish_shared_workbench() {
+  # The config image entrypoint applies SQL before either Python command runs.
+  case " $DEPLOYMENT_SELECTED_DOCKER_SERVICES " in
+    *" nexent-config "*) ;;
+    *) return 0 ;;
+  esac
+
+  echo "Initializing and publishing shared Workbench..."
+  # Keep container paths literal in Git Bash while retaining host-path conversion.
+  if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
+    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+    run --rm --no-deps --workdir /opt/backend \
+    --entrypoint /opt/nexent/scripts/start-backend.sh nexent-config \
+    sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
+    echo "Error: shared Workbench initialization or publication failed." >&2
+    return 1
+  fi
+}
+
 deploy_core_services() {
   # Function to deploy core services
   local core_services=()
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1157,6 +1270,12 @@ deploy_core_services() {
     echo "👀 No core services selected, skipping core service startup."
     return 0
   fi
+
+  prepare_core_service_deployment "${core_services[@]}" || return 1
+  case " ${core_services[*]} " in
+    *" nexent-config "*) stop_legacy_workbench_writers || return 1 ;;
+  esac
+  publish_shared_workbench || return 1
 
   echo "👀 Starting core services: ${core_services[*]}"
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
@@ -1862,9 +1981,9 @@ main_deploy() {
     return 0
   fi
 
-  # Capture historical identities before application replacement or SQL changes.
+  # Complete historical import before application startup can create its marker table.
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-    deployment_upgrade_local_accounts prepare docker || exit 1
+    deployment_upgrade_local_accounts docker || exit 1
   fi
 
   # Configure HTTPS state before core services start so nexent-web is created
@@ -1898,9 +2017,6 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-    deployment_upgrade_local_accounts apply docker || exit 1
-  fi
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then

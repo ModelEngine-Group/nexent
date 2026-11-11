@@ -9,9 +9,9 @@ import jwt
 import pytest
 
 from contracts.errors.exceptions import UnauthorizedError, TenantResourceLimitError
-from gateway.security.passwords import hash_password
+from infrastructure.security.passwords import hash_password
 from management.services.permission.identity import authentication as auth
-from management.services.permission.identity import session as helpers
+from gateway.authentication import auth as helpers
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def account():
         "email": "user@example.com",
         "password_hash": hash_password("Password123"),
         "password_login_enabled": True,
-        "account_status": "active",
+        "delete_flag": "N",
         "token_version": 0,
         "email_confirmed_at": datetime.now(),
     }
@@ -139,7 +139,7 @@ def test_jwt_signature_type_and_account_revision(monkeypatch, account):
         )
         with pytest.raises(UnauthorizedError):
             helpers._decode_jwt_token(wrong)
-    account["account_status"] = "disabled"
+    account["delete_flag"] = "Y"
     with pytest.raises(UnauthorizedError):
         helpers._decode_jwt_token(token)
 

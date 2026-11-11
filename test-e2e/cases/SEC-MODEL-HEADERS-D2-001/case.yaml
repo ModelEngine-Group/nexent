@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: SEC-MODEL-HEADERS-D2-001
+  feature_id: V5-SEC-04
+  business_rule_ids: [V5-SEC-04-RULE-01]
+  title: Model list responses exclude stored Header credentials
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual persisted model rows cross the HTTP response boundary without credentials.
+  preconditions:
+  - A local test deployment provides Config API and PostgreSQL with PR4082 schema.
+  - NEXENT_TEST_EMAIL and NEXENT_TEST_PASSWORD identify a test tenant administrator; secrets stay in process environment.
+  - The runner owns every temporary model it creates; no existing model may be changed.
+  test_data:
+    configuration: Unique synthetic LLM record with inert API key and Header markers; no model inference.
+  steps:
+  - order: 1
+    action: Authenticate, create a UUID-owned model without default backfill, and seed synthetic http_headers on only that new row through PostgreSQL.
+    expected: Stored Header markers exist; existing model records and default slots are unchanged.
+  - order: 2
+    action: Read tenant list, LLM list, provider list, manage list and manage provider list over real HTTP; locate the owned row.
+    expected: All five responses omit api_key and http_headers and contain none of the synthetic credential markers while retaining public model identity.
+  - order: 3
+    action: Read the owned row internally after HTTP reads, then delete the temporary model in a finally block.
+    expected: Internal Header data is intact until cleanup, and the owned row is soft-deleted successfully.
+  expected_results:
+  - Every selected HTTP response excludes credential fields and values without suppressing the owned public model identity.
+  - Internal credential storage is unchanged by reads; creation bypasses default selection and cleanup removes only the owned temporary resource.
+  forbidden_side_effects:
+  - No real model inference or real provider credential is used or written to evidence.
+  - No existing model, tenant, default selection or user credential is modified.
+  contract:
+    protocol: HTTP API with actual persisted PostgreSQL fixture
+    method: GET
+    endpoint: /model/list
+    request_expectations:
+    - Authenticate as a test tenant administrator and read the five persisted list variants in step 2.
+    - Only a new UUID-owned inert model may be created or seeded; no provider inference or default backfill.
+    response_expectations:
+    - Existing response envelopes and owned public model identity remain available with api_key and http_headers absent.
+    - Reads preserve stored Header data; finally cleanup soft-deletes only the owned resource and leaves default slots unchanged.
+  acceptance:
+  - id: AC-01
+    description: All five persisted-list HTTP boundaries redact the synthetic credential-bearing row.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Redaction preserves internal credential storage and releases only the owned test model.
+    steps: [1, 3]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]

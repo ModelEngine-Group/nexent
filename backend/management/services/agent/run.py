@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+from contextlib import aclosing
 from typing import (
     Any,
     Dict,
@@ -14,6 +15,8 @@ from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
+from management.services.agent.background import BackgroundExecutionState
+from management.services.agent.run_state import runtime_state_service
 from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.preprocessing import (
     preprocess_manager,
@@ -40,13 +43,14 @@ from runtime.adapters.nexent.runner import (
 )
 from nexent.core.concurrency import (
     ManagedExecution,
+    run_blocking,
 )
 from nexent.monitor import (
     agent_monitoring_context,
 )
+from management.services.conversation.model_preferences import read_model_preferences as _read_model_preferences
 from management.services.conversation.service import (
     get_current_run_user_message_id,
-    get_latest_assistant_message,
     load_historical_context,
     persist_history_summary_candidate,
     save_conversation_user,
@@ -111,9 +115,6 @@ def apply_workbench_runtime_plan(
         "display_name": root_identity.display_name,
         "origin": root_identity.origin,
     }
-    agent_request.__dict__["_runtime_generation_config"] = (
-        canonical_workbench.generation_config.model_dump(mode="json")
-    )
 
 
 async def prepare_agent_run(
@@ -144,8 +145,6 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
-        "reasoning_effort": agent_request.reasoning_effort,
-        "reasoning_budget_tokens": agent_request.reasoning_budget_tokens,
         "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
@@ -163,18 +162,6 @@ async def prepare_agent_run(
         create_run_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_skill_snapshot is not None:
         create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
-    runtime_generation_config = getattr(
-        agent_request, "_runtime_generation_config", None
-    )
-    if (
-        runtime_generation_config is None
-        and agent_request.generation_config is not None
-    ):
-        runtime_generation_config = agent_request.generation_config.model_dump(
-            mode="json", exclude_unset=True
-        )
-    if runtime_generation_config is not None:
-        create_run_kwargs["runtime_generation_config"] = runtime_generation_config
     runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
     if runtime_mount_plan is not None:
         create_run_kwargs["runtime_sub_agent_mounts"] = [
@@ -189,6 +176,14 @@ async def prepare_agent_run(
         ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
+    preferences = getattr(agent_request, "_runtime_model_parameter_preferences", None)
+    if preferences is None:
+        preferences = agent_request.model_parameter_preferences
+        if agent_request.conversation_id is not None and not agent_request.is_debug:
+            saved = await run_blocking("run-model-preferences", _read_model_preferences, agent_request.conversation_id, user_id)
+            preferences = saved["model_parameter_preferences"]
+    if preferences:
+        create_run_kwargs["model_parameter_preferences"] = preferences
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
@@ -244,6 +239,7 @@ async def prepare_agent_run(
             if historical_context is not None
             else None
         )
+    agent_run_info.__dict__["_automation_runtime_generation"] = agent_request.__dict__.get("_runtime_automation_generation")
     register_kwargs = {}
     if reservation_token is not None:
         register_kwargs["reservation_token"] = reservation_token
@@ -285,6 +281,8 @@ async def generate_stream(
     reservation_token: Optional[str] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    final_answer_mode: str = "delta",
+    execution_state: Optional[BackgroundExecutionState] = None,
 ):
     """Unified streaming entry point.
 
@@ -355,7 +353,8 @@ async def generate_stream(
             # and propagating the failure.
             raise MemoryPreparationException(str(prep_err)) from prep_err
 
-        async for data_chunk in _stream_agent_chunks(
+        background_kwargs = {"execution_state": execution_state} if execution_state is not None else {}
+        async with aclosing(_stream_agent_chunks(
             agent_request=agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
@@ -364,8 +363,11 @@ async def generate_stream(
             channel=channel,
             execution=execution,
             deferred_run=deferred_run,
-        ):
-            yield data_chunk
+            final_answer_mode=final_answer_mode,
+            **background_kwargs,
+        )) as chunks:
+            async for data_chunk in chunks:
+                yield data_chunk
 
     except (asyncio.CancelledError, GeneratorExit):
         if agent_run_info is not None:
@@ -380,6 +382,8 @@ async def generate_stream(
         raise
     except MemoryPreparationException as prep_error:
         if not enable_memory:
+            if execution_state is not None:
+                execution_state.fail("AUTOMATION_PREPARATION_FAILED", "Agent preparation failed.")
             # No-memory path has no fallback; surface the failure cleanly.
             logger.error(
                 "Agent run preparation failed without memory: %s",
@@ -395,7 +399,8 @@ async def generate_stream(
         try:
             # Single fallback: re-issue this generator with memory turned off
             # so the actual ``_stream_agent_chunks`` still runs.
-            async for data_chunk in generate_stream(
+            fallback_kwargs = {"execution_state": execution_state} if execution_state is not None else {}
+            async with aclosing(generate_stream(
                 agent_request,
                 user_id=user_id,
                 tenant_id=tenant_id,
@@ -405,9 +410,14 @@ async def generate_stream(
                 reservation_token=reservation_token,
                 execution=execution,
                 deferred_run=deferred_run,
-            ):
-                yield data_chunk
+                final_answer_mode=final_answer_mode,
+                **fallback_kwargs,
+            )) as chunks:
+                async for data_chunk in chunks:
+                    yield data_chunk
         except Exception as run_exc:
+            if execution_state is not None:
+                execution_state.fail("AUTOMATION_EXECUTION_FAILED", "Agent execution failed after memory fallback.")
             logger.error(
                 "Agent run error after memory failure: %r",
                 run_exc,
@@ -419,6 +429,13 @@ async def generate_stream(
             yield error_chunk
             return
     except Exception as stream_exc:
+        if execution_state is not None and execution_state.outcome != "failed":
+            execution_state.fail("AUTOMATION_EXECUTION_FAILED", "Agent execution failed.")
+        if execution_state is not None and agent_run_info is not None:
+            _unregister_agent_run_after_execution(
+                _agent_run_identifier(agent_request), user_id,
+                status="failed", agent_run_info=agent_run_info,
+            )
         logger.error(
             "Generate stream error: %r",
             stream_exc,
@@ -432,6 +449,8 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
+        if cancel_poll_task is not None:
+            await asyncio.gather(cancel_poll_task, return_exceptions=True)
         if (
             agent_run_info is None
             and deferred_run is not None
@@ -459,6 +478,7 @@ async def run_agent_background(
     tenant_id: str,
     language: str = LANGUAGE["ZH"],
     skip_user_save: bool = False,
+    execution_state: Optional[BackgroundExecutionState] = None,
 ) -> Dict[str, Any]:
     """
     Run an agent without returning an SSE response.
@@ -470,62 +490,74 @@ async def run_agent_background(
     if not agent_request.conversation_id:
         raise ValueError("conversation_id is required for background agent runs")
 
-    # Background automation provenance is server-owned, including run-now.
-    agent_request._message_source = "AUTOMATION"
+    execution_state = execution_state or BackgroundExecutionState()
+    reservation = agent_run_manager.reserve_agent_run(agent_request.conversation_id, user_id)
+    try:
+        agent_request.__dict__["_runtime_automation_generation"] = execution_state.runtime_generation
+        await runtime_state_service.reset_stream_async(
+            user_id, agent_request.conversation_id, generation=execution_state.runtime_generation,
+        )
+        # A user cancellation may have committed before reset or during preparation.
+        if execution_state.is_active is not None and not execution_state.is_active():
+            raise asyncio.CancelledError()
+        # Background automation provenance is server-owned, including run-now.
+        agent_request._message_source = "AUTOMATION"
 
-    if not agent_request.is_debug and not skip_user_save:
-        save_messages(
+        if not agent_request.is_debug and not skip_user_save:
+            save_messages(
+                agent_request,
+                target=MESSAGE_ROLE["USER"],
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+
+        run_context = build_agent_run_context(
             agent_request,
-            target=MESSAGE_ROLE["USER"],
+            user_id,
+            tenant_id,
+            language,
+            extra_metadata={"background": True, "skip_user_save": skip_user_save},
+        )
+        agent_metadata = run_context.metadata
+        stream_gen = generate_stream(
+            agent_request,
             user_id=user_id,
             tenant_id=tenant_id,
+            language=language,
+            enable_memory=run_context.enable_memory,
+            execution_state=execution_state,
+            reservation_token=reservation,
         )
 
-    run_context = build_agent_run_context(
-        agent_request,
-        user_id,
-        tenant_id,
-        language,
-        extra_metadata={"background": True, "skip_user_save": skip_user_save},
-    )
-    agent_metadata = run_context.metadata
-    stream_gen = generate_stream(
-        agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        language=language,
-        enable_memory=run_context.enable_memory,
-    )
-
-    chunks = 0
-    with agent_monitoring_context(agent_metadata):
-        async for _ in stream_gen:
-            chunks += 1
-
-    latest_message = get_latest_assistant_message(
-        agent_request.conversation_id, user_id
-    )
-    return {
-        "conversation_id": agent_request.conversation_id,
-        "assistant_message_id": latest_message.get("message_id")
-        if latest_message
-        else None,
-        "chunks": chunks,
-    }
+        chunks = 0
+        with agent_monitoring_context(agent_metadata):
+            async with aclosing(stream_gen):
+                async for _ in stream_gen:
+                    chunks += 1
+        return {
+            "conversation_id": agent_request.conversation_id,
+            **execution_state.result(),
+            "chunks": chunks,
+        }
+    finally:
+        agent_run_manager.release_agent_run_reservation(agent_request.conversation_id, user_id, reservation)
 
 
-def stop_agent_tasks(conversation_id: int | str, user_id: str):
+def stop_agent_tasks(conversation_id: int | str, user_id: str, expected_generation: Optional[str] = None):
     """
     Stop an agent run by its conversation ID or ephemeral debug run ID.
     Matches the behavior of agent_app.agent_stop_api.
     """
     # Stop agent run
-    agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+    if expected_generation is None:
+        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id)
+    else:
+        agent_stopped = agent_run_manager.stop_agent_run(conversation_id, user_id, expected_generation=expected_generation)
 
     # Preprocess tasks are associated only with persisted conversations.
     preprocess_stopped = (
         preprocess_manager.stop_preprocess_tasks(conversation_id)
-        if isinstance(conversation_id, int)
+        if isinstance(conversation_id, int) and expected_generation is None
         else False
     )
 

@@ -9,7 +9,7 @@
 ## 1. 环境准备
 
 ```bash
-pip install langchain
+uv pip install langchain
 ```
 
 ---

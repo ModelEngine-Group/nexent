@@ -1,0 +1,19 @@
+schema_version = 1
+rule_id = "volcengine_glm_5_3_flash_260828_controls_v1"
+version = 1
+target_kind = "provider_model"
+target_key = "volcengine/glm-5-3-flash-260828"
+reason = "Bind only the exact upstream-declared reasoning controls for OpenAI Chat"
+evidence = "https://www.volcengine.com/docs/82379/1330310; pinned models.dev providers/volcengine/models/glm-5-3-flash-260828.toml and provider.toml; reviewed 2026-10-16"
+
+[[parameters]]
+key = "reasoning_effort"
+visible = true
+editable = true
+required = false
+allowed_scopes = ["outlet", "conversation"]
+ui_group = "reasoning"
+owner = "combination"
+schema = {"type" = "string", "enum" = ["low", "high", "max"]}
+source = {"ref" = "volcengine_glm_5_3_flash_260828_controls_v1", "version" = 1, "evidence" = "https://www.volcengine.com/docs/82379/1330310; pinned models.dev providers/volcengine/models/glm-5-3-flash-260828.toml and provider.toml; reviewed 2026-10-16"}
+api_binding = {"path" = "/reasoning_effort", "transform_ref" = "identity_v1", "transform_version" = 1}

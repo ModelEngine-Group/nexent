@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OPTIONAL-SAMPLING-20261105
+  change_type: bugfix
+  bug_id: MODEL-OPTIONAL-SAMPLING-20261105
+  title: Fix model diagnostics, optional sampling and custom-provider thinking controls
+  description: Fix layered diagnostics and the empty sampling upgrade/edit/check/save lifecycle.
+  observed_behavior: Editor hides connection diagnostics and blocks empty temperature/top_p; defaults and JSON null can reach requests.
+  expected_behavior: Diagnostics remain usable above the editor; empty optional sampling is omitted on wire and remains empty after saving and reopening.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing transport peer asserted exact bodies but did not cover empty sampling omission. Existing UI tests explicitly required sampling defaults. Reviewer follow-up found missing regressions for manual thinking path ownership and unsent shutdown restrictions.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Update the approved sampling contract and add empty/zero/fixed-rule and editor regressions, without duplicating them as formal D1.
+    behaviors:
+    - Missing upgraded sampling does not block editing or checks.
+    - Clearing either sampling field persists omission without recreating defaults.
+    - Zero remains explicit; invalid and fixed values retain their constraints.
+    - Legacy null is never sent to the model service.
+    - Supported custom models allow thinking toggles unless an explicit preference prohibits disabling.
+    - Known provider bindings and explicit user formats retain their request paths.
+    - Manual thinking paths survive new preview, creation, reselection and saved fallback completion without reserved-path collisions.
+    - Unsent conversation controls retain model shutdown restrictions without writing forbidden draft values.
+    test_selectors:
+    - test/backend/services/test_model_optional_sampling.py
+    - test/backend/services/test_custom_provider_thinking.py
+    - frontend/tests/component/modelThinkingSettings.test.tsx
+    - test/sdk/core/model_service/test_openai_chat_adapter.py
+    - frontend/tests/component/modelSamplingParameters.test.tsx
+    - frontend/tests/component/modelOptionalSampling.test.tsx
+    - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+  affected_features:
+    existing: [F-032, BE-MODEL-OUTLET-PERSISTENCE, SDK-MODEL-PROFILE-CONTRACTS, SDK-MODEL-PROFILE-PARAMETERS]
+    modified: [SDK-MODEL-TRANSPORT, SDK-MODEL-PROFILE-COMPOSITION, CHAT-MODEL-CONTROLS]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: [MODEL-SERVICE-TRANSPORT-D3-001, MODEL-OUTLET-PERSISTENCE-D3-001, MODEL-PROFILE-COMPOSITION-D1-001, CHAT-MODEL-CONTROLS-D5-001]
+    added: []
+    retired: []
+  notes: Approved followup 20261105-onboarding-trial-fixes under model-access-native-agent. AC-001..005 and AC-008..012 are current obligations; the colleague batch-result issue is deferred by the user. Reuse transactional persistence and browser journeys as adjacent regression; actual execution is reported separately. Strengthen real sender/adapter/HTTP cooperation in the existing D3; no new D1.

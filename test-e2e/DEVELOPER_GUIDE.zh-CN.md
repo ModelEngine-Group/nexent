@@ -87,6 +87,10 @@ Linux 的 Chromium 系统库需要另外由主机环境提供。依赖安装和�
 
 使用 GitHub Daily 时，若本机 `daily.env` 显式设置了 `NEXENT_REPO`，它必须与 `.github/workflows/nexent-daily-full-test.yml` 中的 `REPO_ROOT` 指向同一个产品 Git 仓库。迁移仓库路径时不能只改其中一个，还需核对启动入口和 SDK 引用，避免从一个仓库启动、却加载另一个仓库的代码。工作流修改只有提交并在实际运行的分支生效后才算完成入口切换；此前不要恢复可能混用新旧入口的 Runner。普通本地命令仍应从实际产品仓库根目录执行，不能仅靠修改该环境变量替代切换工作目录。
 
+普通部署失败留下恢复标记后，下一次 GitHub Daily 可以在持有 Daily 和仓库部署锁、确认旧进程已退出及旧批次终态、核验原始备份和 Local 配置后，保存旧证据并恢复配置，再同步最新 develop、构建部署。标记不会因允许同步而直接清除：服务预检、实际部署模式和 Local 恢复用例必须通过，才能开始普通用例；最终恢复验证完成后才解除本次标记。损坏备份、非预期配置改动、活跃锁、D5 故障恢复标记或未确认的 D5 超时/清理失败仍会阻断。普通定向执行和 resume 不具备这个自动恢复权限。详见[Daily 恢复流程](infra/tools/docs/daily-validation.md#retrying-a-failed-deployment)。
+
+启用通知的 Daily 在成功、失败或可捕获中断时均发送终态报告；同步、资产校验、doctor 阻断也生成启动异常通知。报告注明未完成原因及环境恢复状态，配置还原不等于恢复用例通过。启动与执行批次通过显式关联共用发送回执，`SENDING`/`UNKNOWN` 不盲目重发。未完成批次的通知不会覆盖正式共享 latest，也不会改变用例结果或解除恢复标记。强杀、断电或发送通道不可用时不能保证进程内通知到达，需另行监控兜底。详见[终态通知](infra/tools/docs/daily-validation.md#terminal-reports-and-notifications)。
+
 专用 Ubuntu 测试机迁移后的目录分工：产品 Git 仓库是 `/home/jason/projects/nexent`，test-home 仍为 `/home/jason/nexent-test-suite`。旧 `/root/project/nexent` 保留用于回退，不再作为新入口；`/home/jason/nexent` 是容器工作目录，不是新的产品 Git 仓库，不能覆盖或删除。配置、历史结果、浏览器缓存及持久化数据均保留在原 test-home。专用机的本地命令应先执行 `cd /home/jason/projects/nexent`；其他开发者使用自己的仓库位置，不把上述机器路径写进通用 Case。
 
 Windows Docker Desktop 的容器访问宿主机通常使用 `host.docker.internal`。容器内的 `127.0.0.1` 指向容器自身。按实际网络设置 `NEXENT_TEST_ASSETS_CONTAINER_HOST` 和 `NEXENT_TEST_MCP_CONTAINER_HOST`。
@@ -117,6 +121,32 @@ uv pip check --python $TestPython
 | 账号、模型、服务或资产未准备好 | 修本机配置或部署，保持与需求一致的断言 |
 
 用例验收标准正确时，纯脚本修复不必改 `case.yaml`；文件名、选择器和准备声明没变时，也不必改 `execution.yaml`。保留原 Case ID。新增用例使用新 ID，历史契约需要退出时标记 `retired`。
+
+### 设计时确定责任田
+
+在设计 Feature 和用例时确认一个主要责任模块，在 `infra/config/report-ownership.yaml` 的 `feature_overrides` 中登记，关联用例自动继承。人名只在 `domains` 中统一维护，不逐条写入 `case.yaml`。例如 `AGENT-EDITOR-WORKFLOWS: agent_config` 表示智能体开发配置，当前联系人由该模块配置解析。
+
+只有实际证明边界不同的用例才用 `case_overrides`，并在变更记录中说明依据。不要按 Git 作者、报错关键词或厂商名称分配责任。所有 active/planned Feature（包括尚未生成用例的 Feature）和非 retired 用例必须唯一匹配；设计和实现校验都检查这一点。可先运行 `python test-e2e/infra/tools/ownership_catalog.py --root .`。
+
+人员调整只更新中心配置并走正常 PR，不直接改 Ubuntu 或历史结果。看板统一显示一个“负责人”，按版本化责任田映射更新；历史批次原件保留，不等于缺陷归因。未提交的本地配置导出必须明确标为未提交，不能宣称已经在 develop/Daily 生效。
+
+Daily 对配置有效但未匹配或匹配歧义的责任田记录警告，保留未分配状态并继续执行用例；覆盖完整性仍为 INCOMPLETE，不能报告整批通过。开发者默认的设计、实现校验仍拒绝责任田缺失。中心配置损坏、未知模块引用等全局问题继续阻断；新增 Feature 合入前应基于最新 develop 补齐映射并运行严格校验。
+
+### 实现时确认准备和清理
+
+每个 active 自动化 D2-D5 用例的 `execution.yaml` 都要显式声明 `preparation`，默认实现校验会检查，无需逐条添加检查参数。确实不需要公共工厂的自包含用例可写 `families: []`，但必须在绑定说明或变更记录中解释它如何创建、清理自己的资源；不能用空声明绕过真实依赖。资源类型、逻辑依赖、进程/数据归属、清理和恢复应在 SPEC 设计与任务记录中明确。
+
+准备声明变更后，通过 suite worker 定向验证准备、用例执行、清理和资源释放，保留回执。提交或合入前先按团队流程同步目标分支，再在合并后的代码树运行严格校验，记录目标版本、测试版本和未提交状态。仅更新 skill 或本分支 UT 通过不能保证最新 develop 的全量能够启动。Daily 缺失声明时只阻塞对应用例并保留覆盖缺口，不猜测准备资源；配置格式损坏仍阻断。
+
+### 新增用例的命名规则
+
+Daily 对可明确定位到已有 Case 的纯 ID 格式问题记录警告，继续按原 ID、`stage`、执行绑定和状态处理；原本阻塞的用例仍保持阻塞。开发者设计/实现严格校验继续拒绝不符合规范的新 ID。不要为启动 Daily 自动改名或追加历史豁免。重复 ID、目录与 ID 不一致、非法阶段、脚本路径越界、历史命名目录损坏等仍会阻断。警告会保留覆盖不完整状态，不能使整批显示完全通过。
+
+新增 Case ID 统一使用 `<模块>-<场景>-<阶段>-<三位序号>`，例如 `AGENT-LIST-D1-003`、`MODEL-PERMISSION-D2-001`。模块和场景使用大写英文字母、数字及连字符，可由多个词组成；不要把负责人、日期、哈希或测试工具名称当作业务命名。序号为 `001`～`999`，在相同模块、场景和阶段前缀内选用未占用编号，历史和非活跃用例也不能重复占号。
+
+ID 中的阶段必须与 `case.yaml` 的 `stage` 一致，目录名、用例定义和执行绑定里的 ID 也必须一致。保留存量 `API-001`、`PW-SKILL-02`、`UT-…-AUTO-…` 等历史 ID，不因格式统一改名。仓库的 `case-naming-legacy.json` 是冻结的历史兼容清单，不是新用例登记表，不能追加豁免或按当前目录重新生成；固定内容摘要在无 Git 历史时也会检查清单未被修改，两种校验阶段都会拒绝不合规的新 ID。
+
+用例标题写清“场景／条件＋预期行为”，例如“模型不可用时禁止选择且不触发切换回调”，中英文均可。标题是否准确需结合断言审查，不能仅靠格式校验。主脚本仍使用对应框架的文件名，如 `test.py`、`test.spec.ts`，通过 `execution.yaml` 绑定，不必把完整 ID 重复放进文件名。
 
 Bugfix 有相关 SPEC 时，沿用其中 Feature、业务规则和 Case 的关联，并结合实际调用路径确认影响。没有可用 SPEC 时，在文档仓库创建轻量 `design.md`，按 [Bugfix design 模板](../.agents/skills/nexent-spec-coding/references/bugfix-design-template.md) 描述完整、内聚的功能边界与最终预期，保留与新需求相同的 `D1-D5 Test Design` 矩阵。它列出功能范围内的已知覆盖，Notes 标注复用、补强、新增、仅回归或不受影响；本次修复与验证范围单独写明。无需强制补齐 proposal/task 或整模块需求文档。
 

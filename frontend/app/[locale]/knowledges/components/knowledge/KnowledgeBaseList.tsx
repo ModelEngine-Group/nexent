@@ -19,6 +19,8 @@ import {
   Spin,
   Tag,
   Tooltip,
+  Input,
+  Pagination,
 } from "antd";
 import {
   SyncOutlined,
@@ -56,9 +58,7 @@ import { formatDateOrFallback } from "@/lib/date";
 import { formatFileSize } from "@/lib/utils";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import { USER_ROLES } from "@/const/auth";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
+
 import log from "@/lib/logger";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
@@ -662,7 +662,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         className="mb-3 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-3"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
-          <StandardInput
+          <Input
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<Search className="size-4 text-[#777777]" />}
             value={effectiveSearchKeyword}
@@ -769,7 +769,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               </div>
             }
           >
-            <StandardButton
+            <Button
               className="!h-8"
               aria-label={t("knowledgeBase.filter.button")}
               aria-pressed={
@@ -778,7 +778,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 tagPredicates.length > 0
               }
               icon={<FilterOutlined />}
-              variant={
+              type={
                 effectiveSelectedSources.length > 0 ||
                 effectiveSelectedModels.length > 0 ||
                 tagPredicates.length > 0
@@ -796,28 +796,25 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                     tagPredicates.length}
                 </span>
               )}
-            </StandardButton>
+            </Button>
           </Popover>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StandardButton
+          <Button
             onClick={onSync}
             loading={syncLoading}
             icon={<SyncOutlined />}
           >
             {t("knowledgeBase.button.sync")}
-          </StandardButton>
+          </Button>
           {showDataMateConfig && (
-            <StandardButton
-              onClick={onDataMateConfig}
-              icon={<SettingOutlined />}
-            >
+            <Button onClick={onDataMateConfig} icon={<SettingOutlined />}>
               {t("knowledgeBase.button.dataMateConfig")}
-            </StandardButton>
+            </Button>
           )}
-          <StandardButton variant="primary" onClick={onCreateNew}>
+          <Button type="primary" onClick={onCreateNew}>
             {t("knowledgeBase.card.create")}
-          </StandardButton>
+          </Button>
         </div>
       </div>
       <div className="min-h-0 max-h-[calc(100%-160px)] flex-none overflow-y-auto overflow-x-hidden px-px pb-3 pt-px">
@@ -829,14 +826,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             <p className="text-sm text-gray-500">
               {error || t("knowledgeBase.error.fetchListRetry")}
             </p>
-            <StandardButton
+            <Button
               onClick={() => {
                 onRetry?.();
                 setTagRetry((value) => value + 1);
               }}
             >
               {t("repository.common.retry")}
-            </StandardButton>
+            </Button>
           </div>
         ) : loading ? (
           <div className="flex min-h-40 items-center justify-center">
@@ -1132,7 +1129,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             className="!h-8 !w-[116px]"
             disabled={loading}
           />
-          <StandardPaginator
+          <Pagination
             current={currentPage}
             pageSize={pageSize}
             total={filteredTotal}
@@ -1153,7 +1150,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             className="!h-8 !w-12"
             disabled={loading}
           />
-          <StandardButton
+          <Button
             disabled={loading || jumpPage === null}
             className="!px-2"
             onClick={() => {
@@ -1164,7 +1161,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             }}
           >
             {t("agentConfig.list.jump")}
-          </StandardButton>
+          </Button>
         </div>
       </div>
 

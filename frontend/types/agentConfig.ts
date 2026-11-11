@@ -5,7 +5,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
-import { ModelOption } from "@/types/modelConfig";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -139,6 +138,10 @@ export interface PublishedAgent {
 }
 
 export interface ModelParamsOverrideEntry {
+  parameter_values?: Record<string, unknown>;
+  context_window_tokens?: number;
+  custom_overrides?: Record<string, unknown>;
+  /** Historical fields accepted only while reading older Agent versions. */
   temperature?: number | null;
   top_p?: number | null;
   extra_params?: Record<string, unknown> | null;

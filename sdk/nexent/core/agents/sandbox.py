@@ -1993,7 +1993,9 @@ class _DockerKernelLease:
                     result = content["data"].get("text/plain")
                     status_deadline = time.monotonic() + self._receive_timeout_seconds
                 elif msg_type == "error":
-                    raise AgentError("\n".join(content.get("traceback", [])), self.logger)
+                    error = AgentError("\n".join(content.get("traceback", [])), self.logger)
+                    error.execution_logs = "".join(outputs)
+                    raise error
                 elif msg_type == "status" and content.get("execution_state") == "idle":
                     break
 
@@ -3176,7 +3178,7 @@ class SandboxPoolManager:
                 raise RuntimeError("Docker sandbox FAILED phase=dependency; local fallback is disabled")
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
-                "Install it with: pip install 'smolagents[docker]'. "
+                "Install it with: uv pip install 'smolagents[docker]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(
@@ -3326,7 +3328,7 @@ class SandboxPoolManager:
         except ImportError as exc:
             logger_.error(
                 "WasmExecutor requires smolagents[wasm]. "
-                "Install it with: pip install 'smolagents[wasm]'. "
+                "Install it with: uv pip install 'smolagents[wasm]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(

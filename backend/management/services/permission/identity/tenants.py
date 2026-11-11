@@ -22,13 +22,10 @@ from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_recor
 from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
 from management.db.tool.repository import delete_tools_by_agent_id
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE
 from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
-from management.services.agent.system import (
-    ensure_workbench_main_agent,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -211,48 +208,6 @@ def get_tenants_paginated_for_user(
     return get_tenants_paginated(page=page, page_size=page_size)
 
 
-def backfill_workbench_main_agents() -> Dict[str, int]:
-    """Ensure the tenant-scoped workbench Agent for every existing real tenant.
-
-    The operation is deliberately reentrant. Each tenant is isolated so that a
-    malformed or temporarily unavailable tenant does not prevent the remaining
-    tenants from being upgraded.
-    """
-    if not ENABLE_AGENT_WORKBENCH:
-        return {"total": 0, "succeeded": 0, "failed": 0}
-
-    tenant_ids = [
-        tenant_id
-        for tenant_id in get_all_tenant_ids()
-        if _is_displayable_tenant_id(tenant_id)
-    ]
-    succeeded = 0
-    failed = 0
-
-    for tenant_id in tenant_ids:
-        try:
-            ensure_workbench_main_agent(
-                tenant_id=tenant_id,
-                user_id="system",
-            )
-            succeeded += 1
-        except Exception as exc:
-            failed += 1
-            logger.warning(
-                "Failed to backfill workbench_main for tenant %s: %s",
-                tenant_id,
-                exc,
-            )
-
-    result = {
-        "total": len(tenant_ids),
-        "succeeded": succeeded,
-        "failed": failed,
-    }
-    logger.info("Workbench system Agent backfill completed: %s", result)
-    return result
-
-
 def create_tenant(
     tenant_name: str,
     created_by: Optional[str] = None,
@@ -321,22 +276,6 @@ def create_tenant(
             except Exception as e:
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
-
-        if ENABLE_AGENT_WORKBENCH:
-            try:
-                ensure_workbench_main_agent(
-                    tenant_id=tenant_id,
-                    user_id=created_by or "system",
-                    locale=locale,
-                )
-            except Exception as e:
-                # Tenant creation remains recoverable because Workbench runtime also
-                # calls the provider lazily before using the system Agent.
-                logger.warning(
-                    "Failed to provision workbench_main for tenant %s: %s",
-                    tenant_id,
-                    e,
-                )
 
         tenant_info = {
             "tenant_id": tenant_id,

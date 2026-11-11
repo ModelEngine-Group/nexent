@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "AIDP-KNOWLEDGE",
+    "name": "Knowledge retrieval"
+  },
+  "feature": {
+    "feature_id": "AIDP-RETRIEVAL",
+    "name": "AIDP graph and combined retrieval configuration",
+    "status": "active",
+    "description": "Retrieval policy configured on managed and independent Agent tool instances, with existing northbound request overrides; conversation and Workbench parameter editors are retired.",
+    "business_rules": [
+      {
+        "rule_id": "AIDP-RETRIEVAL-RULE-01",
+        "description": "Validate submitted policies at input boundaries; use explicit channel combinations; keep candidate values fixed in the backend; build retrieval requests without repeated validation; retain scope and provenance. Both wrappers share transport/JSON/response errors; require a list-valued result; retain retry status/count/delay logs without request secrets. Conversation knowledge scopes contain resource selection only; legacy retrieval_config is ignored and never applied to tools. Keep existing northbound tool_params validation and isolation."
+      }
+    ],
+    "required_test_stages": [
+      "D2",
+      "D3",
+      "D4"
+    ]
+  }
+}

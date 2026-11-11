@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for config_app module.
 
@@ -127,8 +128,6 @@ class TestConfigAppRouterConfiguration:
             return {}
 
         router_modules = {
-            "management.api.identity.gateway_identity": {"router": APIRouter()},
-            "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
             "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
@@ -224,6 +223,14 @@ class TestConfigAppRouterConfiguration:
         concurrency_module = types.ModuleType("nexent.core.concurrency")
         concurrency_module.ManagedTaskSpec = ManagedTaskSpec
         concurrency_module.ManagerState = manager_state
+
+        async def invoke_blocking(_name, operation, *args, **kwargs):
+            return operation(*args, **kwargs)
+
+        concurrency_module.run_blocking = AsyncMock(side_effect=invoke_blocking)
+        migration = types.ModuleType("management.services.model.outlet_migration")
+        migration.migrate_legacy_outlets = MagicMock(return_value={"migrated": 2, "failed": 1})
+        monkeypatch.setitem(sys.modules, migration.__name__, migration)
         concurrency_module.set_default_thread_manager = MagicMock()
         concurrency_module.clear_default_thread_manager = MagicMock()
         monkeypatch.setitem(
@@ -239,15 +246,6 @@ class TestConfigAppRouterConfiguration:
             thread_lifecycle_module,
         )
 
-        runtime_state = MagicMock()
-        monkeypatch.setitem(sys.modules, "management.services.agent.run_state",
-                            types.SimpleNamespace(runtime_state_service=runtime_state))
-        component_path = Path(backend_dir) / "management/api/northbound_application.py"
-        component_spec = importlib.util.spec_from_file_location("management.api.northbound_application", component_path)
-        component = importlib.util.module_from_spec(component_spec)
-        component_spec.loader.exec_module(component)
-        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
-
         module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
@@ -255,8 +253,6 @@ class TestConfigAppRouterConfiguration:
 
         assert all(router is not retired_router for router in config_app.app.included_routers)
         assert api_key_router in config_app.app.included_routers
-        for router in router_modules["management.api.northbound"].values():
-            assert router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
             "/api-keys/refresh",
@@ -281,7 +277,6 @@ class TestConfigAppRouterConfiguration:
             "management.recovery"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
-        startup_recovery_module.recover_northbound_tasks = MagicMock()
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
         )
@@ -329,32 +324,23 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "validate_external_service_configuration",
             new=validate_external,
-        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
+        ):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
+        migration.migrate_legacy_outlets.assert_called_once_with()
+        concurrency_module.run_blocking.assert_awaited_once_with(
+            "model-outlet-upgrade", migration.migrate_legacy_outlets
+        )
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with(
             config_app.config_thread_manager
         )
-        assert [c.args[0] for c in schedule_upload_cleanup.await_args_list] == ["nexent-config", "nexent-northbound"]
-        startup_recovery_module.recover_northbound_tasks.assert_called_once_with()
-        schedule_workbench_main_backfill.assert_called_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        schedule_workbench_main_backfill.assert_not_called()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
-
-        # A failure after Northbound recovery must still release Management ownership.
-        for target in ("recover_config_tasks_on_startup", "validate_external_service_configuration", "start_dreaming_scheduler"):
-            config_app.config_thread_manager.state = manager_state.CREATED
-            concurrency_module.clear_default_thread_manager.reset_mock()
-            runtime_state.set_thread_manager.reset_mock()
-            with patch.object(config_app, target, new=AsyncMock(side_effect=RuntimeError("startup failed"))):
-                with pytest.raises(RuntimeError, match="startup failed"):
-                    asyncio.run(exercise_lifespan())
-            assert config_app.config_thread_manager.state == "closed"
-            concurrency_module.clear_default_thread_manager.assert_called_once_with(config_app.config_thread_manager)
-            assert runtime_state.set_thread_manager.call_args.args == (None,)
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""

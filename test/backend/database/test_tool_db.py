@@ -18,6 +18,7 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
         sys.modules["management.db.agent.repository"],
         "is_system_agent",
         lambda *_args, **_kwargs: False,
+        raising=False,
     )
 
 # First mock the consts module to avoid ModuleNotFoundError
@@ -119,6 +120,7 @@ sys.modules['management.db.models'] = db_models_mock
 
 # Mock agent_db module
 agent_db_mock = MagicMock()
+agent_db_mock.is_system_agent = MagicMock(return_value=False)
 agent_db_mock.logger = MagicMock()
 # Declared up front so the autouse fixture can monkeypatch it: setattr on a bare
 # MagicMock cannot create a brand-new attribute on every pytest version.

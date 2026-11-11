@@ -32,7 +32,7 @@ def native_runtime():
         from management.db import models
         from management.db.client import db_client
         from management.services.permission.identity import authentication as auth
-        from management.services.permission.identity import session as helpers
+        from gateway.authentication import auth as helpers
         from management.api.identity import user_management as routes
         from contracts.errors.exceptions import AppException
 

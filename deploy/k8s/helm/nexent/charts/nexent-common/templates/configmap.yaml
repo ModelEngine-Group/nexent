@@ -61,13 +61,6 @@ data:
   # Model Engine Config
   MODEL_ENGINE_ENABLED: {{ .Values.config.modelEngine.enabled | quote }}
 
-  # Voice Service Config
-  APPID: {{ .Values.config.voiceService.appid | quote }}
-  TOKEN: {{ .Values.config.voiceService.token | quote }}
-  CLUSTER: {{ .Values.config.voiceService.cluster | quote }}
-  VOICE_TYPE: {{ .Values.config.voiceService.voiceType | quote }}
-  SPEED_RATIO: {{ .Values.config.voiceService.speedRatio | quote }}
-
   # Model Path Config
   CLIP_MODEL_PATH: {{ .Values.config.modelPath.clipModelPath | quote }}
   NLTK_DATA: {{ .Values.config.modelPath.nltkData | quote }}

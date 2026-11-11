@@ -1,19 +1,15 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.conversation import ConversationModelPreferencePatch, ConversationModelSelectionPatch, ConversationTarget, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
 from contracts.agent import WorkbenchConfigUpdateRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError, AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, AgentDraftEditError, WorkbenchConfigVersionConflict, WorkbenchError
 import logging
 from http import HTTPStatus
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Path, Query, Request
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
-from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
-from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
-from contracts.agent import WorkbenchConfigUpdateRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
 from management.db.conversation.repository import get_conversation_list_page
 from management.services.conversation.service import (
     create_new_conversation,
@@ -34,8 +30,34 @@ from management.services.conversation.agent_history import (
     list_agent_groups,
 )
 from management.services.permission.identity.session import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
+from contracts.clarification import ClarificationResponse
+from contracts.errors.exceptions import UnauthorizedError
+from management.services.conversation.creation_mode import confirm_creation_mode
 
 router = APIRouter(prefix="/conversation")
+
+
+@router.post("/{conversation_id}/creation_mode_responses", response_model=ConversationResponse)
+def confirm_creation_mode_endpoint(
+    conversation_id: Annotated[int, Path(gt=0, le=2147483647)],
+    response: "ClarificationResponse",
+    authorization: Optional[str] = Header(None),
+):
+    """Record an owned AI confirmation without running a model or creating resources."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = confirm_creation_mode(conversation_id, response, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=data)
+    except (TokenExpiredError, UnauthorizedError) as exc:
+        raise HTTPException(status_code=401, detail="Please login first") from exc
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Workbench conversation not found") from exc
+    except (ValidationError, AppException) as exc:
+        raise HTTPException(status_code=422, detail="Creation confirmation is invalid or no longer available") from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Failed to record creation confirmation")
+        raise HTTPException(status_code=500, detail="Failed to record creation confirmation") from exc
 
 
 @router.get("/agent_groups", response_model=ConversationResponse)
@@ -159,6 +181,31 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/creator_histories", response_model=ConversationResponse)
+async def list_creator_histories_endpoint(
+    kind: Literal["agent", "skill"],
+    target_id: Annotated[int, Query(gt=0, le=2147483647)],
+    authorization: Optional[str] = Header(None),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """List the current user's creation conversations for one tenant-owned target."""
+    from management.services.conversation.creator_histories import list_creator_histories
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = list_creator_histories(kind=kind, target_id=target_id, user_id=user_id,
+                                     tenant_id=tenant_id, offset=offset, limit=limit)
+        return ConversationResponse(code=0, message="success", data=data)
+    except TokenExpiredError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/list", response_model=ConversationResponse)
@@ -388,10 +435,81 @@ async def update_conversation_workbench_config_endpoint(
         ) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}
         ) from exc
+
+
+@router.get("/{conversation_id}/model_preferences", response_model=ConversationResponse)
+async def get_conversation_model_preferences(conversation_id: int, authorization: Optional[str] = Header(None)):
+    from nexent.core.concurrency import run_blocking
+    from management.services.conversation.model_preferences import read_model_preferences
+
+    user_id, _ = get_current_user_id(authorization)
+    try:
+        result = await run_blocking("conversation-model-preferences-read", read_model_preferences, conversation_id, user_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
+
+
+@router.patch("/{conversation_id}/model_preferences", response_model=ConversationResponse)
+async def patch_conversation_model_selection(conversation_id: int, request: ConversationModelSelectionPatch,
+    authorization: Optional[str] = Header(None)):
+    from nexent.core.concurrency import run_blocking
+    from management.services.conversation.model_preferences import patch_model_selection
+    from contracts.errors.exceptions import ForbiddenError, RunModelControlsError
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        result = await run_blocking("conversation-model-selection-update", patch_model_selection,
+            conversation_id, request, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
+    except ModelOutletConflictError:
+        raise HTTPException(status_code=409, detail={"code": "MODEL_PREFERENCE_VERSION_CONFLICT"}) from None
+    except ForbiddenError:
+        raise HTTPException(status_code=403, detail="MODEL_SELECTION_FORBIDDEN") from None
+    except RunModelControlsError as error:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(error.code, 422)
+        raise HTTPException(status_code=status, detail={"code": error.code}) from None
+
+
+@router.get("/{conversation_id}/model_preferences/{model_id}", response_model=ConversationResponse)
+async def get_conversation_model_preference_view(conversation_id: int, model_id: int, authorization: Optional[str] = Header(None)):
+    from nexent.core.concurrency import run_blocking
+    from management.services.conversation.model_preferences import read_model_preference_view
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        result = await run_blocking("conversation-model-preference-view", read_model_preference_view,
+            conversation_id, model_id, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(status_code=422, detail={"code": error.category, "field": error.path}) from None
+
+
+@router.patch("/{conversation_id}/model_preferences/{model_id}", response_model=ConversationResponse)
+async def patch_conversation_model_preferences(conversation_id: int, model_id: int,
+    request: ConversationModelPreferencePatch, authorization: Optional[str] = Header(None)):
+    from nexent.core.concurrency import run_blocking
+    from management.services.conversation.model_preferences import patch_model_preferences
+
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        result = await run_blocking("conversation-model-preferences-update", patch_model_preferences,
+            conversation_id, model_id, request, user_id, tenant_id)
+        return ConversationResponse(code=0, message="success", data=result)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="CONVERSATION_NOT_FOUND") from None
+    except ModelOutletConflictError:
+        raise HTTPException(status_code=409, detail={"code": "MODEL_PREFERENCE_VERSION_CONFLICT"}) from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(status_code=422, detail={"code": error.category, "field": error.path}) from None
 
 
 @router.post("/sources", response_model=Dict[str, Any])
@@ -510,3 +628,22 @@ async def get_message_id_endpoint(request: MessageIdRequest):
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.patch("/{conversation_id}/target")
+async def bind_creation_target_endpoint(conversation_id: int, target: ConversationTarget, authorization: Optional[str] = Header(None)):
+    """Bind a saved creator resource without changing executor identity or history."""
+    from management.services.conversation.creator_targets import bind_creator_target
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        result = bind_creator_target(conversation_id, target.model_dump(), user_id, tenant_id)
+        return {"code": 0, "data": {"target": result}, "message": "success"}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except AgentDraftEditError as exc:
+        status = 404 if exc.code == "agent_not_found" else 403
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -343,18 +343,7 @@ WHERE v.message_id IS NOT NULL
   AND m.message_id = v.message_id
   AND m.message_source = 'CHAT';
 
--- Legacy audit timestamps include title/config changes, so use message creation.
-UPDATE nexent.conversation_record_t AS conversation
-SET last_activity_time = COALESCE(
-    (SELECT MAX(message.create_time)
-     FROM nexent.conversation_message_t AS message
-     WHERE message.conversation_id = conversation.conversation_id
-       AND message.delete_flag = 'N'
-       AND (message.message_role = 'user'
-            OR (message.message_role = 'assistant' AND message.message_content <> ''))),
-    conversation.create_time
-)
-WHERE conversation.last_activity_time IS NULL;
+-- Leave legacy activity NULL; creation time is used until the next visible message.
 
 CREATE INDEX IF NOT EXISTS idx_conversation_activity_order
     ON nexent.conversation_record_t

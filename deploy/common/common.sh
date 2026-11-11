@@ -463,12 +463,21 @@ deployment_merge_env_from_example() {
       if (key != "") {
         existing[key] = 1
       }
+      # Preserve existing installations when adding the dedicated MCP key.
+      if (key == "TOKEN") {
+        legacy_mcp_token = $0
+        sub(/TOKEN[[:blank:]]*=/, "NEXENT_MCP_INTERNAL_TOKEN=", legacy_mcp_token)
+      }
       next
     }
     {
       key = assignment_key($0)
       if (key != "" && !(key in existing)) {
-        print $0
+        if (key == "NEXENT_MCP_INTERNAL_TOKEN" && legacy_mcp_token != "") {
+          print legacy_mcp_token
+        } else {
+          print $0
+        }
       }
     }
   ' "$env_file" "$example_file")" || {
@@ -542,34 +551,13 @@ deployment_source_root_env() {
 }
 
 deployment_upgrade_local_accounts() {
-  local phase="$1"
-  local mode="$2"
-  local namespace="${3:-nexent}"
-  local interpreter=""
-  local common_dir script candidate
-
+  local mode="$1" namespace="${2:-nexent}" database="${3:-nexent-postgresql}"
+  local common_dir env_file config="${4:-nexent-config}"
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
-  if [ "$mode" = kubernetes ]; then
-    script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
-  fi
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
-      interpreter="$candidate"
-      break
-    fi
-  done
-  if [ -z "$interpreter" ]; then
-    echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
-    return 1
-  fi
-  local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
-  if [ "$phase" = apply ]; then
-    arguments+=(--apply)
-  fi
-  "$interpreter" "$script" "${arguments[@]}"
-
+  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
+  bash "$common_dir/../sql/tools/supabase_to_postgres/migrate.sh" \
+    --deployment "$mode" --namespace "$namespace" --database-target "$database" --config-target "$config" \
+    --env-file "$env_file" --apply --wait-timeout 300
 }
 
 deployment_env_dir() {
@@ -2102,8 +2090,8 @@ deployment_compute_selection() {
     helm_charts+=(nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
-    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
+    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
+    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     docker_services+=(nexent-data-process)
@@ -2127,7 +2115,7 @@ deployment_compute_docker_ports() {
   local ports=()
 
   if [ "$DEPLOYMENT_PORT_POLICY" = "production" ]; then
-    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013)
+    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013 "${OPS_PORT:-5016}")
     deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && ports+=(2222)
     printf '%s\n' "${ports[*]}"
     return 0
@@ -2137,7 +2125,7 @@ deployment_compute_docker_ports() {
     ports+=(9210 9310 5434 6379 9010 9011)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    ports+=(5010 5014 5011 5015 5013 3000)
+    ports+=(5010 5014 5011 5015 5013 3000 "${OPS_PORT:-5016}")
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     ports+=(5012 5555)
@@ -2187,7 +2175,6 @@ deployment_image_rollout_checksum() {
 }
 
 deployment_render_image_rollout_checksums() {
-  printf '    gatewayImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_GATEWAY_IMAGE")"
   printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
   printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
   printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
@@ -2199,7 +2186,6 @@ deployment_apply_image_source() {
   local image_var
 
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
-    export NEXENT_GATEWAY_IMAGE="nexent/nexent-gateway:latest"
     export NEXENT_IMAGE="nexent/nexent:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
@@ -2208,7 +2194,6 @@ deployment_apply_image_source() {
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
   fi
 
-  export NEXENT_GATEWAY_IMAGE="${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:$version}"
   export NEXENT_IMAGE="${NEXENT_IMAGE:-nexent/nexent:$version}"
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
@@ -2259,7 +2244,6 @@ deployment_apply_image_source() {
 
   if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
     for image_var in \
-      NEXENT_GATEWAY_IMAGE \
       NEXENT_IMAGE \
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
@@ -2345,7 +2329,6 @@ deployment_render_docker_env() {
   {
     printf 'DEPLOYMENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'NEXENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$compose_image_registry_prefix"
-    printf 'NEXENT_GATEWAY_IMAGE="%s"\n' "$NEXENT_GATEWAY_IMAGE"
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
@@ -2396,7 +2379,9 @@ deployment_render_image_values() {
   printf 'nexent-mcp:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-northbound:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf 'nexent-ops:\n'
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf 'nexent-data-process:\n'
@@ -2441,6 +2426,8 @@ deployment_render_k8s_port_values() {
   fi
   printf 'nexent-northbound:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-config:\n'
   printf '  service:\n    type: "%s"\n    nodePort: 30010\n' "$internal_type"
   printf 'nexent-runtime:\n'
@@ -2492,8 +2479,12 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-northbound:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
