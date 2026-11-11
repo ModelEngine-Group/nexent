@@ -5,7 +5,6 @@
 {{- fail "nexent-runtime strategy.type must be Recreate for startup task recovery" -}}
 {{- end -}}
 {{- $global := default dict .Values.global -}}
-{{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
@@ -35,8 +34,15 @@ spec:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-secret: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
+      initContainers:
+        - name: wait-for-management
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - until curl --noproxy '*' -fsS http://nexent-config:5010/health/ready >/dev/null; do sleep 2; done
       containers:
         - name: nexent-runtime
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
@@ -63,7 +69,7 @@ spec:
               value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
-              value: "wait"
+              value: "off"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy
@@ -91,9 +97,6 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
           volumeMounts:
-            - name: nexent-sql-files
-              mountPath: /opt/nexent/sql
-              readOnly: true
             - name: nexent-workspace
               mountPath: /mnt/nexent
             - name: nexent-skills
@@ -110,19 +113,6 @@ spec:
               memory: {{ .Values.resources.backend.limits.memory }}
               cpu: {{ .Values.resources.backend.limits.cpu }}
       volumes:
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-sql-files
-            items:
-              - key: init.sql
-                path: init.sql
-              - key: migrations-.keep
-                path: migrations/.keep
-{{ range $name := default (list) $sqlFileNames.migrations }}
-              - key: {{ printf "migrations-%s" $name | quote }}
-                path: {{ printf "migrations/%s" $name | quote }}
-{{ end }}
-
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

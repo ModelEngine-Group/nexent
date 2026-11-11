@@ -196,8 +196,9 @@ COPY backend /opt/backend
 COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
 COPY VERSION /opt/nexent/VERSION
-COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
+ENV NEXENT_SQL_STARTUP_MODE=off
+COPY deploy/common/start-backend.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/start-backend.sh
 
 WORKDIR /opt
 

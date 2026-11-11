@@ -82,11 +82,9 @@ COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 COPY infrastructure /opt/infrastructure
 ENV PYTHONPATH=/opt:/opt/backend
-COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
-COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
 COPY VERSION /opt/nexent/VERSION
-COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
-RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh
+COPY deploy/common/start-backend.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/start-backend.sh
 
 # Create SSH key directory for Terminal tool
 RUN mkdir -p /opt/ssh-keys
@@ -98,6 +96,12 @@ WORKDIR /opt
 EXPOSE 5010
 
 FROM backend-common AS management
+
+ENV NEXENT_SQL_STARTUP_MODE=migrate
+COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
+COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 
 COPY backend/__init__.py /opt/backend/
 COPY backend/management /opt/backend/management
@@ -123,6 +127,8 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 # Runtime target excludes Management business code.
 FROM backend-common AS runtime
 
+ENV NEXENT_SQL_STARTUP_MODE=off
+
 COPY backend/__init__.py /opt/backend/
 COPY backend/runtime /opt/backend/runtime
 COPY backend/contracts /opt/backend/contracts
@@ -140,5 +146,9 @@ COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_
 
 # Keep the existing full backend as the default build target.
 FROM backend-common AS final
+COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
+COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql
+COPY deploy/common/run-sql-migrations.sh /opt/nexent/scripts/
+RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh
 COPY backend /opt/backend
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json

@@ -374,6 +374,10 @@ render_yaml_literal_file() {
 sql_files_checksum() {
   local payload=""
   local file rel checksum
+  if [ -f "$SQL_INIT_FILE" ]; then
+    checksum="$(deployment_sha256_file "$SQL_INIT_FILE")"
+    payload="init.sql:${checksum}"$'\n'
+  fi
   if [ -d "$DEPLOY_ROOT/sql/migrations" ]; then
     while IFS= read -r file; do
       [ -n "$file" ] || continue
@@ -387,19 +391,7 @@ sql_files_checksum() {
 
 render_infrastructure_runtime_values() {
   local output_file="$1"
-  if [ ! -f "$SQL_INIT_FILE" ]; then
-    echo "Error: SQL init file not found: $SQL_INIT_FILE"
-    exit 1
-  fi
-
-  {
-    echo "global:"
-    echo "  rolloutChecksums:"
-    printf '    sql: %s\n' "$(yaml_quote "$(deployment_sha256_file "$SQL_INIT_FILE")")"
-    echo "nexent-infrastructure-common:"
-    echo "  sqlFiles:"
-    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
-  } > "$output_file"
+  printf '{}\n' > "$output_file"
 }
 
 render_k8s_runtime_config_values() {
@@ -423,6 +415,7 @@ render_k8s_runtime_config_values() {
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "nexent-common:"
     echo "  sqlFiles:"
+    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
     echo "    migrations:"
     while IFS= read -r file; do
       [ -n "$file" ] || continue

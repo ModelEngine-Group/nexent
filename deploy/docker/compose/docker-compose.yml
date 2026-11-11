@@ -64,7 +64,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ${ROOT_DIR}/postgresql/data:/var/lib/postgresql/data
-      - ../../sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5434:5432"
     security_opt:
@@ -82,6 +81,12 @@ services:
     image: ${NEXENT_MANAGEMENT_IMAGE:-${NEXENT_IMAGE}}
     container_name: nexent-config
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--noproxy", "*", "--max-time", "3", "http://127.0.0.1:5010/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
     ports:
       - "5010:5010" # Config service port
     volumes:
@@ -128,7 +133,6 @@ services:
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - nexent_agent_workspace:/mnt/nexent/workdir
-      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
@@ -138,8 +142,7 @@ services:
       GATEWAY_AUTH_ENABLED: "true"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
-      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      NEXENT_SQL_STARTUP_MODE: "off"
       skip_proxy: "true"
       UMASK: "0022"
     env_file:
@@ -147,6 +150,8 @@ services:
       - ../../env/monitoring.env
     user: root
     depends_on:
+      nexent-config:
+        condition: service_healthy
       nexent-elasticsearch:
         condition: service_healthy
     logging:
@@ -169,21 +174,21 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
-      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
       GATEWAY_AUTH_ENABLED: "true"
       GATEWAY_SERVICE_URL: "http://nexent-gateway:5013"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
-      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      NEXENT_SQL_STARTUP_MODE: "off"
       skip_proxy: "true"
       UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
     depends_on:
+      nexent-config:
+        condition: service_healthy
       nexent-elasticsearch:
         condition: service_healthy
     logging:
@@ -291,20 +296,20 @@ services:
       - "5555:5555" # Celery Flower port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
       ELASTICSEARCH_SERVICE: "http://nexent-gateway:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
-      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
       PYTHONPATH: "/opt:/opt/backend"
       skip_proxy: "true"
     env_file:
       - ../../env/.env
     depends_on:
+      nexent-config:
+        condition: service_healthy
       redis:
         condition: service_healthy
       nexent-elasticsearch:

@@ -65,6 +65,8 @@ spec:
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "migrate"
+            - name: NEXENT_SQL_FILES_CHECKSUM
+              value: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

@@ -16,8 +16,6 @@ spec:
     metadata:
       labels:
         app: nexent-postgresql
-      annotations:
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
 
       containers:
@@ -40,9 +38,6 @@ spec:
           volumeMounts:
             - name: postgresql-data
               mountPath: /var/lib/postgresql/data
-            - name: nexent-sql-files
-              mountPath: /docker-entrypoint-initdb.d/init.sql
-              subPath: init.sql
           resources:
             requests:
               memory: {{ .Values.resources.requests.memory }}
@@ -56,6 +51,3 @@ spec:
         - name: postgresql-data
           persistentVolumeClaim:
             claimName: {{ default "nexent-postgresql" .Values.persistence.existingClaim }}
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-infrastructure-sql
