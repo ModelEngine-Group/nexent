@@ -7,6 +7,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from fastapi import HTTPException
 from pydantic_core import PydanticSerializationError
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
@@ -801,7 +802,7 @@ def _export_model(
         model_id, revision = pinned
         record = next((row for row in candidates if row["model_id"] == model_id), None)
         if record is None or not effective or model_record_revision(record) != normalize_model_revision(revision):
-            raise ValueError("Catalog model revision changed during snapshot compilation")
+            raise HTTPException(status_code=409, detail={"code": "MODEL_REVISION_MISMATCH"})
         selected = effective[0]
         base = create_model_config_from_record(record)
     elif candidates and (len(effective) == len(candidates) or (reserved and len(effective) == len(candidates) + 1)):

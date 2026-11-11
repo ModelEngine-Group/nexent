@@ -91,8 +91,18 @@ def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocke
     aliases = {"Evaluation": (11, "revision-1")}
 
     if changed:
-        with pytest.raises(ValueError, match="Catalog model revision changed"):
-            evaluation_snapshot._export_model("Evaluation", models, "tenant-a", resource, {}, catalog_model_versions=aliases)
+        from nexent.core.agents.agent_model import AgentConfig
+
+        agent = AgentConfig(
+            agent_id=7, version_no=2, name="agent", description="agent", model_name="Evaluation", tools=[],
+        )
+        with pytest.raises(HTTPException) as error:
+            evaluation_snapshot.export_snapshot(
+                agent, models, "hello", None, tenant_id="tenant-a", conversation_id=None, language="en",
+                catalog_model_versions=aliases,
+            )
+        assert error.value.status_code == 409
+        assert error.value.detail == {"code": "MODEL_REVISION_MISMATCH"}
     else:
         binding = evaluation_snapshot._export_model(
             "Evaluation", models, "tenant-a", resource, {}, catalog_model_versions=aliases,
