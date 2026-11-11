@@ -36,13 +36,15 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
     assert r.client.get(f"/groups/{r.group}/members", headers=ops_headers).status_code == 200
     assert r.client.get(f"/groups/{r.foreign_group}/members", headers=ops_headers).status_code == 404
     assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "a"}).status_code == 200
-    assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "b"}).status_code == 403
+    assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "b"}).status_code == 404
     assert r.client.post("/model/create", headers=ops_headers, json={}).status_code == 403
-    # Legacy bare JWTs must obey the same operations-only boundary as Bearer JWTs.
-    bare_token = r.headers("user")["Authorization"].split()[1]
-    assert r.client.get(
-        "/user/tokens", headers={"Authorization": bare_token}, params={"user_id": r.users["user"]}
-    ).status_code == 403
+    public_probe = r.client.get("/user/service_health")
+    ops_probe = r.client.get("/user/service_health", headers=ops_headers)
+    assert public_probe.status_code == ops_probe.status_code == 200
+    assert public_probe.json() == ops_probe.json()
+    bare_headers = {"Authorization": ops_headers["Authorization"].split()[1]}
+    assert r.client.get("/user/tokens", headers=bare_headers, params={"user_id": r.users["user"]}).status_code == 200
+    assert r.client.get("/user/tokens", headers=bare_headers, params={"user_id": r.users["foreign"]}).status_code == 403
     for action in ("read", "create", "update", "delete"):
         assert (
             r.client.get(

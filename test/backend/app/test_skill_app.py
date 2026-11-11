@@ -134,7 +134,7 @@ permissions_mock = types.ModuleType("permissions")
 permissions_depends_mock = types.ModuleType("permissions.depends")
 permissions_models_mock = types.ModuleType("permissions.models")
 permissions_operations_mock = types.ModuleType("permissions.operations")
-permissions_operations_mock.resource_read_tenant = lambda request: None
+permissions_operations_mock.resource_read_tenant = lambda request, *, shared=False: None
 permissions_depends_mock.require = lambda _permission: (lambda: None)
 permissions_models_mock.CurrentUser = object
 sys.modules["permissions"] = permissions_mock

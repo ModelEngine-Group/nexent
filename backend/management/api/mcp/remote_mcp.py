@@ -514,7 +514,7 @@ async def get_mcp_list(
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
         effective_tenant_id = tenant_id or auth_tenant_id
 
-        if authorized_tenant := resource_read_tenant(http_request):
+        if authorized_tenant := resource_read_tenant(http_request, shared=True):
             remote_mcp_list = await get_remote_mcp_server_list(
                 tenant_id=authorized_tenant, is_need_auth=False,
             )
@@ -583,7 +583,7 @@ async def list_mcp_containers(
     """List all MCP containers for the current tenant."""
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
-        effective_tenant_id = tenant_id or auth_tenant_id
+        effective_tenant_id = resource_read_tenant(http_request, shared=True) or tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -620,7 +620,8 @@ async def get_container_logs(
     """Get logs from MCP container via SSE stream."""
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, http_request)
-        effective_tenant_id = tenant_id or auth_tenant_id
+        inventory_tenant = resource_read_tenant(http_request)
+        effective_tenant_id = inventory_tenant or tenant_id or auth_tenant_id
 
         try:
             container_manager = MCPContainerManager()
@@ -628,7 +629,7 @@ async def get_container_logs(
             logger.error(f"Failed to initialize container manager: {e}")
             raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Docker service unavailable")
 
-        if resource_read_tenant(http_request) and not any(
+        if inventory_tenant and not any(
             container.get("container_id") == container_id
             for container in container_manager.list_mcp_containers(tenant_id=effective_tenant_id)
         ):
@@ -676,24 +677,28 @@ async def check_mcp_health(
     """Check MCP service health by ID."""
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        read_only = bool(resource_read_tenant(http_request, shared=True))
 
         health_status = await check_mcp_service_health(
             tenant_id=tenant_id,
             user_id=user_id,
             mcp_id=mcp_id,
-            **({"persist_status": False} if resource_read_tenant(http_request) else {}),
+            **({"persist_status": False} if read_only else {}),
         )
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"status": "success", "data": {"health_status": health_status}}
         )
+    except HTTPException:
+        raise
     except McpNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except MCPConnectionError as e:
         logger.error(f"MCP connection failed: {e}")
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="MCP connection failed" if resource_read_tenant(http_request) else (str(e) or "MCP connection failed"))
+        detail = "MCP connection failed" if read_only else (str(e) or "MCP connection failed")
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=detail)
     except Exception as e:
         logger.error(f"Failed to check MCP health: {e}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to check MCP health")

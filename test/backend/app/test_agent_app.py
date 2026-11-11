@@ -328,6 +328,7 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
 
 @pytest.fixture(autouse=True)
 def creator_history_boundary(mocker):
+    mocker.patch("permissions.operations.get_current_user_context", return_value=("test_user", "test_tenant", ("DEV",)))
     from contracts.agent import SystemAgentRef
     from management.services.conversation import creator_execution
     mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))

@@ -48,6 +48,8 @@ change:
       unchanged.
     - Reuse the resource page for OPS with tenant-scoped reads, hidden write controls,
       redacted credentials and diagnostics that do not persist resource changes.
+    - Apply the ordinary route authorization contract with an OPS session; verify
+      the public health probe and personal token endpoint through the D2 HTTP case.
     reason: Existing RBAC and DAC UT prove single-role cases; user UT covers own-tenant
       ADMIN and cross-tenant/SU rejection; invitation UT has old admin-invite restriction
       that must change. Strengthen those units rather than duplicate them as formal
@@ -63,7 +65,6 @@ change:
     - test/backend/permissions/test_rbac.py
     - test/backend/permissions/test_dac.py
     - test/backend/permissions/test_operations.py
-    - test/backend/permissions/test_operations_boundary.py
     - test/backend/services/test_model_health_outlet_routing.py
     - test/backend/management/test_identity_import_architecture.py
     - test/backend/services/test_role_assignment.py

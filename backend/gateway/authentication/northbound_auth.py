@@ -195,8 +195,6 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
     roles = roles_from_record(user_tenant_record)
     if not roles:
         raise TokenExpiredError("No active roles for this account")
-    if roles == ("OPS",):
-        raise HTTPException(status_code=403, detail="Operations-only identity cannot invoke Agents")
     tenant_id = user_tenant_record["tenant_id"]
 
     return {

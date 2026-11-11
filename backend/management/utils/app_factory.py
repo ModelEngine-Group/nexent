@@ -13,7 +13,6 @@ from fastapi.routing import APIRoute
 
 from management.utils.exception_handlers import register_exception_handlers
 from management.utils.health import install_health_contract
-from permissions.operations_boundary import install_operations_boundary
 
 try:
     from infrastructure.observability.bootstrap import monitoring_manager
@@ -65,8 +64,6 @@ def create_app(
         allow_methods=cors_methods or ["*"],
         allow_headers=["*"],
     )
-
-    install_operations_boundary(app)
 
     # Register exception handlers
     register_exception_handlers(app)

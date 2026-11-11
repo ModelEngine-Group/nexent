@@ -40,8 +40,8 @@ case:
       contain both grants without duplicate entries.
   - order: 2
     action: Assign OPS only, ADMIN plus OPS, and SU fixtures in turn; read permission metadata and use resource
-      read/write routes including the shared resource page lists, group members and model creation.
-    expected: Pure OPS receives exactly the three approved entry grants and credential-free tenant resource responses. Foreign tenant reads and business
+      read/write routes including the shared resource page lists, group members and model creation. Check the public authentication probe and the existing self-service token list with an OPS session.
+    expected: Pure OPS receives exactly the three approved entry grants and credential-free tenant resource responses. The authentication probe and self-service token list accept the OPS session. Foreign tenant resource reads and model
       writes are denied; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is
       own tenant.
   - order: 3
@@ -59,7 +59,7 @@ case:
   - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
     both grants without duplicate entries.
   - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
-    return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
+    with a missing action grant return 403. The authentication probe and self-service token list retain their ordinary behavior. ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
   - Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input is rejected
     by the documented validation contract; unknown and empty role sets are rejected.
   - SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead of an implicit
@@ -77,7 +77,7 @@ case:
     - 1
   - id: AC-02
     description: Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads,
-      business writes return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS
+      business writes with a missing action grant return 403. The authentication probe and self-service token list retain their ordinary behavior. ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS
       scope is own tenant.
     steps:
     - 2
@@ -114,7 +114,7 @@ case:
     - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
       both grants without duplicate entries.
     - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
-      return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
+      with a missing action grant return 403. The authentication probe and self-service token list retain their ordinary behavior. ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
     - Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input is rejected
       by the documented validation contract; unknown and empty role sets are rejected.
     - SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead of an implicit

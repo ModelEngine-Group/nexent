@@ -104,6 +104,8 @@ install_business_contract_stubs(consts_model_mock)
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
 utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
+utils_auth_utils_mock.authenticate = lambda: None
+utils_auth_utils_mock.get_current_user_context = MagicMock(return_value=("test_user_id", "test_tenant_id", ("DEV",)))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
 sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
 

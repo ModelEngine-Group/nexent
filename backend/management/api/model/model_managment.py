@@ -113,7 +113,7 @@ from management.services.monitor.audit import record_security_event
 from management.utils.app_factory import ModelCredentialRoute
 from nexent.core.concurrency import run_blocking
 from permissions.depends import require
-from permissions.operations import operations_scope, resource_read_tenant
+from permissions.operations import operations_scope
 from permissions.models import CurrentUser
 
 # Permission strings normalized by backend RBAC cache (lower-case type:subtype).
@@ -859,7 +859,6 @@ async def check_temporary_model_health(
 async def manage_check_model_health(
     request: ManageTenantModelHealthcheckRequest,
     current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION, alternative="resource.inventory:read")),
-    http_request: Request = None,
 ):
     """Check and update model connectivity for a specified tenant (admin/manage operation).
 
@@ -871,7 +870,7 @@ async def manage_check_model_health(
     Returns:
         Connectivity check result with updated status.
     """
-    read_only = resource_read_tenant(http_request) is not None
+    read_only = not has_any_role(current_user.effective_roles, _MANAGE_ALLOWED_ROLES)
     if read_only:
         operations_scope(current_user, request.tenant_id, "resource.inventory:read")
     else:

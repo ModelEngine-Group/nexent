@@ -517,7 +517,7 @@ def get_list_indices(
                 "sources": sources,
                 "models": models,
             }
-        if authorized_tenant := resource_read_tenant(request):
+        if authorized_tenant := resource_read_tenant(request, shared=True):
             return ElasticSearchService.list_indices(
                 pattern, include_stats, authorized_tenant, user_id, vdb_core,
                 inventory_read=True, **pagination_args,
@@ -567,6 +567,8 @@ def get_list_indices(
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
 

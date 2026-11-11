@@ -278,13 +278,15 @@ async def list_openapi_services_api(authorization: Optional[str] = Header(None),
     try:
         _, tenant_id = get_current_user_id(authorization)
         services = list_openapi_services(tenant_id)
-        if resource_read_tenant(request):
+        if resource_read_tenant(request, shared=True):
             fields = ("id", "mcp_service_name", "description")
             services = [{field: service.get(field) for field in fields} for service in services]
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "success", "data": services})
     except TokenExpiredError as e:
         logger.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list OpenAPI services: {e}")
         raise HTTPException(

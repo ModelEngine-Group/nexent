@@ -67,9 +67,10 @@ async def list_skills(
     try:
         user_id, current_tenant_id = get_current_user_id(authorization)
         # Super admin can query a specific tenant's skills; otherwise use current user's tenant
-        effective_tenant_id = tenant_id if tenant_id else current_tenant_id
+        inventory_tenant = resource_read_tenant(request, shared=True)
+        effective_tenant_id = inventory_tenant or tenant_id or current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
-        if resource_read_tenant(request):
+        if inventory_tenant:
             fields = ("skill_id", "name", "description", "source", "tags", "update_time")
             skills = [{field: skill.get(field) for field in fields} for skill in service.list_skills()]
             return JSONResponse(content={"skills": skills})
@@ -78,6 +79,8 @@ async def list_skills(
             user_id=user_id,
         )
         return JSONResponse(content={"skills": skills})
+    except HTTPException:
+        raise
     except SkillException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
