@@ -19,7 +19,10 @@ from contracts.errors.exceptions import ValidationError
 from contracts.tool import ToolParamsRequest
 from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
-from infrastructure.local_tool_execution import LOCAL_RERANK_TOOL_CLASSES, LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA
+from infrastructure.local_tool_execution import (
+    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_RERANK_TOOL_CLASSES,
+    LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA,
+)
 from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
 from infrastructure.object_storage.client import minio_client
 from infrastructure.shared_aidp_tool import SCOPED_SHARED_AIDP_CATALOG_ID, restrict_aidp_access, shared_aidp_parameters
@@ -453,9 +456,13 @@ async def create_tool_config_list(
         )
         if portable_evaluation and tool_config.source == "mcp" and effective_override_params:
             tool_config.metadata = {MCP_ARGUMENT_OVERRIDES: effective_override_params}
-        if (portable_evaluation and tool_config.source == "local" and effective_override_params
-                and tool_config.name in LOCAL_SEARCH_TUNING_FIELDS):
-            tool_config.metadata = {LOCAL_SEARCH_TUNING_METADATA: effective_override_params}
+        if portable_evaluation and tool_config.source == "local" and effective_override_params:
+            key = (
+                LOCAL_SEARCH_TUNING_METADATA
+                if effective_override_params.keys() <= LOCAL_SEARCH_TUNING_FIELDS.get(tool_config.name, set())
+                else LOCAL_PARAMETER_OVERRIDES_METADATA
+            )
+            tool_config.metadata = {key: effective_override_params}
 
         if is_shared_aidp and portable_evaluation and (runtime_knowledge_tools is not None or scoped_knowledge_tool):
             tool_config.metadata = {SCOPED_SHARED_AIDP_CATALOG_ID: tool.get("tool_id")}

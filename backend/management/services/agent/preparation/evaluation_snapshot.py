@@ -638,6 +638,7 @@ def _export_memory_search(agent, allow_memory):
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
     allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None, allow_sandbox_policy=False,
+    user_id=None,
 ):
     if agent.sandbox_policy and not allow_sandbox_policy:
         raise ValueError("Unsupported prepared resource")
@@ -736,7 +737,7 @@ def _export_resource(
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
             binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES:
-            binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language)
+            binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language, user_id=user_id)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in PLAN_TOOL_NAMES or tool.name == AUTOMATION_PROPOSAL_TOOL:
@@ -775,7 +776,9 @@ def _export_resource(
         sandbox_policy=agent.sandbox_policy or None,
         evaluation_options=EvaluationAgentOptions(**profile),
         subagents=[
-            _export_resource(child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory)
+            _export_resource(
+                child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory, user_id=user_id,
+            )
             for child in agent.worker_agents
         ],
         external_a2a=[
@@ -865,7 +868,7 @@ def export_snapshot(
             allow_debug_planning=allow_debug_planning,
             workbench_skills=workbench_skills,
             workbench_knowledge_tools=workbench_knowledge_tools,
-            allow_sandbox_policy=True,
+            allow_sandbox_policy=True, user_id=user_id,
         )
         bindings = [
             _export_model(

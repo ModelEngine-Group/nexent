@@ -37,6 +37,7 @@ LOCAL_SDK_TOOL_CLASSES = {
 }
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 LOCAL_SEARCH_TUNING_METADATA = "agentos_local_search_overrides"
+LOCAL_PARAMETER_OVERRIDES_METADATA = "agentos_local_parameter_overrides"
 LOCAL_SEARCH_TUNING_FIELDS = {
     "dify_search": {"top_k", "rerank", "rerank_model_name"},
     "datamate_search": {"top_k", "threshold", "rerank", "rerank_model_name"},
@@ -114,3 +115,15 @@ def local_tool_revision(tenant_id: str, agent_id: int, version_no: int, row: dic
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
     return hmac.digest(key, payload, "sha256").hex()
+
+
+def apply_local_parameter_overrides(tool: ToolConfig, parameters: dict) -> ToolConfig:
+    """Retain the compiler's run-language and shared-AIDP ownership rules."""
+    params = {**tool.params, **parameters}
+    if tool.name == "deepseek_search":
+        params.pop("localization", None)
+        params.pop("max_content_chars", None)
+        params["language"] = tool.params["language"]
+    elif tool.name == "aidp_search":
+        params = shared_aidp_parameters(params)
+    return tool.model_copy(update={"params": params})

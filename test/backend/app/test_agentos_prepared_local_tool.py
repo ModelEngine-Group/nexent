@@ -166,6 +166,99 @@ def test_local_tool_export_rejects_request_overrides(stored_tool):
         local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_change", [None, "user", "tenant", "agent", "version", "revision", "tampered"])
+async def test_request_connection_overrides_use_an_encrypted_scoped_reference(mocker, stored_tool, scope_change):
+    from infrastructure.local_tool_execution import build_local_tool
+    from management.services.agent.preparation import local_tool, tools
+    from runtime.agentos import prepared_local_tool
+
+    overrides = {"server_url": "https://request-private.invalid/v1", "api_key": "request-private-secret"}
+    # The compiler receives effective instance defaults from its bound-tool query.
+    params = [{**item, "default": 2} if item["name"] == "top_k" else item for item in stored_tool["params"]]
+    mocker.patch.object(tools, "discover_langchain_tools", return_value=[])
+    mocker.patch.object(tools, "_resolve_runtime_tool_records", return_value=[{**stored_tool, "params": params}])
+    mocker.patch.object(tools, "search_agent_info_by_agent_id", return_value={"name": "agent"})
+    tool, = await tools.create_tool_config_list(
+        7, "tenant-a", "user-a", version_no=3, portable_evaluation=True,
+        tool_params={"agents": {"agent": {"tools": {"dify_search": overrides}}}},
+    )
+    mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
+    exported = local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh", user_id="user-a")
+    encoded = exported.model_dump_json()
+    for value in (*overrides.values(), "local-only-dify-key", "private-dify.invalid"):
+        assert value not in encoded
+    assert exported.credential_ref
+    resource = SimpleNamespace(agent_id=7, version_no=3, tools=[ToolBinding.model_validate_json(encoded)])
+    actor = ServicePrincipal("user-a", "tenant-a")
+    rows = [stored_tool]
+    if scope_change == "user":
+        actor = ServicePrincipal("other-user", "tenant-a")
+    elif scope_change == "tenant":
+        actor = ServicePrincipal("user-a", "other-tenant")
+    elif scope_change == "agent":
+        resource.agent_id = 8
+    elif scope_change == "version":
+        resource.version_no = 4
+    elif scope_change == "revision":
+        rows = [{**stored_tool, "instance_params": {"top_k": 8}}]
+    elif scope_change == "tampered":
+        reference = resource.tools[0].credential_ref
+        resource.tools[0].credential_ref = reference[:80] + ("A" if reference[80] != "A" else "B") + reference[81:]
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=rows)
+    hydrate = mocker.patch.object(prepared_local_tool, "_reranker")
+    if scope_change:
+        with pytest.raises((HTTPException, ValueError)):
+            prepared_local_tool.materialize_local_tools(resource, actor, "zh")
+        hydrate.assert_not_called()
+    else:
+        rebound = prepared_local_tool.materialize_local_tools(resource, actor, "zh")["dify_search"]
+        assert rebound.params == build_local_tool(stored_tool, "zh", None, None).params | overrides
+        assert rebound.metadata["rerank_model"] is hydrate.return_value
+
+
+def test_nested_agent_snapshot_retains_request_parameter_owner(mocker, stored_tool):
+    from contracts.agentos import PreparedEvaluationRun
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.local_tool_execution import LOCAL_PARAMETER_OVERRIDES_METADATA, build_local_tool
+    from management.services.agent import tool_identity
+    from management.services.agent.preparation import evaluation_snapshot, local_tool
+    from nexent.core.agents.agent_model import AgentConfig
+    from runtime.agentos import prepared_local_tool
+    from test.backend.app.test_agentos_prepared_evaluation import model_record
+
+    parameters = {"api_key": "nested-request-only-key"}
+    tool = build_local_tool(stored_tool, "zh", None, None)
+    tool.params.update(parameters)
+    tool.metadata = {LOCAL_PARAMETER_OVERRIDES_METADATA: parameters}
+    record = model_record(model_id=11)
+    model = create_model_config_from_record(record)
+    child = AgentConfig(
+        agent_id=8, version_no=4, name="child", description="child", model_name=model.cite_name, tools=[tool],
+    )
+    root = AgentConfig(
+        agent_id=7, version_no=3, name="root", description="root", model_name=model.cite_name,
+        tools=[], worker_agents=[child],
+    )
+    mocker.patch.object(evaluation_snapshot, "read_bound_local_tools", return_value=[stored_tool])
+    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
+    mocker.patch.object(tool_identity, "resolve_tool_user_context", return_value={})
+    snapshot = evaluation_snapshot.export_snapshot(
+        root, [model], "hello", None, user_id="user-a", tenant_id="tenant-a", conversation_id=None, language="zh",
+    )
+    assert snapshot is not None
+    encoded = snapshot.model_dump_json()
+    assert parameters["api_key"] not in encoded
+    restored = PreparedEvaluationRun.model_validate_json(encoded)
+    mocker.patch.object(prepared_local_tool, "read_bound_local_tools", return_value=[stored_tool])
+    mocker.patch.object(prepared_local_tool, "_reranker")
+    rebuilt = prepared_local_tool.materialize_local_tools(
+        restored.resource.subagents[0], ServicePrincipal("user-a", "tenant-a"), "zh",
+    )
+    assert rebuilt["dify_search"].params["api_key"] == parameters["api_key"]
+
+
 def test_local_deepseek_reconstruction_uses_runtime_language(mocker, stored_tool):
     from infrastructure.local_tool_execution import build_local_tool, local_tool_revision
     from management.services.agent.preparation import local_tool

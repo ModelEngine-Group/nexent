@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Rebuild signed SDK tool instances without accepting connection parameters."""
+"""Rebuild signed SDK tool instances with caller-bound parameter overrides."""
 
 import logging
 from hmac import compare_digest
@@ -17,9 +17,10 @@ from infrastructure.ind_aidp_images import (
     create_ind_aidp_image_url_builder, ind_aidp_skill_revision, ind_aidp_workbench_revision,
 )
 from infrastructure.local_tool_execution import (
-    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, apply_local_search_overrides, build_local_tool,
+    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, apply_local_parameter_overrides, apply_local_search_overrides, build_local_tool,
     local_tool_rerank_name, local_tool_revision,
 )
+from infrastructure.local_tool_overrides import PREFIX, open_tool_overrides
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
 from infrastructure.shared_aidp_tool import restrict_aidp_access, scoped_shared_aidp_revision
 from nexent.core.agents.agent_model import ToolConfig
@@ -80,7 +81,8 @@ def materialize_local_tools(
         schema = schemas.get(binding.version)
         if binding.tool_id == "aidp_search" and binding.version == "3" and allow_scoped_aidp:
             schema = ScopedSharedAidpBinding
-        if schema is None or binding.credential_ref is not None or binding.tool_id in references:
+        if (schema is None or binding.tool_id in references
+                or (binding.credential_ref is not None and (binding.version == "3" or not binding.credential_ref.startswith(PREFIX)))):
             raise ValueError("Unsupported local SDK tool binding")
         if binding.version == "4" and binding.tool_id == "ind_aidp_search" and (
             workbench_lookup is None
@@ -91,6 +93,7 @@ def materialize_local_tools(
     if not references:
         return {}
 
+    parameter_refs = {binding.tool_id: binding.credential_ref for binding in resource.tools}
     scope = (resource.agent_id, resource.version_no, actor.tenant_id)
     direct_names = [name for name, (version, _) in references.items() if version == "1"]
     derived_names = [name for name, (version, _) in references.items() if version == "2"]
@@ -138,7 +141,17 @@ def materialize_local_tools(
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
         if not compare_digest(revision, reference.revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
-        tool = apply_local_search_overrides(tool, reference.search_overrides)
+        parameter_ref = parameter_refs[name]
+        if parameter_ref is not None:
+            if reference.search_overrides is not None:
+                raise ValueError("Conflicting local tool parameter overrides")
+            parameter_scope = (
+                actor.tenant_id, actor.user_id, resource.agent_id, resource.version_no, name, reference.revision,
+            )
+            parameters = open_tool_overrides(parameter_ref, parameter_scope)
+            tool = apply_local_parameter_overrides(tool, parameters)
+        else:
+            tool = apply_local_search_overrides(tool, reference.search_overrides)
         rerank_name = local_tool_rerank_name(tool)
         if not rerank_name and (reference.reranker or reference.default_reranker):
             raise ValueError("Unexpected local SDK tool reranker binding")
