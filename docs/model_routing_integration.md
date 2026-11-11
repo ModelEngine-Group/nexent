@@ -299,13 +299,18 @@ quick_qa → long_context → deep_reasoning
 # 跑路由单元测试
 pytest test/backend/services/test_model_task_routing.py -v
 
+# 跑入口集成测试
+pytest test/backend/agents/test_model_routing_entry.py -v
+
 # 冒烟观察路由决策
 # （management 服务日志）
 grep "Model routing decision" <management-service.log>
-
-# 为 Agent 声明任务标签（DB 或管理界面，context_policy JSONB）
-{"task_tag": "medical_summary"}
 ```
+
+注意：per-Agent 任务标签（task_tag）暂不可用 —— `context_policy` 字段被
+`PolicyLayers(extra="forbid")` 校验、不接受额外键；标签配置载体需先经
+Feature Issue（#4331）确认契约后再实现。当前领域词表与标签映射统一由
+`backend/configs/model_routing_rules.json` 承载。
 
 核心文件入口：
 - 路由服务：`backend/management/services/model/routing.py`（`classify_run` / `rank_candidates` / `route_model_selection`）

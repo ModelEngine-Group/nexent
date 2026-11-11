@@ -73,14 +73,20 @@ _TIER_RELAXATION = {
 }
 
 _DEFAULT_RULES: Dict[str, Any] = {
-    "long_context": {"token_threshold": 24000, "char_threshold": 8000, "terms": []},
-    "quick_qa": {"char_limit": 120, "terms": []},
+    "long_context": {"token_threshold": 0, "char_threshold": 0, "terms": []},
+    "quick_qa": {"char_limit": 0, "terms": []},
     "deep_reasoning": {"terms": []},
     "risk": {"high_terms": [], "review_terms": []},
     "task_tags": {},
     "history_tokens_per_turn": 200,
     "attachment_tokens": 800,
 }
+
+# Rules used when the configured file does not exist: identical to the
+# built-in defaults (empty vocabularies, size checks disabled) so the
+# classification always lands on the DEFAULT source and the caller keeps
+# the pre-routing selection - the documented "never route" contract.
+_MISSING_FILE_RULES = dict(_DEFAULT_RULES)
 
 # ---------------------------------------------------------------------------
 # Rules loading (file-based, thread-safe, degrade gracefully)
@@ -103,11 +109,105 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return merged
 
 
+def _validated_terms(value: Any) -> List[str]:
+    """Coerce a vocabulary field to a list of non-empty strings."""
+
+    if not isinstance(value, list):
+        return []
+    return [str(term) for term in value if isinstance(term, str) and term.strip()]
+
+
+def _validated_positive_int(value: Any) -> int:
+    """Coerce a threshold field to a non-negative int (0 disables the check)."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    if value != value or value in (float("inf"), float("-inf")):
+        return 0
+    return max(int(value), 0)
+
+
+def _validate_rules(raw: Any) -> Dict[str, Any]:
+    """Normalize and validate a raw rules document.
+
+    Returns a fully-typed rules dict.  Invalid fields fall back to their
+    defaults individually (field-level degradation), so one bad value
+    cannot break classification and loading never raises.
+    """
+
+    if not isinstance(raw, dict):
+        return dict(_DEFAULT_RULES)
+
+    long_section = raw.get("long_context")
+    quick_section = raw.get("quick_qa")
+    deep_section = raw.get("deep_reasoning")
+    risk_section = raw.get("risk")
+    tags_section = raw.get("task_tags")
+
+    task_tags: Dict[str, str] = {}
+    if isinstance(tags_section, dict):
+        for tag, tier in tags_section.items():
+            if not isinstance(tag, str) or not tag.strip():
+                continue
+            if not isinstance(tier, str):
+                continue
+            try:
+                RouteTier(tier)
+            except ValueError:
+                continue
+            task_tags[tag.strip().lower()] = tier
+
+    risk: Dict[str, List[str]] = {"high_terms": [], "review_terms": []}
+    if isinstance(risk_section, dict):
+        risk = {
+            "high_terms": _validated_terms(risk_section.get("high_terms")),
+            "review_terms": _validated_terms(risk_section.get("review_terms")),
+        }
+
+    long_rules: Dict[str, Any] = {
+        "token_threshold": 0,
+        "char_threshold": 0,
+        "terms": [],
+    }
+    if isinstance(long_section, dict):
+        long_rules = {
+            "token_threshold": _validated_positive_int(long_section.get("token_threshold")),
+            "char_threshold": _validated_positive_int(long_section.get("char_threshold")),
+            "terms": _validated_terms(long_section.get("terms")),
+        }
+
+    quick_rules: Dict[str, Any] = {"char_limit": 0, "terms": []}
+    if isinstance(quick_section, dict):
+        quick_rules = {
+            "char_limit": _validated_positive_int(quick_section.get("char_limit")),
+            "terms": _validated_terms(quick_section.get("terms")),
+        }
+
+    deep_rules: Dict[str, Any] = {"terms": []}
+    if isinstance(deep_section, dict):
+        deep_rules = {"terms": _validated_terms(deep_section.get("terms"))}
+
+    per_turn = _validated_positive_int(raw.get("history_tokens_per_turn"))
+    per_attachment = _validated_positive_int(raw.get("attachment_tokens"))
+
+    return {
+        "long_context": long_rules,
+        "quick_qa": quick_rules,
+        "deep_reasoning": deep_rules,
+        "risk": risk,
+        "task_tags": task_tags,
+        "history_tokens_per_turn": per_turn,
+        "attachment_tokens": per_attachment,
+    }
+
+
 def load_rules(force_reload: bool = False) -> Dict[str, Any]:
     """Load routing rules from ``MODEL_ROUTING_RULES_JSON_PATH``.
 
-    Missing or malformed files degrade to built-in defaults (empty
-    vocabularies); loading never raises so the run path stays safe.
+    Missing files, malformed JSON and invalid field values all degrade to
+    safe fallbacks (missing file: fully disabled sizes per the contract;
+    invalid fields: per-field defaults); loading never raises so the run
+    path stays safe.
     """
 
     global _rules_cache, _rules_loaded_from
@@ -116,18 +216,23 @@ def load_rules(force_reload: bool = False) -> Dict[str, Any]:
             return _rules_cache
         from contracts.constants.environment import MODEL_ROUTING_RULES_JSON_PATH
 
-        rules = _DEFAULT_RULES
         path = MODEL_ROUTING_RULES_JSON_PATH
-        try:
-            if path and os.path.exists(path):
+        if path and os.path.exists(path):
+            try:
                 with open(path, encoding="utf-8") as handle:
                     raw = json.load(handle)
-                if isinstance(raw, dict):
-                    rules = _deep_merge(_DEFAULT_RULES, raw)
-                    _rules_loaded_from = path
-        except (OSError, ValueError) as exc:
-            logger.warning("Model routing rules unavailable (%s); using defaults", exc)
-            rules = _DEFAULT_RULES
+                rules = _validate_rules(raw)
+                _rules_loaded_from = path
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Model routing rules unavailable (%s); routing disabled", exc
+                )
+                rules = _validate_rules(None)
+        else:
+            # Missing rules file: no vocabularies and no size heuristics -
+            # classification always lands on the DEFAULT source and the
+            # caller keeps the existing selection ("never route").
+            rules = _MISSING_FILE_RULES
         _rules_cache = rules
         return rules
 
@@ -473,21 +578,24 @@ def rank_candidates(
     """Rank records for the classified tier, best first.
 
     Returns ``(ranked, fallback_from)``.  Only positive scores qualify.
-    When no record matches the tier, relax along ``_TIER_RELAXATION``;
-    ``fallback_from`` records the tier the request was demoted from
-    (None when the primary tier was served).
+    When no record matches the tier, walk the full relaxation chain
+    (``quick_qa → long_context → deep_reasoning``) until a tier has
+    capable candidates; ``fallback_from`` records the originally
+    requested tier (None when it was served directly or nothing
+    qualified anywhere).
     """
 
     ranked = _rank_for_tier(records, result.tier, result)
     if ranked:
         return ranked, None
 
-    relaxed = _TIER_RELAXATION.get(result.tier)
-    if relaxed is None:
-        return [], None
-    relaxed_ranked = _rank_for_tier(records, relaxed, result)
-    if relaxed_ranked:
-        return relaxed_ranked, result.tier
+    requested_tier = result.tier
+    relaxed = _TIER_RELAXATION.get(requested_tier)
+    while relaxed is not None:
+        relaxed_ranked = _rank_for_tier(records, relaxed, result)
+        if relaxed_ranked:
+            return relaxed_ranked, requested_tier
+        relaxed = _TIER_RELAXATION.get(relaxed)
     return [], None
 
 

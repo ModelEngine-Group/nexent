@@ -82,6 +82,19 @@ class TestRulesLoading:
         assert rules["task_tags"] == {}
         assert rules["risk"]["high_terms"] == []
 
+    def test_missing_file_disables_size_heuristics(self, monkeypatch, tmp_path):
+        # Contract: missing rules file -> "never route".  Size heuristics
+        # must be disabled too, not just the vocabularies.
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH",
+            str(tmp_path / "nonexistent.json"),
+        )
+        reset_rules_cache()
+        result = classify_run("hello")
+        assert result.source is IntentSource.DEFAULT
+        result_long = classify_run("病" * 50000)
+        assert result_long.source is IntentSource.DEFAULT
+
     def test_shipped_rules_file_loads(self):
         rules = routing.load_rules()
         assert rules["task_tags"], "shipped rules file must carry task tags"
@@ -95,6 +108,67 @@ class TestRulesLoading:
         )
         rules = routing.load_rules()
         assert rules == routing._DEFAULT_RULES
+
+    def test_invalid_field_types_degrade_per_field(self, monkeypatch, tmp_path):
+        # P1: structurally valid JSON with wrong field types must not
+        # raise; invalid fields fall back individually.
+        bad = tmp_path / "bad_types.json"
+        bad.write_text(
+            '{"long_context": {"token_threshold": "invalid"}, "quick_qa": 42}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH", str(bad)
+        )
+        rules = routing.load_rules()  # must not raise
+        assert rules["long_context"]["token_threshold"] == 0
+        assert rules["quick_qa"] == {"char_limit": 0, "terms": []}
+
+    def test_invalid_section_types_degrade(self, monkeypatch, tmp_path):
+        bad = tmp_path / "bad_sections.json"
+        bad.write_text(
+            '{"long_context": 42, "risk": "nope", "task_tags": [1, 2]}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH", str(bad)
+        )
+        rules = routing.load_rules()  # must not raise
+        assert rules["long_context"]["terms"] == []
+        assert rules["risk"]["high_terms"] == []
+        assert rules["task_tags"] == {}
+
+    def test_invalid_task_tag_tiers_dropped(self, monkeypatch, tmp_path):
+        bad = tmp_path / "bad_tags.json"
+        bad.write_text(
+            '{"task_tags": {"ok": "quick_qa", "broken": "not_a_tier", "7": "quick_qa"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH", str(bad)
+        )
+        rules = routing.load_rules()
+        assert rules["task_tags"] == {"ok": "quick_qa", "7": "quick_qa"}
+
+    def test_non_string_terms_filtered(self, monkeypatch, tmp_path):
+        bad = tmp_path / "bad_terms.json"
+        bad.write_text(
+            '{"deep_reasoning": {"terms": ["分析", 42, "", null]}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH", str(bad)
+        )
+        rules = routing.load_rules()
+        assert rules["deep_reasoning"]["terms"] == ["分析"]
+
+    def test_top_level_non_dict_degrades(self, monkeypatch, tmp_path):
+        bad = tmp_path / "array.json"
+        bad.write_text("[1, 2, 3]", encoding="utf-8")
+        monkeypatch.setattr(
+            "contracts.constants.environment.MODEL_ROUTING_RULES_JSON_PATH", str(bad)
+        )
+        assert routing.load_rules() == routing._DEFAULT_RULES
 
     def test_reset_reloads_from_disk(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
@@ -280,9 +354,18 @@ class TestScoreAndRank:
         assert ranked and ranked[0][0]["model_id"] == 1
         assert fallback_from is RouteTier.QUICK_QA
 
-    def test_rank_exhausted_returns_empty_with_none(self):
+    def test_rank_walks_full_relaxation_chain(self):
+        # P2: quick_qa request with only a deep model available must pass
+        # through long_context and land on deep_reasoning.
+        records = [_record(model_id=1, name="only-deep", tier_facts=DEEP_FACTS)]
+        ranked, fallback_from = rank_candidates(records, _result(RouteTier.QUICK_QA))
+        assert ranked and ranked[0][0]["model_id"] == 1
+        assert fallback_from is RouteTier.QUICK_QA
+
+    def test_rank_chain_exhaustion_returns_empty_with_none(self):
         records = [_record(model_id=1, name="only-quick", tier_facts=QUICK_FACTS)]
         ranked, fallback_from = rank_candidates(records, _result(RouteTier.DEEP_REASONING))
+        # deep has no relaxation target; nothing qualifies.
         assert ranked == []
         assert fallback_from is None
 
