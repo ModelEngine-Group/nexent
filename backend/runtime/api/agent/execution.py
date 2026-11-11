@@ -15,7 +15,7 @@ from nexent.core.concurrency import run_blocking
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from management.services.agent.subscription import run_agent_stream as run_legacy_agent_stream
-from contracts.errors.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
@@ -25,6 +25,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution, untrack_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
+from runtime.agentos.management_dispatch import dispatch_public_start
 from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import direct_legacy_stream, start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
@@ -88,7 +89,12 @@ _legacy_execution_host = LegacyExecutionHost(
 )
 
 
-async def run_agent_stream(**options):
+async def run_agent_stream(*, management_dispatch=False, **options):
+    if management_dispatch:
+        return await dispatch_public_start(
+            options["agent_request"], options.get("http_request"),
+            ServicePrincipal(options["user_id"], options["tenant_id"]),
+        )
     return await run_legacy_agent_stream(
         **options, legacy_materializer=materialize_legacy_run, thread_manager=runtime_thread_manager,
         execution_host=_legacy_execution_host,
@@ -136,7 +142,7 @@ async def agent_run_api(
     """Legacy signed Gateway entry for starting or resuming a stream."""
     agent_request._track_execution = not resume and not agent_request.is_debug
     return await _run_public_conversation(
-        agent_request, http_request, _gateway_session_principal(), resume,
+        agent_request, http_request, _gateway_session_principal(), resume, management_dispatch=True,
     )
 
 
@@ -163,7 +169,7 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     return await execute()
 
 
-async def _run_public_conversation(agent_request, http_request, principal, resume):
+async def _run_public_conversation(agent_request, http_request, principal, resume, *, management_dispatch=False):
     if resume and (agent_request.is_debug or (agent_request.conversation_id or 0) <= 0):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RESUME_REQUEST"})
     try:
@@ -171,12 +177,18 @@ async def _run_public_conversation(agent_request, http_request, principal, resum
             return await resume_legacy_conversation(
                 agent_request.conversation_id, principal, workbench=agent_request.entrypoint == "workbench",
             )
+        dispatch_options = {"management_dispatch": True} if management_dispatch else {}
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
             user_id=principal.user_id,
             tenant_id=principal.tenant_id,
+            **dispatch_options,
         )
+    except RuntimeServiceTimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Management service timed out") from exc
+    except RuntimeServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Management service is unavailable") from exc
     except ActiveExecutionError:
         return _execution_conflict_response()
     except PermissionError as exc:

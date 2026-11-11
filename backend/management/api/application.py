@@ -14,6 +14,7 @@ from management.api.automation.agent_automation import (
 )
 from management.api.skill.creation import skill_creator_router
 from management.api.agent.creator import router as agent_creator_router
+from management.api.agent.compatibility_dispatch import router as compatibility_dispatch_router
 from management.api.agent.nl2agent_callback import router as nl2agent_callback_router
 from management.api.agent.workbench_callback import router as workbench_callback_router
 from management.api.automation.agentos_callback import router as automation_callback_router
@@ -180,6 +181,7 @@ app.include_router(conversation_run_router)
 app.include_router(agent_automation_router)
 app.include_router(automation_callback_router)
 app.include_router(nl2agent_callback_router)
+app.include_router(compatibility_dispatch_router)
 app.include_router(workbench_callback_router)
 app.include_router(memory_callback_router)
 app.include_router(conversation_automation_router)

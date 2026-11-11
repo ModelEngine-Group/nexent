@@ -733,6 +733,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
+    CONVERSATION_DISPATCH = NAMESPACE + "v1/agent/dispatch-conversation"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
