@@ -2,9 +2,32 @@
 
 
 import logging
+import uuid
 from contracts.constants.constants import LANGUAGE
 from typing import Optional
 from fastapi import Request
+
+REQUEST_ID_HEADER = "x-request-id"
+
+
+def get_request_id(request: Optional[Request] = None) -> str:
+    """Resolve the correlation id used by response envelopes and error bodies.
+
+    Precedence: the caller-supplied ``X-Request-Id`` header, then the id bound
+    to the request by the identity dependency, then a fresh identifier so a
+    response always carries one.
+    """
+    if request is not None:
+        try:
+            header_value = request.headers.get(REQUEST_ID_HEADER)
+        except Exception:  # pragma: no cover - defensive for non-HTTP scopes
+            header_value = None
+        if header_value and header_value.strip():
+            return header_value.strip()
+        state_value = getattr(request.state, "request_id", None)
+        if state_value:
+            return str(state_value)
+    return str(uuid.uuid4())
 
 def get_client_ip(request: Optional[Request]) -> str:
     """Resolve the client IP: first hop of X-Forwarded-For, then X-Real-IP, then peer.

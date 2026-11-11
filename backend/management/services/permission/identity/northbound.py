@@ -147,6 +147,35 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
 
 
 
+
+def record_api_key_usage(principal: AuthenticatedIdentity, request=None) -> None:
+    """Account one authenticated Key call. Best effort: never blocks the request.
+
+    Accounting failures are warnings only: usage statistics must not become a
+    business availability dependency, and the credential is already verified.
+    """
+    token_id = principal.token_id or 0
+    if not token_id or token_id <= 0:
+        return
+    path = request.url.path if request is not None else ""
+    if path == "/nb/v1/chat/run" or path.startswith("/nb/v1/chat/stop/") or (
+        path.startswith("/nb/v1/conversations/") and path.endswith("/title")
+    ):
+        return
+    try:
+        request_id = request.headers.get("X-Request-Id") if request is not None else None
+        log_token_usage(
+            token_id=token_id,
+            call_function_name=path,
+            related_id=None,
+            created_by=principal.user_id,
+            metadata={"method": request.method if request is not None else None,
+                      "request_id": request_id or str(uuid.uuid4())},
+        )
+    except Exception as exc:
+        logging.warning("Failed to log northbound API key usage: %s", exc)
+
+
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:
     from management.services.permission.identity.session import _gateway_identity
 

@@ -212,6 +212,9 @@ services:
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
+      # Same-source exclusion list: compose injects the identical value into the
+      # gateway and the services, so the two cannot drift apart (design §5.7).
+      NORTHBOUND_EXPOSED_EXCLUDE: "${NORTHBOUND_EXPOSED_EXCLUDE:-}"
     entrypoint: ["python", "backend/gateway_service.py"]
     healthcheck:
       test: ["CMD", "python", "-m", "gateway.healthcheck"]

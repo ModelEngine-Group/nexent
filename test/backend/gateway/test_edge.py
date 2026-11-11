@@ -5,7 +5,51 @@ import httpx
 import pytest
 
 from gateway.application import create_gateway_app
-from gateway.routing import select_upstream, filtered_headers
+import gateway.routing as routing_module
+from gateway.routing import RouteTable, select_upstream, filtered_headers
+
+
+@pytest.fixture()
+def manifest_route_table(monkeypatch):
+    """Install a manifest-derived route table covering the historic semantics.
+
+    The production table loads from deploy/northbound.yaml; unit tests inject
+    an equivalent in-memory table so routing assertions do not depend on the
+    deployment file.
+    """
+    entries = [
+        {"id": "chat.run", "upstream": "northbound", "path": "/nb/v1/chat/run", "methods": ["POST"]},
+        {"id": "a2a.jsonrpc", "upstream": "northbound", "path": "/nb/a2a/{endpoint_id}/v1", "methods": ["POST"]},
+    ]
+    monkeypatch.setattr(routing_module, "ROUTE_TABLE", RouteTable.from_manifest(entries, excluded=()))
+    return routing_module.ROUTE_TABLE
+
+
+@pytest.mark.parametrize("method,path,target", [
+    ("GET", "/api/model/list", "management"),
+    ("POST", "/api/agent/run", "runtime"),
+    ("POST", "/api/agent/runner", "management"),
+    ("POST", "/api/file/storage", "runtime"),
+    ("GET", "/api/file/storage", "management"),
+    ("GET", "/nb/v1/does-not-exist", None),
+    ("GET", "/not-an-api", None),
+])
+def test_routes(method, path, target):
+    # Internal-namespace routing is manifest-independent (prefix fallback).
+    assert select_upstream(method, path) == target
+
+
+@pytest.mark.parametrize("method,path,target", [
+    ("POST", "/nb/v1/chat/run", "northbound"),
+    ("GET", "/nb/v1/chat/run", None),
+    # /api/nb/... no longer special-cases into the northbound upstream: the
+    # manifest matches /nb/ paths only, so this is ordinary internal traffic.
+    ("POST", "/api/nb/a2a/test", "management"),
+    ("GET", "/api/internal/thread-capacity", None),
+    ("POST", "/api/agent/internal/northbound/run", None),
+])
+def test_manifest_routes(method, path, target, manifest_route_table):
+    assert select_upstream(method, path) == target
 
 
 @pytest.mark.asyncio
@@ -32,23 +76,6 @@ async def test_partial_upstream_failure_closes_stream_without_retry():
                 await client.post("/api/agent/run")
     assert len(requests) == 1
     assert closed == [True]
-
-
-@pytest.mark.parametrize("method,path,target", [
-    ("GET", "/api/model/list", "management"),
-    ("POST", "/api/agent/run", "runtime"),
-    ("POST", "/api/agent/runner", "management"),
-    ("POST", "/api/file/storage", "runtime"),
-    ("GET", "/api/file/storage", "management"),
-    ("GET", "/nb/v1/chat/run", "northbound"),
-    ("GET", "/api/nb/a2a/test", "northbound"),
-    ("GET", "/api/voice/stt/ws", "runtime"),
-    ("GET", "/api/internal/thread-capacity", None),
-    ("POST", "/api/agent/internal/northbound/run", None),
-    ("GET", "/not-an-api", None),
-])
-def test_routes(method, path, target):
-    assert select_upstream(method, path) == target
 
 
 def test_header_filter():

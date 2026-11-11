@@ -212,3 +212,13 @@ app.include_router(tag_management_router)
 app.include_router(northbound_router)
 app.include_router(a2a_router)
 app.include_router(gateway_identity_router)
+
+# Northbound capability gates (hand-written per the northbound exposure design)
+# and the manifest reconciliation that keeps northbound.yaml honest.
+from management.api.northbound_gates import nb_capability_routers  # noqa: E402
+from management.utils.northbound_manifest import reconcile_northbound_manifest  # noqa: E402
+
+for _nb_router in nb_capability_routers():
+    app.include_router(_nb_router)
+reconcile_northbound_manifest(app)
+

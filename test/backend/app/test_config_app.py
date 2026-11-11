@@ -193,6 +193,18 @@ class TestConfigAppRouterConfiguration:
         retired_module.router = retired_router
         monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
 
+        # The northbound capability gates import real conversation/automation
+        # services; stub the gate package so the stubbed application module
+        # does not pull the database layer.
+        gates_pkg = types.ModuleType("management.api.northbound_gates")
+        gates_pkg.__path__ = []
+        gates_pkg.nb_capability_routers = lambda: ()
+        monkeypatch.setitem(sys.modules, "management.api.northbound_gates", gates_pkg)
+
+        manifest_module = types.ModuleType("management.utils.northbound_manifest")
+        manifest_module.reconcile_northbound_manifest = MagicMock()
+        monkeypatch.setitem(sys.modules, "management.utils.northbound_manifest", manifest_module)
+
         component = types.ModuleType("management.api.northbound_application")
 
         @asynccontextmanager

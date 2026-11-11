@@ -298,6 +298,7 @@ MAX_RUNTIME_METADATA_KEY_LENGTH = 256
 # Stable service identifiers used by startup task recovery.
 CONFIG_SERVICE_NAME = 'nexent-config'
 NORTHBOUND_SERVICE_NAME = 'nexent-northbound'
+NORTHBOUND_PATH_PREFIX = '/nb'
 # Host Configuration Constants
 LOCALHOST_IP = '127.0.0.1'
 LOCALHOST_NAME = 'localhost'

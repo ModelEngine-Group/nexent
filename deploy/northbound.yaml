@@ -1,0 +1,231 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# ---
+# Northbound exposure manifest — the single hand-written source of truth for
+# the open surface (design §5.6.1). One block per capability. The gateway
+# derives its routing table from this file; the sidecar reconciles it against
+# the actual FastAPI routes at startup (fail-fast on drift).
+#
+# Fields:
+#   id          capability id, `<domain>.<action>`, contract-level, never renamed
+#   upstream    owning service (compose service name); the gateway dispatches
+#               by this field, regardless of which process hosts the internal
+#               route
+#   path        published path under /nb/v1 (REST) or /nb/a2a (A2A templates)
+#   methods     HTTP methods; WebSocket endpoints list ["GET", "WS"] because
+#               the gateway proxy upgrades on GET
+#   auth        key (default, API-Key enforced) or public (exempt, e.g. the
+#               A2A agent-card discovery endpoint)
+#   params_lock gateway-side parameter pre-check (the service-side signature
+#               pattern is the second layer)
+#   audit       whether the capability is an action capability that records a
+#               security-audit event on every attempt (including denied)
+#   rate_limit  whether the route-level rate limiter is attached
+#   log_usage   false = the business lane accounts usage in more detail, so
+#               the gate dependency skips it (§5.5 anti-double-count)
+#   enabled     true = serving; false = declared but dark (gateway returns 404,
+#               indistinguishable from nonexistent; reconciliation still
+#               requires the declared gate to exist)
+#
+# Deployment-level emergency brake: NORTHBOUND_EXPOSED_EXCLUDE (environment,
+# injected into both the gateway and the service) subtracts ids at runtime.
+northbound:
+  # ── Existing chat & conversations surfaces (all open today) ──
+  - id: chat.health
+    upstream: management
+    path: /nb/v1/health
+    methods: [GET]
+    auth: public
+  - id: chat.run
+    upstream: management
+    path: /nb/v1/chat/run
+    methods: [POST]
+    rate_limit: true
+    log_usage: false
+  - id: chat.stop
+    upstream: management
+    path: /nb/v1/chat/stop/{conversation_id}
+    methods: [GET]
+    log_usage: false
+  - id: chat.attachments_upload
+    upstream: management
+    path: /nb/v1/chat/attachments/upload
+    methods: [POST]
+  - id: conversations.list
+    upstream: management
+    path: /nb/v1/conversations
+    methods: [GET]
+  - id: conversations.detail
+    upstream: management
+    path: /nb/v1/conversations/{conversation_id}
+    methods: [GET]
+  - id: conversations.rename
+    upstream: management
+    path: /nb/v1/conversations/{conversation_id}/title
+    methods: [PUT]
+    log_usage: false
+  - id: conversations.generate_title
+    upstream: management
+    path: /nb/v1/generate_title
+    methods: [POST]
+  - id: agents.list
+    upstream: management
+    path: /nb/v1/agents
+    methods: [GET]
+  - id: agents.detail
+    upstream: management
+    path: /nb/v1/agents/{agent_name}
+    methods: [GET]
+  - id: agents.knowledge_bases
+    upstream: management
+    path: /nb/v1/agents/{agent_name}/knowledge-bases
+    methods: [GET]
+  - id: knowledge.indices_list
+    upstream: management
+    path: /nb/v1/knowledge/indices
+    methods: [GET]
+  - id: knowledge.indices_create
+    upstream: management
+    path: /nb/v1/knowledge/indices/{index_name}
+    methods: [POST]
+  - id: knowledge.indices_delete
+    upstream: management
+    path: /nb/v1/knowledge/indices/{index_name}
+    methods: [DELETE]
+    audit: true
+  - id: knowledge.indices_files
+    upstream: management
+    path: /nb/v1/knowledge/indices/{index_name}/files
+    methods: [GET]
+  - id: knowledge.chunks
+    upstream: management
+    path: /nb/v1/knowledge/indices/{index_name}/chunks
+    methods: [POST]
+  - id: knowledge.hybrid_search
+    upstream: management
+    path: /nb/v1/knowledge/indices/search/hybrid
+    methods: [POST]
+  - id: knowledge.documents_delete
+    upstream: management
+    path: /nb/v1/knowledge/indices/{index_name}/documents
+    methods: [DELETE]
+    audit: true
+  - id: knowledge.file_upload
+    upstream: management
+    path: /nb/v1/knowledge/file/upload
+    methods: [POST]
+  - id: knowledge.file_download
+    upstream: management
+    path: /nb/v1/knowledge/file/download/{object_name:path}
+    methods: [GET]
+    params_lock: {download: [ignore, stream]}
+  - id: file.fetch
+    upstream: management
+    path: /nb/v1/file/fetch
+    methods: [GET]
+  - id: models.list
+    upstream: management
+    path: /nb/v1/models
+    methods: [GET]
+  - id: api_keys.refresh
+    upstream: management
+    path: /nb/v1/api-keys/refresh
+    methods: [POST]
+    audit: true
+  - id: api_keys.revoke
+    upstream: management
+    path: /nb/v1/api-keys
+    methods: [DELETE]
+    audit: true
+  - id: api_users.batch_create
+    upstream: management
+    path: /nb/v1/api-users/batch
+    methods: [POST]
+    audit: true
+
+  # ── A2A protocol templates (endpoint_id is runtime data) ──
+  - id: a2a.agent_card
+    upstream: management
+    path: /nb/a2a/{endpoint_id}/.well-known/agent-card.json
+    methods: [GET]
+    auth: public
+  - id: a2a.jsonrpc
+    upstream: management
+    path: /nb/a2a/{endpoint_id}/v1
+    methods: [POST]
+  - id: a2a.message_send
+    upstream: management
+    path: /nb/a2a/{endpoint_id}/message:send
+    methods: [POST]
+  - id: a2a.message_stream
+    upstream: management
+    path: /nb/a2a/{endpoint_id}/message:stream
+    methods: [POST]
+  - id: a2a.tasks
+    upstream: management
+    path: /nb/a2a/{endpoint_id}/tasks/{task_id}
+    methods: [GET]
+
+  # ── Phase-one newly exposed capabilities (the three interfaces) ──
+  - id: conversations.delete
+    upstream: management
+    path: /nb/v1/conversations/{conversation_id}
+    methods: [DELETE]
+    audit: true
+  - id: conversations.batch_delete
+    upstream: management
+    path: /nb/v1/conversations/batch-delete
+    methods: [POST]
+    audit: true
+  - id: automations.list
+    upstream: management
+    path: /nb/v1/automations
+    methods: [GET]
+  - id: automations.detail
+    upstream: management
+    path: /nb/v1/automations/{task_id}
+    methods: [GET]
+  - id: file.download
+    upstream: management
+    path: /nb/v1/file/download/{object_name:path}
+    methods: [GET]
+    params_lock: {download: [ignore, stream]}
+
+  # ── Declared but not serving (dark): action capabilities stay closed until
+  #    operations explicitly enable them after review (§5.8 example two).
+  #    Reconciliation checks these at enabled-as-declared value too: declared
+  #    means the gate code should exist, dark only means not serving. ──
+  - id: automations.pause
+    upstream: management
+    path: /nb/v1/automations/{task_id}/pause
+    methods: [POST]
+    audit: true
+    enabled: false
+  - id: automations.resume
+    upstream: management
+    path: /nb/v1/automations/{task_id}/resume
+    methods: [POST]
+    audit: true
+    enabled: false
+  - id: automations.run
+    upstream: management
+    path: /nb/v1/automations/{task_id}/run
+    methods: [POST]
+    audit: true
+    enabled: false
+  - id: automations.delete
+    upstream: management
+    path: /nb/v1/automations/{task_id}
+    methods: [DELETE]
+    audit: true
+    enabled: false
+  - id: automations.runs
+    upstream: management
+    path: /nb/v1/automations/{task_id}/runs
+    methods: [GET]
+    enabled: false
+  - id: automations.run_cancel
+    upstream: management
+    path: /nb/v1/automations/runs/{run_id}/cancel
+    methods: [POST]
+    audit: true
+    enabled: false

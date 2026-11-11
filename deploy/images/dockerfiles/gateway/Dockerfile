@@ -9,6 +9,8 @@ RUN if [ -n "$MIRROR" ]; then \
     fi
 COPY backend/gateway/ /opt/backend/gateway/
 COPY backend/gateway_service.py /opt/backend/gateway_service.py
+COPY deploy/northbound.yaml /opt/northbound.yaml
+ENV NORTHBOUND_MANIFEST_PATH=/opt/northbound.yaml
 ENV PYTHONPATH=/opt/backend
 USER 65532:65532
 EXPOSE 5013

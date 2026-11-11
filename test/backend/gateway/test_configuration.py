@@ -69,7 +69,10 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt"}
+    # ``yaml`` joined the declared runtime libraries with the northbound
+    # manifest (design §5.6.3: an intentional, reviewed extension of the
+    # gateway's "environment-only, zero file" deployment model).
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt", "yaml"}
     for path in (BACKEND / "gateway").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -77,7 +80,7 @@ def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
             for module in modules:
                 assert module and module.split(".")[0] in allowed, (path, module)
             if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}:
-                assert path.name == "configuration.py", path
+                assert path.name in {"configuration.py", "routing.py"}, path
 
 
 def test_only_gateway_sources_can_import_launcher_in_an_isolated_directory(tmp_path):
