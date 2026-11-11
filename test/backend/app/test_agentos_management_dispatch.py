@@ -59,8 +59,12 @@ async def test_runtime_public_start_uses_signed_management_dispatch(mocker, mana
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rejected", [False, True])
-async def test_signed_existing_claim_reaches_prepared_dispatch_with_original_run_id(mocker, management_endpoint, rejected):
+@pytest.mark.parametrize("existing_claim", [False, True])
+async def test_signed_claim_reaches_prepared_dispatch_with_original_run_id(
+    mocker, management_endpoint, rejected, existing_claim,
+):
     from management.services.agent import conversation_submission, prepared_turn, runtime_client
+    from infrastructure.rdb.agent_admission import AdmissionClaim
 
     async def direct(_task, function, *args, **kwargs):
         return function(*args, **kwargs)
@@ -68,7 +72,10 @@ async def test_signed_existing_claim_reaches_prepared_dispatch_with_original_run
     mocker.patch.object(conversation_submission, "_control_io", side_effect=direct)
     mocker.patch.object(conversation_submission, "conversation_belongs_to", return_value=True)
     validate = mocker.patch.object(conversation_submission, "authorize_conversation_dispatch", return_value=True)
-    claim = mocker.patch.object(conversation_submission, "claim_conversation_run", side_effect=AssertionError("second claim"))
+    run_id = "a" * 32
+    claim = mocker.patch.object(conversation_submission, "claim_conversation_run", return_value=AdmissionClaim(
+        run_id, "pending", None, False, True,
+    ))
     mocker.patch.object(runtime_client, "_agentos_client", return_value=object())
     prepared = mocker.patch.object(prepared_turn, "start_turn", new=AsyncMock(
         return_value=StreamingResponse(iter([b"data: done\n\n"]), headers={"conversation_id": "42"}),
@@ -79,7 +86,7 @@ async def test_signed_existing_claim_reaches_prepared_dispatch_with_original_run
         )
     payload = CompatibilityConversationRun(
         request={"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False},
-        idempotency_key="existing-claim", claimed_run_id="a" * 32,
+        idempotency_key="claim", claimed_run_id=run_id if existing_claim else None,
     )
     client = AgentOSClient("http://management", lambda **kwargs: httpx.AsyncClient(
         transport=httpx.ASGITransport(app=management_endpoint), **kwargs,
@@ -88,17 +95,21 @@ async def test_signed_existing_claim_reaches_prepared_dispatch_with_original_run
     response = await client.dispatch_conversation(payload, "actor", "tenant")
 
     assert response.status_code == (422 if rejected else 200)
-    assert response.headers["X-AgentOS-Run-ID"] == payload.claimed_run_id
+    assert response.headers["X-AgentOS-Run-ID"] == run_id
     body = b"".join([chunk async for chunk in response.body_iterator])
     if rejected:
         assert response.headers["Retry-After"] == "7"
         assert b"AGENTOS_RESOURCE_UNSUPPORTED" in body
     else:
         assert body == b"data: done\n\n"
-    assert prepared.await_args.args[0] == payload
+    assert prepared.await_args.args[0] == payload.model_copy(update={"claimed_run_id": run_id})
     assert prepared.await_args.args[2:4] == ("actor", "tenant")
-    assert validate.call_args.kwargs == {"consume": False}
-    claim.assert_not_called()
+    if existing_claim:
+        assert validate.call_args.kwargs == {"consume": False}
+        claim.assert_not_called()
+    else:
+        validate.assert_not_called()
+        claim.assert_called_once()
 
 
 @pytest.mark.asyncio

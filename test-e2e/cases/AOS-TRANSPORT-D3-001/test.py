@@ -1385,10 +1385,11 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
     from management.api.agent import conversation_run
     from management.services.agent import conversation_submission, prepared_turn, runtime_client
-    from runtime.agentos import admission
+    from runtime.agentos import admission, resume
     from runtime.api.agent import execution
 
     received = []
+    resumed = []
     executions = []
     run_id = "a" * 32
     claims = {}
@@ -1450,11 +1451,21 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             headers={"X-AgentOS-Run-ID": run_id, "conversation_id": "42"},
         )
 
+    async def resume_saved(request, actor):
+        resumed.append((request, actor))
+
+        async def body():
+            yield _EVENTS
+
+        return StreamingResponse(body(), headers={"X-AgentOS-Run-ID": run_id, "conversation_id": "42"})
+
+    monkeypatch.setattr(resume, "resume_legacy_run", resume_saved)
     monkeypatch.setattr(execution, "_run_public_conversation", run_public)
     runtime = FastAPI(root_path="/api")
     runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(create_compatibility_router(None, None, conversation_run=run_conversation))
+    runtime.include_router(resume.create_run_lifecycle_router())
 
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
     management = FastAPI(root_path="/api")
@@ -1470,13 +1481,13 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             )
             assert response.status_code == 200
             assert response.content == _EVENTS and response.headers["X-AgentOS-Run-ID"] == run_id
-            payload, actor = received[0]
+            payload, actor = resumed[0]
             assert actor == ServicePrincipal("user-a", "tenant-a")
-            assert payload.request == {"query": "question", "conversation_id": 42, "model_id": None}
-            assert (payload.resume, payload.language, payload.timezone) == (True, "en", "Asia/Shanghai")
+            assert payload.model_dump() == {"conversation_id": 42, "workbench": False}
+            assert received == []
 
             url = f"{management_url}/api/agent/run"
-            headers = {"Idempotency-Key": "retry-1"}
+            headers = {"Idempotency-Key": "retry-1", "Cookie": "NEXT_LOCALE=en", "X-User-Timezone": "Asia/Shanghai"}
             request_body = {"query": "question"}
             first = await client.post(url, json=request_body, headers=headers)
             retry = await client.post(url, json=request_body, headers=headers)
@@ -1486,9 +1497,10 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             assert retry.json() == {"run_id": run_id, "status": "admitted", "conversation_id": 42, "journal_available": True}
             assert changed.status_code == 409 and changed.json()["detail"]["code"] == "AGENTOS_IDEMPOTENCY_CONFLICT"
 
-        assert len(received) == 2
-        submitted, actor = received[1]
+        assert len(received) == len(resumed) == 1
+        submitted, actor = received[0]
         assert submitted.claimed_run_id == run_id
+        assert (submitted.resume, submitted.language, submitted.timezone) == (False, "en", "Asia/Shanghai")
         replay = await agentos.run_conversation(submitted, actor.user_id, actor.tenant_id)
         assert replay.status_code == 409
         error = b"".join([chunk async for chunk in replay.body_iterator])
@@ -1821,8 +1833,9 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
         "extra_params": {"enable_thinking": True, "__custom__": {"temperature": 0.1}},
     }
 
-    async def read_models(tenant_id):
+    async def read_models(tenant_id, *, versions):
         assert tenant_id == actor.tenant_id
+        versions[model_record["display_name"]] = (model_record["model_id"], model_record["update_time"])
         return [create_model_config_from_record(model_record)]
 
     async def compile_agent(**kwargs):

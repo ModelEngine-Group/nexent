@@ -28,6 +28,18 @@ async def _require_owner(conversation_id: int, user_id: str, tenant_id: str) -> 
         raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"})
 
 
+async def _dispatch_claimed(payload, user_id, tenant_id, dispatch, *, include_claim_headers):
+    headers = ({"X-AgentOS-Run-ID": payload.claimed_run_id, "Cache-Control": "no-store"}
+               if include_claim_headers else {})
+    try:
+        response = await dispatch(payload, user_id, tenant_id)
+    except HTTPException as exc:
+        exc.headers = {**(exc.headers or {}), **headers}
+        raise
+    response.headers.update(headers)
+    return response
+
+
 async def submit_conversation(
     payload: CompatibilityConversationRun,
     user_id: str,
@@ -59,15 +71,9 @@ async def submit_conversation(
             raise HTTPException(status_code=503, detail={"code": "AGENTOS_ADMISSION_UNAVAILABLE"}) from exc
         if not authorized:
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_ADMISSION_NOT_PENDING"})
-        headers = ({"X-AgentOS-Run-ID": payload.claimed_run_id, "Cache-Control": "no-store"}
-                   if include_claim_headers else {})
-        try:
-            response = await dispatch(payload, user_id, tenant_id)
-        except HTTPException as exc:
-            exc.headers = {**(exc.headers or {}), **headers}
-            raise
-        response.headers.update(headers)
-        return response
+        return await _dispatch_claimed(
+            payload, user_id, tenant_id, dispatch, include_claim_headers=include_claim_headers,
+        )
     try:
         claim = await _control_io(
             "conversation-claim", claim_conversation_run, scope, fingerprint, user_id, tenant_id,
@@ -96,7 +102,7 @@ async def submit_conversation(
 
     # Compatibility Runtime binds the conversation and journal before writing headers.
     # A transport failure leaves the claim intact so retry cannot dispatch again.
-    response = await dispatch(payload.model_copy(update={"claimed_run_id": claim.run_id}), user_id, tenant_id)
-    if include_claim_headers:
-        response.headers.update(headers)
-    return response
+    return await _dispatch_claimed(
+        payload.model_copy(update={"claimed_run_id": claim.run_id}), user_id, tenant_id, dispatch,
+        include_claim_headers=include_claim_headers,
+    )

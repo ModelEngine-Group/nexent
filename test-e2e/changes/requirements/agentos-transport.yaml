@@ -32,6 +32,8 @@ change:
     - Workbench root Skills use the exact authorized conversation revision and reject expired permissions or changed bundles.
     - Workbench mounted Skills pin contributed Local, MCP, and LangChain tools and reject conflicting or unauthorized catalog configuration.
     - Streaming forwarding preserves headers and closes upstream resources.
+    - Existing pending claims retain their run ID through Management without reacquisition or consuming the claim before staging.
+    - Initial and existing claim dispatch errors preserve the original run ID and retry headers through the production HTTP exception handler.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
     - Automation schedules run and inspect through AgentOS, and Runtime cancels an abandoned background request.
@@ -133,6 +135,7 @@ change:
     - test/backend/services/test_agent_subscription_lifecycle.py
     - test/backend/app/test_conversation_run_app.py
     - test/backend/app/test_agentos_admission.py
+    - test/backend/app/test_agentos_management_dispatch.py
     - test/backend/database/test_conversation_projection_receipt.py
     - test/backend/gateway/test_exposure.py
     - frontend/tests/apiProxyRouting.test.mjs
