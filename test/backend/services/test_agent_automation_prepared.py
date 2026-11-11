@@ -55,8 +55,8 @@ async def test_automation_records_projection_before_dispatch_and_keeps_uncertain
 
     async def lose_ack(payload, user_id, tenant_id):
         assert payload is snapshot and (user_id, tenant_id) == ACTOR
-        assert writes == [{
-            "generated_prompt": "question", "user_message_id": 31, "projection_message_index": 9,
+        assert writes == [{"generated_prompt": "question", "user_message_id": 31}, {
+            "projection_message_index": 9,
             "projection_memory_agent_id": 2 if memory_enabled else None,
         }]
         raise RuntimeServiceUnavailableError("lost response")
@@ -83,6 +83,88 @@ async def test_automation_missing_projection_index_does_not_launch_legacy_run(au
     compile_snapshot.assert_not_awaited()
     legacy.assert_not_awaited()
     client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_source_is_recorded_before_resource_compilation_failure(automation, mocker):
+    executor, run, task, client = automation
+    writes = []
+
+    def persist(run_id, values, user_id, *, expected_statuses, tenant_id):
+        assert (run_id, user_id, tenant_id, expected_statuses) == (run["run_id"], *ACTOR, ["RUNNING"])
+        writes.append(values)
+        return {**run, **values}
+
+    async def failed_compile(request, reference, user, tenant, **kwargs):
+        assert writes == [{"generated_prompt": "question", "user_message_id": 31}]
+        assert reference == REFERENCE and kwargs["current_user_message_id"] == 31
+        raise RuntimeServiceUnavailableError("compile interrupted")
+
+    mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=persist)
+    mocker.patch.object(runner, "prepare_conversation_snapshot", side_effect=failed_compile)
+    fallback = mocker.patch.object(runner, "forward_tracked_background")
+    with pytest.raises(RuntimeServiceUnavailableError):
+        await executor._execute_active_run(run, task)
+    assert run["user_message_id"] == 31 and run["runtime_run_id"] == REFERENCE.run_id
+    assert run.get("projection_message_index") is None
+    fallback.assert_not_awaited()
+    client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lost_source_write_stops_preparation_before_runtime(automation, mocker):
+    executor, run, task, client = automation
+    mocker.patch.object(runner.agent_automation_db, "update_run", return_value=None)
+    current = {**run, "status": "CANCELED"}
+    mocker.patch.object(runner.agent_automation_db, "get_run", return_value=current)
+    compile_run = mocker.patch.object(runner, "prepare_conversation_snapshot", side_effect=AssertionError("not persisted"))
+    fallback = mocker.patch.object(runner, "forward_tracked_background")
+    assert await executor._execute_active_run(run, task) == current
+    compile_run.assert_not_awaited()
+    fallback.assert_not_awaited()
+    client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preparation_retry_reuses_the_source_prompt_and_runtime_id(automation, mocker):
+    executor, run, task, client = automation
+    run.update(user_message_id=31, generated_prompt="original instruction")
+    task["instruction"] = "edited instruction"
+    append = runner.automation_conversation_adapter.append_run_prompt
+    append.side_effect = AssertionError("second user message")
+    load = mocker.patch.object(runner.automation_conversation_adapter, "load_run_prompt", return_value={
+        "user_message_id": 31, "assistant_message_index": 9, "history": [],
+    })
+    mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=lambda _id, values, *_args, **_kw: {**run, **values})
+
+    async def interrupted(request, reference, user, tenant, **kwargs):
+        assert request.query == "original instruction" and reference == REFERENCE
+        assert kwargs["current_user_message_id"] == 31
+        raise RuntimeServiceUnavailableError("interrupted again")
+
+    mocker.patch.object(runner, "prepare_conversation_snapshot", side_effect=interrupted)
+    with pytest.raises(RuntimeServiceUnavailableError):
+        await executor._execute_active_run(run, task)
+    load.assert_called_once_with(100, 31, "original instruction", *ACTOR)
+    append.assert_not_called()
+    assert runner.validate_bindings_available.await_args.kwargs["instruction"] == "original instruction"
+    client.start_prepared_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_preparation_preserves_existing_instruction_normalization(automation, mocker):
+    executor, run, task, _ = automation
+    task["instruction"] = " question \n"
+    mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=lambda _id, values, *_args, **_kw: {**run, **values})
+
+    async def interrupted(request, *_args, **_kwargs):
+        assert request.query == "question"
+        raise RuntimeServiceUnavailableError("preparation interrupted")
+
+    mocker.patch.object(runner, "prepare_conversation_snapshot", side_effect=interrupted)
+    with pytest.raises(RuntimeServiceUnavailableError):
+        await executor._execute_active_run(run, task)
+    assert runner.validate_bindings_available.await_args.kwargs["instruction"] == " question \n"
 
 
 @pytest.mark.asyncio

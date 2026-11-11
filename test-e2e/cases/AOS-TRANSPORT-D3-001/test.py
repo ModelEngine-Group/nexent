@@ -2061,10 +2061,19 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
             "started_at": datetime.now(timezone.utc),
         }
         task = {**stored_run, "status": "ACTIVE", "agent_id": 7, "instruction": "question"}
+        recorded = []
         def record(run_id, values, user_id, *, expected_statuses, tenant_id):
             assert (run_id, user_id, tenant_id, expected_statuses) == (51, actor.user_id, actor.tenant_id, ["RUNNING"])
+            recorded.append(values)
             stored_run.update(values)
             return stored_run.copy()
+
+        async def prepare_automation(request_input, run_reference, user_id, tenant_id, **options):
+            assert run_reference == reference and (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+            assert options["current_user_message_id"] == 23
+            assert recorded == [{"generated_prompt": "question", "user_message_id": 23}]
+            assert stored_run.get("projection_message_index") is None
+            return request
 
         real_start = agentos.start_prepared_run
         async def start_then_drop_ack(payload, user_id, tenant_id):
@@ -2075,7 +2084,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
 
         monkeypatch.setattr(agentos, "start_prepared_run", start_then_drop_ack)
         monkeypatch.setattr(automation, "_agentos_client", lambda: agentos)
-        monkeypatch.setattr(automation, "prepare_conversation_snapshot", AsyncMock(return_value=request))
+        monkeypatch.setattr(automation, "prepare_conversation_snapshot", prepare_automation)
         monkeypatch.setattr(automation, "validate_bindings_available", AsyncMock(return_value={"available": True}))
         monkeypatch.setattr(automation.automation_conversation_adapter, "append_run_prompt",
                             lambda *_: {"user_message_id": 23, "history": [], "assistant_message_index": 1})

@@ -11,6 +11,7 @@ from starlette.responses import Response
 
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunReference, CompatibilityConversationRun
+from contracts.conversation import MessageSource
 from management.db.conversation.prepared_turn import PreparedTurn, SavedUserTurn
 from management.services.agent import prepared_turn as service
 
@@ -61,3 +62,23 @@ async def test_saved_source_pins_history_and_staging_before_any_runtime_start(mo
     assert stage.call_args.args[4] == source.message_index
     assert stage.call_args.kwargs["saved_user"] == source
     next_index.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", [MessageSource.CHAT, MessageSource.AUTOMATION])
+async def test_saved_turn_projection_uses_the_reserved_message_origin(mocker, source):
+    async def inline(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    turn = SimpleNamespace(
+        reference=AgentRunReference(conversation_id=42, run_id="a" * 32), user_id="actor", tenant_id="tenant",
+        message_index=5, assistant_message_id=61, memory_agent_id=None, message_source=source,
+    )
+    mocker.patch.object(service, "_io", side_effect=inline)
+    receipt = mocker.patch.object(service, "get_prepared_projection_receipt", return_value=None)
+    project = mocker.patch.object(service, "resume_assistant_projection", new=AsyncMock())
+    close = mocker.patch.object(service.store, "close_turn")
+    await service._finish_projection(turn, SimpleNamespace(resume=AsyncMock()))
+    assert receipt.call_args.kwargs["message_source"] == source
+    assert project.await_args.kwargs["message_source"] == source
+    close.assert_called_once_with(turn)

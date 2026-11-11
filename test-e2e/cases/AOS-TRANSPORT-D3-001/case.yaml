@@ -62,7 +62,7 @@ case:
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
   - order: 12
     action: Compile a conversation with a saved disabled knowledge scope, drop the prepared automation acknowledgement after Runtime accepts the run, and recover from the persisted Automation record.
-    expected: The signed snapshot excludes the disabled index. Management retains the exact execution ID and pending projection, replays the signed journal, and finalizes one assistant message without starting the run again.
+    expected: The signed snapshot excludes the disabled index. Management records the source message before compilation and the pending projection before dispatch, retains the exact execution ID, replays the signed journal, and finalizes one assistant message without starting the run again.
   - order: 13
     action: Reconnect to a prepared journal through Management's public conversation route and repeat with a foreign tenant.
     expected: The response keeps the original event IDs and terminal state, presents observer events in the public format, signs only scoped output references, and rejects the foreign tenant.

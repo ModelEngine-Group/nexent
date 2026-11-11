@@ -36,6 +36,8 @@ change:
     - Signed compatibility conversation starts visit Management before consuming a claim; an explicit internal fallback preserves the original fingerprint and executes at most once.
     - Saved-user Northbound starts use the owned source message as their stable claim and history boundary, and fallback cannot persist that user again.
     - Saved-turn confirmation rechecks the source and adjacent assistant position, retains the stored message origin and rejects changed input before writing an assistant.
+    - Automation records its user prompt before resource compilation and reuses the same source and runtime run ID during a preparation retry; losing the conditional write cannot start Runtime.
+    - Saved assistant projections keep the trusted CHAT or AUTOMATION source, including pending records written before the origin marker existed.
     - Initial and existing claim dispatch errors preserve the original run ID and retry headers through the production HTTP exception handler.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.
@@ -133,6 +135,7 @@ change:
     - test/backend/services/test_agentos_memory_callback.py
     - test/backend/services/test_prepared_memory_completion.py
     - test/backend/services/test_agent_automation_prepared.py
+    - test/backend/services/test_agent_automation_conversation_adapter.py
     - test/backend/app/test_agentos_tracked_background.py
     - test/backend/services/test_startup_recovery_service.py
     - test/backend/services/test_agent_subscription_lifecycle.py

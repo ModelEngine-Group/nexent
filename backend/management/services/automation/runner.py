@@ -144,11 +144,15 @@ class AgentAutomationRunner:
         run: Dict[str, Any],
         task: Dict[str, Any],
     ) -> Dict[str, Any]:
+        source_id = run.get("user_message_id")
+        generated_prompt = run.get("generated_prompt") if source_id is not None else None
+        if generated_prompt is None:
+            generated_prompt = task["instruction"].strip()
         capability_status = await validate_bindings_available(
             agent_id=task["agent_id"],
             tenant_id=task["tenant_id"],
             user_id=task["user_id"],
-            instruction=task["instruction"],
+            instruction=generated_prompt if source_id is not None else task["instruction"],
             bindings=task.get("capability_bindings") or [],
             version_no=task.get("agent_version_no") or 0,
         )
@@ -173,14 +177,23 @@ class AgentAutomationRunner:
                 stored_snapshot.get("original_instruction") or task["instruction"]
             ),
         }
-        generated_prompt = task["instruction"].strip()
-        turn = automation_conversation_adapter.append_run_prompt(
-            task["conversation_id"],
-            generated_prompt,
-            task["user_id"],
-            task["tenant_id"],
-        )
+        if source_id is None:
+            turn = automation_conversation_adapter.append_run_prompt(
+                task["conversation_id"], generated_prompt, task["user_id"], task["tenant_id"],
+            )
+        else:
+            turn = await run_blocking(
+                "automation-preparation-source", automation_conversation_adapter.load_run_prompt,
+                task["conversation_id"], source_id, generated_prompt, task["user_id"], task["tenant_id"],
+                lane="control-io", owner="management",
+            )
         message_index = turn["assistant_message_index"]
+        saved = agent_automation_db.update_run(run["run_id"], {
+            "generated_prompt": generated_prompt, "user_message_id": turn["user_message_id"],
+        }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value], tenant_id=run["tenant_id"])
+        if saved is None:
+            return agent_automation_db.get_run(run["run_id"], run["tenant_id"], run["user_id"]) or run
+        run.update(saved)
 
         agent_request = AgentRequest(
             query=generated_prompt,
@@ -211,8 +224,6 @@ class AgentAutomationRunner:
             })
 
         pending = agent_automation_db.update_run(run["run_id"], {
-            "generated_prompt": generated_prompt,
-            "user_message_id": turn["user_message_id"],
             "projection_message_index": message_index,
             "projection_memory_agent_id": snapshot.resource.agent_id if snapshot.memory_enabled else None,
         }, run["user_id"], expected_statuses=[AutomationRunStatus.RUNNING.value], tenant_id=run["tenant_id"])

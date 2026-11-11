@@ -417,10 +417,11 @@ async def resume_turn(turn, client):
 
 async def _finish_projection(turn, client):
     reference = turn.reference
+    source = MessageSource(getattr(turn, "message_source", MessageSource.CHAT))
     receipt = await _io(
         "prepared-turn-receipt", get_prepared_projection_receipt,
         projection_run_id=reference.run_id, conversation_id=reference.conversation_id,
-        message_index=turn.message_index, message_source=MessageSource.CHAT, user_id=turn.user_id, tenant_id=turn.tenant_id,
+        message_index=turn.message_index, message_source=source, user_id=turn.user_id, tenant_id=turn.tenant_id,
     )
     if receipt is not None and receipt[0] != turn.assistant_message_id:
         raise RuntimeServiceUnavailableError("Prepared conversation receipt does not match the reserved message")
@@ -428,7 +429,7 @@ async def _finish_projection(turn, client):
         memory_scope = {"memory_agent_id": turn.memory_agent_id} if turn.memory_agent_id is not None else {}
         await resume_assistant_projection(
             client.resume, reference, turn.user_id, turn.tenant_id, message_index=turn.message_index,
-            message_source=MessageSource.CHAT, assistant_message_id=turn.assistant_message_id, **memory_scope,
+            message_source=source, assistant_message_id=turn.assistant_message_id, **memory_scope,
         )
     await _io("prepared-turn-finished", store.close_turn, turn)
 

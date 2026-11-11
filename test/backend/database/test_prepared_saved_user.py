@@ -91,6 +91,7 @@ def test_confirm_saved_user_creates_one_adjacent_assistant_and_is_idempotent(dat
     first = store.confirm_turn(turn)
     second = store.confirm_turn(turn)
     assert first.assistant_message_id == second.assistant_message_id == 61
+    assert first.message_source == second.message_source == source
     assert first.message_index == 1
     with database.sessions() as session:
         rows = session.scalars(select(ConversationMessage).order_by(ConversationMessage.message_index)).all()
@@ -102,6 +103,16 @@ def test_confirm_saved_user_creates_one_adjacent_assistant_and_is_idempotent(dat
     database.clarification.assert_not_called()
     # Retrying the signed request can still locate its already answered source.
     assert saved() == original
+
+
+@pytest.mark.parametrize("source", ["CHAT", "AUTOMATION"])
+def test_pending_old_marker_recovers_its_reserved_assistant_origin(database, source):
+    with database.sessions() as session:
+        session.get(ConversationMessage, 23).message_source = source
+    store.confirm_turn(stage(saved()))
+    with database.sessions() as session:
+        session.get(ConversationRunAdmission, "scope").prepared_user_turn = None
+    assert store.pending_turn(42, "actor", "tenant").message_source == source
 
 
 @pytest.mark.parametrize("user,tenant", [("other", "tenant"), ("actor", "other")])
@@ -150,3 +161,14 @@ def test_same_saved_user_cannot_stage_two_runs(database):
         stage(source)
     assert store.confirm_turn(first).assistant_message_id == 61
     assert len(database.creates) == 1
+
+
+def test_source_id_resolves_its_actual_position_and_enforces_scope(database):
+    with database.sessions() as session:
+        session.get(ConversationMessage, 23).message_index = 8
+        session.add(ConversationRecord(conversation_id=43, created_by="actor", delete_flag="N"))
+    assert store.read_saved_user_turn_by_id(42, "actor", "tenant", 23, "hello", [{"name": "file.txt"}]).message_index == 8
+    with pytest.raises(AdmissionScopeError):
+        store.read_saved_user_turn_by_id(42, "actor", "other", 23, "hello", [{"name": "file.txt"}])
+    with pytest.raises(store.PreparedTurnConflict):
+        store.read_saved_user_turn_by_id(43, "actor", "tenant", 23, "hello", [{"name": "file.txt"}])

@@ -40,6 +40,7 @@ class PreparedTurn:
     assistant_message_id: int | None
     staged_at: datetime
     memory_agent_id: int | None = None
+    message_source: MessageSource = MessageSource.CHAT
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,24 @@ def read_saved_user_turn(conversation_id, user_id, tenant_id, message_index, que
         return _saved_user_message(session, conversation_id, user_id, message_index, query, files)
 
 
+def read_saved_user_turn_by_id(conversation_id, user_id, tenant_id, message_id, query, files) -> SavedUserTurn:
+    """Pin the recorded automation source even when historical message indexes have gaps."""
+    message = ConversationMessage
+    with get_db_session() as session:
+        if _owned(session, conversation_id, user_id, tenant_id) is None:
+            raise AdmissionScopeError
+        index = session.scalar(select(message.message_index).where(
+            message.conversation_id == conversation_id, message.message_id == message_id,
+            message.created_by == user_id, message.delete_flag == "N",
+        ))
+        if index is None:
+            raise PreparedTurnConflict
+        current = _saved_user_message(session, conversation_id, user_id, index, query, files)
+        if current.message_id != message_id:
+            raise PreparedTurnConflict
+        return current
+
+
 def _require_saved_head(session, conversation_id, user_id, source, user_turn):
     current = _saved_user_message(
         session, conversation_id, user_id, source.message_index, user_turn["query"], user_turn["minio_files"],
@@ -136,13 +155,21 @@ def _require_saved_head(session, conversation_id, user_id, source, user_turn):
         raise PreparedTurnConflict
 
 
-def _view(row, *, message_index=None):
+def _view(row, session, *, message_index=None):
+    source = (row.prepared_user_turn or {}).get("source_user_message_source")
+    if source is None and row.prepared_assistant_id is not None:
+        message = ConversationMessage
+        source = session.scalar(select(message.message_source).where(
+            message.message_id == row.prepared_assistant_id, message.conversation_id == row.conversation_id,
+            message.created_by == row.created_by, message.message_role == "assistant", message.delete_flag == "N",
+        ))
     return PreparedTurn(
         AgentRunReference(conversation_id=row.conversation_id, run_id=row.run_id),
         row.created_by, row.tenant_id,
         row.prepared_message_index if message_index is None else message_index, row.prepared_assistant_id,
         row.update_time.replace(tzinfo=timezone.utc) if row.update_time.tzinfo is None else row.update_time,
         (row.prepared_user_turn or {}).get("memory_agent_id"),
+        MessageSource(source or "CHAT"),
     )
 
 
@@ -166,7 +193,7 @@ def pending_turn(conversation_id: int, user_id: str, tenant_id: str) -> Prepared
         if _owned(session, conversation_id, user_id, tenant_id) is None:
             raise AdmissionScopeError
         row = _pending_for_conversation(session, conversation_id, user_id, tenant_id)
-        return _view(row) if row is not None else None
+        return _view(row, session) if row is not None else None
 
 
 def _latest_message_id(conversation_id):
@@ -189,7 +216,7 @@ def read_cursorless_resume(
             raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
         row = _pending_for_conversation(session, conversation_id, user_id, tenant_id)
         if row is not None:
-            return _view(row)
+            return _view(row, session)
 
         # Inspect the latest message before filtering so an earlier assistant cannot mask a newer turn.
         terminal = session.scalar(select(message.status).join(
@@ -398,7 +425,7 @@ def stage_turn(
             }
         row.prepared_message_index = message_index + 1
         row.update_time = datetime.now(timezone.utc).replace(tzinfo=None)
-        return _view(row)
+        return _view(row, session)
 
 
 def _turn_scope(turn):
@@ -420,7 +447,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
         if row is None or (row.prepared_assistant_id is None and row.prepared_message_index is None):
             return None
         if row.prepared_message_index is None:
-            return _view(row, message_index=turn.message_index)
+            return _view(row, session, message_index=turn.message_index)
         if row.prepared_assistant_id is None:
             user_turn = row.prepared_user_turn
             source_message_id = user_turn.get("source_user_message_id")
@@ -488,7 +515,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]
             row.prepared_user_turn = {
-                key: user_turn[key] for key in ("memory_agent_id", "workbench_skill_root") if key in user_turn
+                key: user_turn[key]
+                for key in ("memory_agent_id", "workbench_skill_root", "source_user_message_source") if key in user_turn
             } or None
             if row.prepared_automation_context is not None:
                 row.prepared_automation_context = {
@@ -496,7 +524,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 }
             row.status = "admitted"
             row.journal_available = True
-        return _view(row)
+        return _view(row, session)
 
 
 def close_turn(turn: PreparedTurn, *, failure_status: str | None = None) -> None:
@@ -532,7 +560,7 @@ def pending_turns(after_run_id: str, limit: int) -> list[PreparedTurn]:
         rows = session.scalars(
             _pending(admission.run_id > after_run_id).order_by(admission.run_id).limit(limit)
         )
-        return [_view(row) for row in rows]
+        return [_view(row, session) for row in rows]
 
 def automation_turn(reference: AgentRunReference, user_id: str, tenant_id: str) -> PreparedTurn | None:
     admission = ConversationRunAdmission
@@ -544,7 +572,7 @@ def automation_turn(reference: AgentRunReference, user_id: str, tenant_id: str) 
             admission.created_by == user_id, admission.tenant_id == tenant_id,
             admission.prepared_automation_context.is_not(None),
         ))
-        return _view(row) if row is not None else None
+        return _view(row, session) if row is not None else None
 
 
 def automation_source(turn: PreparedTurn) -> dict | None:

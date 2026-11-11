@@ -141,7 +141,7 @@ async def test_runner_fails_without_calling_agent_when_capability_unavailable(mo
         },
     )
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None):
         updates["run"] = {"run_id": run_id, **values}
         return updates["run"]
 
@@ -228,7 +228,7 @@ async def test_runner_passes_model_and_tool_params_to_background_agent(monkeypat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -278,7 +278,7 @@ async def test_runner_appends_fresh_message_for_each_execution(monkeypatch):
         runs[run["run_id"]] = run
         return run
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None):
         run = runs[run_id]
         if expected_statuses and run["status"] not in expected_statuses:
             return None
@@ -375,7 +375,7 @@ async def test_runner_uses_confirmed_instruction_with_current_runtime_configurat
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -427,7 +427,7 @@ async def test_runner_enforces_task_timeout_and_stops_agent(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -500,7 +500,7 @@ def test_finish_run_preserves_task_paused_during_execution(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(
         runner_module.agent_automation_db,
@@ -530,7 +530,7 @@ def test_scheduled_failure_advances_to_next_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
@@ -569,7 +569,7 @@ def test_manual_run_does_not_consume_scheduled_occurrence(monkeypatch):
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
@@ -703,7 +703,7 @@ def test_repeated_scheduled_failures_pause_task_and_stale_writes_are_discarded(m
     monkeypatch.setattr(
         runner_module.agent_automation_db,
         "update_run",
-        lambda run_id, values, user_id=None, expected_statuses=None: {"run_id": run_id, **values},
+        lambda run_id, values, user_id=None, expected_statuses=None, *, tenant_id=None: {"run_id": run_id, **values},
     )
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
