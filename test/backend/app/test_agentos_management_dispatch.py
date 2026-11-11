@@ -4,9 +4,10 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import HTTPException, Request
 from starlette.responses import StreamingResponse
 
+from backend.http.server.app_factory import create_app
 from contracts.agent import AgentRequest
 from contracts.agentos import CompatibilityConversationRun, ManagementOperation
 from contracts.constants import environment
@@ -19,7 +20,7 @@ from runtime.agentos import management_dispatch
 @pytest.fixture
 def management_endpoint(mocker):
     mocker.patch.object(environment, "JWT_SECRET", "synthetic-dispatch-signing-key")
-    app = FastAPI(root_path="/api")
+    app = create_app(enable_monitoring=False)
     app.include_router(compatibility_dispatch.router)
     return app
 
@@ -54,6 +55,50 @@ async def test_runtime_public_start_uses_signed_management_dispatch(mocker, mana
     assert (user, tenant, payload.language, payload.timezone) == ("actor", "tenant", "en", "Asia/Shanghai")
     assert payload.request["agent_id"] == 7 and payload.request["is_debug"] is False
     legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rejected", [False, True])
+async def test_signed_existing_claim_reaches_prepared_dispatch_with_original_run_id(mocker, management_endpoint, rejected):
+    from management.services.agent import conversation_submission, prepared_turn, runtime_client
+
+    async def direct(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch.object(conversation_submission, "_control_io", side_effect=direct)
+    mocker.patch.object(conversation_submission, "conversation_belongs_to", return_value=True)
+    validate = mocker.patch.object(conversation_submission, "authorize_conversation_dispatch", return_value=True)
+    claim = mocker.patch.object(conversation_submission, "claim_conversation_run", side_effect=AssertionError("second claim"))
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=object())
+    prepared = mocker.patch.object(prepared_turn, "start_turn", new=AsyncMock(
+        return_value=StreamingResponse(iter([b"data: done\n\n"]), headers={"conversation_id": "42"}),
+    ))
+    if rejected:
+        prepared.side_effect = HTTPException(
+            status_code=422, detail={"code": "AGENTOS_RESOURCE_UNSUPPORTED"}, headers={"Retry-After": "7"},
+        )
+    payload = CompatibilityConversationRun(
+        request={"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False},
+        idempotency_key="existing-claim", claimed_run_id="a" * 32,
+    )
+    client = AgentOSClient("http://management", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=management_endpoint), **kwargs,
+    ))
+
+    response = await client.dispatch_conversation(payload, "actor", "tenant")
+
+    assert response.status_code == (422 if rejected else 200)
+    assert response.headers["X-AgentOS-Run-ID"] == payload.claimed_run_id
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    if rejected:
+        assert response.headers["Retry-After"] == "7"
+        assert b"AGENTOS_RESOURCE_UNSUPPORTED" in body
+    else:
+        assert body == b"data: done\n\n"
+    assert prepared.await_args.args[0] == payload
+    assert prepared.await_args.args[2:4] == ("actor", "tenant")
+    assert validate.call_args.kwargs == {"consume": False}
+    claim.assert_not_called()
 
 
 @pytest.mark.asyncio

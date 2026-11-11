@@ -3,6 +3,7 @@
 import asyncio
 import json
 from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -16,6 +17,124 @@ from runtime.agentos import admission
 
 RUN_ID = "a" * 32
 ACTOR = ServicePrincipal("actor", "tenant")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authorized", [False, True])
+async def test_management_handoff_validates_existing_claim_without_claiming_again(monkeypatch, authorized):
+    from management.services.agent import conversation_submission as submission
+
+    sent = CompatibilityConversationRun(
+        request={"query": "question", "conversation_id": 42, "agent_id": 7, "is_debug": False},
+        idempotency_key="client-123", claimed_run_id=RUN_ID,
+    )
+    async def direct(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    claim = MagicMock(side_effect=AssertionError("A received handoff must retain its original claim"))
+    validate = MagicMock(return_value=authorized)
+    monkeypatch.setattr(submission, "_control_io", direct)
+    monkeypatch.setattr(submission, "conversation_belongs_to", MagicMock(return_value=True))
+    monkeypatch.setattr(submission, "claim_conversation_run", claim)
+    monkeypatch.setattr(submission, "authorize_conversation_dispatch", validate, raising=False)
+    dispatch = AsyncMock(return_value=Response(headers={"conversation_id": "42"}))
+    if authorized:
+        response = await submission.submit_conversation(sent, ACTOR.user_id, ACTOR.tenant_id, dispatch)
+        assert response.headers["X-AgentOS-Run-ID"] == RUN_ID
+        dispatch.assert_awaited_once_with(sent, ACTOR.user_id, ACTOR.tenant_id)
+    else:
+        with pytest.raises(HTTPException) as error:
+            await submission.submit_conversation(sent, ACTOR.user_id, ACTOR.tenant_id, dispatch)
+        assert (error.value.status_code, error.value.detail) == (409, {"code": "AGENTOS_ADMISSION_NOT_PENDING"})
+        dispatch.assert_not_called()
+    scope = submission.conversation_claim_scope(ACTOR.user_id, ACTOR.tenant_id, sent.idempotency_key)
+    fingerprint = submission.conversation_request_fingerprint(
+        sent.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id"}),
+    )
+    validate.assert_called_once_with(scope, fingerprint, RUN_ID, ACTOR.user_id, ACTOR.tenant_id, consume=False)
+    claim.assert_not_called()
+
+
+def test_read_only_claim_validation_retains_scope_predicates_without_mutation(monkeypatch):
+    from infrastructure.rdb import agent_admission
+
+    session = MagicMock()
+    session.scalar.return_value = "claim-scope"
+    context = MagicMock()
+    context.__enter__.return_value = session
+    monkeypatch.setattr(agent_admission, "get_db_session", lambda: context)
+    membership = MagicMock(return_value=True)
+    monkeypatch.setattr(agent_admission, "tenant_membership_matches", membership)
+
+    assert agent_admission.authorize_conversation_dispatch(
+        "claim-scope", "fingerprint", RUN_ID, ACTOR.user_id, ACTOR.tenant_id, consume=False,
+    )
+    membership.assert_called_once_with(session, ACTOR.user_id, ACTOR.tenant_id)
+    query = session.scalar.call_args.args[0]
+    assert query.compile().params == {
+        "scope_sha256_1": "claim-scope", "request_sha256_1": "fingerprint", "run_id_1": RUN_ID,
+        "created_by_1": ACTOR.user_id, "tenant_id_1": ACTOR.tenant_id, "status_1": "pending", "delete_flag_1": "N",
+    }
+    session.execute.assert_not_called()
+
+
+def test_handoff_read_and_late_rejection_preserve_the_winning_staged_run(monkeypatch):
+    from contextlib import contextmanager
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    from infrastructure.rdb import agent_admission
+
+    engine = create_engine("sqlite://", execution_options={"schema_translate_map": {agent_admission.SCHEMA: None}})
+
+    @contextmanager
+    def session_scope():
+        with Session(engine) as session, session.begin():
+            yield session
+
+    monkeypatch.setattr(agent_admission, "get_db_session", session_scope)
+    monkeypatch.setattr(agent_admission, "tenant_membership_matches", lambda session, user, tenant: True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("""CREATE TABLE conversation_run_admission_t (
+                scope_sha256 TEXT PRIMARY KEY, run_id TEXT, request_sha256 TEXT,
+                created_by TEXT, tenant_id TEXT, status TEXT, delete_flag TEXT,
+                conversation_id INTEGER, journal_available BOOLEAN, prepared_message_index INTEGER,
+                updated_by TEXT, update_time TIMESTAMP
+            )"""))
+            connection.execute(text("""INSERT INTO conversation_run_admission_t
+                (scope_sha256, run_id, request_sha256, created_by, tenant_id, status, delete_flag)
+                VALUES (:scope, :run_id, 'fingerprint', 'actor', 'tenant', 'pending', 'N')"""), [
+                    {"scope": "scope", "run_id": RUN_ID}, {"scope": "unstaged", "run_id": "b" * 32},
+                ])
+        args = ("scope", "fingerprint", RUN_ID, ACTOR.user_id, ACTOR.tenant_id)
+        assert agent_admission.authorize_conversation_dispatch(*args, consume=False)
+        assert agent_admission.authorize_conversation_dispatch(*args, consume=False)
+        for index, value in enumerate(("other-scope", "other-fingerprint", "b" * 32, "other-user", "other-tenant")):
+            changed_arguments = list(args)
+            changed_arguments[index] = value
+            assert not agent_admission.authorize_conversation_dispatch(*changed_arguments, consume=False)
+        # The existing Runtime still consumes the pending claim exactly once.
+        assert agent_admission.authorize_conversation_dispatch(*args)
+        assert not agent_admission.authorize_conversation_dispatch(*args)
+        with engine.begin() as connection:
+            connection.execute(text("""UPDATE conversation_run_admission_t
+                SET prepared_message_index=3, conversation_id=42 WHERE scope_sha256='scope'"""))
+        # A losing Management preparation must not reject the winner's durable marker.
+        assert not agent_admission.set_conversation_admission(
+            "scope", RUN_ID, ACTOR.user_id, ACTOR.tenant_id, conversation_id=None, journal_available=False,
+        )
+        assert agent_admission.set_conversation_admission(
+            "unstaged", "b" * 32, ACTOR.user_id, ACTOR.tenant_id, conversation_id=None, journal_available=False,
+        )
+        with engine.connect() as connection:
+            row = connection.execute(text("""SELECT status, conversation_id, prepared_message_index
+                FROM conversation_run_admission_t WHERE scope_sha256='scope'""")).one()
+            assert tuple(row) == ("dispatching", 42, 3)
+            assert connection.scalar(text("SELECT status FROM conversation_run_admission_t WHERE scope_sha256='unstaged'")) == "rejected"
+    finally:
+        engine.dispose()
 
 
 def payload(query="question", **values):

@@ -87,23 +87,28 @@ def claim_conversation_run(scope: str, fingerprint: str, user_id: str, tenant_id
         return AdmissionClaim(existing.run_id, status, existing.conversation_id, existing.journal_available, False)
 
 
-def authorize_conversation_dispatch(scope: str, fingerprint: str, run_id: str, user_id: str, tenant_id: str) -> bool:
-    """Consume the signed compatibility handoff before any Runtime side effects."""
+def authorize_conversation_dispatch(
+    scope: str, fingerprint: str, run_id: str, user_id: str, tenant_id: str, *, consume: bool = True,
+) -> bool:
+    """Validate a handoff, consuming it when the legacy Runtime owns admission."""
     admission = ConversationRunAdmission
     with get_db_session() as session:
         if not tenant_membership_matches(session, user_id, tenant_id):
             return False
-        result = session.execute(
-            update(admission).where(
-                admission.scope_sha256 == scope,
-                admission.run_id == run_id,
-                admission.request_sha256 == fingerprint,
-                admission.created_by == user_id,
-                admission.tenant_id == tenant_id,
-                admission.status == "pending",
-                admission.delete_flag == "N",
-            ).values(status="dispatching", updated_by=user_id, update_time=func.current_timestamp())
+        conditions = (
+            admission.scope_sha256 == scope,
+            admission.run_id == run_id,
+            admission.request_sha256 == fingerprint,
+            admission.created_by == user_id,
+            admission.tenant_id == tenant_id,
+            admission.status == "pending",
+            admission.delete_flag == "N",
         )
+        if not consume:
+            return session.scalar(select(admission.scope_sha256).where(*conditions)) is not None
+        result = session.execute(update(admission).where(*conditions).values(
+            status="dispatching", updated_by=user_id, update_time=func.current_timestamp(),
+        ))
         return result.rowcount == 1
 
 
@@ -114,15 +119,18 @@ def set_conversation_admission(
     """Record the first outcome of the matching pending claim."""
     admission = ConversationRunAdmission
     with get_db_session() as session:
+        statement = update(admission).where(
+            admission.scope_sha256 == scope,
+            admission.run_id == run_id,
+            admission.created_by == user_id,
+            admission.tenant_id == tenant_id,
+            admission.status.in_(("pending", "dispatching")),
+            admission.delete_flag == "N",
+        )
+        if conversation_id is None:
+            statement = statement.where(admission.prepared_message_index.is_(None))
         result = session.execute(
-            update(admission).where(
-                admission.scope_sha256 == scope,
-                admission.run_id == run_id,
-                admission.created_by == user_id,
-                admission.tenant_id == tenant_id,
-                admission.status.in_(("pending", "dispatching")),
-                admission.delete_flag == "N",
-            ).values(
+            statement.values(
                 status="admitted" if conversation_id is not None else "rejected",
                 conversation_id=conversation_id,
                 journal_available=journal_available,

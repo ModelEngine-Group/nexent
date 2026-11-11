@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse, Response
 from contracts.agent import AgentRequest
 from contracts.agentos import CompatibilityConversationRun
 from infrastructure.rdb.agent_admission import (
-    AdmissionRequestConflict, AdmissionScopeError, claim_conversation_run, conversation_claim_scope,
+    AdmissionRequestConflict, AdmissionScopeError, authorize_conversation_dispatch, claim_conversation_run, conversation_claim_scope,
     conversation_request_fingerprint,
 )
 from infrastructure.rdb.conversation_state import conversation_belongs_to
@@ -49,6 +49,25 @@ async def submit_conversation(
     fingerprint = conversation_request_fingerprint(
         payload.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id"}),
     )
+    if payload.claimed_run_id is not None:
+        try:
+            authorized = await _control_io(
+                "conversation-handoff-scope", authorize_conversation_dispatch,
+                scope, fingerprint, payload.claimed_run_id, user_id, tenant_id, consume=False,
+            )
+        except (SQLAlchemyError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail={"code": "AGENTOS_ADMISSION_UNAVAILABLE"}) from exc
+        if not authorized:
+            raise HTTPException(status_code=409, detail={"code": "AGENTOS_ADMISSION_NOT_PENDING"})
+        headers = ({"X-AgentOS-Run-ID": payload.claimed_run_id, "Cache-Control": "no-store"}
+                   if include_claim_headers else {})
+        try:
+            response = await dispatch(payload, user_id, tenant_id)
+        except HTTPException as exc:
+            exc.headers = {**(exc.headers or {}), **headers}
+            raise
+        response.headers.update(headers)
+        return response
     try:
         claim = await _control_io(
             "conversation-claim", claim_conversation_run, scope, fingerprint, user_id, tenant_id,
