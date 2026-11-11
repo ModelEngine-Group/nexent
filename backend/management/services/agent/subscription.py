@@ -668,10 +668,7 @@ async def run_agent_stream(
             tracked_execution = await host.begin_tracking(
                 agent_request.conversation_id, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
             )
-        await runtime_state_service.reset_stream_async(
-            user_id=resolved_user_id,
-            conversation_id=agent_request.conversation_id,
-        )
+        await host.reset_stream(agent_request.conversation_id, resolved_user_id)
 
         if not agent_request.is_debug and not skip_user_save:
             save_messages(
@@ -697,22 +694,14 @@ async def run_agent_stream(
 
         journal_run_id = None
         if not agent_request.is_debug:
-            channel = await streaming_channel_manager.get_or_create_channel(
-                conversation_id=agent_request.conversation_id,
-                user_id=resolved_user_id,
-            )
+            channel = await host.open_channel(agent_request.conversation_id, resolved_user_id)
             agent_request._projection_run_id = (
                 getattr(agent_request, "_projection_run_id", None) or uuid.uuid4().hex
             )
-            if tracked_execution is not None:
-                channel.execution_identity = tracked_execution
-            if runtime_state_service.enabled is True:
-                journal_run_id = await channel.start_journal(resolved_tenant_id, agent_request._projection_run_id)
-            if admission_scope is not None:
-                await host.bind_admission(
-                    admission_scope, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
-                    conversation_id=agent_request.conversation_id, journal_available=journal_run_id is not None,
-                )
+            journal_run_id = await host.bind_channel(
+                channel, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
+                conversation_id=agent_request.conversation_id, identity=tracked_execution, admission_scope=admission_scope,
+            )
     except (Exception, asyncio.CancelledError):
         deferred_run.cancel()
         thread_manager.cancel(
@@ -725,10 +714,7 @@ async def run_agent_stream(
             if tracked_execution is not None:
                 await host.fail_setup(tracked_execution)
             if (admission_scope is not None or tracked_execution is not None) and channel is not None:
-                await channel.finish_journal("failed")
-                await streaming_channel_manager.remove_channel(
-                    agent_request.conversation_id, resolved_user_id, expected_channel=channel,
-                )
+                await host.abort_channel(channel, agent_request.conversation_id, resolved_user_id)
         finally:
             host.registry.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),

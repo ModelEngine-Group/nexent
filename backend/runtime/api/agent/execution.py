@@ -28,7 +28,10 @@ from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import consume_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
-from runtime.agentos.legacy_tracking import begin_legacy_tracking, bind_legacy_admission, fail_legacy_setup
+from runtime.agentos.legacy_tracking import (
+    abort_legacy_channel, begin_legacy_tracking, bind_legacy_channel, fail_legacy_setup, open_legacy_channel,
+    reset_legacy_stream,
+)
 from runtime.executions import AgentRunManager, agent_run_manager, stop_registered_run
 from runtime.thread_management import (
     agent_stream_producer_tasks,
@@ -53,7 +56,10 @@ class LegacyExecutionHost:
     admit: Callable
     consume_producer: Callable
     begin_tracking: Callable
-    bind_admission: Callable
+    reset_stream: Callable
+    open_channel: Callable
+    bind_channel: Callable
+    abort_channel: Callable
     fail_setup: Callable
     untrack: Callable
     unregister: Callable[..., bool]
@@ -68,7 +74,10 @@ _legacy_execution_host = LegacyExecutionHost(
     admit=partial(admit_legacy_execution, agent_run_manager),
     consume_producer=consume_legacy_producer,
     begin_tracking=begin_legacy_tracking,
-    bind_admission=bind_legacy_admission,
+    reset_stream=reset_legacy_stream,
+    open_channel=open_legacy_channel,
+    bind_channel=bind_legacy_channel,
+    abort_channel=abort_legacy_channel,
     fail_setup=fail_legacy_setup,
     untrack=untrack_execution,
     unregister=partial(unregister_after_worker_exit, agent_run_manager),
