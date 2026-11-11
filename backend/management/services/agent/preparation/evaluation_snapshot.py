@@ -15,7 +15,7 @@ from contracts.agentos import (
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunAttachmentHistory, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
     PreparedMemorySearch, SkillDerivedMCPBinding, SkillExecutionBinding, ToolBinding, ToolCallerContext, TurnModelGeneration,
-    WorkbenchSkillBinding,
+    WorkbenchSkillBinding, memory_context_requires_search,
 )
 from contracts.constants import environment
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
@@ -755,9 +755,12 @@ def _export_resource(
         for key in ("history_summary_sink", "history_summary_status_sink"):
             if context_config.pop(key, None) is not None:
                 raise ValueError("Unsupported evaluation callback")
-    if memory_search is None and any(
-        item["type"] in {"memory", "long_term_memory"} for item in profile.get("context_items") or []
-    ):
+    memory_items = [
+        item for item in profile.get("context_items") or [] if item["type"] in {"memory", "long_term_memory"}
+    ]
+    if memory_items and (not allow_memory or (
+        memory_search is None and any(memory_context_requires_search(item) for item in memory_items)
+    )):
         raise ValueError("Unsupported evaluation context")
 
     aliases.setdefault(agent.model_name, None)

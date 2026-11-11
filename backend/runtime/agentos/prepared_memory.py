@@ -5,7 +5,7 @@ import logging
 
 import httpx
 
-from contracts.agentos import AgentMemoryStore, AgentMemoryStored, ManagementOperation
+from contracts.agentos import AgentMemoryStore, AgentMemoryStored, ManagementOperation, memory_context_requires_search
 from contracts.constants import environment
 from infrastructure.agent_tool_config import STORE_MEMORY_TOOL, build_store_memory_tool
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
@@ -34,11 +34,11 @@ async def notify_memory_stored(notice: AgentMemoryStored, actor: ServicePrincipa
 def materialize_memory(resource, actor: ServicePrincipal, conversation_id: int | None):
     bindings = [tool for tool in resource.tools if tool.tool_id == STORE_MEMORY_TOOL]
     items = resource.evaluation_options.context_items if resource.evaluation_options else None
-    memory_context = any(item.get("type") in {"memory", "long_term_memory"} for item in items or [])
+    context_types = {item.get("type") for item in items or []}
     search = resource.memory_search
-    if (search is not None or bindings or memory_context) and not conversation_id:
+    if (search is not None or bindings or context_types & {"memory", "long_term_memory"}) and not conversation_id:
         raise ValueError("Prepared Memory requires a persistent conversation")
-    if memory_context and search is None:
+    if search is None and any(memory_context_requires_search(item) for item in items or []):
         raise ValueError("Prepared Memory context requires a search binding")
     events = search.observer_events() if search is not None else []
     if not bindings:

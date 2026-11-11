@@ -469,6 +469,17 @@ class PreparedMemorySearch(RunSpecModel):
         ]
 
 
+def memory_context_requires_search(item: dict) -> bool:
+    """Only independently retrieved tenant and user documents may omit presearch events."""
+    if item.get("type") not in ("memory", "long_term_memory"):
+        return False
+    content = item.get("content")
+    return not (
+        item.get("type") == "memory" and isinstance(content, dict)
+        and content.get("scope") in ("tenant", "user") and content.get("memory_level") == content["scope"]
+    )
+
+
 class AgentResource(RunSpecModel):
     agent_id: PositiveInt
     version_no: Annotated[int, Field(ge=0)]

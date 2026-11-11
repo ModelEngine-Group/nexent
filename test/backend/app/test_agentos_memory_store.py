@@ -142,3 +142,38 @@ def test_prepared_memory_rejects_ephemeral_and_tool_overrides(conversation_id, c
     )
     with pytest.raises(ValueError, match=error):
         prepared_memory.materialize_memory(resource, ServicePrincipal("user-a", "tenant-a"), conversation_id)
+
+
+def test_long_term_memory_survives_presearch_failure_in_a_persistent_snapshot():
+    from management.services.agent.preparation import evaluation_snapshot
+    from nexent.core.agents.agent_model import AgentConfig
+
+    item = {"id": "tenant-memory", "type": "memory", "content": {
+        "memory": "Authorized tenant context", "scope": "tenant", "memory_level": "tenant",
+    }}
+    config = AgentConfig(
+        agent_id=8, version_no=1, name="child", description="", model_name="model",
+        context_items=[item], pre_run_tool_events=[], tools=[],
+    )
+    resource = evaluation_snapshot._export_resource(
+        config, {}, "tenant-a", "en", None, {}, allow_memory=True,
+    )
+    assert resource.memory_search is None
+    assert resource.evaluation_options.context_items[0]["content"] == item["content"]
+    actor = ServicePrincipal("user-a", "tenant-a")
+    assert prepared_memory.materialize_memory(resource, actor, 42) == ({}, [])
+    with pytest.raises(ValueError, match="persistent conversation"):
+        prepared_memory.materialize_memory(resource, actor, None)
+    with pytest.raises(ValueError, match="Unsupported evaluation context"):
+        evaluation_snapshot._export_resource(config, {}, "tenant-a", "en", None, {})
+
+
+def test_short_term_memory_still_requires_search_binding():
+    from contracts.agentos import EvaluationAgentOptions
+
+    resource = AgentResource(
+        agent_id=8, version_no=1, name="child", description="", prompt_templates={},
+        evaluation_options=EvaluationAgentOptions(context_items=[{"type": "memory"}]),
+    )
+    with pytest.raises(ValueError, match="requires a search binding"):
+        prepared_memory.materialize_memory(resource, ServicePrincipal("user-a", "tenant-a"), 42)
