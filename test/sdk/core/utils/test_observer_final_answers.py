@@ -92,14 +92,19 @@ def test_verification_replacement_and_unstreamed_completion_have_one_canonical_b
     assert [item["content"] for item in events(observer) if item["type"] == "final_answer"] == ["Runtime result"]
 
 
-def test_direct_answer_completion_marks_body_for_move_without_retransmission():
+def test_direct_answer_completion_includes_full_body_for_api_consumers():
     observer = MessageObserver()
-    observer.add_model_new_token("Legacy result")
+    observer.add_assistant_text_delta("Native ")
+    observer.add_assistant_text_delta("result")
     observer.mark_direct_final_answer()
-    observer.complete_final_answer("agent", "Legacy result")
-    assert observer.get_final_answer() == "Legacy result"
-    completion = events(observer)[-1]
-    assert completion["reclassify_step"] is True and completion["content"] == ""
+    observer.complete_final_answer("agent", "Native result")
+    assert observer.get_final_answer() == "Native result"
+    emitted = events(observer)
+    assert [item["content"] for item in emitted if item["type"] == "model_output_thinking"] == ["Native ", "result"]
+    completion = emitted[-1]
+    assert completion["type"] == "final_answer"
+    assert completion["reclassify_step"] is True
+    assert completion["content"] == "Native result"
 
 
 def test_completed_event_without_cached_fragments_falls_back_to_event_content():
