@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { ReactNode } from "react";
 import { Drawer } from "antd";
 
@@ -15,6 +17,7 @@ export interface StandardDrawerProps {
   onConfirm?: () => void;
   width?: number | string;
   footer?: ReactNode | null;
+  maskClosable?: boolean;
 }
 
 export function StandardDrawer({
@@ -28,6 +31,7 @@ export function StandardDrawer({
   onConfirm,
   width = 560,
   footer,
+  maskClosable = false,
 }: StandardDrawerProps) {
   const defaultFooter = (
     <div className="flex h-8 w-full shrink-0 flex-nowrap items-center justify-end gap-4">
@@ -46,7 +50,7 @@ export function StandardDrawer({
       placement="right"
       size={width}
       onClose={onClose}
-      mask={{ closable: false }}
+      mask={{ closable: maskClosable }}
       closable={false}
       title={
         <div className="flex h-[28px] w-full items-center justify-between">

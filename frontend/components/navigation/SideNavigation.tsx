@@ -15,6 +15,7 @@ import Link from "next/link";
 import { Button, Tooltip } from "antd";
 import {
   Bell,
+  Activity,
   BookOpen,
   Blocks,
   Bot,
@@ -162,6 +163,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     labelKey: "sidebar.skillSpace",
     order: 12,
     parentKey: "/resource-space",
+  },
+  {
+    path: "/observability",
+    Icon: Activity,
+    labelKey: "sidebar.observability",
+    order: 12.5,
+    parentKey: null,
   },
   {
     path: "/resource-manage",

@@ -19,6 +19,16 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  trajectory: {
+    records: `${API_BASE_URL}/trajectory/records`,
+    conversation: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}`,
+    snapshot: (id: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/snapshot`,
+    content: (id: string, contentId: string) =>
+      `${API_BASE_URL}/trajectory/conversations/${encodeURIComponent(id)}/contents/${encodeURIComponent(contentId)}`,
+    cleanup: `${API_BASE_URL}/trajectory/cleanup`,
+  },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
   knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
   agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,

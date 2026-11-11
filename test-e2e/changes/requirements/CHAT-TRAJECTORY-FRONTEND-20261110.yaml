@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-FRONTEND-20261110
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-FRONTEND-20261110
+  title: 实现管理员可观测中心前端
+  description: 沿用Nexent导航及真实轨迹API，完成服务端汇总列表、级联筛选、分段层级时间线、正文与清理交互。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-ISOLATION-D5-001
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - 前端服务保留字符串ID、业务错误、AbortSignal及清理安全参数。
+    - 管理员门禁、级联清空和迟到隔离、查询快照分页与显式刷新。
+    - 层级保留父路径、nullable指标及模型专属TTFT/吞吐，正文分块与32MiB上限。
+    - 清理明确提交、逐批累计、失败重试和取消后不续批。
+    reason: 前端组件和纯逻辑UT证明状态边界；复用JOURNEY-D4证明浏览器跨组件流程。无Python产品变更，不新增PythonUT或重复D1。
+    test_selectors:
+    - frontend/tests/component/trajectory.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/standardDrawer.test.tsx
+  notes: Primary ownership runtime via CHAT-TRAJECTORY. D4 uses a controlled HTTP
+    fixture with real product components and no model/tool execution; resources are
+    browser context/routes and released on failure. Formal acceptance is deferred
+    at user request; no claim of real PG/Agent/deployment proof. Cleanup only uses
+    authenticated tenant context; SU must not send arbitrary tenant identifiers. Browser
+    script and fixture now exist as a partial implementation. Full delayed-response,
+    all availability variants, SU cross-tenant selection, localization/keyboard and
+    resource-volume assertions need completion before an execution binding or semantic
+    acceptance claim. User requested formal acceptance deferral. Frontend local smoke
+    is recorded separately.
