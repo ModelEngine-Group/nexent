@@ -372,6 +372,7 @@ def update_run(
     expected_statuses: Optional[List[str]] = None,
     *,
     tenant_id: str | None = None,
+    expected_source: dict[str, Any] | None = None,
 ) -> Optional[Dict[str, Any]]:
     data = {
         **values,
@@ -388,6 +389,11 @@ def update_run(
             conditions.append(AgentAutomationRun.status.in_(expected_statuses))
         if tenant_id is not None:
             conditions.extend((AgentAutomationRun.tenant_id == tenant_id, AgentAutomationRun.user_id == user_id))
+        if expected_source is not None:
+            conditions.extend((
+                AgentAutomationRun.generated_prompt == expected_source["generated_prompt"],
+                AgentAutomationRun.user_message_id == expected_source["user_message_id"],
+            ))
         run = session.execute(
             update(AgentAutomationRun).where(*conditions).values(**data).returning(AgentAutomationRun)
         ).scalar_one_or_none()

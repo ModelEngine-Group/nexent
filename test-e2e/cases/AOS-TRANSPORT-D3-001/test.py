@@ -3717,7 +3717,9 @@ async def test_saved_user_compatibility_over_signed_http(monkeypatch, fallback):
 
 @pytest.mark.stage("D3")
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
-@pytest.mark.parametrize("mode", ["prepared", "unsupported", "unrecorded", "disconnect"])
+@pytest.mark.parametrize("mode", [
+    "prepared", "unsupported", "unrecorded", "disconnect", "recovered", "source-race", "newer-history",
+])
 @pytest.mark.asyncio
 async def test_background_management_handoff_over_signed_http(monkeypatch, mode):
     from backend.http.server.app_factory import create_app
@@ -3725,6 +3727,7 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
     from management.api.agent import compatibility_dispatch
     from management.db.conversation.prepared_turn import SavedUserTurn
     from management.services.agent import background, runtime_client
+    from contracts.conversation import HistoryItem
     from runtime.agentos import management_dispatch
     from runtime.api.agent import execution
 
@@ -3734,7 +3737,8 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
     record = {
         "run_id": 5, "runtime_run_id": reference.run_id, "conversation_id": 42,
         "user_id": actor.user_id, "tenant_id": actor.tenant_id, "status": "RUNNING",
-        "generated_prompt": "hello", "user_message_id": None if mode == "unrecorded" else 23,
+        "generated_prompt": None if mode in {"recovered", "source-race", "newer-history"} else "hello",
+        "user_message_id": None if mode in {"unrecorded", "recovered", "source-race", "newer-history"} else 23,
     }
     snapshot = PreparedAgentRun.model_validate({
         **reference.model_dump(), "mode": "nexent", "input": {"query": "hello"},
@@ -3742,7 +3746,7 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
                      "prompt_templates": {"system_prompt": "Answer"}, "tools": []},
         "models": {"llm": {"model_id": 7, "alias": "llm", "revision": "fixture"}},
     })
-    prepared, legacy, projected, stopped = [], [], [], []
+    prepared, legacy, projected, stopped, writes = [], [], [], [], []
     projecting, stop_received = threading.Event(), threading.Event()
     state = {}
 
@@ -3760,8 +3764,14 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
         )
         return record.copy()
 
-    def update(run_id, values, user, *, expected_statuses, tenant_id):
+    def update(run_id, values, user, *, expected_statuses, tenant_id, expected_source=None):
         assert (run_id, user, tenant_id, expected_statuses) == (5, actor.user_id, actor.tenant_id, ["RUNNING"])
+        if expected_source is not None:
+            assert expected_source == {"generated_prompt": None, "user_message_id": None}
+            if mode == "source-race":
+                record.update(generated_prompt="newer", user_message_id=24)
+                return None
+        writes.append(values.copy())
         record.update(values)
         return record.copy()
 
@@ -3771,7 +3781,14 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
         )
         return SavedUserTurn(23, 8, "AUTOMATION")
 
+    def head(conversation, user, tenant, query, files):
+        if mode == "unrecorded":
+            raise background.turns.PreparedTurnConflict
+        return source(conversation, user, tenant, 23, query, files)
+
     async def compile_snapshot(request, ref, user, tenant, **options):
+        if mode == "recovered":
+            assert writes == [{"generated_prompt": "hello", "user_message_id": 23}]
         assert (ref, user, tenant) == (reference, actor.user_id, actor.tenant_id)
         assert request.model_id == 7 and request.enable_automation_tool is False
         assert request.tool_params.agents["root"].tools == {"search": {"top_k": 5}}
@@ -3813,6 +3830,15 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
     monkeypatch.setattr(background.runs, "update_run", update)
     monkeypatch.setattr(background.runs, "update_task", forbidden_finish)
     monkeypatch.setattr(background.turns, "read_saved_user_turn_by_id", source)
+    monkeypatch.setattr(background.turns, "read_saved_user_turn_head", head)
+    def source_history(conversation, message, query, user, tenant):
+        assert (conversation, message, query, user, tenant) == (42, 23, "hello", actor.user_id, actor.tenant_id)
+        return {
+            "user_message_id": 23, "assistant_message_index": 9,
+            "history": [HistoryItem(role="user", content="later turn")] if mode == "newer-history" else [],
+        }
+
+    monkeypatch.setattr(background.automation_conversation_adapter, "load_run_prompt", source_history)
     monkeypatch.setattr(background, "prepare_conversation_snapshot", compile_snapshot)
     monkeypatch.setattr(background, "_project", project)
     monkeypatch.setattr(execution, "run_blocking", control)
@@ -3860,7 +3886,11 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
         with pytest.raises(RuntimeUpstreamError) as loop:
             await manager_client.dispatch_background(payload.model_copy(update={"preparation": "legacy"}), actor.user_id, actor.tenant_id)
         assert loop.value.status_code == 422
-        if mode == "disconnect":
+        if mode == "source-race":
+            with pytest.raises(RuntimeUpstreamError) as raced:
+                await client.run_tracked_background(payload, actor.user_id, actor.tenant_id)
+            assert raced.value.status_code == 409
+        elif mode == "disconnect":
             task = asyncio.create_task(client.run_tracked_background(payload, actor.user_id, actor.tenant_id))
             try:
                 assert await asyncio.to_thread(projecting.wait, 5)
@@ -3872,17 +3902,26 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
         else:
             result = await client.run_tracked_background(payload, actor.user_id, actor.tenant_id)
             assert (result.run_id, result.conversation_id, result.assistant_message_id) == (reference.run_id, 42, 61)
-            if mode == "prepared":
+            if mode in {"prepared", "recovered"}:
                 assert await client.run_tracked_background(payload, actor.user_id, actor.tenant_id) == result
     assert record["status"] == "RUNNING"
-    if mode in {"prepared", "disconnect"}:
+    if mode == "source-race":
+        assert not prepared and not legacy and not projected and not writes
+        assert record["user_message_id"] == 24 and record["generated_prompt"] == "newer"
+    elif mode in {"prepared", "disconnect", "recovered"}:
         assert prepared == [reference.run_id] and not legacy
         assert record["projection_message_index"] == 9
-        assert projected == ([61] if mode == "prepared" else [])
+        assert projected == ([61] if mode in {"prepared", "recovered"} else [])
         assert stopped == ([reference.run_id] if mode == "disconnect" else [])
+        if mode == "recovered":
+            assert writes == [{"generated_prompt": "hello", "user_message_id": 23}, {
+                "projection_message_index": 9, "projection_memory_agent_id": None,
+            }]
     else:
         assert legacy == [reference.run_id] and not prepared and not projected
         assert "projection_message_index" not in record
+        if mode == "newer-history":
+            assert not writes and record["user_message_id"] is None and record["generated_prompt"] is None
 
 
 @pytest.mark.stage("D3")

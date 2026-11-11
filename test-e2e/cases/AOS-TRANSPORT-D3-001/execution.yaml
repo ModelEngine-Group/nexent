@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-62:
+  - test_background_management_handoff_over_signed_http
   AC-61:
   - test_raw_model_profile_reaches_sdk_provider_over_signed_http
   AC-60:

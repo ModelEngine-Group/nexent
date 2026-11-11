@@ -36,12 +36,17 @@ def dispatch(mocker):
     owner = mocker.patch.object(background, "conversation_belongs_to", return_value=True)
     lookup = mocker.patch.object(background.runs, "get_run_by_runtime_id", side_effect=lambda *_args, **_kw: record.copy())
     source = mocker.patch.object(background.turns, "read_saved_user_turn_by_id", return_value=SavedUserTurn(23, 8, "AUTOMATION"))
+    mocker.patch.object(background.turns, "read_saved_user_turn_head", side_effect=background.turns.PreparedTurnConflict)
     snapshot = SimpleNamespace(memory_enabled=True, resource=SimpleNamespace(agent_id=2))
     compile_run = mocker.patch.object(background, "prepare_conversation_snapshot", new=AsyncMock(return_value=snapshot))
     writes = []
 
-    def persist(run_id, values, user, *, expected_statuses, tenant_id):
+    def persist(run_id, values, user, *, expected_statuses, tenant_id, expected_source=None):
         assert (run_id, user, tenant_id, expected_statuses) == (5, "actor", "tenant", ["RUNNING"])
+        if expected_source is not None and expected_source != {
+            "generated_prompt": record.get("generated_prompt"), "user_message_id": record.get("user_message_id"),
+        }:
+            return None
         writes.append(values.copy())
         record.update(values)
         return record.copy()

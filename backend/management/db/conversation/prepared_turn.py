@@ -143,6 +143,23 @@ def read_saved_user_turn_by_id(conversation_id, user_id, tenant_id, message_id, 
         return current
 
 
+def read_saved_user_turn_head(conversation_id, user_id, tenant_id, query, files) -> SavedUserTurn:
+    """Identify an already-saved source without inferring its index from history length."""
+    with get_db_session() as session:
+        if _owned(session, conversation_id, user_id, tenant_id, lock=True) is None:
+            raise AdmissionScopeError
+        message = ConversationMessage
+        head = session.scalar(select(message).where(
+            message.conversation_id == conversation_id, message.delete_flag == "N",
+        ).order_by(message.message_index.desc().nulls_first(), message.message_id.desc()).limit(1))
+        if head is None or type(head.message_index) is not int:
+            raise PreparedTurnConflict
+        source = _saved_user_message(session, conversation_id, user_id, head.message_index, query, files)
+        if source.message_id != head.message_id:
+            raise PreparedTurnConflict
+        return source
+
+
 def _require_saved_head(session, conversation_id, user_id, source, user_turn):
     current = _saved_user_message(
         session, conversation_id, user_id, source.message_index, user_turn["query"], user_turn["minio_files"],
