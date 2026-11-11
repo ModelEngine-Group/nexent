@@ -7,8 +7,8 @@ from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.agentos_events import debug_preparation_events, present_ephemeral_stream
 from management.services.agent.preparation.evaluation_snapshot import PreparedDebug, _turn_model_generation
 from management.services.agent.preparation.run import create_agent_run_info
-from management.services.agent.run import build_run_preparation_arguments
-from management.services.agent.subscription import _prepare_legacy_conversation
+from management.services.agent.preparation.request import build_run_preparation_arguments
+from management.services.agent.conversation_preparation import prepare_conversation_request as _prepare_legacy_conversation
 
 
 async def prepare_raw_debug(request: AgentRequest, actor: ServicePrincipal) -> PreparedDebug | None:

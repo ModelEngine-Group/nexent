@@ -715,7 +715,7 @@ from management.services.agent import naming as naming_service
 from management.services.agent import management as agent_management
 from management.services.agent import service as agent_service
 from management.services.agent import execution as agent_execution
-from management.services.agent import subscription as agent_subscription
+from management.services.agent import conversation_preparation, subscription as agent_subscription
 from management.services.agent import transfer as agent_transfer
 from management.services.agent import transfer as agent_transfer_backend
 from management.services.agent import run as agent_run
@@ -778,11 +778,11 @@ def reset_mocks(mocker, request):
         mocker.patch.object(agent_service, "resolve_agent_list_permission", return_value="EDIT")
     legacy_execution_host.registry._agent_capacity_counts.clear()
     legacy_execution_host.registry._agent_capacity_tokens.clear()
-    agent_subscription.get_conversation_service.reset_mock(
+    conversation_preparation.get_conversation_service.reset_mock(
         return_value=True,
         side_effect=True,
     )
-    agent_subscription.get_conversation_service.return_value = {
+    conversation_preparation.get_conversation_service.return_value = {
         "conversation_id": 123,
         "knowledge_scope": None,
     }
@@ -5053,11 +5053,11 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     update_agent = MagicMock()
     save_user_message = MagicMock()
     reset_stream = AsyncMock()
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', access_lookup)
-    monkeypatch.setattr(agent_subscription, 'update_conversation_agent_id_service', update_agent)
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', access_lookup)
+    monkeypatch.setattr(conversation_preparation, 'update_conversation_agent_id_service', update_agent)
     monkeypatch.setattr(agent_subscription, 'save_messages', save_user_message)
     monkeypatch.setattr(legacy_tracking.runtime_state_service, 'reset_stream_async', reset_stream)
-    with pytest.raises(agent_subscription.ForbiddenError, match='not accessible'):
+    with pytest.raises(conversation_preparation.ForbiddenError, match='not accessible'):
         await run_agent_stream(mock_agent_request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     access_lookup.assert_called_once_with(conversation_id=mock_agent_request.conversation_id, user_id='user-a', tenant_id='tenant-a')
     update_agent.assert_not_called()
@@ -5161,7 +5161,7 @@ async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(monkeypatc
         pass
     monkeypatch.setattr(agent_subscription, 'AgentRunAlreadyActiveError', ActiveRunError)
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **_kwargs: ('user-a', 'tenant-a', 'zh'))
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', MagicMock(return_value={'conversation_id': mock_agent_request.conversation_id}))
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', MagicMock(return_value={'conversation_id': mock_agent_request.conversation_id}))
     monkeypatch.setattr(legacy_execution_host.registry, 'reserve_agent_run', MagicMock(side_effect=ActiveRunError('active')))
     save_user_message = MagicMock()
     reset_stream = AsyncMock()
@@ -5180,7 +5180,7 @@ async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(monkeypatc
 
 @pytest.mark.asyncio
 @patch('management.services.agent.subscription._resolve_user_tenant_language', return_value=('u', 't', 'en'))
-@patch('management.services.agent.subscription.create_new_conversation')
+@patch('management.services.agent.conversation_preparation.create_new_conversation')
 @patch('management.services.agent.subscription.generate_stream')
 @patch('management.services.agent.subscription.save_messages')
 @patch('management.services.configuration.user.memory.build_memory_context')
@@ -17644,9 +17644,9 @@ def test_inject_user_timezone_time_with_invalid_timezone():
 @pytest.mark.asyncio
 async def test_run_agent_stream_resolves_dict_knowledge_scope(mocker, mock_agent_request, mock_http_request):
     """A dict knowledge_scope resolves the per-run pool and wires runtime context."""
-    mock_resolve = mocker.patch.object(agent_subscription, 'resolve_knowledge_scope')
-    mocker.patch.object(agent_subscription, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
-    mock_create_conversation = mocker.patch.object(agent_subscription, 'create_new_conversation', return_value={'conversation_id': 999})
+    mock_resolve = mocker.patch.object(conversation_preparation, 'resolve_knowledge_scope')
+    mocker.patch.object(conversation_preparation, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
+    mock_create_conversation = mocker.patch.object(conversation_preparation, 'create_new_conversation', return_value={'conversation_id': 999})
     mocker.patch.object(agent_subscription, '_resolve_user_tenant_language', return_value=('u', 't', 'en'))
     mocker.patch.object(agent_run_service, 'build_memory_context', return_value=MagicMock(user_config=MagicMock(memory_switch=True)))
     mocker.patch.object(agent_subscription, 'save_messages')
@@ -17688,11 +17688,11 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(mocker, mock_agent
 @pytest.mark.asyncio
 async def test_run_agent_stream_persists_request_scope_on_existing_conversation(mocker, mock_agent_request, mock_http_request):
     """A request scope on an existing conversation is re-persisted after resolution."""
-    mock_resolve = mocker.patch.object(agent_subscription, 'resolve_knowledge_scope')
-    mocker.patch.object(agent_subscription, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
-    mocker.patch.object(agent_subscription, 'get_conversation_service', return_value={'knowledge_scope': None})
-    mocker.patch.object(agent_subscription, 'update_conversation_chat_mode_service')
-    mock_update_scope = mocker.patch.object(agent_subscription, 'update_conversation_knowledge_scope_service')
+    mock_resolve = mocker.patch.object(conversation_preparation, 'resolve_knowledge_scope')
+    mocker.patch.object(conversation_preparation, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
+    mocker.patch.object(conversation_preparation, 'get_conversation_service', return_value={'knowledge_scope': None})
+    mocker.patch.object(conversation_preparation, 'update_conversation_chat_mode_service')
+    mock_update_scope = mocker.patch.object(conversation_preparation, 'update_conversation_knowledge_scope_service')
     mocker.patch.object(agent_subscription, '_resolve_user_tenant_language', return_value=('u', 't', 'en'))
     mocker.patch.object(agent_run_service, 'build_memory_context', return_value=MagicMock(user_config=MagicMock(memory_switch=True)))
     mocker.patch.object(agent_subscription, 'save_messages')
@@ -17726,11 +17726,11 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
 @pytest.mark.asyncio
 async def test_run_agent_stream_uses_stored_scope_when_request_has_none(mocker, mock_agent_request, mock_http_request):
     """When the request carries no scope, the stored conversation scope wins."""
-    mock_resolve = mocker.patch.object(agent_subscription, 'resolve_knowledge_scope')
-    mocker.patch.object(agent_subscription, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
-    mock_get_conversation = mocker.patch.object(agent_subscription, 'get_conversation_service', return_value={'knowledge_scope': {'local': {'mode': 'inherit'}}})
-    mock_update_scope = mocker.patch.object(agent_subscription, 'update_conversation_knowledge_scope_service')
-    mocker.patch.object(agent_subscription, 'update_conversation_chat_mode_service')
+    mock_resolve = mocker.patch.object(conversation_preparation, 'resolve_knowledge_scope')
+    mocker.patch.object(conversation_preparation, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
+    mock_get_conversation = mocker.patch.object(conversation_preparation, 'get_conversation_service', return_value={'knowledge_scope': {'local': {'mode': 'inherit'}}})
+    mock_update_scope = mocker.patch.object(conversation_preparation, 'update_conversation_knowledge_scope_service')
+    mocker.patch.object(conversation_preparation, 'update_conversation_chat_mode_service')
     mocker.patch.object(agent_subscription, '_resolve_user_tenant_language', return_value=('u', 't', 'en'))
     mocker.patch.object(agent_run_service, 'build_memory_context', return_value=MagicMock(user_config=MagicMock(memory_switch=True)))
     mocker.patch.object(agent_subscription, 'save_messages')
@@ -17763,11 +17763,11 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(mocker, 
 @pytest.mark.asyncio
 async def test_run_agent_stream_emits_knowledge_scope_resolved_event(mocker, mock_agent_request, mock_http_request):
     """The stream emits a knowledge_scope_resolved SSE event carrying the effective scope."""
-    mock_resolve = mocker.patch.object(agent_subscription, 'resolve_knowledge_scope')
-    mocker.patch.object(agent_subscription, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
-    mocker.patch.object(agent_subscription, 'get_conversation_service', return_value={'knowledge_scope': None})
-    mocker.patch.object(agent_subscription, 'update_conversation_chat_mode_service')
-    mocker.patch.object(agent_subscription, 'update_conversation_knowledge_scope_service')
+    mock_resolve = mocker.patch.object(conversation_preparation, 'resolve_knowledge_scope')
+    mocker.patch.object(conversation_preparation, 'build_runtime_knowledge_resources', return_value={'local_capable': True, 'aidp_capable': False, 'local_disabled': False, 'aidp_disabled': False, 'local_display_names': ['KB A'], 'aidp_display_names': []})
+    mocker.patch.object(conversation_preparation, 'get_conversation_service', return_value={'knowledge_scope': None})
+    mocker.patch.object(conversation_preparation, 'update_conversation_chat_mode_service')
+    mocker.patch.object(conversation_preparation, 'update_conversation_knowledge_scope_service')
     mocker.patch.object(agent_subscription, '_resolve_user_tenant_language', return_value=('u', 't', 'en'))
     mocker.patch.object(agent_run_service, 'build_memory_context', return_value=MagicMock(user_config=MagicMock(memory_switch=True)))
     mocker.patch.object(agent_subscription, 'save_messages')
@@ -17979,10 +17979,10 @@ async def test_run_agent_stream_rejects_invalid_runtime_metadata(mock_resolve, m
     """Non-JSON runtime metadata must be rejected with CHAT_METADATA_INVALID."""
     request = AgentRequest(agent_id=1, conversation_id=123, query='q', history=[], minio_files=[], metadata={'bad': float('nan')})
     mock_get_conversation = MagicMock(return_value={'knowledge_scope': None})
-    with patch.object(agent_subscription, 'get_conversation_service', mock_get_conversation):
-        with pytest.raises(agent_subscription.AppException) as exc_info:
+    with patch.object(conversation_preparation, 'get_conversation_service', mock_get_conversation):
+        with pytest.raises(conversation_preparation.AppException) as exc_info:
             await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
-    assert exc_info.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_INVALID
+    assert exc_info.value.error_code == conversation_preparation.ErrorCode.CHAT_METADATA_INVALID
 
 
 @pytest.mark.asyncio
@@ -17991,10 +17991,10 @@ async def test_run_agent_stream_rejects_oversized_runtime_metadata(mock_resolve,
     """METADATA_TOO_LARGE validation failures map to CHAT_METADATA_TOO_LARGE."""
     request = AgentRequest(agent_id=1, conversation_id=123, query='q', history=[], minio_files=[], metadata={'payload': 'x' * (64 * 1024 + 1)})
     mock_get_conversation = MagicMock(return_value={'knowledge_scope': None})
-    with patch.object(agent_subscription, 'get_conversation_service', mock_get_conversation):
-        with pytest.raises(agent_subscription.AppException) as exc_info:
+    with patch.object(conversation_preparation, 'get_conversation_service', mock_get_conversation):
+        with pytest.raises(conversation_preparation.AppException) as exc_info:
             await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
-    assert exc_info.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_TOO_LARGE
+    assert exc_info.value.error_code == conversation_preparation.ErrorCode.CHAT_METADATA_TOO_LARGE
 
 
 @pytest.mark.asyncio
@@ -18003,15 +18003,15 @@ async def test_run_agent_stream_rejects_metadata_when_agent_disallows(mock_resol
     """Metadata input for an agent with allow_chat_metadata=False is rejected."""
     request = AgentRequest(agent_id=1, conversation_id=123, query='q', history=[], minio_files=[], metadata={'session': 's1'})
     mock_get_conversation = MagicMock(return_value={'knowledge_scope': None})
-    with patch.object(agent_subscription, 'get_conversation_service', mock_get_conversation), patch.object(agent_subscription, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': False}):
-        with pytest.raises(agent_subscription.AppException) as exc_info:
+    with patch.object(conversation_preparation, 'get_conversation_service', mock_get_conversation), patch.object(conversation_preparation, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': False}):
+        with pytest.raises(conversation_preparation.AppException) as exc_info:
             await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
-    assert exc_info.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_NOT_ALLOWED
+    assert exc_info.value.error_code == conversation_preparation.ErrorCode.CHAT_METADATA_NOT_ALLOWED
 
 
 @pytest.mark.asyncio
 @patch('management.services.agent.subscription._resolve_user_tenant_language', return_value=('u', 't', 'en'))
-@patch('management.services.agent.subscription.create_new_conversation')
+@patch('management.services.agent.conversation_preparation.create_new_conversation')
 @patch('management.services.agent.subscription.generate_stream')
 @patch('management.services.agent.subscription.save_messages')
 @patch('management.services.configuration.user.memory.build_memory_context')
@@ -18024,7 +18024,7 @@ async def test_run_agent_stream_new_conversation_persists_runtime_metadata(mock_
     async def stream_chunks():
         yield 'data: ok\n\n'
     mock_generate_stream.return_value = stream_chunks()
-    with patch.object(agent_subscription, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}):
+    with patch.object(conversation_preparation, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}):
         response = await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     kwargs = mock_create_conversation.call_args.kwargs
     assert kwargs['runtime_metadata'] == {'session': 's1'}
@@ -18036,8 +18036,8 @@ async def test_run_agent_stream_new_conversation_persists_runtime_metadata(mock_
 
 @pytest.mark.asyncio
 @patch('management.services.agent.subscription._resolve_user_tenant_language', return_value=('u', 't', 'en'))
-@patch('management.services.agent.subscription.update_conversation_chat_mode_service')
-@patch('management.services.agent.subscription.update_conversation_agent_id_service')
+@patch('management.services.agent.conversation_preparation.update_conversation_chat_mode_service')
+@patch('management.services.agent.conversation_preparation.update_conversation_agent_id_service')
 @patch('management.services.agent.subscription.generate_stream')
 @patch('management.services.agent.subscription.save_messages')
 @patch('management.services.configuration.user.memory.build_memory_context')
@@ -18051,7 +18051,7 @@ async def test_run_agent_stream_existing_conversation_resolves_metadata(mock_bui
     async def stream_chunks():
         yield 'data: ok\n\n'
     mock_generate_stream.return_value = stream_chunks()
-    with patch.object(agent_subscription, 'get_conversation_service', mock_get_conversation), patch.object(agent_subscription, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}), patch.object(agent_subscription, 'resolve_conversation_runtime_metadata', mock_resolve_metadata):
+    with patch.object(conversation_preparation, 'get_conversation_service', mock_get_conversation), patch.object(conversation_preparation, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}), patch.object(conversation_preparation, 'resolve_conversation_runtime_metadata', mock_resolve_metadata):
         response = await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     assert isinstance(response, StreamingResponse)
     assert request.__dict__['_runtime_metadata_snapshot'] == {'session': 's2'}
@@ -18072,17 +18072,17 @@ async def test_run_agent_stream_metadata_version_conflict(mock_resolve, mock_htt
         def __init__(self, current_version):
             super().__init__('conflict')
             self.current_version = current_version
-    original = agent_subscription.RuntimeMetadataVersionConflict
-    agent_subscription.RuntimeMetadataVersionConflict = _FakeVersionConflict
+    original = conversation_preparation.RuntimeMetadataVersionConflict
+    conversation_preparation.RuntimeMetadataVersionConflict = _FakeVersionConflict
     try:
         mock_get_conversation = MagicMock(return_value={'knowledge_scope': None})
         mock_resolve_metadata = MagicMock(side_effect=_FakeVersionConflict(current_version=7))
-        with patch.object(agent_subscription, 'get_conversation_service', mock_get_conversation), patch.object(agent_subscription, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}), patch.object(agent_subscription, 'resolve_conversation_runtime_metadata', mock_resolve_metadata):
-            with pytest.raises(agent_subscription.AppException) as exc_info:
+        with patch.object(conversation_preparation, 'get_conversation_service', mock_get_conversation), patch.object(conversation_preparation, 'search_agent_info_by_agent_id', return_value={'allow_chat_metadata': True}), patch.object(conversation_preparation, 'resolve_conversation_runtime_metadata', mock_resolve_metadata):
+            with pytest.raises(conversation_preparation.AppException) as exc_info:
                 await run_agent_stream(request, mock_http_request, user_id='test_user', tenant_id='test_tenant')
     finally:
-        agent_subscription.RuntimeMetadataVersionConflict = original
-    assert exc_info.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+        conversation_preparation.RuntimeMetadataVersionConflict = original
+    assert exc_info.value.error_code == conversation_preparation.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
     assert exc_info.value.details == {'current_version': 7}
 
 

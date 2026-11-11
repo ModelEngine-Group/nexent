@@ -39,10 +39,10 @@ async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(moc
 @pytest.mark.asyncio
 async def test_compatibility_stream_requires_a_pool_before_starting_a_conversation(mocker):
     from contracts.agent import AgentRequest
-    from management.services.agent import lifecycle, subscription
+    from management.services.agent import conversation_preparation, lifecycle, subscription
 
     mocker.patch.object(lifecycle, "get_default_thread_manager", return_value=None)
-    create = mocker.patch.object(subscription, "create_new_conversation")
+    create = mocker.patch.object(conversation_preparation, "create_new_conversation")
 
     with pytest.raises(RuntimeError, match="requires a thread manager"):
         await subscription.run_agent_stream(AgentRequest(query="run"), None, "actor", "tenant")
@@ -53,9 +53,9 @@ async def test_compatibility_stream_requires_a_pool_before_starting_a_conversati
 @pytest.mark.asyncio
 async def test_compatibility_stream_requires_runtime_state_before_conversation_writes(mocker):
     from contracts.agent import AgentRequest
-    from management.services.agent import subscription
+    from management.services.agent import conversation_preparation, subscription
 
-    create = mocker.patch.object(subscription, "create_new_conversation")
+    create = mocker.patch.object(conversation_preparation, "create_new_conversation")
     with pytest.raises(RuntimeError, match="requires a Runtime host"):
         await subscription.run_agent_stream(
             AgentRequest(query="run"), None, "actor", "tenant", thread_manager=object(),

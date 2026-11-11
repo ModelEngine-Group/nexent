@@ -252,3 +252,27 @@ def test_assistant_projection_is_a_separate_responsibility():
         encoding="utf-8"
     )
     assert "await finalize_assistant_projection(" in execution
+
+
+def test_raw_preparation_does_not_load_legacy_subscription():
+    script = """
+import importlib.abc
+import sys
+from unittest.mock import patch
+
+class BlockLegacyExecution(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"management.services.agent." + name for name in ("subscription", "run", "execution", "lifecycle")} | {"backend.management.services.agent." + name for name in ("subscription", "run", "execution", "lifecycle")}:
+            raise AssertionError(f"Preparation imported retired execution facade: {fullname}")
+        if fullname in {"runtime", "backend.runtime"} or fullname.startswith(("runtime.", "backend.runtime.")):
+            raise AssertionError(f"Preparation imported Runtime source: {fullname}")
+
+sys.meta_path.insert(0, BlockLegacyExecution())
+with patch("nexent.core.nlp.stopwords.load_stopwords"):
+    from management.services.agent.raw_execution import prepare_raw_debug
+"""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(str(ROOT / path) for path in ("", "backend", "sdk"))}
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr

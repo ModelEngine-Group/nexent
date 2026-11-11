@@ -4120,7 +4120,7 @@ async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
     from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
     from contracts.errors.exceptions import ForbiddenError
     from management.api.agent import compatibility_dispatch
-    from management.services.agent import raw_execution, runtime_client, subscription
+    from management.services.agent import raw_execution, runtime_client, conversation_preparation as subscription
     from management.services.agent.context import strip_current_time_prefix
     from management.services.agent import workbench as workbench_service
     from management.services.knowledge_base import scope, mount
@@ -4253,7 +4253,7 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     from infrastructure.agent_model_config import create_model_config_from_record
     from infrastructure.agent_model_overrides import overlay_root_model
     from management.api.agent import compatibility_dispatch
-    from management.services.agent import raw_execution, runtime_client, subscription, tool_identity
+    from management.services.agent import raw_execution, runtime_client, conversation_preparation as subscription, tool_identity
     from management.services.agent.preparation import run as preparation, evaluation_snapshot
     from management.services.model import run_controls
     from nexent.core.agents.agent_model import AgentConfig

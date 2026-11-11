@@ -90,9 +90,9 @@ async def test_raw_workbench_uses_granted_debug_dispatch_and_retains_opening_eve
 @pytest.mark.asyncio
 async def test_raw_workbench_disabled_keeps_original_feature_gate(preparation, mocker):
     from contracts.errors.exceptions import WorkbenchError
-    from management.services.agent import subscription
+    from management.services.agent import conversation_preparation, subscription
 
-    mocker.patch.object(subscription, "ENABLE_AGENT_WORKBENCH", False)
+    mocker.patch.object(conversation_preparation, "ENABLE_AGENT_WORKBENCH", False)
     mocker.patch.object(service, "_prepare_legacy_conversation", new=subscription._prepare_legacy_conversation)
     request = AgentRequest(query="hello", is_debug=True, entrypoint="workbench", workbench={"mode": "generic_chat"})
     with pytest.raises(WorkbenchError) as denied:

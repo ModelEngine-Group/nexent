@@ -15,6 +15,7 @@ import pytest_asyncio
 from fastapi import Request
 
 from . import test_agent_service as service_tests
+from management.services.agent import conversation_preparation
 from runtime.agentos import legacy_admission, legacy_producer, legacy_tracking
 
 
@@ -33,8 +34,8 @@ async def lifecycle(monkeypatch):
     monkeypatch.setattr(legacy_admission, "AgentRunAlreadyActiveError", module.AgentRunAlreadyActiveError)
     monkeypatch.setattr(legacy_producer, "cleanup_channel_later", AsyncMock())
     monkeypatch.setattr(service, "_resolve_user_tenant_language", MagicMock(return_value=("u", "t", "en")))
-    monkeypatch.setattr(service, "get_conversation_service", MagicMock(return_value={"conversation_id": 123}))
-    monkeypatch.setattr(service, "create_new_conversation", MagicMock(return_value={"conversation_id": 123}))
+    monkeypatch.setattr(conversation_preparation, "get_conversation_service", MagicMock(return_value={"conversation_id": 123}))
+    monkeypatch.setattr(conversation_preparation, "create_new_conversation", MagicMock(return_value={"conversation_id": 123}))
     monkeypatch.setattr(service, "save_messages", MagicMock())
     monkeypatch.setattr(service, "build_agent_run_context", MagicMock(return_value=SimpleNamespace(
         metadata={}, enable_memory=False,

@@ -23,6 +23,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Conversation policy and request configuration helpers load without the legacy execution facade or Runtime source while preserving preflight, scope, metadata, Workbench and message semantics.
     - Strict snapshot compilation reports safe resource, model, identity or input failure stages with the original cause; the temporary exporter preserves None fallback and HTTP authorization errors.
     - SDK-local catalog aliases retain class-based execution, pinned tenant bindings, language rules and provider request behavior without colliding with AgentOS namespaces.
     - Legacy background calls without an automation source claim the original run ID and request fingerprint, stage only the AUTOMATION assistant and recover an unknown admission or completed receipt without starting twice or finishing a scheduler task.

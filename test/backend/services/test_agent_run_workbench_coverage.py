@@ -9,6 +9,7 @@ import pytest
 from runtime.agentos import legacy_producer, legacy_tracking
 
 from test.backend.services import test_agent_service as legacy
+from management.services.agent import conversation_preparation
 
 
 agent_run = legacy.agent_run_service
@@ -200,13 +201,13 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     workbench.assert_workbench_version = MagicMock()
     workbench.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
     monkeypatch.setitem(sys.modules, 'management.services.agent.workbench', workbench)
-    monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', True)
+    monkeypatch.setattr(conversation_preparation, 'ENABLE_AGENT_WORKBENCH', True)
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', MagicMock(return_value=('user-a', 'tenant-a', 'en')))
-    monkeypatch.setattr(agent_subscription, 'prepend_current_time', lambda query, _timezone, *, language: query)
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', MagicMock(return_value=conversation))
-    monkeypatch.setattr(agent_subscription, 'apply_workbench_runtime_plan', apply_plan)
-    monkeypatch.setattr(agent_subscription, 'update_conversation_workbench_config_service', update_config)
-    monkeypatch.setattr(agent_subscription, 'update_conversation_chat_mode_service', MagicMock())
+    monkeypatch.setattr(conversation_preparation, 'prepend_current_time', lambda query, _timezone, *, language: query)
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', MagicMock(return_value=conversation))
+    monkeypatch.setattr(conversation_preparation, 'apply_workbench_runtime_plan', apply_plan)
+    monkeypatch.setattr(conversation_preparation, 'update_conversation_workbench_config_service', update_config)
+    monkeypatch.setattr(conversation_preparation, 'update_conversation_chat_mode_service', MagicMock())
     monkeypatch.setattr(agent_subscription, 'save_messages', MagicMock())
     monkeypatch.setattr(agent_subscription, 'build_agent_run_context', MagicMock(return_value=SimpleNamespace(metadata={}, enable_memory=False)))
     monkeypatch.setattr(legacy_producer, 'agent_monitoring_context', lambda _metadata: nullcontext())
@@ -243,8 +244,8 @@ async def test_run_agent_stream_rejects_disabled_workbench_entrypoint(monkeypatc
     from contracts.agent import WorkbenchSessionConfig
     workbench = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(entrypoint='workbench', workbench=workbench)
-    monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', False)
-    with pytest.raises(agent_subscription.WorkbenchError, match='WORKBENCH_DISABLED'):
+    monkeypatch.setattr(conversation_preparation, 'ENABLE_AGENT_WORKBENCH', False)
+    with pytest.raises(conversation_preparation.WorkbenchError, match='WORKBENCH_DISABLED'):
         await agent_subscription.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
 
 
@@ -252,11 +253,11 @@ async def test_run_agent_stream_rejects_disabled_workbench_entrypoint(monkeypatc
 async def test_run_agent_stream_rejects_stored_workbench_when_disabled(monkeypatch):
     from fastapi import Request
     request = _request()
-    monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', False)
+    monkeypatch.setattr(conversation_preparation, 'ENABLE_AGENT_WORKBENCH', False)
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **_kwargs: ('user-a', 'tenant-a', 'en'))
-    monkeypatch.setattr(agent_subscription, 'prepend_current_time', lambda query, _timezone, *, language: query)
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', lambda **_kwargs: {'workbench_config': {'schema_version': 3}})
-    with pytest.raises(agent_subscription.WorkbenchError, match='WORKBENCH_DISABLED'):
+    monkeypatch.setattr(conversation_preparation, 'prepend_current_time', lambda query, _timezone, *, language: query)
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', lambda **_kwargs: {'workbench_config': {'schema_version': 3}})
+    with pytest.raises(conversation_preparation.WorkbenchError, match='WORKBENCH_DISABLED'):
         await agent_subscription.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
 
 
@@ -264,11 +265,11 @@ async def test_run_agent_stream_rejects_stored_workbench_when_disabled(monkeypat
 async def test_run_agent_stream_rejects_conversation_entrypoint_mismatch(monkeypatch):
     from fastapi import Request
     request = _request(entrypoint='workbench', workbench=None)
-    monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', True)
+    monkeypatch.setattr(conversation_preparation, 'ENABLE_AGENT_WORKBENCH', True)
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **_kwargs: ('user-a', 'tenant-a', 'en'))
-    monkeypatch.setattr(agent_subscription, 'prepend_current_time', lambda query, _timezone, *, language: query)
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', lambda **_kwargs: {'workbench_config': None})
-    with pytest.raises(agent_subscription.ForbiddenError, match='different chat entrypoint'):
+    monkeypatch.setattr(conversation_preparation, 'prepend_current_time', lambda query, _timezone, *, language: query)
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', lambda **_kwargs: {'workbench_config': None})
+    with pytest.raises(conversation_preparation.ForbiddenError, match='different chat entrypoint'):
         await agent_subscription.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
 
 
@@ -278,14 +279,14 @@ async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
     from contracts.agent import WorkbenchSessionConfig
     workbench = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(entrypoint='workbench', workbench=workbench, metadata={'ticket': 'NEX-1'}, expected_metadata_version=2)
-    monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', True)
+    monkeypatch.setattr(conversation_preparation, 'ENABLE_AGENT_WORKBENCH', True)
     monkeypatch.setattr(agent_subscription, '_resolve_user_tenant_language', lambda **_kwargs: ('user-a', 'tenant-a', 'en'))
-    monkeypatch.setattr(agent_subscription, 'prepend_current_time', lambda query, _timezone, *, language: query)
-    monkeypatch.setattr(agent_subscription, 'get_conversation_service', lambda **_kwargs: {'workbench_config': workbench.model_dump(mode='json'), 'runtime_metadata_version': 3})
+    monkeypatch.setattr(conversation_preparation, 'prepend_current_time', lambda query, _timezone, *, language: query)
+    monkeypatch.setattr(conversation_preparation, 'get_conversation_service', lambda **_kwargs: {'workbench_config': workbench.model_dump(mode='json'), 'runtime_metadata_version': 3})
     workbench_module = ModuleType('management.services.agent.workbench')
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock()
     monkeypatch.setitem(sys.modules, 'management.services.agent.workbench', workbench_module)
-    with pytest.raises(agent_subscription.AppException) as caught:
+    with pytest.raises(conversation_preparation.AppException) as caught:
         await agent_subscription.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
-    assert caught.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+    assert caught.value.error_code == conversation_preparation.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
