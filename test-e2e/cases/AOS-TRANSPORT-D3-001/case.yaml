@@ -177,6 +177,9 @@ case:
   - order: 50
     action: Send an original internal debug request through the signed Management handoff, then exercise an unsupported export and an invalid handoff.
     expected: Management reuses the original preparation policy and configuration. Supported resources execute through AgentOS ephemeral run; unsupported resources retain one explicit fallback with the original query. Debug and correlation headers survive. Original scope denial and invalid invocation combinations cannot execute.
+  - order: 51
+    action: Send raw native and Workbench debug requests with selected knowledge and an unavailable selection through both services.
+    expected: Management resolves the original policy against one resource tree, exports the same authorized tool map or Workbench plan and emits the original scope/configuration events and warnings before the answer. Other tenants are rejected and debug preparation cannot write conversation history or start legacy execution.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -229,6 +232,7 @@ case:
   - Saved-user compatibility requests use the original message identity and never execute or persist the user twice.
   - Background requests retain their original run identity and configuration through the signed Management handoff, recover without a second start and propagate disconnect cancellation.
   - Raw internal debug requests preserve their original preparation policy, model and tool configuration, metadata, response headers and single execution across signed service boundaries.
+  - Raw knowledge and Workbench debug preparation preserves the original authorized resources, warnings and event order with no history writes, and executes only through AgentOS.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -546,4 +550,9 @@ case:
     description: Original internal debug requests visit Management with unchanged preparation policy and execute only once through the prepared or explicit compatibility path.
     steps: [50]
     expected_results: [51]
+    forbidden_side_effects: [1, 2]
+  - id: AC-60
+    description: Raw native and Workbench knowledge preparation uses the original policy and frozen resources, preserves public preparation events and cannot write history or enter legacy execution for supported snapshots.
+    steps: [51]
+    expected_results: [52]
     forbidden_side_effects: [1, 2]

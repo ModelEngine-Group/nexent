@@ -109,6 +109,20 @@ def knowledge_scope_event_content(resolved) -> dict:
     }
 
 
+def debug_preparation_events(prepared) -> list[dict]:
+    """Share the public preparation events for both debug entrypoints."""
+    events = []
+    if prepared.workbench is not None:
+        events.append({"type": "workbench_config_resolved", "content": {
+            "config_version": 0, "schema_version": prepared.workbench.schema_version,
+            "mode": prepared.workbench.mode,
+            "agent_mounts": [mount.model_dump(mode="json") for mount in prepared.workbench.agent_mounts],
+        }})
+    if prepared.knowledge is not None:
+        events.append({"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)})
+    return events
+
+
 def present_ephemeral_stream(
     response: StreamingResponse, user_id: str, run_id: str, *, opening_events: Sequence[dict] = (),
 ) -> StreamingResponse:

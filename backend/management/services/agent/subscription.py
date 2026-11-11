@@ -7,6 +7,7 @@ import json
 from contracts.errors.exceptions import UnauthorizedError
 import logging
 import uuid
+from dataclasses import dataclass
 from copy import (
     deepcopy,
 )
@@ -31,7 +32,7 @@ from contracts.errors.exceptions import (
     WorkbenchError,
 )
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
-from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.knowledge import ConversationKnowledgeScopeRequest, ResolvedKnowledgeScope
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.conversation.repository import resolve_conversation_runtime_metadata
 from fastapi import (
@@ -92,16 +93,29 @@ def _resolve_user_tenant_language(
     return user_id, tenant_id, get_user_language(http_request)
 
 
+@dataclass(frozen=True)
+class PreparedConversationRequest:
+    """Keep the policy result available to both legacy and portable execution."""
+
+    created: bool
+    workbench: WorkbenchSessionConfig | None
+    knowledge: ResolvedKnowledgeScope | None
+    knowledge_tree: tuple[dict, ...] = ()
+
+
 async def _prepare_legacy_conversation(
     agent_request: AgentRequest,
     resolved_user_id: str,
     resolved_tenant_id: str,
     language: str,
     timezone: str | None,
-) -> tuple[bool, WorkbenchSessionConfig | None]:
+    *, export_resources: bool = False,
+) -> PreparedConversationRequest:
     """Apply the compatibility request's conversation and authorization rules."""
     from management.services.model import run_controls
 
+    if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
     run_controls.validate_agent_model_selection(
         agent_request, resolved_tenant_id, search_agent_info_by_agent_id
     )
@@ -240,6 +254,7 @@ async def _prepare_legacy_conversation(
         source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
 
     resolved_scope = None
+    runtime_knowledge_tree = []
     if source_scope is not None:
         if agent_request.agent_id is None:
             raise ValueError("agent_id is required when knowledge_scope is set")
@@ -252,6 +267,18 @@ async def _prepare_legacy_conversation(
             )
         ]
         resolve_scope_kwargs = {}
+        if export_resources and not runtime_knowledge_tree:
+            from management.services.knowledge_base.scope import resolve_root_version, snapshot_runtime_knowledge_tree
+
+            version = await run_blocking(
+                "resolve-knowledge-root-version", resolve_root_version,
+                agent_request.agent_id, resolved_tenant_id, agent_request.version_no, bool(agent_request.is_debug),
+                lane="control-io", owner="management",
+            )
+            runtime_knowledge_tree = await run_blocking(
+                "freeze-runtime-knowledge-tree", snapshot_runtime_knowledge_tree,
+                agent_request.agent_id, resolved_tenant_id, version, lane="control-io", owner="management",
+            )
         if runtime_knowledge_tree:
             resolve_scope_kwargs["runtime_agent_tree"] = runtime_knowledge_tree
 
@@ -451,7 +478,7 @@ async def _prepare_legacy_conversation(
             user_id=resolved_user_id,
         )
 
-    return is_new_conversation, canonical_workbench
+    return PreparedConversationRequest(is_new_conversation, canonical_workbench, resolved_scope, tuple(runtime_knowledge_tree))
 
 
 async def run_agent_stream(
@@ -480,10 +507,11 @@ async def run_agent_stream(
     )
     thread_manager = require_legacy_thread_manager(thread_manager)
     host = require_legacy_execution_host(execution_host)
-    is_new_conversation, canonical_workbench = await _prepare_legacy_conversation(
+    prepared_request = await _prepare_legacy_conversation(
         agent_request, resolved_user_id, resolved_tenant_id, language,
         http_request.headers.get("x-user-timezone") if http_request else None,
     )
+    is_new_conversation, canonical_workbench = prepared_request.created, prepared_request.workbench
 
     run_identifier = _agent_run_identifier(agent_request)
     try:

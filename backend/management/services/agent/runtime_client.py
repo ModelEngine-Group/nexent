@@ -27,7 +27,7 @@ from infrastructure.rdb.agent_admission import AdmissionScopeError
 from infrastructure.agentos_identity import ServicePrincipal
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
-    active_run_error_response, knowledge_scope_event_content, present_ephemeral_stream, present_public_resume,
+    active_run_error_response, debug_preparation_events, present_ephemeral_stream, present_public_resume,
 )
 from management.services.agent.workbench_debug_grant import (
     WorkbenchDebugGrantUnavailable, close_workbench_debug_grant, open_workbench_debug_grant,
@@ -173,16 +173,9 @@ async def forward_conversation_run(
             raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
         if prepared is not None:
             response = await _run_prepared_debug(client, prepared, user_id, tenant_id)
-            opening = []
-            if prepared.workbench is not None:
-                opening.append({"type": "workbench_config_resolved", "content": {
-                    "config_version": 0, "schema_version": prepared.workbench.schema_version,
-                    "mode": prepared.workbench.mode,
-                    "agent_mounts": [mount.model_dump(mode="json") for mount in prepared.workbench.agent_mounts],
-                }})
-            if prepared.knowledge is not None:
-                opening.append({"type": "knowledge_scope_resolved", "content": knowledge_scope_event_content(prepared.knowledge)})
-            public = present_ephemeral_stream(response, user_id, prepared.payload.run_id, opening_events=opening)
+            public = present_ephemeral_stream(
+                response, user_id, prepared.payload.run_id, opening_events=debug_preparation_events(prepared),
+            )
             if public.status_code == 200 and request.conversation_id is not None:
                 public.headers["conversation_id"] = str(request.conversation_id)
             return public

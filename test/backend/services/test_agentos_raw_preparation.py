@@ -24,11 +24,12 @@ def preparation(mocker):
         "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "v1"}},
     })
 
-    async def preflight(request, user, tenant, language, timezone):
+    async def preflight(request, user, tenant, language, timezone, *, export_resources=False):
         assert (user, tenant, language, timezone) == (ACTOR.user_id, ACTOR.tenant_id, "zh", None)
+        assert export_resources is True
         request.query = "prefixed"
         request.__dict__.update(_debug_run_id="debug-" + "9" * 32, _runtime_metadata_snapshot={"tag": "original"})
-        return False, None
+        return SimpleNamespace(created=False, workbench=None, knowledge=None, knowledge_tree=())
 
     original = mocker.patch.object(service, "_prepare_legacy_conversation", side_effect=preflight)
     compile_run = mocker.patch.object(service, "create_agent_run_info", new=AsyncMock(return_value=snapshot))
@@ -45,9 +46,9 @@ async def test_raw_export_reuses_original_preparation_and_exact_run_arguments(pr
         requested_output_tokens=1024, tool_params={"agents": {"root": {"tools": {"search": {"top_k": 5}}}}},
     )
     result = await service.prepare_raw_debug(request, ACTOR)
-    assert result.run_id == "9" * 32 and result.debug is True
-    assert result.runtime_metadata == {"tag": "original"}
-    assert result.resource.version_no == 0
+    assert result.payload.run_id == "9" * 32 and result.payload.debug is True
+    assert result.payload.runtime_metadata == {"tag": "original"}
+    assert result.payload.resource.version_no == 0
     values = preparation.compile.await_args.kwargs
     assert values["query"] == "prefixed" and values["conversation_id"] == 0
     assert (values["override_model_id"], values["override_version_no"]) == (11, None)
@@ -60,13 +61,11 @@ async def test_raw_export_reuses_original_preparation_and_exact_run_arguments(pr
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("unsupported", ["nondebug", "knowledge", "export"])
+@pytest.mark.parametrize("unsupported", ["nondebug", "export"])
 async def test_raw_unsupported_keeps_original_payload_in_explicit_fallback(preparation, unsupported):
     request = {"query": "hello", "agent_id": 7, "is_debug": True}
     if unsupported == "nondebug":
         request["is_debug"] = False
-    elif unsupported == "knowledge":
-        request["knowledge_scope"] = {"schema_version": 1}
     else:
         preparation.compile.return_value = None
     payload = CompatibilityConversationRun(request=request, invocation="northbound")

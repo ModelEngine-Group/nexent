@@ -3908,14 +3908,15 @@ async def test_raw_northbound_preparation_over_signed_http(monkeypatch, unsuppor
         "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "fixture"}},
     })
 
-    async def preflight(request, user, tenant, language, timezone):
+    async def preflight(request, user, tenant, language, timezone, *, export_resources=False):
+        assert export_resources is True
         if tenant != actor.tenant_id:
             raise ForbiddenError("Original scope rejected")
         assert (user, language, timezone) == (actor.user_id, "zh", None)
         checked.append(request.query)
         request.query = "prefixed"
         request.__dict__.update(_debug_run_id="debug-" + "9" * 32, _runtime_metadata_snapshot={"tag": "original"})
-        return False, None
+        return SimpleNamespace(created=False, workbench=None, knowledge=None, knowledge_tree=())
 
     async def compile_snapshot(**values):
         assert (values["override_model_id"], values["override_version_no"], values["conversation_id"]) == (11, None, 0)
@@ -3980,3 +3981,134 @@ async def test_raw_northbound_preparation_over_signed_http(monkeypatch, unsuppor
     assert checked == ["hello"] and compiled == ["prefixed"]
     assert executed == ([] if unsupported else ["9" * 32])
     assert legacy == (["hello"] if unsupported else [])
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("workbench", [False, True])
+@pytest.mark.asyncio
+async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
+    from copy import deepcopy
+
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
+    from contracts.errors.exceptions import ForbiddenError
+    from management.api.agent import compatibility_dispatch
+    from management.services.agent import raw_execution, runtime_client, subscription
+    from management.services.agent.context import strip_current_time_prefix
+    from management.services.agent import workbench as workbench_service
+    from management.services.knowledge_base import scope, mount
+    from management.services.model import run_controls
+    from runtime.agentos import management_dispatch
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("scope-user", "scope-tenant")
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-scope-key")
+    reads, compiled, executed = [], [], []
+    tree = [{"agent_id": 7, "version_no": 0, "agent_name": "draft", "tools": [{
+        "tool_id": 5, "name": "search", "class_name": "KnowledgeBaseSearchTool", "source": "local",
+        "params": [{"name": "index_names", "default": ["index-default"]}],
+    }]}]
+    warning = {"source": "local", "code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE", "count": 1}
+
+    async def control(_name, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    def snapshot_tree(agent_id, tenant, version):
+        if tenant != actor.tenant_id:
+            raise ForbiddenError("Original knowledge ownership rejected")
+        assert (agent_id, tenant, version) == (7, actor.tenant_id, 0)
+        reads.append(version)
+        return deepcopy(tree)
+
+    def knowledge_scope(ids, user, tenant):
+        if (user, tenant) != (actor.user_id, actor.tenant_id):
+            raise ForbiddenError("Original knowledge ownership rejected")
+        assert ids == ["3", "4"]
+        return [{"knowledge_id": 3, "index_name": "index-a", "knowledge_name": "knowledge-a"}], [warning]
+
+    def resolve_workbench(config, *, tenant_id, is_debug, user_id):
+        if (user_id, tenant_id) != (actor.user_id, actor.tenant_id):
+            raise ForbiddenError("Original knowledge ownership rejected")
+        assert is_debug is True
+        identity = workbench_service.RuntimeAgentIdentity("root", 7, 0, "root", "Root", "PERSISTED")
+        plan = workbench_service.ResolvedAgentPlan(
+            workbench_service.PublishedRootDescriptor(identity, {}),
+            workbench_service.RootRuntimeOverlay(None, None, (), config.knowledge_scope.model_dump()), (),
+        )
+        return config, plan
+
+    async def compile_snapshot(**values):
+        assert strip_current_time_prefix(values["query"]) == "hello"
+        assert values["tool_params"].agents["draft"].tools["search"]["index_names"] == ["index-a"]
+        if workbench:
+            prepared = values["prepared_workbench"]
+            assert prepared.plan.root.identity.agent_id == 7
+            assert prepared.knowledge.local_knowledge_ids == ["3"] and prepared.knowledge.warnings == [warning]
+            assert prepared.knowledge_tools[0]["tool_id"] == 5
+        else:
+            assert values["authorized_knowledge_tools"] == {(7, 0): {"search": {"index_names": ["index-a"]}}}
+        compiled.append(values["query"])
+        return PreparedEvaluationRun.model_validate({
+            "mode": "nexent", "input": {"query": values["query"]},
+            "resource": {"agent_id": 7, "version_no": 0, "name": "draft", "description": "test",
+                         "prompt_templates": {"system_prompt": "Answer"}, "tools": []},
+            "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "fixture"}},
+        })
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Ephemeral scope preparation wrote history or used local legacy execution")
+
+    monkeypatch.setattr(subscription, "run_blocking", control)
+    monkeypatch.setattr(subscription, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(run_controls, "validate_agent_model_selection", lambda *_args: None)
+    monkeypatch.setattr(run_controls, "preflight_agent_turn_controls", lambda *_args: None)
+    monkeypatch.setattr(scope, "snapshot_runtime_knowledge_tree", snapshot_tree)
+    monkeypatch.setattr(scope, "_resolve_local_override", knowledge_scope)
+    monkeypatch.setattr(mount, "ENABLE_AIDP_KNOWLEDGE", False)
+    monkeypatch.setattr(workbench_service, "resolve_workbench_config", resolve_workbench)
+    monkeypatch.setattr(raw_execution, "create_agent_run_info", compile_snapshot)
+    monkeypatch.setattr(execution, "run_legacy_agent_stream", forbidden)
+    for name in ("create_new_conversation", "update_conversation_chat_mode_service", "update_conversation_agent_id_service",
+                 "update_conversation_knowledge_scope_service", "update_conversation_workbench_config_service",
+                 "update_conversation_workbench_and_metadata_service"):
+        monkeypatch.setattr(subscription, name, forbidden)
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_compatibility_router(
+        execution.run_agentos_compatibility, None, conversation_run=execution.run_agentos_conversation,
+    ))
+
+    @runtime.post(AgentOperation.RUN_EPHEMERAL.value)
+    async def run_prepared(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        payload = PreparedEphemeralRun.model_validate_json(request.scope[BODY_KEY])
+        assert payload.debug is True and payload.native_knowledge == (None if workbench else True)
+        executed.append(payload.run_id)
+        return StreamingResponse(iter([b'data: {"type":"final_answer","content":"answer"}\n\n']),
+                                 headers={"run_id": "debug-" + payload.run_id})
+
+    manager = create_app(enable_monitoring=False)
+    manager.include_router(compatibility_dispatch.router)
+    with serve(runtime) as runtime_url, serve(manager) as manager_url:
+        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+        selection = {"local": {"mode": "override", "knowledge_ids": ["3", "4"]}, "aidp": {"mode": "disabled"}}
+        raw = {"query": "hello", "agent_id": 7, "is_debug": True, "conversation_id": 42, "knowledge_scope": selection}
+        if workbench:
+            raw.update(entrypoint="workbench", workbench={"mode": "generic_chat", "knowledge_scope": selection})
+        response = await client.run(raw, actor.user_id, actor.tenant_id)
+        assert response.status_code == 200 and response.headers["conversation_id"] == "42"
+        frames = [json.loads(item[6:]) for item in b"".join([part async for part in response.body_iterator]).split(b"\n\n") if item]
+        assert [item["type"] for item in frames] == (["workbench_config_resolved"] if workbench else []) + ["knowledge_scope_resolved", "final_answer"]
+        assert frames[-2]["content"]["effective"]["local"]["knowledge_ids"] == ["3"]
+        assert frames[-2]["content"]["warnings"] == [warning]
+        foreign = await client.run(raw, actor.user_id, "foreign-tenant")
+        assert foreign.status_code == 403
+        assert b"Original knowledge ownership rejected" in b"".join([part async for part in foreign.body_iterator])
+    assert len(compiled) == len(executed) == 1
+    assert len(reads) == 1

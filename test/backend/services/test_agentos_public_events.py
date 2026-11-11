@@ -196,7 +196,7 @@ async def test_public_debug_selects_agentos_before_compatibility(mocker, mode):
         assert result.status_code == 200
 
     if mode == "unsupported":
-        client.run_conversation.assert_awaited_once_with(payload, "actor", "tenant")
+        client.run_conversation.assert_awaited_once_with(payload.model_copy(update={"preparation": "legacy"}), "actor", "tenant")
     else:
         client.run_conversation.assert_not_awaited()
     if mode in {"prepared", "upstream_error"}:
