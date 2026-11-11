@@ -5,7 +5,7 @@ import logging
 
 from fastapi import HTTPException
 
-from contracts.agentos import KnowledgeSearchBinding
+from contracts.agentos import KNOWLEDGE_TOOL_BINDING_PREFIX, KnowledgeSearchBinding
 from contracts.constants import environment
 from infrastructure.agent_model_config import model_record_revision, normalize_model_revision
 from infrastructure.knowledge_search import embedding_adapter_spec, knowledge_search_revision
@@ -78,11 +78,28 @@ def _authorize_indexes(binding, actor):
 
 
 def materialize_knowledge_search(bindings, actor):
-    if not bindings:
-        return {}
-    if len(bindings) != 1 or bindings[0].version != "1" or bindings[0].credential_ref is not None:
-        raise ValueError("Unsupported knowledge search tool binding")
-    binding = KnowledgeSearchBinding.model_validate(bindings[0].parameters)
+    prepared = []
+    seen = set()
+    for reference in bindings:
+        if reference.version != "1" or reference.credential_ref is not None or reference.tool_id in seen:
+            raise ValueError("Unsupported knowledge search tool binding")
+        if reference.tool_id == "knowledge_base_search":
+            catalog_name = reference.tool_id
+        elif reference.tool_id.startswith(KNOWLEDGE_TOOL_BINDING_PREFIX):
+            catalog_name = reference.tool_id.removeprefix(KNOWLEDGE_TOOL_BINDING_PREFIX)
+            if not catalog_name:
+                raise ValueError("A knowledge binding requires its catalog name")
+        else:
+            raise ValueError("Unsupported knowledge search tool binding")
+        seen.add(reference.tool_id)
+        prepared.append((reference.tool_id, catalog_name, KnowledgeSearchBinding.model_validate(reference.parameters)))
+    return {
+        tool_id: _materialize_knowledge_search_tool(binding, actor, catalog_name)
+        for tool_id, catalog_name, binding in prepared
+    }
+
+
+def _materialize_knowledge_search_tool(binding, actor, catalog_name):
     allowed = _authorize_indexes(binding, actor)
     embedding = _load_model(binding.embedding, actor.tenant_id, {"embedding", "multi_embedding"})
     adapter = None
@@ -90,7 +107,7 @@ def materialize_knowledge_search(bindings, actor):
         config, modality, slot = embedding_adapter_spec(embedding)
         adapter = build_adapter_fresh(config, modality, slot, None)
     tool = ToolConfig(
-        class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local", usage=binding.usage,
+        class_name="KnowledgeBaseSearchTool", name=catalog_name, source="local", usage=binding.usage,
         **binding.description.model_dump(),
         params=binding.model_dump(include={"index_names", "top_k", "search_mode", "rerank", "rerank_model_name"}),
         metadata={
@@ -102,4 +119,4 @@ def materialize_knowledge_search(bindings, actor):
             "vdb_core": create_elasticsearch_core(host=environment.ES_HOST, api_key=environment.ES_API_KEY) if allowed else None,
         },
     )
-    return {tool.name: tool}
+    return tool

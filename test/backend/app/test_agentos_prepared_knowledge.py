@@ -25,10 +25,13 @@ def knowledge_tool():
 @pytest.mark.parametrize(("change", "status"), [
     ("none", None), ("deny_all", None), ("revoked", 403), ("stale", 409), ("stale_model", 409), ("foreign", 404),
 ])
-def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, knowledge_tool, change, status):
+@pytest.mark.parametrize("aliased", [False, True])
+def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, knowledge_tool, change, status, aliased):
     from management.services.agent.preparation import knowledge_search
     from runtime.agentos import prepared_knowledge
 
+    if aliased:
+        knowledge_tool.name = "tenant_knowledge"
     index = {
         "knowledge_id": 7, "index_name": "kb-authorized", "tenant_id": "tenant-a", "knowledge_name": "Authorized",
         "created_by": "user-a", "embedding_model_id": 12,
@@ -87,7 +90,9 @@ def test_prepared_knowledge_search_preserves_scope_and_model_revision(mocker, kn
         vector.assert_not_called()
     else:
         info = prepared_evaluation.prepare_evaluation_run(payload, actor)
+        assert info.agent_config.tools[0].name == knowledge_tool.name
         tool = NexentAgent.create_local_tool(info, info.agent_config.tools[0])
+        assert tool.name == "knowledge_base_search"
         assert tool._internal_document_paths == ["reports/approved.txt"]
         denied_scope = tool._resolve_search_scope(["Denied"])
         assert denied_scope.permission_denied_scope == ["kb-denied"]
@@ -279,3 +284,44 @@ def test_prepared_model_revision_matches_database_list_and_id_formats(mocker):
     assert prepared_evaluation.prepare_evaluation_run(prepared, actor).model_config_list[0] == selected
     prepared.models.llm.revision = "2026-11-10T13:40:00"
     assert prepared_evaluation.prepare_evaluation_run(prepared, actor).model_config_list[0] == selected
+
+
+@pytest.mark.parametrize("binding_ids", [["sdk_knowledge:"], ["sdk_knowledge:tenant", "sdk_knowledge:tenant"]])
+def test_knowledge_alias_shape_is_rejected_before_storage_access(mocker, binding_ids):
+    from contracts.agentos import ToolBinding
+    from runtime.agentos import prepared_knowledge
+
+    lookup = mocker.patch.object(prepared_knowledge, "read_knowledge_search_records")
+    if len(binding_ids) == 1:
+        params = {}
+    else:
+        params = {"description": {}, "index_names": [], "allowed": [], "display_name_to_index": {}}
+    with pytest.raises(ValueError):
+        prepared_knowledge.materialize_knowledge_search(
+            [ToolBinding(tool_id=value, version="1", parameters=params) for value in binding_ids],
+            ServicePrincipal("user-a", "tenant-a"),
+        )
+    lookup.assert_not_called()
+
+
+def test_distinct_knowledge_catalog_aliases_keep_independent_sdk_configuration(mocker):
+    from types import SimpleNamespace
+    from contracts.agentos import ToolBinding
+    from runtime.agentos import prepared_knowledge
+
+    storage = mocker.patch.object(prepared_knowledge, "read_knowledge_search_records")
+    models = mocker.patch.object(prepared_knowledge, "get_model_by_model_id")
+    vector = mocker.patch.object(prepared_knowledge, "create_elasticsearch_core")
+    references = [ToolBinding(tool_id="sdk_knowledge:" + name, version="1", parameters={
+        "description": {}, "index_names": [], "allowed": [], "display_name_to_index": {}, "top_k": top_k,
+    }) for name, top_k in [("first", 3), ("second", 7)]]
+    actual = prepared_knowledge.materialize_knowledge_search(references, ServicePrincipal("user-a", "tenant-a"))
+    assert list(actual) == [item.tool_id for item in references]
+    assert [(tool.name, tool.params["top_k"]) for tool in actual.values()] == [("first", 3), ("second", 7)]
+    for config in actual.values():
+        sdk = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
+        assert sdk.name == "knowledge_base_search"
+        assert sdk._resolve_search_scope(None).used_scope == []
+    storage.assert_not_called()
+    models.assert_not_called()
+    vector.assert_not_called()

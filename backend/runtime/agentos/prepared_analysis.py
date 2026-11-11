@@ -51,7 +51,7 @@ def materialize_analysis_tools(bindings: list[ToolBinding], actor: ServicePrinci
     for binding in bindings:
         if binding.version != "1" or binding.credential_ref is not None or binding.tool_id in tools:
             raise ValueError("Unsupported analysis tool binding")
-        kind = EvaluationAnalysisTool(binding.tool_id)
+        kind, catalog_name = EvaluationAnalysisTool.binding_identity(binding.tool_id)
         settings = AnalysisToolBinding.model_validate(binding.parameters)
         model = _analysis_adapter(kind, settings, actor)
         metadata = {"storage_client": minio_client, "validate_url_access": validate}
@@ -59,8 +59,8 @@ def materialize_analysis_tools(bindings: list[ToolBinding], actor: ServicePrinci
             metadata.update(llm_model=model, data_process_service_url=environment.DATA_PROCESS_SERVICE)
         else:
             metadata["vlm_model"] = model
-        tools[kind.value] = ToolConfig(
-            class_name=kind.class_name, name=kind.value, source="local", usage=settings.usage,
+        tools[binding.tool_id] = ToolConfig(
+            class_name=kind.class_name, name=catalog_name, source="local", usage=settings.usage,
             params={"selected_model_id": settings.selected_model_id}, metadata=metadata,
             **settings.description.model_dump(),
         )

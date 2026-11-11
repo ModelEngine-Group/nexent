@@ -13,6 +13,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from contracts.agentos import (
+    ANALYSIS_TOOL_BINDING_PREFIX,
+    KNOWLEDGE_TOOL_BINDING_PREFIX,
     AgentRunReference, EvaluationAgentResult, EvaluationAnalysisTool, EvaluationFileTool, FileToolDescription,
     ParallelExecutorBinding, PreparedAgentRun, PreparedEphemeralRun, PreparedEvaluationRun,
     WorkbenchDebugSkillLookup, WorkbenchSkillLookup,
@@ -226,10 +228,12 @@ def _materialize_agent(
         [binding for binding in resource.tools if binding.tool_id == "parallel_executor"],
     ))
     local_tools.update(materialize_knowledge_search(
-        [binding for binding in resource.tools if binding.tool_id == "knowledge_base_search"], actor,
+        [binding for binding in resource.tools if binding.tool_id == "knowledge_base_search"
+         or binding.tool_id.startswith(KNOWLEDGE_TOOL_BINDING_PREFIX)], actor,
     ))
     local_tools.update(materialize_analysis_tools(
-        [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)], actor,
+        [binding for binding in resource.tools if binding.tool_id in set(EvaluationAnalysisTool)
+         or binding.tool_id.startswith(ANALYSIS_TOOL_BINDING_PREFIX)], actor,
     ))
     ordered_tools = {
         "mcp": iter(mcp.materialize(resource, workbench_tools=mounted_tools)),

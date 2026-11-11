@@ -23,6 +23,8 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Knowledge search catalog aliases retain index authorization, document filtering, model revision and actual SDK search behavior through prepared execution.
+    - Analysis catalog aliases retain class-based SDK execution, tenant model revision and object ACL while Management compiles a pure descriptor without creating legacy inference adapters.
     - Nested Agent sandbox configuration crosses prepared execution without changing the root-owned effective sandbox or falling back to legacy execution.
     - Conversation policy and request configuration helpers load without the legacy execution facade or Runtime source while preserving preflight, scope, metadata, Workbench and message semantics.
     - Strict snapshot compilation reports safe resource, model, identity or input failure stages with the original cause; the temporary exporter preserves None fallback and HTTP authorization errors.

@@ -323,11 +323,28 @@ class FileToolDescription(RunSpecModel):
     output_type: str | None = None
 
 
+ANALYSIS_TOOL_BINDING_PREFIX = "sdk_analysis:"
+KNOWLEDGE_TOOL_BINDING_PREFIX = "sdk_knowledge:"
+
+
 class EvaluationAnalysisTool(str, Enum):
     TEXT = "analyze_text_file"
     IMAGE = "analyze_image"
     AUDIO = "analyze_audio"
     VIDEO = "analyze_video"
+
+    @classmethod
+    def for_class_name(cls, class_name):
+        return next((kind for kind in cls if kind.class_name == class_name), None)
+
+    @classmethod
+    def binding_identity(cls, tool_id):
+        if not tool_id.startswith(ANALYSIS_TOOL_BINDING_PREFIX):
+            return cls(tool_id), tool_id
+        kind, separator, name = tool_id.removeprefix(ANALYSIS_TOOL_BINDING_PREFIX).partition("/")
+        if not separator or not name:
+            raise ValueError("An analysis binding requires its kind and catalog name")
+        return cls(kind), name
 
     @property
     def class_name(self) -> str:

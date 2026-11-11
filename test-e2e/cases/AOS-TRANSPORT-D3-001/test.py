@@ -792,7 +792,23 @@ async def test_knowledge_legacy_top_k_over_signed_agentos(monkeypatch, tmp_path,
     await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, legacy_top_k=top_k)
 
 
-async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *, legacy_top_k=4):
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("analysis_name", ["tenant_image", "mcp"])
+@pytest.mark.asyncio
+async def test_analysis_catalog_alias_over_signed_agentos(monkeypatch, tmp_path, analysis_name):
+    await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, analysis_name=analysis_name)
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("knowledge_name", ["tenant_kb", "mcp"])
+@pytest.mark.asyncio
+async def test_knowledge_catalog_alias_over_signed_agentos(monkeypatch, tmp_path, knowledge_name):
+    await _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, knowledge_name=knowledge_name)
+
+
+async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *, legacy_top_k=4, analysis_name="analyze_image", knowledge_name="knowledge_base_search"):
     from types import SimpleNamespace
     from infrastructure import agent_attachments
     from infrastructure.object_storage.client import minio_client
@@ -996,7 +1012,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     monkeypatch.setattr(prepared_knowledge, "build_adapter_fresh", lambda *args: object())
     monkeypatch.setattr(prepared_knowledge, "create_elasticsearch_core", lambda **kwargs: SimpleNamespace(accurate_search=accurate_search))
     kb_tool = ToolConfig(
-        class_name="KnowledgeBaseSearchTool", name="knowledge_base_search", source="local",
+        class_name="KnowledgeBaseSearchTool", name=knowledge_name, source="local",
         params={"index_names": ["kb-open", "kb-blocked"], "search_mode": "accurate", "top_k": legacy_top_k},
     )
     assert knowledge_search.prepare_knowledge_search(kb_tool, "user-a", "tenant-a", ["reports/allowed.txt"])
@@ -1016,7 +1032,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
     monkeypatch.setattr(prepared_analysis, "get_model_by_model_id", read_media_model)
     monkeypatch.setattr(prepared_analysis, "get_adapter_from_config", create_media_adapter)
     image_tool = ToolConfig(
-        class_name="AnalyzeImageTool", name="analyze_image", source="local", params={"selected_model_id": "93"},
+        class_name="AnalyzeImageTool", name=analysis_name, source="local", params={"selected_model_id": "93"},
     )
     assert analysis.prepare_analysis_tool(image_tool, "tenant-a")
 
@@ -1041,8 +1057,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         by_name = {tool.name: tool for tool in info.agent_config.tools}
         assert list(by_name) == [
             "download_from_s3", "catalog_lookup", "parallel_executor",
-            "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", "knowledge_base_search",
-            "analyze_image", "dify_search", "ind_aidp_search",
+            "run_skill_script", "read_skill_md", "read_skill_config", "skill_lookup", knowledge_name,
+            analysis_name, "dify_search", "ind_aidp_search",
         ]
         parallel = NexentAgent.create_local_tool(None, by_name["parallel_executor"])
         assert parallel.default_timeout_seconds == 47
@@ -1057,7 +1073,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         ):
             mcp = NexentAgent.create_tool(sdk, by_name[name])
             assert mcp.forward(scope="model-value", limit=1) == expected
-        knowledge = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["knowledge_base_search"])
+        knowledge = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name[knowledge_name])
+        assert knowledge.name == "knowledge_base_search"
         result = knowledge.forward("facts", ["Blocked"])
         assert "authorized-document" in result and "secret-document" not in result
         assert "no read permission" in result
@@ -1083,7 +1100,8 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
         assert knowledge_queries == original_queries == [{
             "index_names": ["kb-open"], "query_text": "facts", "top_k": original.top_k,
         }]
-        image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["analyze_image"])
+        image = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name[analysis_name])
+        assert image.name == "analyze_image"
         assert image.selected_model_id == 93 and image.vlm_model is media_adapter
         skill_search = NexentAgent.create_local_tool(SimpleNamespace(observer=None), by_name["dify_search"])
         assert (skill_search.api_key, skill_search.dataset_ids, skill_search.top_k) == (

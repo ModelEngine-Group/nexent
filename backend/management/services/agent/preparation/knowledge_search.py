@@ -37,7 +37,7 @@ def _rerank_bindings(tenant_id, model_name):
 
 def prepare_knowledge_search(tool, user_id: str, tenant_id: str, document_paths) -> bool:
     """Resolve a serializable descriptor without initializing a model or vector client."""
-    if tool.name != "knowledge_base_search" or tool.source != "local":
+    if tool.class_name != "KnowledgeBaseSearchTool" or tool.source != "local":
         return False
     params = tool.params or {}
     if set(params) - _SEARCH_PARAMS:

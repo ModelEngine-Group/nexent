@@ -15,6 +15,8 @@ from contracts.errors.exceptions import SnapshotCompilationError
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import (
+    ANALYSIS_TOOL_BINDING_PREFIX,
+    KNOWLEDGE_TOOL_BINDING_PREFIX,
     AgentResource, AgentRunReference, AnalysisToolBinding, EvaluationAgentOptions, EvaluationAnalysisTool, EvaluationAgentRun, EvaluationFileTool, EvaluationSkillTool,
     ExternalA2AExecutionBinding, FileToolDescription, KnowledgeSearchBinding, MCPExecutionBinding, ModelBindings, ParallelExecutorBinding,
     PreparedAgentRun, PreparedConversationHistory, PreparedConversationScope, PreparedEphemeralRun, PreparedEvaluationRun, PreparedHistoryCheckpoint, RunAttachment, RunAttachmentHistory, RunHistoryMessage, RunInput, RunModelBinding, RunModelOverrides,
@@ -519,11 +521,12 @@ def _builtin_binding(tool):
 
 
 def _export_analysis_binding(tool):
-    builtin = EvaluationAnalysisTool(tool.name)
-    if tool.class_name != builtin.class_name or tool.source != "local":
+    builtin = EvaluationAnalysisTool.for_class_name(tool.class_name)
+    if builtin is None or tool.source != "local":
         raise ValueError("Unsupported analysis tool configuration")
     descriptor = AnalysisToolBinding.model_validate((tool.metadata or {}).get("prepared_analysis"))
-    return ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
+    tool_id = builtin.value if tool.name == builtin.value else f"{ANALYSIS_TOOL_BINDING_PREFIX}{builtin.value}/{tool.name}"
+    return ToolBinding(tool_id=tool_id, version="1", parameters=descriptor.model_dump(mode="json"))
 
 
 def _export_parallel_executor_binding(tool):
@@ -735,14 +738,15 @@ def _export_resource(
             binding = _export_mcp_binding(tool, candidates, mcp_servers, agent, tenant_id, tool_servers)
         elif tool.source == "langchain":
             binding = export_langchain_tool(tool, langchain_candidates, plugins, *local_scope)
-        elif tool.name == "knowledge_base_search" and tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
+        elif tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
             descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
-            binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
+            tool_id = tool.name if tool.name == "knowledge_base_search" else KNOWLEDGE_TOOL_BINDING_PREFIX + tool.name
+            binding = ToolBinding(tool_id=tool_id, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
             binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
         elif tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES:
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language, user_id=user_id)
-        elif tool.name in set(EvaluationAnalysisTool):
+        elif EvaluationAnalysisTool.for_class_name(tool.class_name) is not None:
             binding = _export_analysis_binding(tool)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)

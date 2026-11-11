@@ -8,9 +8,9 @@ from nexent.core.agents.agent_model import ToolConfig
 
 
 def prepare_analysis_tool(tool: ToolConfig, tenant_id: str) -> bool:
-    kind = EvaluationAnalysisTool(tool.name)
+    kind = EvaluationAnalysisTool.for_class_name(tool.class_name)
     params = tool.params or {}
-    if tool.source != "local" or tool.class_name != kind.class_name or set(params) - {"selected_model_id"}:
+    if kind is None or tool.source != "local" or set(params) - {"selected_model_id"}:
         return False
     selected = params.get("selected_model_id")
     if selected is not None and type(selected) not in {int, str}:

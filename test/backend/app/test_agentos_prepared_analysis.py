@@ -20,14 +20,17 @@ from test.backend.app.test_agentos_prepared_evaluation import model_record
     ("analyze_audio", "AnalyzeAudioTool", "vlm", "vlm4"),
     ("analyze_video", "AnalyzeVideoTool", "vlm", "vlm3"),
 ])
+@pytest.mark.parametrize("aliased", [False, True])
 @pytest.mark.asyncio
-async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(mocker, name, class_name, modality, slot):
+async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(mocker, name, class_name, modality, slot, aliased):
     from contracts.constants import environment
     from infrastructure.object_storage import client as storage
     from management.services.agent.preparation import tools
     from management.services.model import adapter
     from runtime.agentos import prepared_analysis
 
+    canonical_name = name
+    name = "tenant_" + name if aliased else name
     model = model_record(model_id=9, model_type=slot, api_key="private-analysis-key")
     raw = {"name": name, "class_name": class_name, "source": "local", "params": [
         {"name": "selected_model_id", "default": "9"},
@@ -52,11 +55,13 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
     mocker.patch.object(environment, "DATA_PROCESS_SERVICE", "http://runtime-processing")
     rebound = prepared_analysis.materialize_analysis_tools(
         [ToolBinding.model_validate_json(encoded)], ServicePrincipal("user-a", "tenant-a"),
-    )[name]
+    )[reference.tool_id]
+    assert rebound.name == name
     runtime_model.assert_called_once_with(9, "tenant-a")
     assert create_adapter.call_args.args == (model, modality, slot, "tenant-a")
     assert rebound.metadata["storage_client"] is storage.minio_client
     tool_instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
+    assert tool_instance.name == canonical_name
     assert tool_instance.selected_model_id == 9
     assert (tool_instance.llm_model if slot == "llm" else tool_instance.vlm_model) is create_adapter.return_value
     if slot == "llm":
@@ -71,14 +76,15 @@ async def test_media_analysis_compiler_uses_model_reference_and_runtime_storage(
 @pytest.mark.parametrize(("change", "status"), [
     ("gone", 404), ("other_tenant", 404), ("revision", 409), ("type", 409),
 ])
-def test_media_analysis_refuses_invalid_model_before_adapter_creation(mocker, change, status):
+@pytest.mark.parametrize("aliased", [False, True])
+def test_media_analysis_refuses_invalid_model_before_adapter_creation(mocker, change, status, aliased):
     from management.services.agent.preparation import analysis
     from management.services.model import adapter
     from runtime.agentos import prepared_analysis
 
     record = model_record(model_id=9, model_type="vlm")
     defaults = mocker.patch.object(adapter.tenant_config_manager, "get_model_config", return_value=record)
-    tool = ToolConfig(name="analyze_image", class_name="AnalyzeImageTool", source="local", params={})
+    tool = ToolConfig(name="tenant_image" if aliased else "analyze_image", class_name="AnalyzeImageTool", source="local", params={})
     assert analysis.prepare_analysis_tool(tool, "tenant-a")
     defaults.assert_called_once()
     assert defaults.call_args.kwargs["tenant_id"] == "tenant-a"
@@ -108,3 +114,15 @@ def test_media_analysis_keeps_missing_default_model(mocker):
     rebound = prepared_analysis.materialize_analysis_tools([reference], ServicePrincipal("user-a", "tenant-a"))[tool.name]
     assert rebound.metadata["vlm_model"] is None
     lookup.assert_not_called()
+
+
+@pytest.mark.parametrize("tool_id", ["sdk_analysis:", "sdk_analysis:analyze_image/", "sdk_analysis:unknown/image"])
+def test_malformed_analysis_alias_is_rejected_before_adapter_creation(mocker, tool_id):
+    from runtime.agentos import prepared_analysis
+
+    adapter = mocker.patch.object(prepared_analysis, "get_adapter_from_config")
+    with pytest.raises(ValueError):
+        prepared_analysis.materialize_analysis_tools(
+            [ToolBinding(tool_id=tool_id, version="1")], ServicePrincipal("user-a", "tenant-a"),
+        )
+    adapter.assert_not_called()

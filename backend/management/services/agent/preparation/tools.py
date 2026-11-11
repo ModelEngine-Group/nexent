@@ -509,7 +509,7 @@ async def create_tool_config_list(
             if kb_overrides and "document_paths" in kb_overrides:
                 document_paths = kb_overrides.get("document_paths")
 
-        if portable_evaluation and tool_config.name in set(EvaluationAnalysisTool):
+        if portable_evaluation and EvaluationAnalysisTool.for_class_name(tool_config.class_name) is not None:
             from management.services.agent.preparation.analysis import prepare_analysis_tool
 
             if prepare_analysis_tool(tool_config, tenant_id):

@@ -7,6 +7,10 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-69:
+  - test_knowledge_catalog_alias_over_signed_agentos
+  AC-68:
+  - test_analysis_catalog_alias_over_signed_agentos
   AC-67:
   - test_raw_model_profile_reaches_sdk_provider_over_signed_http
   AC-66:
