@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-66:
+  - test_local_catalog_name_over_signed_agentos
   AC-65:
   - test_background_without_automation_record_over_signed_agentos
   AC-64:

@@ -17,8 +17,9 @@ from infrastructure.ind_aidp_images import (
     create_ind_aidp_image_url_builder, ind_aidp_skill_revision, ind_aidp_workbench_revision,
 )
 from infrastructure.local_tool_execution import (
-    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_TOOL_CLASSES, apply_local_parameter_overrides, apply_local_search_overrides, build_local_tool,
-    local_tool_rerank_name, local_tool_revision,
+    LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_BINDING_PREFIX, LOCAL_SDK_TOOL_CLASSES,
+    apply_local_parameter_overrides, apply_local_search_overrides, build_local_tool,
+    local_tool_binding_name, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.local_tool_overrides import PREFIX, open_tool_overrides
 from infrastructure.rdb.local_tool_records import read_bound_local_tools, read_shared_aidp_catalog_tool, read_skill_derived_local_tools
@@ -76,8 +77,10 @@ def materialize_local_tools(
     references = {}
     schemas = {"1": StoredLocalToolBinding, "2": SkillDerivedLocalToolBinding, "4": SkillDerivedLocalToolBinding}
     for binding in resource.tools:
-        if binding.tool_id not in LOCAL_SDK_TOOL_CLASSES:
+        if binding.tool_id not in LOCAL_SDK_TOOL_CLASSES and not binding.tool_id.startswith(LOCAL_SDK_BINDING_PREFIX):
             continue
+        if not local_tool_binding_name(binding.tool_id):
+            raise ValueError("A local SDK tool requires its catalog name")
         schema = schemas.get(binding.version)
         if binding.tool_id == "aidp_search" and binding.version == "3" and allow_scoped_aidp:
             schema = ScopedSharedAidpBinding
@@ -95,8 +98,8 @@ def materialize_local_tools(
 
     parameter_refs = {binding.tool_id: binding.credential_ref for binding in resource.tools}
     scope = (resource.agent_id, resource.version_no, actor.tenant_id)
-    direct_names = [name for name, (version, _) in references.items() if version == "1"]
-    derived_names = [name for name, (version, _) in references.items() if version == "2"]
+    direct_names = [local_tool_binding_name(name) for name, (version, _) in references.items() if version == "1"]
+    derived_names = [local_tool_binding_name(name) for name, (version, _) in references.items() if version == "2"]
     direct = read_bound_local_tools(*scope, direct_names) if direct_names else []
     try:
         derived = read_skill_derived_local_tools(*scope, derived_names) if derived_names else []
@@ -108,7 +111,8 @@ def materialize_local_tools(
     skill_ids = {ref.instance_id for ref in resource.skill_refs} if derived_names else set()
     mounted_skill_ids = {ref.skill_id for ref in resource.workbench_skill_refs} if mounted else set()
     tools = {}
-    for name, (version, reference) in references.items():
+    for binding_id, (version, reference) in references.items():
+        name = local_tool_binding_name(binding_id)
         if isinstance(reference, ScopedSharedAidpBinding):
             if require_scoped_aidp_instance:
                 bound = read_bound_local_tools(resource.agent_id, resource.version_no, actor.tenant_id, [name])
@@ -121,7 +125,7 @@ def materialize_local_tools(
                     ]
                 if len(bound) != 1 or bound[0]["tool_id"] != reference.catalog_tool_id:
                     raise HTTPException(status_code=404, detail={"code": "AGENTOS_LOCAL_TOOL_NOT_FOUND"})
-            tools[name] = _materialize_scoped_shared_aidp(reference, resource, actor, language)
+            tools[binding_id] = _materialize_scoped_shared_aidp(reference, resource, actor, language)
             continue
         if isinstance(reference, StoredLocalToolBinding):
             row = by_instance.get((reference.instance_id, name))
@@ -141,7 +145,7 @@ def materialize_local_tools(
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"}) from exc
         if not compare_digest(revision, reference.revision):
             raise HTTPException(status_code=409, detail={"code": "AGENTOS_LOCAL_TOOL_REVISION_MISMATCH"})
-        parameter_ref = parameter_refs[name]
+        parameter_ref = parameter_refs[binding_id]
         if parameter_ref is not None:
             if reference.search_overrides is not None:
                 raise ValueError("Conflicting local tool parameter overrides")
@@ -157,7 +161,11 @@ def materialize_local_tools(
             raise ValueError("Unexpected local SDK tool reranker binding")
         if tool.class_name in LOCAL_RERANK_TOOL_CLASSES:
             tool.metadata = {"rerank_model": _reranker(reference, actor.tenant_id) if rerank_name else None}
-        elif name == "ind_aidp_search":
+        elif tool.class_name == "IndependentAidpSearchTool":
+            if version == "4" and (workbench_lookup is None or (
+                workbench_lookup.agent_id, workbench_lookup.agent_version
+            ) != (resource.agent_id, resource.version_no)):
+                raise ValueError("Mounted independent AIDP requires a Workbench run reference")
             skill_revision = None
             if version == "4":
                 skill_revision = ind_aidp_workbench_revision(
@@ -172,7 +180,7 @@ def materialize_local_tools(
                 tool_id=row["tool_id"], aidp_tenant_id=tool.params.get("tenant_id") or "aidp",
                 skill_revision=skill_revision, workbench_lookup=workbench_lookup if version == "4" else None,
             )}
-        elif name == "aidp_search":
+        elif tool.class_name == "AidpSearchTool":
             _bind_shared_aidp_access(tool, actor)
-        tools[name] = tool
+        tools[binding_id] = tool
     return tools

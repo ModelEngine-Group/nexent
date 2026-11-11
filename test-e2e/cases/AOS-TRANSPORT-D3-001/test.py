@@ -532,7 +532,16 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
     assert len(scoped_runs) == 2 and all(events[-1]["content"] == "done" for events in scoped_runs)
 
 
-async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog_name", ["tenant_search", "mcp", "analyze_image"])
+async def test_local_catalog_name_over_signed_agentos(monkeypatch, tmp_path, catalog_name):
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-local-tool-alias-secret")
+    await _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, catalog_name=catalog_name)
+
+
+async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, catalog_name="dify_search"):
     from fastapi import Request, Response
 
     from infrastructure import ind_aidp_images, langchain_plugins
@@ -602,7 +611,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
     async def run(info, thread_manager):
         dify_config, plugin_config, aidp_config, workspace_config = info.agent_config.tools
         assert (dify_config.name, plugin_config.name, aidp_config.name, workspace_config.name) == (
-            "dify_search", "fixture_double", "ind_aidp_search", "create_file",
+            catalog_name, "fixture_double", "ind_aidp_search", "create_file",
         )
         assert info.model_config_list[0].extra_body == {"provider_setting": "local-private-model-body"}
         create_file = NexentAgent.create_local_tool(SimpleNamespace(observer=None), workspace_config)
@@ -610,6 +619,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert (tool_workspace / "agentos.txt").read_text(encoding="utf-8") == "workspace tool"
         assert NexentAgent.create_langchain_tool(None, plugin_config).forward(value=7) == 14
         tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), dify_config)
+        assert tool.name == "dify_search"
         answer = await asyncio.to_thread(tool.forward, "fixture query")
         assert "scoped Dify result" in answer
         observer = SimpleNamespace(add_message=capture_picture)
@@ -631,7 +641,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
 
     with serve(provider) as provider_url, serve(runtime) as runtime_url:
         row = {
-            "tool_instance_id": 23, "tool_id": 5, "name": "dify_search", "class_name": "DifySearchTool",
+            "tool_instance_id": 23, "tool_id": 5, "name": catalog_name, "class_name": "DifySearchTool",
             "source": "local", "description": "Provider search", "usage": None, "inputs": None,
             "output_type": "string", "instance_params": {"top_k": 2},
             "params": [{"name": name, "default": value} for name, value in {
@@ -669,7 +679,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         dify_tool, plugin_tool = await tools.create_tool_config_list(
             8, "tenant-a", "user-a", version_no=4, language="en", portable_evaluation=True,
             tool_params={"agents": {"eval": {"tools": {
-                "dify_search": {"top_k": 7}, "fixture_double": {"value": 99},
+                catalog_name: {"top_k": 7}, "fixture_double": {"value": 99},
             }}}},
         )
 
@@ -688,7 +698,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(independent_aidp_proxy, "query_tools_by_ids", lambda ids: [aidp_row] if ids == [6] else [])
 
         def read_tools(agent_id, version_no, tenant_id, names):
-            assert (agent_id, version_no, names) == (8, 4, ["dify_search", "ind_aidp_search", "create_file"])
+            assert (agent_id, version_no, names) == (8, 4, [catalog_name, "ind_aidp_search", "create_file"])
             return enabled if tenant_id == "tenant-a" else []
 
         for module in (evaluation_snapshot, prepared_local_tool):
@@ -709,7 +719,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
             agent_model_overrides=model_overrides,
         )
         assert isinstance(prepared, PreparedEvaluationRun)
-        search = next(tool for tool in prepared.resource.tools if tool.tool_id == "dify_search")
+        search = next(tool for tool in prepared.resource.tools if tool.tool_id == (catalog_name if catalog_name == "dify_search" else "sdk_local:" + catalog_name))
         assert search.parameters["search_overrides"] == {"top_k": 7}
         for secret in (
             provider_url, "synthetic-runtime-dify-key", "fixture-private-dataset",
@@ -729,7 +739,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path):
         assert image == (b"fixture-png", "image/png", "private, max-age=3600")
         assert next(tool for tool in prepared.resource.tools if tool.tool_id == "langchain").version == "1"
         invalid = prepared.model_copy(deep=True)
-        tuning = next(tool for tool in invalid.resource.tools if tool.tool_id == "dify_search")
+        tuning = next(tool for tool in invalid.resource.tools if tool.tool_id == (catalog_name if catalog_name == "dify_search" else "sdk_local:" + catalog_name))
         tuning.parameters["search_overrides"]["api_key"] = "invalid-request-key"
         with pytest.raises(RuntimeUpstreamError) as invalid_override:
             await client.run_prepared_evaluation(invalid, "user-a", "tenant-a")

@@ -641,6 +641,20 @@ class StorageObjectConflictError(ValueError):
     """Raised when an object identity is already bound to different accounting data."""
 
 
+class SnapshotCompilationError(Exception):
+    """Keep safe compiler diagnostics separate from the original failure cause."""
+
+    def __init__(self, stage: str, cause: Exception):
+        self.stage = stage
+        self.error_type = type(cause).__name__
+        self.category = (
+            "dependency_io" if isinstance(cause, OSError) else
+            "unresolved" if isinstance(cause, LookupError) else
+            "compiler" if isinstance(cause, TypeError) else "contract"
+        )
+        super().__init__(f"Snapshot compilation failed at {stage} ({self.category}, {self.error_type})")
+
+
 class AccountConflictError(Exception):
     """An account email or stable identity conflicts with an existing record."""
 

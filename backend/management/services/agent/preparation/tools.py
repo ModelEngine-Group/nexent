@@ -20,7 +20,7 @@ from contracts.tool import ToolParamsRequest
 from infrastructure.agent_tool_config import PLAN_TOOL_NAMES, build_plan_tool_configs
 from infrastructure.ind_aidp_images import create_ind_aidp_image_url_builder
 from infrastructure.local_tool_execution import (
-    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_RERANK_TOOL_CLASSES,
+    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_RERANK_TOOL_CLASSES, LOCAL_SDK_CLASS_NAMES,
     LOCAL_SEARCH_TUNING_FIELDS, LOCAL_SEARCH_TUNING_METADATA,
 )
 from infrastructure.mcp_execution import MCP_ARGUMENT_OVERRIDES
@@ -459,7 +459,9 @@ async def create_tool_config_list(
         if portable_evaluation and tool_config.source == "local" and effective_override_params:
             key = (
                 LOCAL_SEARCH_TUNING_METADATA
-                if effective_override_params.keys() <= LOCAL_SEARCH_TUNING_FIELDS.get(tool_config.name, set())
+                if effective_override_params.keys() <= LOCAL_SEARCH_TUNING_FIELDS.get(
+                    LOCAL_SDK_CLASS_NAMES.get(tool_config.class_name, tool_config.name), set(),
+                )
                 else LOCAL_PARAMETER_OVERRIDES_METADATA
             )
             tool_config.metadata = {key: effective_override_params}

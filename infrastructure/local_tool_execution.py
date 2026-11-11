@@ -35,6 +35,8 @@ LOCAL_SDK_TOOL_CLASSES = {
     "move_item": "MoveItemTool",
     "terminal": "TerminalTool",
 }
+LOCAL_SDK_CLASS_NAMES = {value: key for key, value in LOCAL_SDK_TOOL_CLASSES.items()}
+LOCAL_SDK_BINDING_PREFIX = "sdk_local:"
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 LOCAL_SEARCH_TUNING_METADATA = "agentos_local_search_overrides"
 LOCAL_PARAMETER_OVERRIDES_METADATA = "agentos_local_parameter_overrides"
@@ -51,6 +53,16 @@ LOCAL_SEARCH_TUNING_FIELDS = {
 }
 
 
+def local_tool_binding_id(tool: ToolConfig) -> str:
+    if LOCAL_SDK_TOOL_CLASSES.get(tool.name) == tool.class_name:
+        return tool.name
+    return LOCAL_SDK_BINDING_PREFIX + tool.name
+
+
+def local_tool_binding_name(binding_id: str) -> str:
+    return binding_id.removeprefix(LOCAL_SDK_BINDING_PREFIX)
+
+
 def catalog_tool_parameters(row: dict) -> dict:
     overrides = row["instance_params"] or {}
     return {
@@ -61,14 +73,15 @@ def catalog_tool_parameters(row: dict) -> dict:
 
 def build_local_tool(row: dict, language: str, description_zh: str | None, inputs: str | None) -> ToolConfig:
     name = row["name"]
-    if row["source"] != "local" or LOCAL_SDK_TOOL_CLASSES.get(name) != row["class_name"]:
+    canonical = LOCAL_SDK_CLASS_NAMES.get(row["class_name"])
+    if row["source"] != "local" or canonical is None:
         raise ValueError("Unsupported local SDK tool")
     params = catalog_tool_parameters(row)
-    if name == "deepseek_search":
+    if canonical == "deepseek_search":
         params.pop("localization", None)
         params.pop("max_content_chars", None)
         params["language"] = language
-    elif name == "aidp_search":
+    elif canonical == "aidp_search":
         params = shared_aidp_parameters(params)
     return ToolConfig(
         name=name, class_name=row["class_name"], source="local", description=row["description"],
@@ -86,13 +99,14 @@ def apply_local_search_overrides(tool: ToolConfig, overrides: LocalSearchOverrid
     if overrides is None:
         return tool
     values = overrides.model_dump(exclude_unset=True)
-    if values.keys() - LOCAL_SEARCH_TUNING_FIELDS.get(tool.name, set()):
+    canonical = LOCAL_SDK_CLASS_NAMES.get(tool.class_name)
+    if values.keys() - LOCAL_SEARCH_TUNING_FIELDS.get(canonical, set()):
         raise ValueError("Unsupported local search override")
     if any(value is None for name, value in values.items() if name != "score_threshold"):
         raise ValueError("Local search override requires a value")
-    if tool.name == "deepseek_search" and values.get("max_results", 0) > 50:
+    if canonical == "deepseek_search" and values.get("max_results", 0) > 50:
         raise ValueError("DeepSeek search supports up to 50 results")
-    if tool.name == "ragflow_search" and values.get("similarity_threshold", 0) < 0:
+    if canonical == "ragflow_search" and values.get("similarity_threshold", 0) < 0:
         raise ValueError("RAGFlow similarity threshold must be nonnegative")
     return tool.model_copy(update={"params": {**tool.params, **values}})
 
@@ -120,10 +134,11 @@ def local_tool_revision(tenant_id: str, agent_id: int, version_no: int, row: dic
 def apply_local_parameter_overrides(tool: ToolConfig, parameters: dict) -> ToolConfig:
     """Retain the compiler's run-language and shared-AIDP ownership rules."""
     params = {**tool.params, **parameters}
-    if tool.name == "deepseek_search":
+    canonical = LOCAL_SDK_CLASS_NAMES.get(tool.class_name)
+    if canonical == "deepseek_search":
         params.pop("localization", None)
         params.pop("max_content_chars", None)
         params["language"] = tool.params["language"]
-    elif tool.name == "aidp_search":
+    elif canonical == "aidp_search":
         params = shared_aidp_parameters(params)
     return tool.model_copy(update={"params": params})

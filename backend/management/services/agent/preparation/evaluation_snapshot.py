@@ -2,13 +2,16 @@
 """Export authorized AgentOS snapshots from the Management compiler."""
 
 import json
+import logging
 from dataclasses import asdict, dataclass
-from functools import cache
+from functools import cache, wraps
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic_core import PydanticSerializationError
+
+from contracts.errors.exceptions import SnapshotCompilationError
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import (
@@ -41,7 +44,7 @@ from infrastructure.agent_tool_config import (
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
 )
-from infrastructure.local_tool_execution import LOCAL_SDK_TOOL_CLASSES
+from infrastructure.local_tool_execution import LOCAL_SDK_CLASS_NAMES
 from infrastructure.mcp_execution import (
     MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
     mcp_execution_revision, select_mcp_server,
@@ -704,7 +707,7 @@ def _export_resource(
     mcp_servers = read_servers(tenant_id) if mcp_names else []
     local_names = [
         tool.name for tool in agent.tools
-        if tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES
+        if tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES
         and SCOPED_SHARED_AIDP_CATALOG_ID not in (tool.metadata or {})
     ]
     local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
@@ -735,12 +738,12 @@ def _export_resource(
         elif tool.name == "knowledge_base_search" and tool.class_name == "KnowledgeBaseSearchTool" and tool.source == "local":
             descriptor = KnowledgeSearchBinding.model_validate((tool.metadata or {}).get("prepared_knowledge_search"))
             binding = ToolBinding(tool_id=tool.name, version="1", parameters=descriptor.model_dump(mode="json"))
-        elif tool.name in set(EvaluationAnalysisTool):
-            binding = _export_analysis_binding(tool)
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
             binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
-        elif tool.source == "local" and tool.name in LOCAL_SDK_TOOL_CLASSES:
+        elif tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES:
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language, user_id=user_id)
+        elif tool.name in set(EvaluationAnalysisTool):
+            binding = _export_analysis_binding(tool)
         elif tool.name == "parallel_executor":
             binding = _export_parallel_executor_binding(tool)
         elif tool.name in PLAN_TOOL_NAMES or tool.name == AUTOMATION_PROPOSAL_TOOL:
@@ -854,7 +857,7 @@ def _export_model(
     )
 
 
-def export_snapshot(
+def compile_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
@@ -862,6 +865,7 @@ def export_snapshot(
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
+    stage = "resource"
     try:
         aliases = {}
         resource = _export_resource(
@@ -873,6 +877,7 @@ def export_snapshot(
             workbench_knowledge_tools=workbench_knowledge_tools,
             allow_sandbox_policy=True, user_id=user_id,
         )
+        stage = "model"
         bindings = [
             _export_model(
                 alias, models, tenant_id, resource, agent_model_overrides,
@@ -882,10 +887,12 @@ def export_snapshot(
             )
             for alias in aliases
         ]
+        stage = "identity"
         identity = resolve_tool_user_context(agent, user_id, tenant_id) if user_id is not None else None
         tool_caller = ToolCallerContext(**{
             key: identity[key] for key in ToolCallerContext.model_fields if key in identity
         }) if identity is not None else None
+        stage = "input"
         fields = dict(
             mode="nexent", language=language, resource=resource, tool_caller=tool_caller,
             models=ModelBindings(llm=bindings[0], additional_llms=bindings[1:]),
@@ -896,5 +903,18 @@ def export_snapshot(
         if prepared_conversation is not None:
             return PreparedAgentRun(**fields, **prepared_conversation.model_dump())
         return PreparedEvaluationRun(**fields, conversation_id=conversation_id if conversation_id is not None else 0)
-    except (LookupError, OSError, TypeError, ValueError, PydanticSerializationError):
+    except (LookupError, OSError, TypeError, ValueError, PydanticSerializationError) as exc:
+        raise SnapshotCompilationError(stage, exc) from exc
+
+
+@wraps(compile_snapshot)
+def export_snapshot(*args, **kwargs):
+    """Retain compatibility until all callers use the strict compiler result."""
+    try:
+        return compile_snapshot(*args, **kwargs)
+    except SnapshotCompilationError as exc:
+        logging.getLogger(__name__).warning(
+            "agentos_snapshot_not_exported stage=%s category=%s error_type=%s",
+            exc.stage, exc.category, exc.error_type,
+        )
         return None

@@ -195,6 +195,9 @@ case:
   - order: 56
     action: Send an owned fixed-ID background request with no automation record or no provable source through both signed services, retry it, change its payload and disconnect another admitted request during projection.
     expected: Management stages an assistant-only AUTOMATION marker at the original history index before standard Agent.run, projects once without finishing a schedule and retries from the same receipt. A changed request conflicts without another start, foreign tenants are refused and disconnect stops the same run while retaining recovery metadata. The old SDK execution handler cannot run.
+  - order: 57
+    action: Export SDK-local catalog aliases including reserved transport names and invoke them over signed AgentOS HTTP.
+    expected: The actual SDK retains its canonical execution name and provider request; changed revisions and cross-tenant access are rejected.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -253,6 +256,7 @@ case:
   - Original internal new conversations keep their assistant-only persistence and history-derived index while executing through standard AgentOS.
   - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
   - Background execution needs no automation record or inferred user source when Management owns its fixed-ID admission and assistant-only projection.
+  - Noncanonical local catalog names retain actual SDK execution and scoped credentials without protocol dispatch collisions.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -600,4 +604,9 @@ case:
     description: A signed background request without an automation record or provable source uses one standard AgentOS run and an owned AUTOMATION assistant projection, retaining fixed-ID recovery, cancellation and task ownership.
     steps: [56]
     expected_results: [57]
+    forbidden_side_effects: [1, 2]
+  - id: AC-66
+    description: SDK-local catalog aliases preserve SDK execution and provider requests across signed AgentOS, including reserved namespace names, with unchanged revision and tenant enforcement.
+    steps: [57]
+    expected_results: [58]
     forbidden_side_effects: [1, 2]

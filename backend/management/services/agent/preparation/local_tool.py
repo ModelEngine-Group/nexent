@@ -6,7 +6,8 @@ from contracts.agentos import (
     StoredLocalToolBinding, ToolBinding,
 )
 from infrastructure.local_tool_execution import (
-    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_SEARCH_TUNING_METADATA, apply_local_parameter_overrides, apply_local_search_overrides, build_local_tool, local_tool_rerank_name, local_tool_revision,
+    LOCAL_PARAMETER_OVERRIDES_METADATA, LOCAL_SEARCH_TUNING_METADATA, apply_local_parameter_overrides,
+    apply_local_search_overrides, build_local_tool, local_tool_binding_id, local_tool_rerank_name, local_tool_revision,
 )
 from infrastructure.local_tool_overrides import seal_tool_overrides
 from infrastructure.rdb.local_tool_records import read_shared_aidp_catalog_tool
@@ -89,6 +90,6 @@ def export_local_tool(
         scope = (tenant_id, user_id, agent_id, version_no, persisted.name, binding.revision)
         credential_ref = seal_tool_overrides(scope, parameters)
     return ToolBinding(
-        tool_id=persisted.name, version=version, parameters=binding.model_dump(mode="json", exclude_unset=True),
+        tool_id=local_tool_binding_id(persisted), version=version, parameters=binding.model_dump(mode="json", exclude_unset=True),
         credential_ref=credential_ref,
     )

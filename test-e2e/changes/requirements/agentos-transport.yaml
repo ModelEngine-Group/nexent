@@ -23,6 +23,8 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Strict snapshot compilation reports safe resource, model, identity or input failure stages with the original cause; the temporary exporter preserves None fallback and HTTP authorization errors.
+    - SDK-local catalog aliases retain class-based execution, pinned tenant bindings, language rules and provider request behavior without colliding with AgentOS namespaces.
     - Legacy background calls without an automation source claim the original run ID and request fingerprint, stage only the AUTOMATION assistant and recover an unknown admission or completed receipt without starting twice or finishing a scheduler task.
     - Knowledge search preserves legacy SDK top_k conversion for null, numeric strings, floats and booleans before strict AgentOS serialization without constructing legacy clients; invalid SDK values retain their error behavior.
     - Internal new conversations admit and confirm only the assistant at the original history-derived index; restart recovery retains the omission marker and rejects a competing message before writing.
@@ -148,6 +150,8 @@ change:
     - test/backend/services/test_prepared_memory_completion.py
     - test/backend/services/test_agent_automation_prepared.py
     - test/backend/services/test_agent_automation_conversation_adapter.py
+    - test/backend/app/test_agentos_snapshot_diagnostics.py
+    - test/backend/app/test_agentos_local_catalog_names.py
     - test/backend/app/test_agentos_tracked_background.py
     - test/backend/app/test_agentos_background_handoff.py
     - test/backend/app/test_agentos_raw_handoff.py
