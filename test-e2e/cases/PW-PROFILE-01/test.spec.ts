@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { randomBytes } from "node:crypto";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { testUser, appPath } from "../../infra/automation/d4/runner/runtime-config";
