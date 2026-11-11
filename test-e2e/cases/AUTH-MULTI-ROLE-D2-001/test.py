@@ -37,6 +37,12 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
     assert r.client.get(f"/groups/{r.foreign_group}/members", headers=ops_headers).status_code == 404
     assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "a"}).status_code == 200
     assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "b"}).status_code == 404
+    su_headers = r.headers("su")
+    tenant_keys = r.client.get("/api-keys", headers=su_headers, params={"tenant_id": "b"})
+    assert tenant_keys.status_code == 200
+    [key] = tenant_keys.json()["data"]["items"]
+    assert key["user_id"] == r.users["foreign"] and "access_key" not in key
+    assert r.client.delete("/api-keys", headers=su_headers, params={"user_id": r.users["foreign"]}).status_code == 403
     assert r.client.post("/model/create", headers=ops_headers, json={}).status_code == 403
     public_probe = r.client.get("/user/service_health")
     ops_probe = r.client.get("/user/service_health", headers=ops_headers)

@@ -1361,17 +1361,6 @@ export default function UserManageComp() {
                             />
                           ),
                         },
-                        ...(hasRole(user, "ADMIN") || readOnly
-                          ? [
-                              {
-                                key: "apiKeys",
-                                label:
-                                  t("tenantResources.tabs.apiKeys") ||
-                                  "API Key",
-                                children: <ApiKeyList tenantId={tenantId} readOnly={readOnly} />,
-                              },
-                            ]
-                          : []),
                         {
                           key: "groups",
                           label: t("tenantResources.tabs.groups") || "Groups",
@@ -1428,6 +1417,25 @@ export default function UserManageComp() {
                             />
                           ),
                         },
+                        ...(hasRole(user, "ADMIN", "SU") || readOnly
+                          ? [
+                              {
+                                key: "apiKeys",
+                                label:
+                                  t("tenantResources.tabs.apiKeys") ||
+                                  "API Key",
+                                children: (
+                                  <ApiKeyList
+                                    key={tenantId}
+                                    tenantId={tenantId}
+                                    readOnly={
+                                      readOnly || tenantId !== user?.tenantId
+                                    }
+                                  />
+                                ),
+                              },
+                            ]
+                          : []),
                       ]}
                     />
                   ) : (

@@ -106,6 +106,14 @@ def isolated_runtime():
                         permission_subtype="READ",
                     )
                 )
+            connection.execute(
+                models.RolePermission.__table__.insert().values(
+                    user_role="SU",
+                    permission_category="RESOURCE",
+                    permission_type="TENANT.LIST",
+                    permission_subtype="READ",
+                )
+            )
             # Fixture setup applies the current additive role upgrade, never modifies historical SQL.
             upgrades = sorted((ROOT / "deploy/sql/migrations").glob("*_ops_roles.sql"))
             if len(upgrades) != 1:
@@ -170,6 +178,10 @@ class Runtime:
                     account["user_id"], tenant, roles[0], account["email"], db_session=session, roles=roles
                 )
                 self.users[logical] = account["user_id"]
+            session.add(self.models.UserTokenInfo(
+                access_key="fixture-only-api-key", user_id=self.users["foreign"],
+                created_by=self.users["foreign"], updated_by=self.users["foreign"], delete_flag="N",
+            ))
             for tenant in ("a", "b"):
                 group = self.models.TenantGroupInfo(
                     tenant_id=tenant, group_name="Owned group", created_by=self.users["su"], delete_flag="N"

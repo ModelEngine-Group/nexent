@@ -43,17 +43,18 @@ case:
     expected: Invitation has both roles and no role-edit control; pure OPS sees only operations dashboard, system
       configuration and the shared resource page. User search and model browsing work, with business mutation controls absent.
   - order: 3
-    action: Use owned DEV plus OPS and SU sessions to inspect entries and tenant scope, then remove OPS from the
-      active target in a second admin session and refresh its authorization. The ADMIN viewer then adds OPS to
+    action: Use owned DEV plus OPS and SU sessions to inspect entries and tenant scope. As SU select another
+      tenant in resource management and open the API Key tab. Remove OPS from the active target in a second
+      admin session and refresh its authorization. The ADMIN viewer then adds OPS to
       their own roles through the editor without reloading the page.
-    expected: Combined roles retain development entries; SU has cross-tenant operations selection; the revoked target
+    expected: Combined roles retain development entries; SU can select another tenant and see API Key metadata in the last tab; the revoked target
       loses OPS entries and direct protected navigation is denied or redirected without executing a business write.
       Saving the viewer's own roles refreshes the navigation immediately while retaining ADMIN.
   expected_results:
   - Two role labels are displayed, the target appears once, and the saved selection survives reopening.
   - Invitation has both roles and no role-edit control; pure OPS sees only operations dashboard, system configuration
     and the shared resource page with working user search and model browsing. Business mutation controls are absent.
-  - Combined roles retain development entries; SU has cross-tenant operations selection; the revoked target loses
+  - Combined roles retain development entries; SU can select another tenant and see API Key metadata in the last tab; the revoked target loses
     OPS entries and direct protected navigation is denied or redirected without executing a business write. Saving
     the viewer's own roles refreshes navigation immediately while retaining ADMIN.
   forbidden_side_effects:
@@ -74,7 +75,7 @@ case:
     expected_results:
     - 2
   - id: AC-03
-    description: Combined roles retain development entries; SU has cross-tenant operations selection; the revoked
+    description: Combined roles retain development entries; SU can select another tenant and see API Key metadata in the last tab; the revoked
       target loses OPS entries and direct protected navigation is denied or redirected without executing a business
       write. Saving the viewer's own roles refreshes navigation immediately while retaining ADMIN.
     steps:

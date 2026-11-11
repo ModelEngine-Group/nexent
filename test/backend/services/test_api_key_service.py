@@ -184,15 +184,17 @@ def test_list_tenant_api_keys_allows_superuser_and_forwards_pagination(mock_list
     mock_list.assert_called_once_with("tenant-a", 2, 10, "asc")
 
 
+@pytest.mark.parametrize(("role", "tenant"), [("OPS", "tenant-a"), ("SU", "tenant-b")])
 @patch("management.services.permission.api_keys.list_active_tokens_by_tenant")
-def test_operations_api_key_list_keeps_metadata_without_the_key(mock_list):
+def test_api_key_observers_receive_metadata_without_the_key(mock_list, role, tenant):
     mock_list.return_value = {"items": [{"token_id": 1, "access_key": "secret", "total_usage_count": 5}], "total": 1}
 
     result = api_key_service.list_tenant_api_keys(
-        actor_tenant_id="tenant-a", actor_role=("OPS",), tenant_id="tenant-a"
+        actor_tenant_id="tenant-a", actor_role=(role,), tenant_id=tenant
     )
 
     assert result == {"items": [{"token_id": 1, "total_usage_count": 5}], "total": 1}
+    mock_list.assert_called_once_with(tenant, 1, 20, "desc")
 
 
 def test_list_tenant_api_keys_rejects_other_tenant():

@@ -186,18 +186,20 @@ def list_tenant_api_keys(
     page_size: int = 20,
     sort_order: str = "desc",
 ) -> Dict[str, Any]:
-    """List active keys, redacting credentials for operations observers."""
-    read_only = has_any_role(actor_role, {"OPS"}) and not has_any_role(actor_role, {"ADMIN", "SU"})
-    if not read_only:
+    """List active keys, with metadata-only access for observers and cross-tenant administrators."""
+    is_admin = has_any_role(actor_role, {"ADMIN", "SU"})
+    is_observer = has_any_role(actor_role, {"OPS"}) and not is_admin
+    if not is_observer:
         _require_tenant_admin(actor_tenant_id, actor_role)
-    if tenant_id != actor_tenant_id:
+    cross_tenant = tenant_id != actor_tenant_id
+    if cross_tenant and not has_any_role(actor_role, {"SU"}):
         raise NotFoundException("Tenant not found")
     result = list_active_tokens_by_tenant(tenant_id, page, page_size, sort_order)
 
     enrich_cas_usernames(result.get("items", []), {
         "owner_cas_username": "user_id", "creator_cas_username": "created_by",
     })
-    if read_only:
+    if is_observer or cross_tenant:
         for item in result.get("items", []):
             item.pop("access_key", None)
     return result

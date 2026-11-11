@@ -241,6 +241,24 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     const scopedResponse = await selectedScope;
     expect(scopedResponse.status()).toBe(200);
     selectedTenant = (await scopedResponse.json()).data.tenant_id;
+    await su.page.setViewportSize({ width: 1600, height: 900 });
+    await su.page.goto(`${baseURL}/en/resource-manage`);
+    await su.page.getByText("Owned b", { exact: true }).click();
+    const apiKeyTab = su.page.getByRole("tab", { name: /^API Keys?$/ });
+    await expect(
+      su.page.getByRole("tablist").getByRole("tab").last(),
+    ).toHaveAccessibleName(/^API Keys?$/);
+    await apiKeyTab.click();
+    const apiKeyPanel = su.page.getByRole("tabpanel", { name: /^API Keys?$/ });
+    await expect(
+      apiKeyPanel.getByRole("row").filter({ hasText: fixture.emails.foreign }),
+    ).toBeVisible();
+    await expect(
+      apiKeyPanel.getByText("fixture-only-api-key", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      apiKeyPanel.getByRole("columnheader", { name: "Actions" }),
+    ).toHaveCount(0);
     const revoked = await admin.context.request.put(
       `${baseURL}/api/users/${fixture.users.user}`,
       { data: { roles: ["DEV"] } },
