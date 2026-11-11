@@ -125,12 +125,7 @@ def _validate_user_tenant_limit(
 
 
 def get_user_role_by_tenant(user_id: str, tenant_id: str) -> tuple[str, ...]:
-    """Return the user's role within the given tenant.
-
-    Joins ``user_tenant_t`` by ``(user_id, tenant_id)`` so the result is
-    strictly tenant-scoped. Returns the empty string when no active row
-    exists; callers should treat that as "no role".
-    """
+    """Return the account roles for an active membership in the given tenant."""
     if not user_id or not tenant_id:
         return ()
     with get_db_session() as session:

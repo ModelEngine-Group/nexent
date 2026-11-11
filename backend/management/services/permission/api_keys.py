@@ -29,7 +29,7 @@ from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.permission.identity.groups import get_tenant_default_group_id
 
 
-def _require_tenant_admin(actor_tenant_id: str, actor_role: str) -> None:
+def _require_tenant_admin(actor_tenant_id: str, actor_role: str | tuple[str, ...]) -> None:
     if not has_any_role(actor_role, {'ADMIN','SU'}):
         raise ForbiddenError("Only administrators can manage API keys")
     if not actor_tenant_id:
@@ -71,7 +71,7 @@ def create_api_users_batch(
     *,
     actor_user_id: str,
     actor_tenant_id: str,
-    actor_role: str,
+    actor_role: str | tuple[str, ...],
     role: str = "USER",
     group_id: Optional[int] = None,
     count: int = 1,
@@ -128,7 +128,7 @@ def refresh_user_api_key(
     *,
     actor_user_id: str,
     actor_tenant_id: str,
-    actor_role: str,
+    actor_role: str | tuple[str, ...],
     user_id: Optional[str] = None,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -159,7 +159,7 @@ def revoke_user_api_keys(
     *,
     actor_user_id: str,
     actor_tenant_id: str,
-    actor_role: str,
+    actor_role: str | tuple[str, ...],
     user_id: Optional[str] = None,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -180,7 +180,7 @@ def revoke_user_api_keys(
 def list_tenant_api_keys(
     *,
     actor_tenant_id: str,
-    actor_role: str,
+    actor_role: str | tuple[str, ...],
     tenant_id: str,
     page: int = 1,
     page_size: int = 20,

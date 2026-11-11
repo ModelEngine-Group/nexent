@@ -132,7 +132,10 @@ def test_logout_success_records_audit_entry(caplog, mocker):
 def test_account_revoke_success_records_audit_entry(caplog, mocker):
     """Successful account revocation records the revoked account owner."""
     user = MagicMock()
-    user.user_metadata = {"role": "user"}
+    mocker.patch(
+        "management.api.identity.user_management.get_current_user_context",
+        return_value=("user123", "tenant456", ("USER", "OPS")),
+    )
     mocker.patch("management.api.identity.user_management.delete_user_and_cleanup", new_callable=AsyncMock)
     mocker.patch("management.api.identity.user_management.validate_token", return_value=(True, user))
     mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("user123", "tenant456"))

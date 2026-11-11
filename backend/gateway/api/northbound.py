@@ -139,7 +139,7 @@ async def health_check():
     return {"status": "healthy", "service": "northbound-api"}
 
 
-def _role_for_context(user_id: str, tenant_id: str) -> str:
+def _role_for_context(user_id: str, tenant_id: str) -> tuple[str, ...]:
     return get_user_role_by_tenant(user_id, tenant_id)
 
 
