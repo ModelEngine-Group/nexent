@@ -1,0 +1,229 @@
+{
+  "project": "default",
+  "prior_greeting_trace": "cd2c7e6a090c229293e5dec2878d5753",
+  "prior_length_trace": "5caff80738ef19ad56cf27379c012083",
+  "prior_length_observation": {
+    "requested_output_tokens": 4096,
+    "input_tokens": 3739,
+    "output_tokens": 4096,
+    "reasoning_tokens": 4096,
+    "visible_content_chars": 0,
+    "finish_reason": "length",
+    "conversation_id": 2
+  },
+  "new_spans": [
+    {
+      "id": "U3BhbjozMQ==",
+      "trace_id": "d416f2b950ddb1457724cd9dacec091a",
+      "span_id": "925ed8a9d13c9cf6",
+      "name": "POST /agent/run",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjozMA==",
+      "trace_id": "d416f2b950ddb1457724cd9dacec091a",
+      "span_id": "1a894c8cc74e49d3",
+      "name": "agent.run",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoyOQ==",
+      "trace_id": "d416f2b950ddb1457724cd9dacec091a",
+      "span_id": "df9b30c19143dad0",
+      "name": "agent.run.loop",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoyOA==",
+      "trace_id": "d416f2b950ddb1457724cd9dacec091a",
+      "span_id": "06349337c3458213",
+      "name": "agent.tool.final_answer",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoyNw==",
+      "trace_id": "d416f2b950ddb1457724cd9dacec091a",
+      "span_id": "2199915c4e5fc9ca",
+      "name": "glm-5.3.generate",
+      "status": "UNSET",
+      "finish": "tool_calls",
+      "purpose": "native_agent",
+      "invocation": "{\"max_output_tokens\": 4096}",
+      "usage": {
+        "llm.usage.cached_input_tokens": 0,
+        "llm.usage.input_tokens": 3691,
+        "llm.usage.origin": "provider",
+        "llm.usage.output_tokens": 156,
+        "llm.usage.reasoning_tokens": 136,
+        "llm.usage.total_tokens": 3847
+      },
+      "reasoning_parts": 1,
+      "tool_calls": [
+        "final_answer"
+      ]
+    },
+    {
+      "id": "U3BhbjoyNg==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "28d9dbe390472cf0",
+      "name": "POST /agent/run",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoyNQ==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "a9905d525e0a3aae",
+      "name": "agent.run",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoyNA==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "5b607a98ba5d32d5",
+      "name": "agent.run.loop",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoyMw==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "48798bfd04fd3d9b",
+      "name": "qwen3.8-flash.generate",
+      "status": "UNSET",
+      "finish": "stop",
+      "purpose": "native_agent",
+      "invocation": "{\"max_output_tokens\": 4096}",
+      "usage": {
+        "llm.usage.cached_input_tokens": 3584,
+        "llm.usage.input_tokens": 3712,
+        "llm.usage.origin": "provider",
+        "llm.usage.output_tokens": 31,
+        "llm.usage.reasoning_tokens": 16,
+        "llm.usage.total_tokens": 3743
+      },
+      "reasoning_parts": 1,
+      "tool_calls": []
+    },
+    {
+      "id": "U3BhbjoyMg==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "ad1873488c565876",
+      "name": "agent.tool.code_execution",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoyMQ==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "cdb37da07b98f538",
+      "name": "agent.sandbox.warmup",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoyMA==",
+      "trace_id": "d3093a01e3cbff593be04ccd98a688e9",
+      "span_id": "0097ccbb846363b0",
+      "name": "qwen3.8-flash.generate",
+      "status": "UNSET",
+      "finish": "tool_calls",
+      "purpose": "native_agent",
+      "invocation": "{\"max_output_tokens\": 4096}",
+      "usage": {
+        "llm.usage.cached_input_tokens": 0,
+        "llm.usage.input_tokens": 3621,
+        "llm.usage.origin": "provider",
+        "llm.usage.output_tokens": 58,
+        "llm.usage.reasoning_tokens": 22,
+        "llm.usage.total_tokens": 3679
+      },
+      "reasoning_parts": 1,
+      "tool_calls": [
+        "code_execution"
+      ]
+    },
+    {
+      "id": "U3BhbjoxOQ==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "3448bad3a26febf3",
+      "name": "POST /agent/run",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoxOA==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "a5d28bdcdab6fc3d",
+      "name": "agent.run",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoxNw==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "8ca4bd62f63ed675",
+      "name": "agent.run.loop",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoxNg==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "26ec94919c78081e",
+      "name": "agent.tool.final_answer",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoxNQ==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "b81a89fe85ee231d",
+      "name": "glm-5.3.generate",
+      "status": "UNSET",
+      "finish": "tool_calls",
+      "purpose": "native_agent",
+      "invocation": "{\"max_output_tokens\": 4096}",
+      "usage": {
+        "llm.usage.cached_input_tokens": 3328,
+        "llm.usage.input_tokens": 3529,
+        "llm.usage.origin": "provider",
+        "llm.usage.output_tokens": 27,
+        "llm.usage.reasoning_tokens": 0,
+        "llm.usage.total_tokens": 3556
+      },
+      "reasoning_parts": 0,
+      "tool_calls": [
+        "final_answer"
+      ]
+    },
+    {
+      "id": "U3BhbjoxNA==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "b717de739f01e1ab",
+      "name": "agent.tool.code_execution",
+      "status": "UNSET"
+    },
+    {
+      "id": "U3BhbjoxMw==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "acaf1a434f5bc4a9",
+      "name": "agent.sandbox.warmup",
+      "status": "OK"
+    },
+    {
+      "id": "U3BhbjoxMg==",
+      "trace_id": "2026f23891c47866b40d5c7725a0d16a",
+      "span_id": "3ba28a39e016572f",
+      "name": "glm-5.3.generate",
+      "status": "UNSET",
+      "finish": "tool_calls",
+      "purpose": "native_agent",
+      "invocation": "{\"max_output_tokens\": 4096}",
+      "usage": {
+        "llm.usage.cached_input_tokens": 0,
+        "llm.usage.input_tokens": 3392,
+        "llm.usage.origin": "provider",
+        "llm.usage.output_tokens": 117,
+        "llm.usage.reasoning_tokens": 99,
+        "llm.usage.total_tokens": 3509
+      },
+      "reasoning_parts": 1,
+      "tool_calls": [
+        "code_execution"
+      ]
+    }
+  ]
+}

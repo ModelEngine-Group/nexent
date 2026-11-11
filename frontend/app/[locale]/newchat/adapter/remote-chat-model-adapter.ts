@@ -715,7 +715,6 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "tool":
       return "tool-call";
     case "final_answer":
-    case "model_output":
     case "agent_run_info":
     case "user_input":
     case "agent_finish":

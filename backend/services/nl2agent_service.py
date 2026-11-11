@@ -1546,6 +1546,7 @@ async def build_nl2agent_run_info(
 
     stop_event = threading.Event()
     run_info = AgentRunInfo(
+        agent_runtime="codeagent",
         tenant_id=tenant_id,
         query=final_query,
         model_config_list=model_config_list,

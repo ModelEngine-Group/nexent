@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Managed context path thin adapter.
 
 All context policy and final payload assembly belongs to ContextManager.  This
@@ -12,6 +13,7 @@ from smolagents.memory import AgentMemory
 from smolagents.models import ChatMessage, Model
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext, ModelTool
+from ...context_runtime.usage import normalized_chars_per_token
 from .evidence import ContextEvidenceCollector
 from .manager import ContextManager
 from .models import ContextItem, ContextItemInput
@@ -70,6 +72,7 @@ class ManagedContextRuntime:
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_items: Sequence[ContextItemInput] = (),
     ) -> FinalContext:
         final_context = self.context_manager.assemble_final_context(
             model=model,
@@ -80,6 +83,7 @@ class ManagedContextRuntime:
             run_context=self._ensure_run_context(memory),
             request_system_messages=request_system_messages,
             request_tail_messages=request_tail_messages,
+            request_items=request_items,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context
@@ -93,6 +97,7 @@ class ManagedContextRuntime:
         tools: Sequence[ModelTool] | None = None,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_items: Sequence[ContextItemInput] = (),
     ) -> FinalContext:
         """Force a source-backed rebuild after explicit Provider overflow."""
         final_context = self.context_manager.assemble_final_context(
@@ -105,6 +110,7 @@ class ManagedContextRuntime:
             force_compaction=True,
             request_system_messages=request_system_messages,
             request_tail_messages=request_tail_messages,
+            request_items=request_items,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context
@@ -178,7 +184,7 @@ class ManagedContextRuntime:
 
     @property
     def chars_per_token(self) -> float:
-        return self.context_manager.config.chars_per_token
+        return normalized_chars_per_token(self.context_manager.config.chars_per_token)
 
     @property
     def token_threshold(self) -> int | None:

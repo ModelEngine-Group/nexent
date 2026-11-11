@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "case_id": "AGENT-NATIVE-D2-002",
+  "implementations": [
+    {
+      "framework": "pytest",
+      "file": "test.py",
+      "selector": "AGENT-NATIVE-D2-002"
+    }
+  ],
+  "timeout_seconds": 240,
+  "preparation": {
+    "families": [],
+    "anchors": false,
+    "special_assets": false,
+    "d4_groups": []
+  },
+  "acceptance_bindings": {
+    "AC-01": [
+      "test_reasoning_stream_and_unchanged_definition"
+    ]
+  },
+  "notes": "Operator supplies existing configured models/Agent; no resource creation/config mutation. HTTP sessions use with/finally cleanup; emitted bodies are inspected in memory, not retained."
+}

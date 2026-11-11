@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import parse_agent_runtime, parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -461,3 +461,6 @@ NEXENT_LITELLM_JSON = os.environ.get('NEXENT_LITELLM_JSON', '/opt/nexent/litellm
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv('NEXENT_MODEL_DIAGNOSTIC_CHUNKS', os.getenv('NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT', '0')) == '1'
 # Read OAuth settings centrally, including provider-specific credential names.
 GET_OAUTH_SETTING = os.getenv
+
+# Agent runtime request; effective mode is selected per resolved model capability.
+NEXENT_AGENT_RUNTIME = parse_agent_runtime(os.getenv("NEXENT_AGENT_RUNTIME"))

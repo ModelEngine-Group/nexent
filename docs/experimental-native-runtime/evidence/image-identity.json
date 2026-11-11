@@ -1,0 +1,30 @@
+{
+  "source_parent": "64bf7f453cc57cbf2b0ef2f6e85dc5001efc0e59",
+  "note": "CI architecture correction precommit tree. Product hashes identify tested source independently of documentation/tests. SDK/frontend runtime semantics unchanged from 64bf7f453.",
+  "images": {
+    "nexent": "sha256:0b52174750968275df2970bb6c12fe94cf87fa9ceee9bf48612035dcf7d56b76",
+    "nexent-web": "sha256:2c1155bd9f563765c7589357af566add478587bd73f86a8838a4661d13d44a18",
+    "nexent-sandbox": "sha256:e5c0ef1d27cd5063b282c9a083bdb93c5964a33fdcb440cd8ede0047299da188",
+    "nexent-mcp": "sha256:814de1f7c9272c503b7b121e7e43e16562b66634b67fa2a4dd144cd63e595d03"
+  },
+  "all_changed_backend_sdk_files_match_built_image": true,
+  "files": {
+    "backend/contracts/configuration.py": "0045ab00ee587f9e707f7b47c75c6fcff5ff4e0e34dd9b9a6cbdaeed9050dc10",
+    "backend/contracts/constants/environment.py": "c02b487ce08989f68d1601388e49bee61a95d9b232cb7a4e99e81c8398ad86bf",
+    "backend/management/services/agent/execution.py": "a2e2bbd9171270a0f47b3e9dc0732651519315c41472837e3d5161df6e383b82",
+    "backend/management/services/agent/preparation/run.py": "fa623ef7c6e6de52bbad108ece736ec1f875367f0ee76ae72a63e2eafe7bcc8c",
+    "backend/management/services/agent/stream.py": "52f3f5f4c0f5880e852bfe100f2e04cc49a30f4d8634247965c46aab96d3394d",
+    "backend/services/nl2agent_service.py": "648261dbae26629316bfa4a5eb9f97db57db0a851be822c528345679556eccfa",
+    "backend/services/nl2skill_service.py": "80a6242efa4ae96ee2d7363f47766006e85c58b39da3d45b77375d357e87e8de",
+    "sdk/nexent/core/agents/agent_model.py": "4ddf3b84c550574fcc18770290e229ab2d31ebd78864fd7ea9447fd0a962f2e9",
+    "sdk/nexent/core/agents/native_model_service.py": "6a8c0b383b4bff43cf9cd0273a38d45fae64260fd7e77b9f4b28f8351147f082",
+    "sdk/nexent/core/agents/native_runtime.py": "8fc26c3a54996ec9d2c4ca96df1ab03df4d8b788898a462a14d5e9acbb15b1e6",
+    "sdk/nexent/core/agents/nexent_agent.py": "e5effe36dff26585d7ef7623107c38c70e288bb9bb07acdc4a5137befdd8c7a1",
+    "sdk/nexent/core/agents/run_agent.py": "5cab35bfd00a6a49d4d71d262c810647dae269b85bfa2302cd74006126707021",
+    "sdk/nexent/core/agents/runtime_factory.py": "f564a86deb759773184ffe9de3333beda1cb08e67fbccf6c57b999dd91c1cb63",
+    "sdk/nexent/core/model_service/adapters/openai_chat.py": "348cf61fd533f336df85116271b1a81aecef3570626a44b02527fb4339328c86",
+    "sdk/nexent/core/model_service/adapters/openai_stream.py": "59beede90e7a30ed949028d44ced60e252e46ba5d5ba82cca7f219c15358e233",
+    "sdk/nexent/core/model_service/service.py": "bba8468ba702e55e2132d9007b401462588001d83c226040fdd9d483682b7d28",
+    "sdk/nexent/core/utils/observer.py": "39edd33a6ed53da7a02b4c2cc241762bd7bae68347f9ee7eba98018cab88f041"
+  }
+}

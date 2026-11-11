@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "case_id": "AGENT-NATIVE-D3-001",
+  "implementations": [
+    {
+      "framework": "pytest",
+      "file": "test.py",
+      "selector": "AGENT-NATIVE-D3-001"
+    }
+  ],
+  "timeout_seconds": 1800,
+  "acceptance_bindings": {
+    "AC-01": [
+      "test_native_execution_paths"
+    ],
+    "AC-02": [
+      "test_native_execution_paths"
+    ],
+    "AC-03": [
+      "test_native_execution_paths"
+    ],
+    "AC-04": [
+      "test_native_execution_paths"
+    ],
+    "AC-05": [
+      "test_native_execution_paths"
+    ],
+    "AC-06": [
+      "test_provider_native_reasoning_and_tools"
+    ],
+    "AC-07": [
+      "test_managed_native_child_uses_actual_python",
+      "test_native_mcp_tool_uses_managed_protocol_session"
+    ],
+    "AC-08": [
+      "test_real_tool_error_recovers_with_correlated_results",
+      "test_real_max_step_limit_does_not_add_fallback_request",
+      "test_real_stream_cancellation_closes_provider_resource"
+    ]
+  },
+  "preparation": {
+    "families": [],
+    "anchors": true,
+    "special_assets": false,
+    "d4_groups": []
+  },
+  "notes": "Self-contained automated preparation creates only a case-owned marker workspace; no dataset families or shared business assets are required. Real services and strict Docker image are prerequisites, not replaced by mocks. Executor/client/marker cleanup is owned by each parameter variant."
+}

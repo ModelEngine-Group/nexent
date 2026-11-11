@@ -1,0 +1,38 @@
+{
+  "project": "nexent-pr4315-host-deployment",
+  "api_run": "20261109T113417066776Z-AGENT-NATIVE-D2-001",
+  "observations": [
+    {
+      "trace_id": "c6e563ab12611f2e1cd0a08aa538347a",
+      "span_id": "8dd2937d249e6168",
+      "requested": "toolcalling",
+      "effective": "codeagent",
+      "fallback_reason": "tool_capability_not_supported",
+      "status": "OK"
+    },
+    {
+      "trace_id": "5b66c150584dfb98e8b36331198fc6d2",
+      "span_id": "ae3b1039abc3b5a2",
+      "requested": "toolcalling",
+      "effective": "codeagent",
+      "fallback_reason": "tool_capability_not_supported",
+      "status": "OK"
+    },
+    {
+      "trace_id": "7191198fafbcc5a3c56df41acf185f5e",
+      "span_id": "0ca3d9349a34d1a3",
+      "requested": "toolcalling",
+      "effective": "toolcalling",
+      "fallback_reason": "",
+      "status": "OK"
+    },
+    {
+      "trace_id": "1bb6ecff6fb9c615f8c0dfcf50dbbaf3",
+      "span_id": "87e8b90e5b4ca064",
+      "requested": "toolcalling",
+      "effective": "toolcalling",
+      "fallback_reason": "",
+      "status": "OK"
+    }
+  ]
+}

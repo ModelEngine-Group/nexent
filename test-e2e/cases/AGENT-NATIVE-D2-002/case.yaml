@@ -1,0 +1,89 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "AGENT-NATIVE-D2-002",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001"
+    ],
+    "title": "Native reasoning streams separately through the deployed API",
+    "type": "API-IT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Verify actual provider reasoning and completed answers over SSE using two configured reasoning-capable models without changing definitions.",
+    "preconditions": [
+      "Deployed native runtime, existing test tenant administrator, existing authorized Agent and two available configured reasoning-capable model IDs supplied by operator. The supplied models must be configured to return provider text reasoning for this request."
+    ],
+    "test_data": {
+      "model_indexes": [
+        0,
+        1
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Sign in and snapshot the existing Agent definition. Run the short arithmetic request with each supplied model through deployed /agent/run.",
+        "expected": "Reasoning SSE events have attempt/step identity, public/final output stays separate and one final completion contains 323. Token metadata exposes the actual terminal finish reason."
+      },
+      {
+        "order": 2,
+        "action": "Read the Agent definition after each run.",
+        "expected": "The definition is unchanged."
+      },
+      {
+        "order": 3,
+        "action": "Close HTTP sessions after each test.",
+        "expected": "No HTTP resource is retained and no existing configuration is modified."
+      }
+    ],
+    "expected_results": [
+      "Actual reasoning, public text and final completion follow their distinct SSE contracts. Token metadata exposes the terminal finish reason.",
+      "Semantic Agent definition is unchanged.",
+      "HTTP sessions are closed."
+    ],
+    "forbidden_side_effects": [
+      "No Agent/model configuration mutation or forced reasoning for unsupported models.",
+      "No credentials or reasoning bodies retained in evidence."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Two real-model deployed requests expose distinct typed reasoning and successful final output without definition mutation.",
+        "steps": [
+          1,
+          2,
+          3
+        ],
+        "expected_results": [
+          1,
+          2,
+          3
+        ],
+        "forbidden_side_effects": [
+          1,
+          2
+        ]
+      }
+    ],
+    "source": {
+      "notes": "Adds the missing native reasoning API assertion. Historical D2 fallback test remains separate and requires its original outlets."
+    },
+    "contract": {
+      "endpoint": "POST /agent/run",
+      "protocol": "HTTP/SSE",
+      "request_expectations": [
+        "Authorized existing Agent and two current configured reasoning-capable models."
+      ],
+      "response_expectations": [
+        "Typed reasoning with step/attempt identity, separate completed final answer and unchanged definition."
+      ]
+    }
+  }
+}

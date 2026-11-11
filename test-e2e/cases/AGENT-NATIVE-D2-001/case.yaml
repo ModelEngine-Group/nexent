@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "NATIVE-RUNTIME",
+  "case": {
+    "case_id": "AGENT-NATIVE-D2-001",
+    "feature_id": "NATIVE-RUNTIME",
+    "requirement_ids": [
+      "NATIVE-RUNTIME-REQ-001"
+    ],
+    "business_rule_ids": [
+      "NATIVE-RUNTIME-RULE-001",
+      "NATIVE-RUNTIME-RULE-002"
+    ],
+    "title": "Existing Agent API and stream compatibility",
+    "type": "API-IT",
+    "priority": "P0",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Existing Agent API and stream compatibility",
+    "preconditions": [
+      "Branch-built native application is running; task tenant administrator, persisted Agent and configured real model exist; endpoints and IDs are supplied in machine-local environment.",
+      "Native-capable and generic unknown-tool-capability outlets are provisioned through the current model service."
+    ],
+    "test_data": {
+      "runtime_values": [
+        "codeagent",
+        "toolcalling"
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Run authenticated plain-answer and Python tasks through the existing Agent API.",
+        "expected": "HTTP/SSE succeeds, a final marker is visible, and Python has an actual successful 323 observation."
+      },
+      {
+        "order": 2,
+        "action": "Compare the complete persisted Agent Definition before and after each run.",
+        "expected": "Definition hashes are identical."
+      },
+      {
+        "order": 3,
+        "action": "Submit an unauthenticated Agent run request.",
+        "expected": "Request is denied before any execution stream."
+      },
+      {
+        "order": 4,
+        "action": "Run plain/Python tasks using the generic outlet under global toolcalling selection. Inspect effective runtime and unchanged definition.",
+        "expected": "Actual model service uses CodeAgent fallback; Python produces 323 and no synthetic thinking requirement is inserted."
+      }
+    ],
+    "expected_results": [
+      "Plain and Python runs complete with actual observations and existing SSE event contracts.",
+      "Agent Definition remains byte-equivalent after canonical serialization.",
+      "Unauthenticated request produces an HTTP error and no event stream; HTTP status is recorded, including any baseline defect.",
+      "Models without declared tool support use CodeAgent and complete actual plain/Python tasks through the model service."
+    ],
+    "forbidden_side_effects": [
+      "No unauthorized tool execution, destructive definition changes, exposed secrets or uncorrelated tool results."
+    ],
+    "source": {
+      "notes": "Fixed live API checks; application trace review is retained separately."
+    },
+    "contract": {
+      "endpoint": "Existing agent run API",
+      "response_expectations": [
+        "Existing authentication and observer stream contracts remain valid."
+      ],
+      "protocol": "HTTP/SSE",
+      "request_expectations": [
+        "Existing authenticated Agent run request using unchanged Agent Definition."
+      ]
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Existing API and observer stream execute real tasks.",
+        "steps": [
+          1
+        ],
+        "expected_results": [
+          1
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Runtime switching requires no persisted definition mutation.",
+        "steps": [
+          2
+        ],
+        "expected_results": [
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      },
+      {
+        "id": "AC-03",
+        "description": "Unauthenticated requests cannot execute tools.",
+        "steps": [
+          3
+        ],
+        "expected_results": [
+          3
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      },
+      {
+        "id": "AC-04",
+        "description": "Selected unknown-tool-capability model falls back compatibly through actual API runs.",
+        "steps": [
+          4
+        ],
+        "expected_results": [
+          4
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ]
+  }
+}

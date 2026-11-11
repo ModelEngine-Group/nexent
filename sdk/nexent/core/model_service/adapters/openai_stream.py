@@ -225,7 +225,9 @@ class OpenAIStreamDecoder:
         state = self._calls[index]
         if "type" in raw and raw["type"] != "function":
             self._fail("MODEL_TOOL_CALL_INVALID")
-        if raw.get("id") is not None:
+        # Some compatible gateways emit an empty ID on continuation fragments.
+        # It is an omission; the completed call must still have a nonempty ID.
+        if raw.get("id") not in (None, ""):
             value = raw["id"]
             if not isinstance(value, str) or not value.strip() or state["id"] is not None and state["id"] != value:
                 self._fail("MODEL_STREAM_IDENTITY_CONFLICT")

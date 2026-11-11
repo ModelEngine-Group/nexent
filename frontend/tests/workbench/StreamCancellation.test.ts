@@ -158,7 +158,7 @@ it("UT-FE-WB-003 interleaved conversation streams retain only their own messages
       .get(id)!
       .enqueue(
         new TextEncoder().encode(
-          `data: ${JSON.stringify({ type: "model_output", content })}\n\n`
+          `data: ${JSON.stringify({ type: "model_output_thinking", content })}\n\n`
         )
       );
   emit(12, "alpha-only");

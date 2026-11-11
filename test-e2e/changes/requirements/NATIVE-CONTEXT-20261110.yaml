@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "NATIVE-CONTEXT-20261110",
+    "change_type": "requirement",
+    "requirement_id": "NATIVE-RUNTIME-REQ-001",
+    "title": "Integrate shared non-blocking context into native execution",
+    "description": "Use shared provider observations, safe native result offload/recall and bounded model-service rebuild without tool replay.",
+    "affected_features": {
+      "existing": [
+        "F-171"
+      ],
+      "added": [],
+      "modified": [
+        "NATIVE-RUNTIME"
+      ],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "AGENT-NATIVE-D3-001",
+        "AGENT-HISTORY-D3-001",
+        "AGENT-NATIVE-D4-001"
+      ],
+      "added": [],
+      "modified": [
+        "AGENT-NATIVE-D3-002"
+      ],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "behaviors": [
+        "Native request observations pair completed provider usage with actual messages and schemas.",
+        "Native explicit-overflow rebuild uses service attempt budget and cannot replay tools.",
+        "Local excess and maintenance failure preserve protected inputs and structured calls/results.",
+        "Owned tool originals remain authorized and reloadable after compaction."
+      ],
+      "reason": "Reuse completion/reasoning/cancellation tests and add missing native shared-context regressions; actual HTTP and real-model proofs remain separate.",
+      "test_selectors": [
+        "test/sdk/core/agents/test_native_context.py",
+        "test/sdk/core/model_service/test_native_context_recovery.py"
+      ]
+    },
+    "notes": "Existing native ownership routing; case-owned loopback server/client cleanup. No new D1. Shared local container acceptance passed before stacking. Current broad matrix, long-run, image and Phoenix evidence are maintained in the native runtime SPEC execution record; formal mapping is separate from whole-Case semantic review."
+  }
+}

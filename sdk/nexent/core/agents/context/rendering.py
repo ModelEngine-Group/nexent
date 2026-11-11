@@ -105,7 +105,21 @@ def _render_legacy_tool_call(call: Any) -> str:
 
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
-        return list(item.content["messages"])
+        from copy import deepcopy
+
+        messages = deepcopy(item.content["messages"])
+        compact = item.content.get("summary") or item.content.get("preview")
+        reference = item.content.get("output_ref")
+        if compact is not None and reference:
+            # Change only a completed result body; native call IDs and ordering
+            # remain provider protocol, never textual approximations.
+            for message in messages:
+                if message.get("role") == "tool":
+                    message["content"] = (
+                        "<SUMMARIED_RESULT>" + escape(compact) + "</SUMMARIED_RESULT>"
+                        if item.content.get("summary") else str(compact)
+                    ) + "\n<OUTPUT_REF>" + escape(reference) + "</OUTPUT_REF>"
+        return messages
     from .execution_history import result_text
 
     c = item.content

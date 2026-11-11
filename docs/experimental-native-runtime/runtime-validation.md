@@ -1,0 +1,30 @@
+# Validation record
+
+Historical PR4310 results do not certify this branch. Machine-local logs and test-home data remain under this worktree's ignored .runtime directory. Final sanitized results will be retained under evidence/ and in the independent SPEC execution record.
+
+Current checks include traditional unit suites separately from formal cases: AGENT-NATIVE-D2-001 (deployed API/SSE and unchanged definition), AGENT-NATIVE-D3-001 (17 real-service local/Docker and provider/lifecycle checks), AGENT-NATIVE-D3-002 (10 controlled HTTP/SSE normal/incomplete/refused variants with owned cleanup), AGENT-NATIVE-D4-001 (manual built-in browser), and AGENT-NATIVE-D5-001 (branch-built images/source/health). Self-contained fault tests do not substitute for real-model tests.
+
+Real model service discovery and an actual NativeServiceModel inference succeeded using qwen3.8-flash and the tokenpony provider profile. The 17-case SDK matrix passed through the model service; spans are in nexent-pr4315-host-acceptance on the configured host Phoenix. All four provider families are tested using current resolved model profiles. Provider-returned reasoning is recorded structurally without retaining private reasoning text.
+
+Public message projection has five Node tests and four new adapter scenarios (including buffered SSE tail, rollback and saved history), executed alongside existing adapter regressions. Both frontends pass TypeScript checking. Final deployed API/browser checks and source/image evidence passed; CI remains pending until the verified changes are pushed.
+
+
+## Final host verification — 2026-11-09
+
+Python: **1298 passed**, no failures/skips across 27 isolated affected modules. Frontend: **5 Node projection tests + 17 Vitest adapter/regression tests**, plus TypeScript passed. Native module coverage from the focused 98-case combined run: runtime 98%, model-service bridge 90%, runtime factory 97% (rounded; full affected-suite coverage is assessed by CI/Codecov).
+
+Formal results are distinct from unit coverage: **5 deployed API cases** (native/plain/Python, unknown-capability CodeAgent fallback/plain/Python, unauthenticated denial), **17 actual-model SDK cases**, **10 controlled HTTP/SSE cases**, **1 final image/source/health case**, all passed. Manual built-in browser verification observed public progress, expanded list_directory and code_execution arguments/results (323), a single final answer, saved-history ordering and retained semantic Agent configuration. The local test Agent was published only within the test deployment to exercise new chat.
+
+[Acceptance record](evidence/acceptance.json), [API results and definition hashes](evidence/api-results.json), [SDK Phoenix audit](evidence/phoenix-sdk-audit.json), [deployed/browser Phoenix audit](evidence/phoenix-deployment-audit.json), [source/image identities](evidence/image-identity.json), [browser capture](evidence/interleaved-browser.png), [expanded tools](evidence/interleaved-tools.png).
+
+The final main image is sha256:0b52174750968275df2970bb6c12fe94cf87fa9ceee9bf48612035dcf7d56b76; web is sha256:2c1155bd9f563765c7589357af566add478587bd73f86a8838a4661d13d44a18. All 17 changed backend/SDK product files match installed image hashes; no dev source overlay is present. Runtime requests toolcalling and telemetry exports to the configured host Phoenix project nexent-pr4315-host-deployment. Only this application stack remains active at localhost:3000; old bind-mounted data is retained separately. VM stays stopped as instructed.
+
+D3 temporarily stops/restarts the application to own the sandbox control alias. The first D5 attempt after that cleanup correctly failed its on-demand sandbox precondition; deployed D2 was rerun to provision it, then D5 passed. Earlier diagnostic failures are not counted as acceptance passes. Runner status alone is not semantic review: returned results, unchanged definition hashes, call/result correlation, finish reasons, capability selection, provider reasoning presence/replay and image hashes were separately inspected. Private reasoning bodies and credentials are omitted from retained audits.
+
+Current-run native history compaction and initial multimodal projection remain limited. Dynamic MCP-container business journeys, concurrent child lifetimes and live planning/verifier/clarification round trips remain unverified; representative harness units and scoped MCP/delegation tests do not establish full production parity. Develop's existing math rendering fix is retained without a new math backport.
+
+
+Full CI initially reported 23,949 passed and one failed architecture test: configuration declarations prohibit control flow. Runtime validation was moved into the existing pure configuration-helper module; the six configuration and seven architecture tests now pass locally. The affected main image was rebuilt and redeployed; five API scenarios and the final identity/health case passed again (runs 20261109T113417066776Z-AGENT-NATIVE-D2-001 and 20261109T113519378102Z-AGENT-NATIVE-D5-001). [Fresh requested/effective runtime spans](evidence/phoenix-config-correction-audit.json) confirm both native and compatibility fallback after the correction. All 17 changed installed backend/SDK sources match the rebuilt image. SDK/frontend product code is unchanged from the preceding real-model/browser proof. CI rerun/Codecov remain pending at this source update.
+
+
+Provider reasoning follow-up: 153 affected Python tests PASS; 20 frontend live/history/cancellation tests PASS. Formal reasoning API two configured real models PASS (AGENT-NATIVE-D2-002); controlled HTTP/SSE 10 PASS; final current image/health PASS. Actual installed-image sources independently passed the same 10 controlled runtime scenarios. Live GLM and Qwen SSE and browser live/reopened GLM reasoning were verified, with immutable Agent configuration and Phoenix default routing. All changed product sources match rebuilt main image ddeb7852c760a7bd5571e9beae2999601f630ccc1f9576c46422eefbe3487fca. See reasoning-debugging.md and evidence/reasoning-*.json. CI for this follow-up is pending at this source update.

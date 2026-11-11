@@ -4612,7 +4612,8 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_success(self):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
-        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+        with patch('management.services.agent.preparation.run.NEXENT_AGENT_RUNTIME', 'toolcalling'), \
+                patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
                 patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
                 patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
@@ -4652,6 +4653,7 @@ class TestCreateAgentRunInfo:
             # Verify that AgentRunInfo was called correctly with dict format mcp_host
             assert mock_agent_run_info.call_count == 1
             mock_agent_run_info.assert_called_with(
+                agent_runtime="toolcalling",
                 query="processed_query",
                 model_config_list=["model_config"],
                 observer=mock_message_observer.return_value,

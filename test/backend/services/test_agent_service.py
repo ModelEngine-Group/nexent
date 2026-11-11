@@ -518,6 +518,9 @@ sys.modules["nexent.core.utils"] = MagicMock()
 
 # Mock ProcessType enum for observer module
 class MockProcessType:
+    class MODEL_OUTPUT:
+        value = "model_output"
+
     class FINAL_ANSWER:
         value = "final_answer"
 

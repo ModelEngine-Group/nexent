@@ -1,0 +1,11 @@
+{
+  "source_parent": "ab378a49a12d53a85819ba2f023474195f297bce",
+  "main_image": "sha256:ddeb7852c760a7bd5571e9beae2999601f630ccc1f9576c46422eefbe3487fca",
+  "all_changed_product_sources_match_installed_image": true,
+  "source_sha256": {
+    "sdk/nexent/core/agents/native_runtime.py": "3914ac5a524da1b339821b3d3d6762259988f963eafd6bc47abad0072bcfd136",
+    "sdk/nexent/core/agents/native_model_service.py": "9d3b88e9b53d567b1338d34a4d34a079999e2ee18cec281d97e58377ba76e333"
+  },
+  "installed_controlled_scenarios": 10,
+  "note": "Installed-image proof imports /opt/sdk and reuses the fixed case primary test functions without pytest path injection. No SDK/backend dev source overlay; test dependencies come from the existing task verification environment."
+}

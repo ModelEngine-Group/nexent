@@ -399,10 +399,12 @@ def _mock_managed_mcp(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("agent_runtime", ["codeagent", "toolcalling"])
 @pytest.mark.parametrize("fastpath_enabled", [False, True])
-def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch, fastpath_enabled):
+def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch, fastpath_enabled, agent_runtime):
     """Verify local execution path when mcp_host is empty or None."""
     # Patch NexentAgent inside run_agent to a MagicMock instance
+    basic_agent_run_info.agent_runtime = agent_runtime
     basic_agent_run_info.tool_fastpath_enabled = fastpath_enabled
     basic_agent_run_info.tool_fastpath_allowed_tools = ["ReadSkillConfigTool"]
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -415,6 +417,7 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch, fastpath
 
     # NexentAgent should be instantiated with observer, model_config_list, stop_event
     run_agent.NexentAgent.assert_called_once_with(
+        agent_runtime=agent_runtime,
         observer=basic_agent_run_info.observer,
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
@@ -510,12 +513,14 @@ def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_
     basic_agent_run_info.observer.add_message.assert_not_called()
 
 
+@pytest.mark.parametrize("agent_runtime", ["codeagent", "toolcalling"])
 @pytest.mark.parametrize("fastpath_enabled", [False, True])
 def test_agent_run_thread_mcp_flow(
-    basic_agent_run_info, mock_memory_context, monkeypatch, fastpath_enabled
+    basic_agent_run_info, mock_memory_context, monkeypatch, fastpath_enabled, agent_runtime
 ):
     """Verify behaviour when an MCP host list is provided with auto-detected transport."""
     # Give the AgentRunInfo an MCP host list (string format, auto-detect transport)
+    basic_agent_run_info.agent_runtime = agent_runtime
     basic_agent_run_info.tool_fastpath_enabled = fastpath_enabled
     basic_agent_run_info.tool_fastpath_allowed_tools = ["ReadSkillConfigTool"]
     basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
@@ -547,6 +552,7 @@ def test_agent_run_thread_mcp_flow(
 
     # NexentAgent should be instantiated with mcp_tool_collection
     run_agent.NexentAgent.assert_called_once_with(
+        agent_runtime=agent_runtime,
         observer=basic_agent_run_info.observer,
         model_config_list=basic_agent_run_info.model_config_list,
         stop_event=basic_agent_run_info.stop_event,
