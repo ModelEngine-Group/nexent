@@ -449,18 +449,13 @@ async def _admit_legacy_run(*args):
     return await admit_legacy_execution(legacy_execution_host.registry, *args)
 
 
-async def _consume_legacy_producer(**kwargs):
-    from runtime.agentos.legacy_producer import consume_legacy_producer
-
-    await consume_legacy_producer(**kwargs)
-
-
+from runtime.agentos.legacy_producer import start_legacy_producer
 from runtime.agentos import legacy_tracking
 
 legacy_execution_host = types.SimpleNamespace(
     registry=_agent_run_manager_mock,
     admit=_admit_legacy_run,
-    consume_producer=_consume_legacy_producer,
+    start_producer=start_legacy_producer,
     reset_stream=legacy_tracking.reset_legacy_stream,
     open_channel=legacy_tracking.open_legacy_channel,
     bind_channel=legacy_tracking.bind_legacy_channel,

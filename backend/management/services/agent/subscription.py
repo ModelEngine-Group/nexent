@@ -855,46 +855,21 @@ async def run_agent_stream(
     )
 
     if channel is not None:
-        def release_producer_resources(task: asyncio.Task) -> None:
-            """Retain preparation ownership until the detached producer exits."""
-            host.producer_tasks.discard(task)
-            if tracked_execution is not None:
-                host.untrack(tracked_execution)
-            if not task.cancelled() and task.exception() is not None:
-                logger.error("Agent stream producer did not finalize", exc_info=task.exception())
-            reservation_released = host.registry.release_agent_run_reservation(
-                run_identifier,
-                resolved_user_id,
-                reservation_token,
-            )
-            # A task cancelled before its first iteration cannot run the
-            # generator's finally block to release the deferred worker.
-            # A consumed/released reservation belongs to generate_stream;
-            # let its bound worker finish its own cleanup.
-            if reservation_released and not execution.future.done():
-                deferred_run.cancel()
-                thread_manager.cancel(
-                    execution.execution_id,
-                    reason="agent stream producer finished",
-                    wait_timeout=0,
-                    mark_stuck_on_timeout=False,
-                )
-
-        # Start independently of response-body iteration so clients may close
-        # the connection as soon as they receive the conversation ID header.
-        producer_task = asyncio.create_task(
-            host.consume_producer(
-                stream_gen=stream_gen,
-                channel=channel,
-                agent_metadata=agent_metadata,
-                conversation_id=agent_request.conversation_id,
-                user_id=resolved_user_id,
-                execution_host=host,
-                render_error=_safe_agent_stream_error_chunk,
-            )
+        producer_task = host.start_producer(
+            stream_gen=stream_gen,
+            channel=channel,
+            agent_metadata=agent_metadata,
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            execution_host=host,
+            render_error=_safe_agent_stream_error_chunk,
+            tracked_execution=tracked_execution,
+            run_identifier=run_identifier,
+            reservation_token=reservation_token,
+            execution=execution,
+            deferred_run=deferred_run,
+            thread_manager=thread_manager,
         )
-        host.producer_tasks.add(producer_task)
-        producer_task.add_done_callback(release_producer_resources)
         if tracked_execution is not None:
             response.agentos_producer = producer_task
 

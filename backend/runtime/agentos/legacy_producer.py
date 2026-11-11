@@ -120,3 +120,59 @@ async def consume_legacy_producer(
             len(host.producer_tasks),
             streaming_channel_manager.get_retained_history_bytes(),
         )
+
+
+
+def start_legacy_producer(
+    *,
+    stream_gen,
+    channel,
+    agent_metadata,
+    conversation_id,
+    user_id,
+    execution_host,
+    render_error,
+    tracked_execution,
+    run_identifier,
+    reservation_token,
+    execution,
+    deferred_run,
+    thread_manager,
+) -> asyncio.Task[None]:
+    """Schedule the stream independently of its response and release its reservation."""
+    host = execution_host
+
+    def release_producer_resources(task: asyncio.Task[None]) -> None:
+        host.producer_tasks.discard(task)
+        if tracked_execution is not None:
+            host.untrack(tracked_execution)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("Agent stream producer did not finalize", exc_info=task.exception())
+        reservation_released = host.registry.release_agent_run_reservation(
+            run_identifier, user_id, reservation_token,
+        )
+        # A task cancelled before its first iteration cannot run generator cleanup.
+        # Once the reservation is consumed, the bound worker owns its own cleanup.
+        if reservation_released and not execution.future.done():
+            deferred_run.cancel()
+            thread_manager.cancel(
+                execution.execution_id,
+                reason="agent stream producer finished",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )
+
+    producer = asyncio.create_task(
+        consume_legacy_producer(
+            stream_gen=stream_gen,
+            channel=channel,
+            agent_metadata=agent_metadata,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            execution_host=host,
+            render_error=render_error,
+        )
+    )
+    host.producer_tasks.add(producer)
+    producer.add_done_callback(release_producer_resources)
+    return producer
