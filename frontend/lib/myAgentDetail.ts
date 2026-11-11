@@ -144,10 +144,7 @@ export function mapOfficialRepositoryDetail(
     description: detail.description?.trim() || "",
     author: detail.author?.trim() || null,
     authorCasUsername: detail.author_cas_username,
-    modelName:
-      detail.model_names?.filter(Boolean).join(", ") ||
-      detail.model_name?.trim() ||
-      null,
+    modelName: detail.model_name?.trim() || null,
     versionLabel: detail.version_label?.trim() || null,
     tools: uniqueNames(detail.tools ?? []),
     skills: [],
