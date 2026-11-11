@@ -171,7 +171,7 @@ def _materialize_agent(
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
-        resource.memory_ref is not None, bool(resource.sandbox_policy) and root_alias is None,
+        resource.memory_ref is not None,
     )):
         raise ValueError("Unsupported evaluation resource")
     if root_alias is not None and resource.model_alias not in (None, root_alias):

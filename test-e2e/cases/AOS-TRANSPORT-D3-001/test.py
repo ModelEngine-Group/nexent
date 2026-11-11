@@ -4244,7 +4244,8 @@ async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
 @pytest.mark.parametrize("sampling", [False, True])
 @pytest.mark.asyncio
-async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypatch, tmp_path, sampling):
+@pytest.mark.parametrize("child_level", [None, "local", "docker"])
+async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypatch, tmp_path, sampling, child_level):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
     from backend.http.server.app_factory import create_app
@@ -4318,7 +4319,8 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
         async def agent(**_kwargs):
             return AgentConfig(agent_id=7, version_no=0, name="root", description="", model_name=base.cite_name, tools=[],
                                worker_agents=[AgentConfig(agent_id=8, version_no=1, name="child", description="",
-                                                         model_name=base.cite_name, tools=[])])
+                                                         model_name=base.cite_name, tools=[],
+                                                         sandbox_policy={"level": child_level, "auto_sync_outputs": False} if child_level else None)])
 
         monkeypatch.setattr(preparation, "create_model_config_list", models)
         monkeypatch.setattr(preparation, "create_agent_config", agent)
@@ -4345,6 +4347,10 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
             child = by_alias[info.agent_config.worker_agents[0].model_name]
             assert root.model_copy(update={"cite_name": expected.cite_name}) == expected
             assert child == (base if sampling else expected)
+            assert info.agent_config.worker_agents[0].sandbox_policy == (
+                {"level": child_level, "auto_sync_outputs": False} if child_level else None
+            )
+            assert info.sandbox_config is None
 
             def call(config, role):
                 sdk = NexentAgent(info.observer, [config], info.stop_event, tenant_id=actor.tenant_id)

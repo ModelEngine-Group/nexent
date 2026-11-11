@@ -23,6 +23,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Nested Agent sandbox configuration crosses prepared execution without changing the root-owned effective sandbox or falling back to legacy execution.
     - Conversation policy and request configuration helpers load without the legacy execution facade or Runtime source while preserving preflight, scope, metadata, Workbench and message semantics.
     - Strict snapshot compilation reports safe resource, model, identity or input failure stages with the original cause; the temporary exporter preserves None fallback and HTTP authorization errors.
     - SDK-local catalog aliases retain class-based execution, pinned tenant bindings, language rules and provider request behavior without colliding with AgentOS namespaces.
@@ -151,6 +152,7 @@ change:
     - test/backend/services/test_prepared_memory_completion.py
     - test/backend/services/test_agent_automation_prepared.py
     - test/backend/services/test_agent_automation_conversation_adapter.py
+    - test/backend/app/test_agentos_subagent_resources.py
     - test/backend/app/test_agentos_snapshot_diagnostics.py
     - test/backend/app/test_agentos_local_catalog_names.py
     - test/backend/app/test_agentos_tracked_background.py

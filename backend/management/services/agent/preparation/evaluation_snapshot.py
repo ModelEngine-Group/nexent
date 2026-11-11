@@ -784,6 +784,7 @@ def _export_resource(
         subagents=[
             _export_resource(
                 child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory, user_id=user_id,
+                allow_sandbox_policy=allow_sandbox_policy,
             )
             for child in agent.worker_agents
         ],

@@ -198,6 +198,9 @@ case:
   - order: 57
     action: Export SDK-local catalog aliases including reserved transport names and invoke them over signed AgentOS HTTP.
     expected: The actual SDK retains its canonical execution name and provider request; changed revisions and cross-tenant access are rejected.
+  - order: 58
+    action: Compile a nested Agent carrying a sandbox policy and run it over signed AgentOS with the original model controls.
+    expected: The nested policy survives serialization and SDK reconstruction while effective execution retains the root sandbox and provider requests.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -257,6 +260,7 @@ case:
   - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
   - Background execution needs no automation record or inferred user source when Management owns its fixed-ID admission and assistant-only projection.
   - Noncanonical local catalog names retain actual SDK execution and scoped credentials without protocol dispatch collisions.
+  - Nested Agent sandbox configuration crosses signed AgentOS without legacy execution or changing the effective root sandbox.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -609,4 +613,9 @@ case:
     description: SDK-local catalog aliases preserve SDK execution and provider requests across signed AgentOS, including reserved namespace names, with unchanged revision and tenant enforcement.
     steps: [57]
     expected_results: [58]
+    forbidden_side_effects: [1, 2]
+  - id: AC-67
+    description: Legacy-valid nested sandbox configuration survives Management compilation and signed Runtime reconstruction while actual model calls retain their provider request and effective root sandbox.
+    steps: [58]
+    expected_results: [59]
     forbidden_side_effects: [1, 2]
