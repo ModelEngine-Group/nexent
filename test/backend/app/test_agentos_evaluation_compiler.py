@@ -901,3 +901,26 @@ async def test_debug_snapshot_uses_the_tenant_group_and_version_before_compilati
     groups.assert_called_once_with("actor", "tenant-a")
     memory.assert_not_called()
     conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_turn_controls_reject_missing_root_binding_without_legacy_retry(mocker):
+    from contracts.agentos import TurnModelGeneration
+    from contracts.errors.exceptions import RunModelControlsError
+    from nexent.core.agents.agent_model import AgentConfig
+
+    mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
+    mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
+    mocker.patch.object(run, "create_model_config_list", new=AsyncMock(return_value=[]))
+    mocker.patch.object(run, "create_agent_config", new=AsyncMock(return_value=AgentConfig(
+        name="agent", description="agent", model_name="missing-root", tools=[],
+    )))
+    export = mocker.patch.object(evaluation_snapshot, "export_snapshot")
+
+    with pytest.raises(RunModelControlsError, match="model_not_available"):
+        await run.create_agent_run_info(
+            7, [], "hello", [], "tenant", "actor", is_debug=True, export_evaluation=True,
+            turn_generation=TurnModelGeneration(settings=WorkbenchGenerationConfig(temperature=0.4)),
+        )
+
+    export.assert_not_called()

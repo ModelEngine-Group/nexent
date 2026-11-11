@@ -17,6 +17,7 @@ from contracts.constants.environment import (
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     TOKEN,
 )
+from contracts.errors.exceptions import RunModelControlsError
 from contracts.tool import ToolParamsRequest
 from backend.http.client import create_httpx_client
 from infrastructure.agent_model_overrides import apply_turn_model_generation, merge_provider_body
@@ -342,7 +343,7 @@ async def create_agent_run_info(
     if turn_generation is not None:
         selected = next((model for model in model_list if model.cite_name == agent_config.model_name), None)
         if selected is None:
-            return None
+            raise RunModelControlsError("model_not_available")
         source_model_alias = selected.cite_name
         root = apply_turn_model_generation(selected, turn_generation, "turn_root_model")
         model_list.append(root)
@@ -358,8 +359,6 @@ async def create_agent_run_info(
             (m for m in model_list if m.cite_name == agent_config.model_name), None
         )
         if selected_config is None:
-            from contracts.errors.exceptions import RunModelControlsError
-
             raise RunModelControlsError("model_not_available")
         legacy = {}
         if reasoning_effort is not None:
