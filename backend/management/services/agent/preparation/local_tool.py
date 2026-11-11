@@ -43,10 +43,11 @@ def export_local_tool(
     metadata = tool.metadata or {}
     raw_overrides = metadata.get(LOCAL_SEARCH_TUNING_METADATA)
     overrides = LocalSearchOverrides.model_validate(raw_overrides) if raw_overrides else None
+    effective = apply_local_search_overrides(persisted, overrides)
     if (metadata.keys() - {LOCAL_SEARCH_TUNING_METADATA}
-            or apply_local_search_overrides(persisted, overrides) != tool.model_copy(update={"metadata": None})):
+            or effective != tool.model_copy(update={"metadata": None})):
         raise ValueError("Local SDK tool differs from its persisted instance")
-    rerank_name = local_tool_rerank_name(persisted)
+    rerank_name = local_tool_rerank_name(effective)
     selected, default = _rerank_bindings(tenant_id, rerank_name) if rerank_name else (None, None)
     options = {
         "revision": local_tool_revision(tenant_id, agent_id, version_no, row, persisted),

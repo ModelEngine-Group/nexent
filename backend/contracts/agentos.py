@@ -348,6 +348,8 @@ class AnalysisToolBinding(RunSpecModel):
 
 
 class LocalSearchOverrides(RunSpecModel):
+    rerank: bool | None = None
+    rerank_model_name: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=100)
     max_results: int | None = Field(default=None, ge=1, le=100)
     threshold: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)

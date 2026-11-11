@@ -38,9 +38,9 @@ LOCAL_SDK_TOOL_CLASSES = {
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 LOCAL_SEARCH_TUNING_METADATA = "agentos_local_search_overrides"
 LOCAL_SEARCH_TUNING_FIELDS = {
-    "dify_search": {"top_k"},
-    "datamate_search": {"top_k", "threshold"},
-    "ragflow_search": {"top_k", "similarity_threshold"},
+    "dify_search": {"top_k", "rerank", "rerank_model_name"},
+    "datamate_search": {"top_k", "threshold", "rerank", "rerank_model_name"},
+    "ragflow_search": {"top_k", "similarity_threshold", "rerank", "rerank_model_name"},
     "haotian_search": {"top_k", "score_threshold"},
     "idata_search": {"top_k", "similarity_threshold"},
     "deepseek_search": {"max_results"},

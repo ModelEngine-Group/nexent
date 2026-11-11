@@ -28,7 +28,8 @@ def stored_tool(mocker):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("requested", [None, {"top_k": 7}, {"top_k": True}, {"top_k": 101}, {"api_key": "request-key"}])
+@pytest.mark.parametrize("requested", [None, {"top_k": 7}, {"top_k": True}, {"top_k": 101}, {"api_key": "request-key"},
+    {"rerank": False}, {"rerank": True, "rerank_model_name": "Alternate"}, {"rerank_model_name": ""}])
 async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields(mocker, stored_tool, requested):
     from management.services.agent.preparation import local_tool, tools
     from runtime.agentos import prepared_local_tool
@@ -47,17 +48,21 @@ async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields
     legacy.assert_not_called()
 
     rerank = mocker.patch.object(local_tool, "_rerank_bindings", return_value=(None, None))
-    if requested and requested != {"top_k": 7}:
+    if requested and requested in ({"top_k": True}, {"top_k": 101}, {"api_key": "request-key"}):
         with pytest.raises(ValueError):
             local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
         rerank.assert_not_called()
         return
     exported = local_tool.export_local_tool(tool, [stored_tool], 7, 3, "tenant-a", "zh")
     if requested:
-        assert exported.parameters["search_overrides"] == {"top_k": 7}
+        assert exported.parameters["search_overrides"] == requested
     else:
         assert "search_overrides" not in exported.parameters
-    rerank.assert_called_once_with("tenant-a", "Reranker")
+    rerank_name = tool.params.get("rerank_model_name") if tool.params.get("rerank") else None
+    if rerank_name:
+        rerank.assert_called_once_with("tenant-a", rerank_name)
+    else:
+        rerank.assert_not_called()
     encoded = exported.model_dump_json()
     for secret in ("https://private-dify.invalid/v1", "local-only-dify-key", "dataset-a"):
         assert secret not in encoded
@@ -70,8 +75,10 @@ async def test_local_tool_compiles_and_rebinds_without_sending_connection_fields
     assert rebound.params == tool.params
     instance = NexentAgent.create_local_tool(SimpleNamespace(observer=None), rebound)
     assert instance.dataset_ids == ["dataset-a"]
-    assert instance.top_k == (7 if requested else 2)
-    assert instance.rerank_model is hydrate_rerank.return_value
+    assert instance.top_k == (requested or {}).get("top_k", 2)
+    assert instance.rerank_model is (hydrate_rerank.return_value if rerank_name else None)
+    if not rerank_name:
+        hydrate_rerank.assert_not_called()
 
 
 @pytest.mark.parametrize(("change", "status"), [("revoked", 404), ("changed", 409), ("covered_default", 409)])
