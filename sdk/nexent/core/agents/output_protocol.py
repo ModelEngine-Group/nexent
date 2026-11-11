@@ -91,6 +91,10 @@ class ModelOutputProtocolExhaustedError(Exception):
 
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
+_RUNTIME_RECORD_RE = re.compile(
+    r"</?(?:completed_action_history|completed_action|code_exec_result|summaried_result|output_ref)\b",
+    re.IGNORECASE,
+)
 _CODE_MARKER_RE = re.compile(r"</?code>", re.IGNORECASE)
 _PROTOCOL_MARKER_RE = re.compile(r"</?(?:code|final_answer)>|```<run>", re.IGNORECASE)
 _MARKDOWN_RE = re.compile(
@@ -256,6 +260,7 @@ def is_raw_final_answer_candidate(output: Any) -> bool:
         has_meaningful_visible_content(text)
         and not _PROTOCOL_MARKER_RE.search(text)
         and not _MODEL_CONTROL_TOKEN_RE.search(text)
+        and not _RUNTIME_RECORD_RE.search(text)
         and not re.search(r"</?(?:think|tool_call|code_exec_result|summaried_result|output_ref)\b", text, re.I)
     )
 
@@ -279,6 +284,9 @@ def _classify_code_action(
         if any(not _position_in_spans(token.start(), examples)
                for token in _MODEL_CONTROL_TOKEN_RE.finditer(remaining[:prefix_end])):
             _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        if any(not _position_in_spans(token.start(), examples)
+               for token in _RUNTIME_RECORD_RE.finditer(remaining[:prefix_end])):
+            _raise_protocol_error(ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT, protocol, logger)
         if marker is None:
             break
         start = position + marker.start()

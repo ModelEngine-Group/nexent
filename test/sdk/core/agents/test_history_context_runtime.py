@@ -276,8 +276,8 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
-    assert "reasoning 1" in rendered
-    assert "reasoning 2" in rendered
+    assert "reasoning 1" not in rendered
+    assert "reasoning 2" not in rendered
     assert result.evidence.item_representations == (
         ("current_task:0", "raw"), ("current_planning:0", "raw"),
         ("current_action:0", "raw"), ("current_action:1", "raw"),
@@ -317,15 +317,15 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
         model=None, memory=memory, current_run_start_idx=0, run_context=run,
     )
     rendered = _rendered_text(result.messages)
-    assert "<code>" in rendered
-    assert "print('ok')" in rendered
+    assert "<code>" not in rendered
+    assert "print(" in rendered and "ok" in rendered
     assert "<OUTPUT>ok</OUTPUT>" in rendered
     assert "<RETURN_VALUE>done</RETURN_VALUE>" in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
     summary_rendered = _rendered_text(manager.render_memory_messages(memory))
-    assert "<code>" in summary_rendered
+    assert "<code>" not in summary_rendered
     assert "<OUTPUT>ok</OUTPUT>" in summary_rendered
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
@@ -422,7 +422,7 @@ def test_compact_stages_old_actions_before_other_items(monkeypatch):
     assert result.evidence.current_action_compact_count == 1
     rendered = str(result.messages)
     assert "old observation" in rendered
-    assert "old reasoning" in rendered
+    assert "old reasoning" not in rendered
     assert "knowledge knowledge" in rendered
 
 
