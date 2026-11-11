@@ -24,7 +24,6 @@ from management.services.agent.preparation.inputs import (
 )
 from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
 from management.services.agent.tool_identity import resolve_tool_user_context
-from management.services.file.service import validate_urls_access
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
@@ -43,6 +42,10 @@ class LegacyRunMaterializer(Protocol):
     def prepare_workspace(
         self, user_id: str, tenant_id: str, run_id: str, skill_snapshot: list[dict[str, Any]] | None,
     ) -> tuple[str, list[dict[str, Any]] | None]: ...
+
+    def file_tool_context(
+        self, workspace_path: str, user_id: str, tenant_id: str, run_id: str,
+    ) -> dict[str, Any]: ...
 
     def __call__(self, **values: Any) -> "AgentRunInfo": ...
 
@@ -163,22 +166,15 @@ async def create_agent_run_info(
         except (TypeError, ValueError):
             return None
     else:
-        from infrastructure.object_storage.client import minio_client
-
         workspace_run_id = uuid.uuid4().hex
         workspace_path, runtime_skill_snapshot = legacy_materializer.prepare_workspace(
             user_id, tenant_id, workspace_run_id, runtime_skill_snapshot,
         )
         effective_minio_files = _collect_run_minio_files(minio_files, history)
         _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
-        runtime_file_context = {
-            "workspace_path": workspace_path,
-            "minio_client": minio_client,
-            "user_id": user_id,
-            "tenant_id": tenant_id,
-            "run_id": workspace_run_id,
-            "validate_url_access": lambda urls: validate_urls_access(urls, user_id, tenant_id),
-        }
+        runtime_file_context = legacy_materializer.file_tool_context(
+            workspace_path, user_id, tenant_id, workspace_run_id,
+        )
 
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)

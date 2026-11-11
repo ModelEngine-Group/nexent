@@ -3,10 +3,12 @@
 """Construct SDK run objects from prepared values and local execution settings."""
 
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from contracts.constants import environment
+from infrastructure.object_storage.read_access import validate_urls_access
 from infrastructure.redis.client import get_redis_client
 from infrastructure.sandbox_deployment import get_sandbox_minio_client
 from infrastructure.workspace_paths import create_run_workspace
@@ -34,6 +36,20 @@ class LegacyRunFactory:
         if skill_snapshot is not None:
             skill_snapshot = materialize_legacy_skill_snapshot(skill_snapshot, workspace, tenant_id)
         return workspace, skill_snapshot
+
+    def file_tool_context(
+        self, workspace_path: str, user_id: str, tenant_id: str, run_id: str,
+    ) -> dict[str, Any]:
+        from infrastructure.object_storage.client import minio_client
+
+        return {
+            "workspace_path": workspace_path,
+            "minio_client": minio_client,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "run_id": run_id,
+            "validate_url_access": partial(validate_urls_access, user_id=user_id, caller_tenant_id=tenant_id),
+        }
 
     def __call__(self, *, agent_config, workspace_path, **values) -> AgentRunInfo:
         """Resolve Runtime deployment settings for the in-process compatibility path."""

@@ -309,7 +309,7 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     mocker.patch.object(factory.environment, "MCP_REQUEST_TIMEOUT_SECONDS", 23)
     mocker.patch.object(run, "_validate_run_minio_files")
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
-    mocker.patch.object(run, "create_agent_config", return_value=agent)
+    compile_agent = mocker.patch.object(run, "create_agent_config", return_value=agent)
     mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
     mocker.patch.object(run, "create_model_config_list", return_value=[model])
     mocker.patch.object(run, "get_remote_mcp_server_list", return_value=[])
@@ -333,6 +333,13 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     assert prepared.mcp_request_timeout_seconds == 23
     storage_client.assert_called_once_with()
     workspace = tmp_path / "actor" / prepared.workspace_run_id
+    context = compile_agent.await_args.kwargs["runtime_file_context"]
+    assert context["workspace_path"] == str(workspace)
+    assert context["run_id"] == prepared.workspace_run_id
+    validate = context["validate_url_access"]
+    validate(["/bucket/attachments/actor/file.txt", "https://example.com/file.txt"])
+    with pytest.raises(PermissionError):
+        validate(["s3://bucket/attachments/another-user/file.txt"])
     assert prepared.workspace_path == str(workspace)
     assert prepared.sandbox_config.output_dir == str(workspace / "outputs")
     assert prepared.sandbox_config.extra_kwargs["workspace_root"] == str(tmp_path.resolve())

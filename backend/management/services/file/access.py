@@ -5,11 +5,11 @@ from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX
 from typing import Dict
 from typing import List
 from typing import Optional
-from nexent.multi_modal.utils import parse_s3_url
-from infrastructure.object_storage.read_access import can_read_object
-
-import logging
-logger = logging.getLogger('management.services.file.service')
+from infrastructure.object_storage.read_access import (
+    can_read_object,
+    validate_s3_url_access as validate_s3_url_access,
+    validate_urls_access as validate_urls_access,
+)
 
 def check_file_access(
     object_name: str,
@@ -113,70 +113,3 @@ def check_file_access_batch(
         )
         for obj_name in object_names
     }
-
-
-def validate_s3_url_access(
-    object_name: str,
-    user_id: Optional[str],
-    caller_tenant_id: Optional[str] = None,
-) -> None:
-    """
-    Validate if user has permission to access the S3 URL.
-
-    Args:
-        object_name: File object name in storage (extracted from S3 URL)
-        user_id: Current user ID
-
-    Raises:
-        PermissionError: If user doesn't have permission to access the file
-    """
-    if not user_id:
-        raise PermissionError("User authentication required to access files")
-
-    if not check_file_access(object_name, user_id, caller_tenant_id):
-        logger.warning(
-            f"[validate_s3_url_access] Access denied: object_name={object_name}, user_id={user_id}")
-        raise PermissionError(
-            f"Access denied: You don't have permission to access this file ({object_name})")
-
-
-def validate_urls_access(
-    urls: List[str],
-    user_id: Optional[str],
-    caller_tenant_id: Optional[str] = None,
-) -> None:
-    """
-    Validate if user has permission to access the given URLs.
-
-    Supports S3 URLs (s3://bucket/key or /bucket/key format).
-
-    Args:
-        urls: List of URLs to validate (S3, HTTP, or HTTPS)
-        user_id: Current user ID
-
-    Raises:
-        PermissionError: If user doesn't have permission to access any of the files
-    """
-    if not urls:
-        return
-
-    for url in urls:
-        if not url:
-            continue
-
-        # Only validate S3 URLs (MinIO storage)
-        # HTTP/HTTPS URLs are external resources and are not subject to MinIO access control
-        if url.startswith("s3://"):
-            try:
-                _, object_name = parse_s3_url(url)
-                validate_s3_url_access(object_name, user_id, caller_tenant_id)
-            except ValueError as e:
-                logger.warning(
-                    f"[validate_urls_access] Failed to parse S3 URL: {url}, error: {e}")
-                raise PermissionError(f"Invalid S3 URL format: {url}")
-        elif url.startswith("/") and not url.startswith("//"):
-            # Handle /bucket/key format (absolute path style)
-            parts = url.strip("/").split("/", 1)
-            if len(parts) == 2:
-                bucket, object_name = parts
-                validate_s3_url_access(object_name, user_id, caller_tenant_id)
