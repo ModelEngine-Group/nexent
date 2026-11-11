@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Management-owned public conversation admission and projection markers."""
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from sqlalchemy import func, select, update
 from contracts.agent import WorkbenchSessionConfig
 from contracts.agentos import AgentRunReference, WorkbenchSkillLookup, WorkbenchSkillMounts
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
+from contracts.conversation import MessageSource
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
 from infrastructure.rdb.agent_admission import AdmissionScopeError, ConversationRunAdmission
@@ -38,6 +40,13 @@ class PreparedTurn:
     assistant_message_id: int | None
     staged_at: datetime
     memory_agent_id: int | None = None
+
+
+@dataclass(frozen=True)
+class SavedUserTurn:
+    message_id: int
+    message_index: int
+    message_source: str
 
 
 @dataclass(frozen=True)
@@ -87,6 +96,44 @@ def next_message_index(conversation_id: int, user_id: str, tenant_id: str) -> in
         if _owned(session, conversation_id, user_id, tenant_id) is None:
             raise AdmissionScopeError
         return _next_index(session, conversation_id)
+
+
+def _saved_user_message(session, conversation_id, user_id, message_index, query, files):
+    message = ConversationMessage
+    row = session.scalar(select(message).where(
+        message.conversation_id == conversation_id, message.created_by == user_id,
+        message.message_index == message_index, message.message_role == "user",
+        message.status == "completed", message.delete_flag == "N",
+    ).order_by(message.message_id.desc()).limit(1))
+    if row is None or message_index < 0 or message_index % 2 or row.message_content != query:
+        raise PreparedTurnConflict
+    try:
+        attachments = json.loads(row.minio_files) if row.minio_files else []
+    except (ValueError, TypeError) as exc:
+        raise PreparedTurnConflict from exc
+    if (attachments or []) != (files or []) or row.message_source not in {"CHAT", "AUTOMATION"}:
+        raise PreparedTurnConflict
+    return SavedUserTurn(row.message_id, row.message_index, row.message_source)
+
+
+def read_saved_user_turn(conversation_id, user_id, tenant_id, message_index, query, files) -> SavedUserTurn:
+    """Find the source of an old signed request, including an already answered retry."""
+    with get_db_session() as session:
+        if _owned(session, conversation_id, user_id, tenant_id) is None:
+            raise AdmissionScopeError
+        return _saved_user_message(session, conversation_id, user_id, message_index, query, files)
+
+
+def _require_saved_head(session, conversation_id, user_id, source, user_turn):
+    current = _saved_user_message(
+        session, conversation_id, user_id, source.message_index, user_turn["query"], user_turn["minio_files"],
+    )
+    message = ConversationMessage
+    head = session.scalar(select(message.message_id).where(
+        message.conversation_id == conversation_id, message.delete_flag == "N",
+    ).order_by(message.message_index.desc(), message.message_id.desc()).limit(1))
+    if current != source or head != source.message_id:
+        raise PreparedTurnConflict
 
 
 def _view(row, *, message_index=None):
@@ -275,8 +322,10 @@ def _require_workbench_version(conversation: ConversationRecord, expected: int, 
 
 def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
-    *, initial_title: str | None = None,
+    *, initial_title: str | None = None, saved_user: SavedUserTurn | None = None,
 ) -> PreparedTurn:
+    if saved_user is not None and (initial_title is not None or saved_user.message_index != message_index):
+        raise PreparedTurnConflict
     admission = ConversationRunAdmission
     workbench = user_turn.get("workbench_update")
     knowledge = user_turn.get("knowledge_update")
@@ -286,20 +335,27 @@ def stage_turn(
             if _owned(session, reference.conversation_id, user_id, tenant_id) is None:
                 raise AdmissionScopeError
             # Keep the legacy order of quota lock followed by conversation row.
-            _enforce_conversation_turn_limit(session, reference.conversation_id, "user", user_id)
+            if saved_user is None:
+                _enforce_conversation_turn_limit(session, reference.conversation_id, "user", user_id)
+            else:
+                _lock_conversation_limit_scope(session, f"conversation-turn-limit:{reference.conversation_id}")
             conversation = _owned(session, reference.conversation_id, user_id, tenant_id, lock=True)
             if conversation is None:
                 raise AdmissionScopeError
-            if (session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None
-                    or _next_index(session, reference.conversation_id) != message_index):
+            if session.scalar(_pending(admission.conversation_id == reference.conversation_id).limit(1)) is not None:
                 raise PreparedTurnConflict
+            if saved_user is None:
+                if _next_index(session, reference.conversation_id) != message_index:
+                    raise PreparedTurnConflict
+            else:
+                _require_saved_head(session, reference.conversation_id, user_id, saved_user, user_turn)
             if workbench is not None:
                 _require_workbench_version(conversation, workbench["expected_version"], workbench["config"])
             if knowledge is not None and conversation.knowledge_scope != knowledge["expected"]:
                 raise PreparedTurnConflict
             if (metadata_update := user_turn.get("metadata_update")) is not None:
                 _require_metadata_version(conversation, metadata_update["expected_version"])
-            if clarification is not None:
+            if clarification is not None and saved_user is None:
                 resolved = _resolve_clarification_response(
                     session, reference.conversation_id, user_id, "user", clarification,
                 )
@@ -335,6 +391,11 @@ def stage_turn(
             **{key: value for key, value in user_turn.items() if key != "automation"},
             "new_conversation": initial_title is not None,
         }
+        if saved_user is not None:
+            row.prepared_user_turn = {
+                **row.prepared_user_turn, "source_user_message_id": saved_user.message_id,
+                "source_user_message_source": saved_user.message_source,
+            }
         row.prepared_message_index = message_index + 1
         row.update_time = datetime.now(timezone.utc).replace(tzinfo=None)
         return _view(row)
@@ -361,9 +422,15 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
         if row.prepared_message_index is None:
             return _view(row, message_index=turn.message_index)
         if row.prepared_assistant_id is None:
-            if _next_index(session, conversation_id) != row.prepared_message_index - 1:
-                raise PreparedTurnConflict
             user_turn = row.prepared_user_turn
+            source_message_id = user_turn.get("source_user_message_id")
+            if source_message_id is None:
+                if _next_index(session, conversation_id) != row.prepared_message_index - 1:
+                    raise PreparedTurnConflict
+            else:
+                _require_saved_head(session, conversation_id, turn.user_id, SavedUserTurn(
+                    source_message_id, row.prepared_message_index - 1, user_turn["source_user_message_source"],
+                ), user_turn)
             workbench = user_turn.get("workbench_update")
             knowledge = user_turn.get("knowledge_update")
             metadata_update = user_turn.get("metadata_update")
@@ -400,19 +467,23 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
             }
             clarification = user_turn.get("clarification_response")
             options = {}
-            if clarification is not None:
+            if clarification is not None and source_message_id is None:
                 user_message["clarification_response"] = clarification
                 options["expected_clarification_source_id"] = user_turn["clarification_source_id"]
             try:
-                source_message_id = create_conversation_message(user_message, turn.user_id, db_session=session, **options)
+                if source_message_id is None:
+                    source_message_id = create_conversation_message(user_message, turn.user_id, db_session=session, **options)
             except AppException as exc:
                 if clarification is None or exc.error_code != ErrorCode.COMMON_VALIDATION_ERROR:
                     raise
                 raise PreparedTurnConflict from exc
+            source_options = {"message_source": MessageSource(user_turn["source_user_message_source"])} if (
+                "source_user_message_id" in user_turn
+            ) else {}
             row.prepared_assistant_id = create_conversation_message({
                 "conversation_id": conversation_id, "message_idx": row.prepared_message_index,
                 "role": "assistant", "content": "",
-            }, turn.user_id, status="streaming", streaming_owner="management", db_session=session)
+            }, turn.user_id, status="streaming", streaming_owner="management", db_session=session, **source_options)
             conversation.chat_mode = user_turn["chat_mode"]
             if workbench is None:
                 conversation.agent_id = user_turn["agent_id"]

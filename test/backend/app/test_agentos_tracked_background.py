@@ -6,7 +6,7 @@ from unittest.mock import call
 import pytest
 from starlette.responses import StreamingResponse
 
-from contracts.agentos import BackgroundRun
+from contracts.agentos import BackgroundRun, CompatibilityConversationRun
 from infrastructure.agentos_identity import ServicePrincipal
 from runtime.api.agent import execution
 
@@ -20,7 +20,9 @@ async def test_runtime_supplies_its_materializer_to_the_compatibility_stream(moc
     actor = ServicePrincipal("actor", "tenant")
     legacy_stream = mocker.patch.object(execution, "run_legacy_agent_stream", return_value=StreamingResponse(iter(())))
 
-    response = await execution.run_agentos_compatibility({"query": "run", "conversation_id": 42}, actor)
+    response = await execution.run_agentos_conversation(CompatibilityConversationRun(
+        request={"query": "run", "conversation_id": 42}, preparation="legacy", user_message="saved",
+    ), actor)
 
     assert response is legacy_stream.return_value
     options = legacy_stream.await_args.kwargs

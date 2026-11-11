@@ -23,6 +23,12 @@ async def dispatch_signed_start(payload: CompatibilityConversationRun, actor: Se
     )
 
 
+async def dispatch_saved_start(request: AgentRequest, actor: ServicePrincipal):
+    return await dispatch_signed_start(CompatibilityConversationRun(
+        request=request.model_dump(mode="json", exclude_unset=True), user_message="saved",
+    ), actor)
+
+
 async def dispatch_public_start(request: AgentRequest, context: Request | None, actor: ServicePrincipal):
     language = "zh"
     timezone = None

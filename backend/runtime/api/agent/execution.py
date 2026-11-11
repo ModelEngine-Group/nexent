@@ -25,7 +25,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution, untrack_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
-from runtime.agentos.management_dispatch import dispatch_public_start, dispatch_signed_start
+from runtime.agentos.management_dispatch import dispatch_public_start, dispatch_saved_start, dispatch_signed_start
 from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import direct_legacy_stream, start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
@@ -91,6 +91,10 @@ _legacy_execution_host = LegacyExecutionHost(
 
 async def run_agent_stream(*, management_dispatch=False, **options):
     if management_dispatch:
+        if options.get("skip_user_save"):
+            return await dispatch_saved_start(
+                options["agent_request"], ServicePrincipal(options["user_id"], options["tenant_id"]),
+            )
         return await dispatch_public_start(
             options["agent_request"], options.get("http_request"),
             ServicePrincipal(options["user_id"], options["tenant_id"]),
@@ -165,8 +169,9 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     request._track_execution = not payload.resume and not request.is_debug
 
     async def execute():
+        saved_options = {"skip_user_save": True} if payload.user_message == "saved" else {}
         return await _run_public_conversation(
-            request, context, principal, payload.resume,
+            request, context, principal, payload.resume, **saved_options,
         )
 
     if payload.idempotency_key is not None or payload.claimed_run_id is not None:
@@ -176,7 +181,9 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
     return await execute()
 
 
-async def _run_public_conversation(agent_request, http_request, principal, resume, *, management_dispatch=False):
+async def _run_public_conversation(
+    agent_request, http_request, principal, resume, *, management_dispatch=False, skip_user_save=False,
+):
     if resume and (agent_request.is_debug or (agent_request.conversation_id or 0) <= 0):
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RESUME_REQUEST"})
     try:
@@ -185,6 +192,8 @@ async def _run_public_conversation(agent_request, http_request, principal, resum
                 agent_request.conversation_id, principal, workbench=agent_request.entrypoint == "workbench",
             )
         dispatch_options = {"management_dispatch": True} if management_dispatch else {}
+        if skip_user_save:
+            dispatch_options["skip_user_save"] = True
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
@@ -350,6 +359,7 @@ async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, ten
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
+            management_dispatch=not agent_request.is_debug and (agent_request.conversation_id or 0) > 0,
         )
     except ActiveExecutionError:
         return _execution_conflict_response()
@@ -372,6 +382,10 @@ async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, ten
         return _runtime_overload_response(exc)
     except AppException:
         raise
+    except RuntimeServiceTimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Management service timed out") from exc
+    except RuntimeServiceUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Management service is unavailable") from exc
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(

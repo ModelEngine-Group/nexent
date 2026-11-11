@@ -3598,3 +3598,109 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
                 assert not grants
     finally:
         await manager.shutdown(timeout=5)
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.asyncio
+async def test_saved_user_compatibility_over_signed_http(monkeypatch, fallback):
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import AgentRunReference
+    from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
+    from management.api.agent import compatibility_dispatch
+    from management.db.conversation.prepared_turn import SavedUserTurn
+    from management.services.agent import conversation_submission, prepared_turn, runtime_client
+    from runtime.agentos import admission, management_dispatch
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("saved-user", "saved-tenant")
+    reference = AgentRunReference(conversation_id=42, run_id="7" * 32)
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-saved-user-http-key")
+    source_reads, claims, prepared, executed = [], {}, [], []
+
+    async def control(_task, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    def source(conversation_id, user, tenant, index, query, files):
+        if (user, tenant) != (actor.user_id, actor.tenant_id):
+            raise AdmissionScopeError
+        assert (conversation_id, index, query, files) == (42, 0, "hello", None)
+        source_reads.append(23)
+        return SavedUserTurn(23, 0, "CHAT")
+
+    def claim(scope, fingerprint, user, tenant):
+        assert (user, tenant) == (actor.user_id, actor.tenant_id)
+        acquired = scope not in claims
+        if acquired:
+            claims[scope] = [fingerprint, "pending"]
+        assert claims[scope][0] == fingerprint
+        return AdmissionClaim(reference.run_id, claims[scope][1], None if acquired else 42, not acquired, acquired)
+
+    def consume(scope, fingerprint, run_id, user, tenant):
+        assert (run_id, user, tenant) == (reference.run_id, actor.user_id, actor.tenant_id)
+        if claims.get(scope) != [fingerprint, "pending"]:
+            return False
+        claims[scope][1] = "dispatching"
+        return True
+
+    def response():
+        async def chunks():
+            yield b'data: {"type":"final_answer","content":"answer"}\n\n'
+        return StreamingResponse(chunks(), headers={"conversation_id": "42"})
+
+    async def prepare(payload, request, user, tenant, client, **options):
+        assert payload.user_message == "saved" and payload.idempotency_key == "saved-message-23"
+        assert options["saved_user"] == SavedUserTurn(23, 0, "CHAT")
+        assert options["include_journal_controls"] is False
+        prepared.append(payload.claimed_run_id)
+        if fallback:
+            return None
+        next(iter(claims.values()))[1] = "admitted"
+        return response()
+
+    async def legacy(**options):
+        assert options["skip_user_save"] is True
+        assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
+        assert options["agent_request"]._projection_run_id == reference.run_id
+        executed.append(reference.run_id)
+        next(iter(claims.values()))[1] = "admitted"
+        return response()
+
+    for owner in (conversation_submission, admission):
+        monkeypatch.setattr(owner, "_control_io", control)
+        monkeypatch.setattr(owner, "conversation_belongs_to", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(runtime_client, "run_blocking", control)
+    monkeypatch.setattr(prepared_turn.store, "read_saved_user_turn", source)
+    monkeypatch.setattr(conversation_submission, "claim_conversation_run", claim)
+    monkeypatch.setattr(admission, "authorize_conversation_dispatch", consume)
+    monkeypatch.setattr(prepared_turn, "start_turn", prepare)
+    monkeypatch.setattr(prepared_turn, "find_pending_turn", lambda *_: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(execution, "run_legacy_agent_stream", legacy)
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_compatibility_router(
+        execution.run_agentos_compatibility, None, conversation_run=execution.run_agentos_conversation,
+    ))
+    manager = create_app(enable_monitoring=False)
+    manager.include_router(compatibility_dispatch.router)
+    with serve(runtime) as runtime_url, serve(manager) as manager_url:
+        client = AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
+        manager_client = AgentOSClient(manager_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+        request = {"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False}
+        first = await client.run(request, actor.user_id, actor.tenant_id)
+        assert first.status_code == 200
+        assert b"answer" in b"".join([item async for item in first.body_iterator])
+        retry = await client.run(request, actor.user_id, actor.tenant_id)
+        assert retry.status_code == 202
+        assert json.loads(b"".join([item async for item in retry.body_iterator]))["run_id"] == reference.run_id
+        foreign = await client.run(request, actor.user_id, "foreign-tenant")
+        assert foreign.status_code == 404
+        assert b"AGENTOS_RUN_NOT_FOUND" in b"".join([item async for item in foreign.body_iterator])
+    assert source_reads == [23, 23] and len(claims) == 1
+    assert prepared == [reference.run_id]
+    assert executed == ([reference.run_id] if fallback else [])

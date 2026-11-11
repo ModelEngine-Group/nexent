@@ -107,6 +107,7 @@ async def reject_unstaged_turn(payload, user_id, tenant_id):
 
 async def start_turn(
     payload, request, user_id, tenant_id, client, *, include_journal_controls=True, metadata_from_northbound=False,
+    saved_user: store.SavedUserTurn | None = None,
 ):
     run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
@@ -142,9 +143,13 @@ async def start_turn(
             initial_title = DEFAULT_EN_TITLE if payload.language == "en" else DEFAULT_ZH_TITLE
             options = {"new_conversation": True}
         else:
-            boundary = await _io("prepared-turn-boundary", store.next_message_index,
-                                 conversation_id, user_id, tenant_id)
-            options = {"before_message_index": boundary}
+            if saved_user is None:
+                boundary = await _io("prepared-turn-boundary", store.next_message_index,
+                                     conversation_id, user_id, tenant_id)
+                options = {"before_message_index": boundary}
+            else:
+                boundary = saved_user.message_index
+                options = {"current_user_message_id": saved_user.message_id}
             if native_conversation is not None:
                 options["owned_conversation"] = native_conversation
         if metadata_from_northbound:
@@ -178,6 +183,8 @@ async def start_turn(
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
+        if saved_user is not None:
+            creation["saved_user"] = saved_user
         user_turn = {
             "query": strip_current_time_prefix(request.query), "minio_files": request.minio_files,
             "chat_mode": "planning" if request.enable_plan else "execution",

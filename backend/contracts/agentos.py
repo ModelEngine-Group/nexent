@@ -45,6 +45,7 @@ class CompatibilityConversationRun(CompatibilityRun):
     preparation: Literal["management", "legacy"] | None = Field(
         default=None, description="Internal migration hop, excluded from the conversation admission fingerprint.",
     )
+    user_message: Literal["new", "saved"] = "new"
 
     @model_serializer(mode="wrap")
     def omit_unused_handoff_fields(self, serialize):
@@ -53,6 +54,8 @@ class CompatibilityConversationRun(CompatibilityRun):
             payload.pop("claimed_run_id", None)
         if self.preparation is None:
             payload.pop("preparation", None)
+        if self.user_message == "new":
+            payload.pop("user_message", None)
         return payload
 
 

@@ -21,6 +21,7 @@ from contracts.errors.exceptions import (
     RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
     ValidationError, WorkbenchError,
 )
+from infrastructure.rdb.agent_admission import AdmissionScopeError
 from infrastructure.agentos_identity import ServicePrincipal
 from management.clients.agentos import AgentOSClient
 from management.services.agent.agentos_events import (
@@ -137,6 +138,25 @@ async def forward_conversation_run(
     from management.services.agent.conversation_submission import submit_conversation
 
     client = _agentos_client()
+    saved_user = None
+    if payload.user_message == "saved":
+        if request.is_debug or payload.resume or (request.conversation_id or 0) <= 0:
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_SAVED_USER_REQUEST"})
+        from management.services.agent.context import strip_current_time_prefix
+
+        message_index = 2 * sum(item.role == "user" for item in request.history or [])
+        try:
+            saved_user = await run_blocking(
+                "saved-user-source", prepared_turn.store.read_saved_user_turn,
+                request.conversation_id, user_id, tenant_id, message_index,
+                strip_current_time_prefix(request.query), request.minio_files, lane="control-io", owner="management",
+            )
+        except AdmissionScopeError as exc:
+            raise HTTPException(status_code=404, detail={"code": "AGENTOS_RUN_NOT_FOUND"}) from exc
+        except prepared_turn.store.PreparedTurnConflict as exc:
+            raise prepared_turn.active_turn_conflict() from exc
+        if payload.idempotency_key is None:
+            payload = payload.model_copy(update={"idempotency_key": f"saved-message-{saved_user.message_id}"})
     if request.is_debug and not payload.resume and northbound_fallback is None:
         from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 
@@ -166,19 +186,21 @@ async def forward_conversation_run(
             return public
 
     conversation_id = request.conversation_id
-    northbound = northbound_fallback is not None
+    northbound = northbound_fallback is not None or saved_user is not None
     temporary_workbench_claim = request.entrypoint == "workbench" and payload.idempotency_key is None
     candidate = prepared_turn.is_prepared_candidate(payload, request)
 
     async def dispatch(claimed, owner, tenant):
         if candidate:
+            saved_options = {"saved_user": saved_user} if saved_user is not None else {}
             response = await prepared_turn.start_turn(
                 claimed, request, owner, tenant, client, include_journal_controls=not northbound,
                 metadata_from_northbound=northbound and request.metadata is not None,
+                **saved_options,
             )
             if response is not None:
                 return response
-            if northbound or temporary_workbench_claim:
+            if northbound_fallback is not None or temporary_workbench_claim:
                 await prepared_turn.reject_unstaged_turn(claimed, owner, tenant)
                 claimed = payload
         if conversation_id and conversation_id > 0 and not request.is_debug:

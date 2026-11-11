@@ -168,6 +168,9 @@ case:
   - order: 47
     action: Submit a public debug request with a client conversation correlation ID and cancel the debug run through the standard AgentOS lifecycle endpoint.
     expected: Management echoes the client ID and Runtime receives only the temporary run ID. The original planning and scoped cancellation behavior is preserved.
+  - order: 48
+    action: Submit a signed old Northbound request whose user message is already saved, retry it, and attempt the same operation with a foreign actor.
+    expected: Runtime delegates saved-message selection to Management. The exact actor and message position produce a stable claim and only one execution; a compatibility fallback skips user persistence. Retry returns the existing run and a foreign source is refused before claiming or executing.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -217,6 +220,7 @@ case:
   - MCP snapshots carry explicit invocation overrides and keep persisted defaults and connection configuration in Runtime.
   - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
   - Debug correlation is kept at the public boundary and debug cancellation uses signed Agent.stop.
+  - Saved-user compatibility requests use the original message identity and never execute or persist the user twice.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -519,4 +523,9 @@ case:
     description: Debug correlation and cancellation use the standard signed AgentOS lifecycle without accessing the correlated conversation.
     steps: [47]
     expected_results: [48]
+    forbidden_side_effects: [1, 2]
+  - id: AC-57
+    description: Old signed saved-user starts select the owned source in Management, retain one claim on retry and do not save the user again during fallback.
+    steps: [48]
+    expected_results: [49]
     forbidden_side_effects: [1, 2]
