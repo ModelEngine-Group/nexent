@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: AOS-TRANSPORT-D3-001
+timeout_seconds: 60
 implementations:
 - framework: pytest
   file: test.py
@@ -7,6 +8,10 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-71:
+  - test_agentos_validation_transport_timeouts
+  AC-70:
+  - test_catalog_system_tools_over_signed_agentos
   AC-69:
   - test_knowledge_catalog_alias_over_signed_agentos
   AC-68:

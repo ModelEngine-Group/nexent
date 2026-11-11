@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from starlette.responses import JSONResponse
 
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, AgentOperation, CompatibilityOperation, EvaluationAgentResult, EvaluationAgentRun, PreparedEvaluationRun,
+    BODY_KEY, PRINCIPAL_KEY, AgentOperation, EvaluationAgentResult, PreparedEvaluationRun,
 )
 from runtime.agentos.compatibility import run_until_disconnect
 
@@ -18,17 +18,6 @@ logger = logging.getLogger(__name__)
 
 def create_evaluation_router() -> APIRouter:
     router = APIRouter()
-
-    @router.post(CompatibilityOperation.EVALUATION_CASE.value, include_in_schema=False)
-    async def retired_evaluation_case(request: Request):
-        actor = request.scope.get(PRINCIPAL_KEY)
-        if actor is None:
-            return JSONResponse({"code": "AGENTOS_UNAUTHORIZED"}, status_code=401)
-        try:
-            EvaluationAgentRun.model_validate_json(request.scope[BODY_KEY])
-        except ValidationError:
-            return JSONResponse({"code": "AGENTOS_INVALID_REQUEST"}, status_code=422)
-        return JSONResponse({"code": "AGENTOS_EVALUATION_PREPARED_REQUIRED"}, status_code=410)
 
     @router.post(AgentOperation.EVALUATION_CASE.value, include_in_schema=False)
     async def run_prepared_case(request: Request):

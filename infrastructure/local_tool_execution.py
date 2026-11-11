@@ -35,7 +35,13 @@ LOCAL_SDK_TOOL_CLASSES = {
     "move_item": "MoveItemTool",
     "terminal": "TerminalTool",
 }
-LOCAL_SDK_CLASS_NAMES = {value: key for key, value in LOCAL_SDK_TOOL_CLASSES.items()}
+LOCAL_SDK_CLASS_NAMES = {
+    **{value: key for key, value in LOCAL_SDK_TOOL_CLASSES.items()},
+    # Canonical injected tools keep their dedicated bindings; catalog aliases use sdk_local.
+    "DownloadFromS3Tool": "download_from_s3",
+    "UploadToS3Tool": "upload_to_s3",
+    "ParallelExecutorTool": "parallel_executor",
+}
 LOCAL_SDK_BINDING_PREFIX = "sdk_local:"
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
 LOCAL_SEARCH_TUNING_METADATA = "agentos_local_search_overrides"
@@ -61,6 +67,13 @@ def local_tool_binding_id(tool: ToolConfig) -> str:
 
 def local_tool_binding_name(binding_id: str) -> str:
     return binding_id.removeprefix(LOCAL_SDK_BINDING_PREFIX)
+
+
+def is_catalog_local_tool(tool: ToolConfig) -> bool:
+    return (
+        tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES
+        and (tool.class_name, tool.name) != ("ParallelExecutorTool", "parallel_executor")
+    )
 
 
 def catalog_tool_parameters(row: dict) -> dict:

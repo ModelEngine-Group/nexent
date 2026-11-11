@@ -641,7 +641,7 @@ async def create_tool_config_list(
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id),
             }
-        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"]:
+        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"] and not portable_evaluation:
             tool_config.metadata = {
                 "minio_client": minio_client,
                 "user_id": user_id,

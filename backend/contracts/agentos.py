@@ -23,9 +23,6 @@ class CompatibilityOperation(str, Enum):
     RUN = NAMESPACE + "v1/compat/agent/run"
     CONVERSATION_RUN = NAMESPACE + "v1/compat/agent/conversation-run"
     STOP = NAMESPACE + "v1/compat/agent/stop"
-    BACKGROUND = NAMESPACE + "v1/compat/agent/background"
-    INSPECT = NAMESPACE + "v1/compat/agent/inspect"
-    EVALUATION_CASE = NAMESPACE + "v1/compat/agent/evaluation-case"
     DEBUG_STOP = NAMESPACE + "v1/compat/agent/debug-stop"
 
 

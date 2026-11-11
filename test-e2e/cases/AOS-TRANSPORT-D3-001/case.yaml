@@ -35,7 +35,7 @@ case:
       call enters the execution sink.
   - order: 3
     action: Run a prepared synthetic evaluation and probe the retired compatibility route.
-    expected: Prepared evaluation preserves events and rejects a positive ID. The retired route returns 401 without signing, 422 for invalid input and 410 for a valid signed request.
+    expected: Prepared evaluation preserves events and rejects a positive ID. The retired compatibility route is absent from routes and operations and returns 404 for every credential and payload.
   - order: 4
     action: Submit a signed background call with a run ID and disconnect another background client.
     expected: Runtime receives the signed actor and run ID, returns the assistant message, and cancels execution after disconnect.
@@ -154,8 +154,8 @@ case:
     action: Reconnect to a registered legacy execution without a run ID and follow replay and live events over AgentOS.
     expected: Management uses the registered execution and returns legacy status frames, replay count, and the final status.
   - order: 43
-    action: Send unsigned, tampered, invalid signed, and valid signed requests to both retired conversation-scoped background routes.
-    expected: Runtime authenticates and validates the requests, returns 410 for valid signed input, and does not dispatch any work.
+    action: Send unsigned, malformed and unrelated signed requests to removed evaluation, background and inspection paths.
+    expected: Runtime has no route or operation registration for these paths, returns 404 and does not dispatch any work.
   - order: 44
     action: Reconnect without a cursor after the legacy projection is committed and the journal is unavailable, then repeat with a foreign tenant and an owned conversation without an assistant.
     expected: Management confirms the receipt through the signed run inspection operation. Foreign scope is refused before inspection, and the empty conversation does not contact Runtime.
@@ -207,6 +207,12 @@ case:
   - order: 60
     action: Compile a knowledge search catalog alias and execute its SDK search across signed AgentOS with allowed and denied indexes.
     expected: Alias dispatch retains the exact original SDK search query and output, document filtering, model revision and denied-index behavior without colliding with MCP.
+  - order: 61
+    action: Export catalog-bound file transfer and parallel SDK classes and reconstruct them through signed AgentOS.
+    expected: Runtime retains the original owner, tenant, workspace restrictions and timeout while Management sends no storage client or callback.
+  - order: 62
+    action: Hold a controlled HTTP response before headers and after the first stream chunk until the short verification read deadline expires.
+    expected: AgentOS maps the pre-header timeout, propagates the stream read timeout and closes each client; neither request waits indefinitely.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -251,7 +257,7 @@ case:
   - Native metadata follows the prepared admission path, remains scoped to its conversation, and keeps the public version header.
   - A cursorless request for a terminal prepared turn is settled by Management using the owned projection.
   - Registered legacy journals resume without invoking the compatibility execution router.
-  - Retired background start and inspection require a run ID and cannot enter an execution handler.
+  - Retired evaluation, background start and inspection routes are removed and return operation-not-found without executing.
   - Management preserves the terminal and empty conversation JSON without using the compatibility execution route.
   - MCP snapshots carry explicit invocation overrides and keep persisted defaults and connection configuration in Runtime.
   - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
@@ -269,6 +275,8 @@ case:
   - Nested Agent sandbox configuration crosses signed AgentOS without legacy execution or changing the effective root sandbox.
   - Analysis catalog aliases retain their SDK class, selected model, object ACL and original namespace separation across signed AgentOS.
   - Knowledge search aliases preserve index authorization, document filtering and actual SDK query/output across signed AgentOS.
+  - Catalog transfer and parallel classes retain SDK execution settings and resource boundaries through signed AgentOS without transporting clients.
+  - Controlled response-header and stream stalls fail within the local verification deadline and close their HTTP clients.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -548,7 +556,7 @@ case:
     expected_results: [43]
     forbidden_side_effects: [1, 2]
   - id: AC-52
-    description: Retired conversation-scoped background start and inspection reject unauthenticated or invalid requests and never dispatch an execution.
+    description: Retired evaluation, conversation-scoped background start and inspection are absent from routes and protocol operations, return 404 and never dispatch execution.
     steps: [43]
     expected_results: [44]
     forbidden_side_effects: [1, 2]
@@ -636,4 +644,14 @@ case:
     description: Knowledge search catalog aliases preserve actual SDK query/output, allowed and denied scopes and document filtering across signed AgentOS without namespace collisions.
     steps: [60]
     expected_results: [61]
+    forbidden_side_effects: [1, 2]
+  - id: AC-70
+    description: Catalog-bound transfer and parallel tools materialize in Runtime from revisioned references with original actor scope, workspace boundaries and timeout and no transported clients.
+    steps: [61]
+    expected_results: [62]
+    forbidden_side_effects: [1, 2]
+  - id: AC-71
+    description: Controlled verification header and stream stalls have finite deadlines, correct pre-header error mapping and closed HTTP clients.
+    steps: [62]
+    expected_results: [63]
     forbidden_side_effects: [1, 2]

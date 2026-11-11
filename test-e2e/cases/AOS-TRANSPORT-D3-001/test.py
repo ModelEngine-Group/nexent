@@ -4,6 +4,7 @@
 import asyncio
 import json
 import socket
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -32,6 +33,15 @@ from runtime.agentos import prepared_evaluation
 from runtime.agentos.evaluation import create_evaluation_router
 from runtime.agentos.middleware import AgentOSMiddleware
 
+_LOCAL_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=2.0, write=2.0, pool=2.0)
+
+
+def _local_http_client(**kwargs):
+    """Keep controlled local verification bounded without changing production SSE policy."""
+    kwargs["timeout"] = _LOCAL_HTTP_TIMEOUT
+    return httpx.AsyncClient(trust_env=False, **kwargs)
+
+
 _EVENTS = b"id: 1\ndata: first\n\nid: 2\ndata: done\n\n"
 
 
@@ -40,11 +50,11 @@ def serve(app):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-        server = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="error"))
+        server = uvicorn.Server(uvicorn.Config(app, lifespan="off", log_level="error", timeout_graceful_shutdown=2, timeout_keep_alive=1))
         worker = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
         worker.start()
         try:
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + 3
             while not server.started:
                 if not worker.is_alive() or time.monotonic() >= deadline:
                     raise RuntimeError("AgentOS verification server did not start")
@@ -52,7 +62,7 @@ def serve(app):
             yield f"http://127.0.0.1:{port}"
         finally:
             server.should_exit = True
-            worker.join(timeout=10)
+            worker.join(timeout=3)
             assert not worker.is_alive(), "AgentOS verification leaked a server"
 
 
@@ -113,7 +123,7 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         evaluation_stub.setattr(prepared_evaluation, "execute_prepared_evaluation", evaluate)
 
         def client_factory(**kwargs):
-            return httpx.AsyncClient(trust_env=False, **kwargs)
+            return _local_http_client(**kwargs)
 
         agentos = AgentOSClient(runtime_url, client_factory)
         management = FastAPI()
@@ -178,38 +188,15 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
             )
             assert response.status_code == 422
 
-            retired = CompatibilityOperation.EVALUATION_CASE
-            old_case = EvaluationAgentRun(agent_id=7, version_no=3, query="question", conversation_id=-12)
-            old_body = old_case.model_dump_json().encode()
-            invalid_old_body = json.dumps(old_case.model_dump() | {"conversation_id": 42}).encode()
-            retired_url = f"{runtime_url}/api{retired.value}"
-            for content, credential, status, code in (
-                (old_body, None, 401, "AGENTOS_UNAUTHORIZED"),
-                (invalid_old_body, sign_call(retired, invalid_old_body, principal), 422, "AGENTOS_INVALID_REQUEST"),
-                (old_body, sign_call(retired, old_body, principal), 410, "AGENTOS_EVALUATION_PREPARED_REQUIRED"),
-            ):
-                headers = {"Authorization": f"Bearer {credential}"} if credential else {}
-                response = await client.post(retired_url, content=content, headers=headers)
-                assert response.status_code == status
-                assert response.json() == {"code": code}
-
-            for operation, payload in (
-                (CompatibilityOperation.BACKGROUND, CompatibilityRun(request={"conversation_id": 42})),
-                (CompatibilityOperation.INSPECT, CompatibilityStop(conversation_id=42)),
-            ):
-                body = payload.model_dump_json().encode()
-                signed = sign_call(operation, body, principal)
-                invalid = b"{}"
-                for content, credential, status, code in (
-                    (body, None, 401, "AGENTOS_UNAUTHORIZED"),
-                    (body.replace(b"42", b"43"), signed, 401, "AGENTOS_UNAUTHORIZED"),
-                    (invalid, sign_call(operation, invalid, principal), 422, "AGENTOS_INVALID_REQUEST"),
-                    (body, signed, 410, "AGENTOS_RUN_ID_REQUIRED"),
-                ):
-                    headers = {"Authorization": f"Bearer {credential}"} if credential else {}
-                    response = await client.post(f"{runtime_url}/api{operation.value}", content=content, headers=headers)
-                    assert response.status_code == status
-                    assert response.json() == {"code": code}
+            for suffix in ("evaluation-case", "background", "inspect"):
+                path = "/internal/agentos/v1/compat/agent/" + suffix
+                assert path not in {getattr(route, "path", None) for route in runtime.routes}
+                for body in (b"{}", b'{"conversation_id":42}'):
+                    wrong_route_token = sign_call(CompatibilityOperation.RUN, body, principal)
+                    for headers in ({}, {"Authorization": f"Bearer {wrong_route_token}"}):
+                        response = await client.post(f"{runtime_url}/api{path}", content=body, headers=headers)
+                        assert response.status_code == 404
+                        assert response.json() == {"code": "AGENTOS_OPERATION_NOT_FOUND"}
 
             background_result = await agentos.run_tracked_background(
                 BackgroundRun(run_id="a" * 32, request={"conversation_id": 42}), principal.user_id, principal.tenant_id,
@@ -493,7 +480,7 @@ async def _assert_shared_aidp_over_signed_http(monkeypatch, tmp_path):
         monkeypatch.setattr(environment, "AIDP_API_KEY", "synthetic-shared-aidp-key")
         monkeypatch.setattr(environment, "AIDP_TENANT_ID", "shared-provider")
         monkeypatch.setattr(aidp_service, "AIDP_TENANT_ID", "shared-provider")
-        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        client = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         result = await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
         assert result.events == [
             {"type": "thought", "content": "scope checked"}, {"type": "final_answer", "content": "done"},
@@ -541,7 +528,16 @@ async def test_local_catalog_name_over_signed_agentos(monkeypatch, tmp_path, cat
     await _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, catalog_name=catalog_name)
 
 
-async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, catalog_name="dify_search"):
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("system_class", ["DownloadFromS3Tool", "UploadToS3Tool", "ParallelExecutorTool"])
+@pytest.mark.asyncio
+async def test_catalog_system_tools_over_signed_agentos(monkeypatch, tmp_path, system_class):
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-catalog-system-secret")
+    await _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, system_class=system_class)
+
+
+async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, catalog_name="dify_search", system_class=None):
     from fastapi import Request, Response
 
     from infrastructure import ind_aidp_images, langchain_plugins
@@ -555,6 +551,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
     from runtime.agentos import prepared_evaluation, prepared_langchain, prepared_local_tool
     from runtime.executions import LocalExecutionRegistry
 
+    system_name = "tenant_" + system_class.removesuffix("Tool").lower() if system_class else None
     model_record = {
         "model_id": 18, "tenant_id": "tenant-a", "delete_flag": "N", "model_type": "llm",
         "model_name": "fixture-model", "model_repo": None, "display_name": "eval_llm",
@@ -609,10 +606,27 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
     monkeypatch.setattr(prepared_evaluation, "read_agent_model_overrides", read_model_override)
 
     async def run(info, thread_manager):
-        dify_config, plugin_config, aidp_config, workspace_config = info.agent_config.tools
+        dify_config, plugin_config, aidp_config, workspace_config, *system_configs = info.agent_config.tools
         assert (dify_config.name, plugin_config.name, aidp_config.name, workspace_config.name) == (
             catalog_name, "fixture_double", "ind_aidp_search", "create_file",
         )
+        if system_class:
+            config, = system_configs
+            assert config.name == system_name and config.class_name == system_class
+            system_tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
+            if system_class == "ParallelExecutorTool":
+                assert system_tool.default_timeout_seconds == 47 and system_tool.forward([]) == []
+            else:
+                assert (system_tool.user_id, system_tool.tenant_id) == ("user-a", "tenant-a")
+                assert system_tool.workspace_path == str(tool_workspace.resolve())
+                if system_class == "DownloadFromS3Tool":
+                    assert system_tool._check_access("attachments/user-a/file")
+                    assert not system_tool._check_access("attachments/user-b/file")
+                else:
+                    with pytest.raises(Exception, match="within the workspace"):
+                        system_tool._validate_path("../denied")
+        else:
+            assert not system_configs
         assert info.model_config_list[0].extra_body == {"provider_setting": "local-private-model-body"}
         create_file = NexentAgent.create_local_tool(SimpleNamespace(observer=None), workspace_config)
         create_file.forward("agentos.txt", "workspace tool")
@@ -664,7 +678,12 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
             "class_name": "CreateFileTool", "description": "Create a file",
             "instance_params": {}, "params": [{"name": "init_path", "default": str(tool_workspace)}],
         }
-        enabled = [row, aidp_row, file_row]
+        system_params = {"default_timeout_seconds": 47} if system_class == "ParallelExecutorTool" else {"workspace_path": str(tool_workspace)}
+        system_rows = [{
+            **row, "tool_instance_id": 27, "tool_id": 9, "name": system_name, "class_name": system_class,
+            "instance_params": {}, "params": [{"name": key, "default": value} for key, value in system_params.items()],
+        }] if system_class else []
+        enabled = [row, aidp_row, file_row, *system_rows]
         plugin_row = {
             **row, "tool_instance_id": 25, "tool_id": 7, "name": "fixture_double",
             "class_name": "fixture_double", "source": "langchain", "description": "Double the input",
@@ -698,7 +717,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
         monkeypatch.setattr(independent_aidp_proxy, "query_tools_by_ids", lambda ids: [aidp_row] if ids == [6] else [])
 
         def read_tools(agent_id, version_no, tenant_id, names):
-            assert (agent_id, version_no, names) == (8, 4, [catalog_name, "ind_aidp_search", "create_file"])
+            assert (agent_id, version_no, names) == (8, 4, [catalog_name, "ind_aidp_search", "create_file", *([system_name] if system_class else [])])
             return enabled if tenant_id == "tenant-a" else []
 
         for module in (evaluation_snapshot, prepared_local_tool):
@@ -712,6 +731,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
             tools=[
                 dify_tool, plugin_tool,
                 build_local_tool(aidp_row, "en", None, None), build_local_tool(file_row, "en", None, None),
+                *[build_local_tool(item, "en", None, None) for item in system_rows],
             ],
         )
         prepared = evaluation_snapshot.export_snapshot(
@@ -728,7 +748,7 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
         ):
             assert secret not in prepared.model_dump_json()
 
-        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        client = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         result = await client.run_prepared_evaluation(prepared, "user-a", "tenant-a")
         assert result.events == [
             {"type": "thought", "content": "lookup"}, {"type": "final_answer", "content": "scoped Dify result"},
@@ -1216,7 +1236,7 @@ async def _assert_prepared_evaluation_over_signed_http(monkeypatch, tmp_path, *,
 
     monkeypatch.setattr(evaluation_snapshot, "prepare_evaluation_snapshot", prepare)
     with serve(runtime) as runtime_url:
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
         result = await runtime_client.forward_evaluation_case(case, "user-a", "tenant-a")
         assert result.answer == "answer"
@@ -1393,7 +1413,7 @@ async def _assert_resume_over_signed_http(monkeypatch):
     management.include_router(conversation_run.router)
 
     with serve(runtime) as runtime_url:
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         request = AgentResume(conversation_id=42, run_id=run_id, after_event_id=f"{run_id}:1")
         response = await agentos.resume(request, "user-a", "tenant-a")
         output = b"".join([chunk async for chunk in response.body_iterator])
@@ -1531,8 +1551,8 @@ async def _assert_public_conversation_over_signed_http(monkeypatch, *, signed_in
     management.include_router(conversation_run.router)
     management.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(management) as management_url:
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
-        manager = AgentOSClient(management_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
+        manager = AgentOSClient(management_url, lambda **kwargs: _local_http_client(**kwargs))
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager)
         async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
@@ -1615,7 +1635,7 @@ async def _assert_run_lifecycle_over_signed_http(monkeypatch):
     runtime.include_router(resume.create_run_lifecycle_router())
 
     with serve(runtime) as runtime_url:
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         state = await agentos.inspect_run(first, "user-a", "tenant-a")
         assert (state.status, state.latest_event_id, state.cancellation_requested) == ("running", f"{first.run_id}:2", False)
 
@@ -1711,7 +1731,7 @@ async def _assert_public_stop_and_background(monkeypatch):
     management.include_router(conversation_run.router)
 
     with serve(runtime) as runtime_url, serve(management) as management_url:
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
         async with httpx.AsyncClient(trust_env=False) as browser:
             response = await browser.get(f"{management_url}/api/agent/stop/{run_id}", headers={"Authorization": "foreign"})
@@ -1796,7 +1816,7 @@ async def _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch):
 
     try:
         with serve(runtime) as runtime_url:
-            agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
             async with httpx.AsyncClient(base_url=runtime_url, trust_env=False) as client:
                 response = await client.post(run_path, json={"query": "hello"}, headers={"Authorization": "Bearer raw"})
                 assert response.status_code == 401 and starts == []
@@ -2104,7 +2124,7 @@ async def _assert_prepared_run_over_signed_http(monkeypatch, tmp_path):
                 rejected = await raw.post(f"/api{operation.value}", content=callback_body, headers=headers)
                 assert rejected.status_code == expected
         ingested.assert_not_awaited()
-        agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        agentos = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         with pytest.raises(RuntimeUpstreamError) as foreign:
             await agentos.start_prepared_run(request, actor.user_id, "tenant-b")
         assert foreign.value.status_code == 404 and not admissions
@@ -2325,7 +2345,7 @@ async def _assert_prepared_planning_over_signed_http(monkeypatch, tmp_path):
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(prepared_run.create_prepared_run_router())
     with serve(runtime) as runtime_url:
-        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        client = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         assert await client.start_prepared_run(payload, principal.user_id, principal.tenant_id) == reference
 
     assert [call.args[0] for call in redis.setex.call_args_list] == ["plan:47:planning-user"] * 2
@@ -2540,7 +2560,7 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
             approved = await http.post(url, content=body, headers={"Authorization": f"Bearer {signature}"})
             assert approved.status_code == 200 and approved.headers["cache-control"] == "no-store"
             assert approved.json() == mounts.model_dump()
-        client = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        client = AgentOSClient(runtime_url, lambda **kwargs: _local_http_client(**kwargs))
         assert await client.start_prepared_run(payload, actor.user_id, actor.tenant_id) == reference
         path, = image_paths
         identity = {"kind": "session", "user_id": actor.user_id, "tenant_id": actor.tenant_id}
@@ -2830,7 +2850,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda token: (actor.user_id, token))
     with serve(runtime) as runtime_url:
         monkeypatch.setattr(runtime_client, "_agentos_client",
-                            lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+                            lambda: AgentOSClient(runtime_url, lambda **kw: _local_http_client(**kw)))
         if raw_new:
             from management.api.agent import compatibility_dispatch
 
@@ -2840,7 +2860,7 @@ async def _assert_public_prepared_turn_over_signed_http(
                 "history": [{"role": "user", "content": "earlier"} for _ in range(raw_prior_users)],
             }, invocation="northbound", language="en", timezone="Asia/Shanghai")
             with serve(management) as management_url:
-                caller = AgentOSClient(management_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
+                caller = AgentOSClient(management_url, lambda **kw: _local_http_client(**kw))
                 first = await caller.dispatch_conversation(body, actor.user_id, actor.tenant_id)
                 text = b"".join([chunk async for chunk in first.body_iterator]).decode()
                 assert first.status_code == 200 and first.headers["conversation_id"] == str(reference.conversation_id)
@@ -3262,7 +3282,7 @@ async def _assert_signed_ephemeral_stream(monkeypatch, tmp_path):
     manager.start()
     try:
         with serve(app) as base:
-            client = AgentOSClient(base, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            client = AgentOSClient(base, lambda **kwargs: _local_http_client(**kwargs))
             monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
             async with httpx.AsyncClient(trust_env=False) as unauthenticated:
                 rejected = await unauthenticated.post(
@@ -3407,7 +3427,7 @@ async def _assert_automation_proposal_callback(monkeypatch):
     management.include_router(callback_api.router)
     with serve(runtime) as runtime_url, serve(management) as management_url:
         monkeypatch.setattr(agentos_callback, "_agentos_client",
-                            lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+                            lambda: AgentOSClient(runtime_url, lambda **kw: _local_http_client(**kw)))
         monkeypatch.setattr(environment, "MANAGEMENT_AGENTOS_URL", management_url)
         resource = AgentResource(
             agent_id=7, version_no=3, name="agent", description="", prompt_templates={},
@@ -3528,7 +3548,7 @@ async def test_nl2skill_creation_over_signed_agentos(monkeypatch):
     manager.start()
     try:
         with serve(runtime) as upstream, serve(management) as public:
-            client = AgentOSClient(upstream, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            client = AgentOSClient(upstream, lambda **kwargs: _local_http_client(**kwargs))
             monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
             async with httpx.AsyncClient(trust_env=False, timeout=8) as http:
                 rejected = await http.post(f"{upstream}/api{AgentOperation.RUN_EPHEMERAL.value}", json={})
@@ -3674,7 +3694,7 @@ async def test_nl2agent_run_and_signed_draft_callback(monkeypatch):
     manager.start()
     try:
         with serve(runtime) as upstream, serve(management) as public:
-            client = AgentOSClient(upstream, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+            client = AgentOSClient(upstream, lambda **kwargs: _local_http_client(**kwargs))
             monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
             monkeypatch.setattr(prepared_agent_creator, "MANAGEMENT_AGENTOS_URL", public)
             async with httpx.AsyncClient(trust_env=False, timeout=8) as http:
@@ -3797,8 +3817,8 @@ async def test_saved_user_compatibility_over_signed_http(monkeypatch, fallback):
     manager = create_app(enable_monitoring=False)
     manager.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(manager) as manager_url:
-        client = AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
-        manager_client = AgentOSClient(manager_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
+        client = AgentOSClient(runtime_url, lambda **kw: _local_http_client(**kw))
+        manager_client = AgentOSClient(manager_url, lambda **kw: _local_http_client(**kw))
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
         request = {"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False}
@@ -3974,7 +3994,7 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
     manager = create_app(enable_monitoring=False)
     manager.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(manager) as manager_url:
-        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        factory = lambda **kw: _local_http_client(**kw)
         client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
@@ -4101,7 +4121,7 @@ async def test_raw_northbound_preparation_over_signed_http(monkeypatch, unsuppor
     manager = create_app(enable_monitoring=False)
     manager.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(manager) as manager_url:
-        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        factory = lambda **kw: _local_http_client(**kw)
         client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
@@ -4237,7 +4257,7 @@ async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
     manager = create_app(enable_monitoring=False)
     manager.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(manager) as manager_url:
-        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        factory = lambda **kw: _local_http_client(**kw)
         client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
@@ -4390,7 +4410,7 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
         manager = create_app(enable_monitoring=False)
         manager.include_router(compatibility_dispatch.router)
         with serve(runtime) as runtime_url, serve(manager) as manager_url:
-            factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+            factory = lambda **kw: _local_http_client(**kw)
             client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
             monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
             monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
@@ -4543,7 +4563,7 @@ async def test_background_without_automation_record_over_signed_agentos(monkeypa
     manager = create_app(enable_monitoring=False)
     manager.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(manager) as manager_url:
-        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        factory = lambda **kw: _local_http_client(**kw)
         client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
         monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
@@ -4575,3 +4595,44 @@ async def test_background_without_automation_record_over_signed_agentos(monkeypa
         assert foreign.value.status_code == 404
     if record is not None:
         assert record["status"] == "RUNNING" and record["user_message_id"] is None and record["generated_prompt"] is None
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("phase", ["headers", "body"])
+@pytest.mark.asyncio
+async def test_agentos_validation_transport_timeouts(monkeypatch, phase):
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-timeout-key")
+    monkeypatch.setattr(sys.modules[__name__], "_LOCAL_HTTP_TIMEOUT", httpx.Timeout(0.1))
+    app = FastAPI()
+    clients = []
+
+    @app.post("/api" + CompatibilityOperation.RUN.value)
+    async def stalled():
+        if phase == "headers":
+            await asyncio.sleep(0.5)
+            return Response(content="late")
+        async def stream():
+            yield b"data: first\n\n"
+            await asyncio.sleep(0.5)
+            yield b"data: late\n\n"
+        return StreamingResponse(stream())
+
+    def create(**kwargs):
+        client = _local_http_client(**kwargs)
+        clients.append(client)
+        return client
+
+    with serve(app) as url:
+        client = AgentOSClient(url, create)
+        if phase == "headers":
+            with pytest.raises(RuntimeServiceTimeoutError):
+                await asyncio.wait_for(client.run({"query": "fixture"}, "user-a", "tenant-a"), 1)
+        else:
+            response = await asyncio.wait_for(client.run({"query": "fixture"}, "user-a", "tenant-a"), 1)
+            with pytest.raises(httpx.ReadTimeout):
+                async for _chunk in response.body_iterator:
+                    pass
+        assert len(clients) == 1 and clients[0].is_closed

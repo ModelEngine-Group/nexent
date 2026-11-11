@@ -182,5 +182,9 @@ def materialize_local_tools(
             )}
         elif tool.class_name == "AidpSearchTool":
             _bind_shared_aidp_access(tool, actor)
+        elif tool.class_name in {"DownloadFromS3Tool", "UploadToS3Tool"}:
+            from infrastructure.object_storage.client import minio_client
+
+            tool.metadata = {"minio_client": minio_client, "user_id": actor.user_id, "tenant_id": actor.tenant_id}
         tools[binding_id] = tool
     return tools

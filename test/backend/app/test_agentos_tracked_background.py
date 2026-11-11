@@ -107,11 +107,11 @@ async def test_background_disconnect_requests_stop_for_the_dispatched_run(mocker
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation_name", ["BACKGROUND", "INSPECT"])
-async def test_untracked_background_routes_require_run_id(mocker, operation_name):
+@pytest.mark.parametrize("operation_name", ["background", "inspect", "evaluation-case"])
+async def test_retired_compatibility_routes_are_absent(mocker, operation_name):
     import httpx
 
-    from contracts.agentos import CompatibilityOperation
+    from contracts.agentos import CompatibilityOperation, NAMESPACE
     from contracts.constants import environment
     from infrastructure.agentos_identity import sign_call
     from runtime.api.application import app
@@ -119,19 +119,16 @@ async def test_untracked_background_routes_require_run_id(mocker, operation_name
     mocker.patch.object(environment, "JWT_SECRET", "fixture-retired-background-key")
     lookup = mocker.patch.object(execution, "_require_owned_conversation")
     start = mocker.patch.object(execution, "run_agent_stream")
-    operation = CompatibilityOperation[operation_name]
     actor = ServicePrincipal("actor", "tenant")
-    body = b'{"request":{"conversation_id":42,"query":"test"}}' if operation_name == "BACKGROUND" else b'{"conversation_id":42}'
-
+    path = NAMESPACE + "v1/compat/agent/" + operation_name
+    body = b'{"conversation_id":42}'
+    token = sign_call(CompatibilityOperation.RUN, body, actor)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://runtime") as client:
-        assert (await client.post(operation.value, content=body)).status_code == 401
-        for payload, status, code in (
-            (b"{}", 422, "AGENTOS_INVALID_REQUEST"),
-            (body, 410, "AGENTOS_RUN_ID_REQUIRED"),
-        ):
-            token = sign_call(operation, payload, actor)
-            response = await client.post(operation.value, content=payload, headers={"Authorization": f"Bearer {token}"})
-            assert response.status_code == status
-            assert response.json() == {"code": code}
+        for payload in (body, b"{}"):
+            for headers in ({}, {"Authorization": f"Bearer {token}"}, {"Authorization": "Bearer invalid"}):
+                response = await client.post(path, content=payload, headers=headers)
+                assert response.status_code == 404
+                assert response.json() == {"code": "AGENTOS_OPERATION_NOT_FOUND"}
+    assert path not in {getattr(route, "path", None) for route in app.routes}
     lookup.assert_not_called()
     start.assert_not_called()

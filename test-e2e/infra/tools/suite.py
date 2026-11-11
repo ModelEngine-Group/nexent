@@ -275,7 +275,9 @@ def worker(repo, home, record, directory, settings):
                     raise ValueError("Invalid prepared D4 environment")
                 key, value = parts[0].split("=", 1)
                 env[key] = value
-        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory)
+        # The controller owns this worker's whole process group and Case deadline.
+        # Keep its commands in that group so outer cancellation also reclaims children.
+        _, outcome, _ = run_one(record, repo, home, env, result_dir=directory, enforce_timeout=False)
         status_path = directory / "status.json"
         if status_path.is_file():
             test_details = json.loads(status_path.read_text(encoding="utf-8"))

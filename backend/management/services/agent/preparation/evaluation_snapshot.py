@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic_core import PydanticSerializationError
 
 from contracts.errors.exceptions import SnapshotCompilationError
+from infrastructure.local_tool_execution import is_catalog_local_tool
 
 from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.agentos import (
@@ -46,7 +47,6 @@ from infrastructure.agent_tool_config import (
 from infrastructure.langchain_plugins import (
     discover_langchain_plugin_refs, read_bound_langchain_tools, read_skill_derived_langchain_tools,
 )
-from infrastructure.local_tool_execution import LOCAL_SDK_CLASS_NAMES
 from infrastructure.mcp_execution import (
     MCP_ARGUMENT_OVERRIDES, apply_mcp_argument_overrides, build_mcp_tool, mcp_binding_identity,
     mcp_execution_revision, select_mcp_server,
@@ -710,7 +710,7 @@ def _export_resource(
     mcp_servers = read_servers(tenant_id) if mcp_names else []
     local_names = [
         tool.name for tool in agent.tools
-        if tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES
+        if is_catalog_local_tool(tool)
         and SCOPED_SHARED_AIDP_CATALOG_ID not in (tool.metadata or {})
     ]
     local_candidates = read_bound_local_tools(*local_scope, local_names) if local_names else []
@@ -744,7 +744,7 @@ def _export_resource(
             binding = ToolBinding(tool_id=tool_id, version="1", parameters=descriptor.model_dump(mode="json"))
         elif tool.name == "aidp_search" and SCOPED_SHARED_AIDP_CATALOG_ID in (tool.metadata or {}):
             binding = export_scoped_shared_aidp(tool, agent.agent_id, agent.version_no, tenant_id, language)
-        elif tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES:
+        elif is_catalog_local_tool(tool):
             binding = export_local_tool(tool, local_candidates, agent.agent_id, agent.version_no, tenant_id, language, user_id=user_id)
         elif EvaluationAnalysisTool.for_class_name(tool.class_name) is not None:
             binding = _export_analysis_binding(tool)
