@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from test.backend.app.test_model_managment_app import client  # noqa: F401 - Shared app fixture.
+from test.backend.app.test_model_management_app import client  # noqa: F401 - Shared app fixture.
 
 
 @pytest.mark.parametrize("path,kind", [("model_profiles", "model"), ("provider_profiles", "provider")])
 def test_profile_list_validates_inputs_and_forwards_pagination(client, mocker, path, kind):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     payload = {"items": [], "total": 0, "catalog_revision": "revision", "page": 2, "page_size": 3}
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value=payload))
@@ -52,7 +52,7 @@ def test_invalid_header_values_are_not_echoed_in_schema_errors(client):
 
 
 def test_preview_reaches_actual_composer_with_trusted_tenant(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     async def run(_name, fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -74,7 +74,7 @@ def test_preview_reaches_actual_composer_with_trusted_tenant(client, mocker):
 
 
 def test_save_passes_trusted_owner_and_excludes_credentials_from_audit(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value={"model_id": 42, "config_revision": 1}))
     audit = mocker.patch.object(app, "record_security_event")
@@ -88,7 +88,7 @@ def test_save_passes_trusted_owner_and_excludes_credentials_from_audit(client, m
 
 
 def test_outlet_get_does_not_expose_foreign_or_missing_record(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value=None))
     assert client.get("/model/outlets/42").status_code == 404
@@ -105,7 +105,7 @@ def test_profile_operations_require_permission(client, mocker, path):
 
 
 def test_patch_preserves_omitted_credential_and_trusted_identity(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value={"model_id": 42, "config_revision": 2}))
     audit = mocker.patch.object(app, "record_security_event")
@@ -121,7 +121,7 @@ def test_patch_preserves_omitted_credential_and_trusted_identity(client, mocker)
 
 @pytest.mark.parametrize("exception,status", [("missing", 404), ("stale", 409), ("invalid", 422)])
 def test_patch_maps_domain_errors(client, mocker, exception, status):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError
 
     failures = {"missing": LookupError(), "stale": ModelOutletConflictError(),
@@ -154,7 +154,7 @@ def test_outlet_mutations_require_permission(client, mocker, method, path, body)
 
 
 def test_migration_review_passes_authenticated_owner_and_exact_revision(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
 
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value={
         "model_id": 42, "config_revision": 7, "migration_review_required": False}))
@@ -166,7 +166,7 @@ def test_migration_review_passes_authenticated_owner_and_exact_revision(client, 
 
 
 def test_migration_review_requires_admin_role_even_with_update_permission(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from permissions.models import CurrentUser
 
     # The shared fixture overrides the authentication dependency directly.
@@ -178,7 +178,7 @@ def test_migration_review_requires_admin_role_even_with_update_permission(client
 
 @pytest.mark.parametrize("failure,status", [("stale", 409), ("missing", 404), ("invalid", 422)])
 def test_review_maps_revision_and_record_failures(client, mocker, failure, status):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError
 
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock())
@@ -196,7 +196,7 @@ def test_review_maps_revision_and_record_failures(client, mocker, failure, statu
 
 @pytest.mark.parametrize('kind,status', [('stale', 409), ('invalid', 400)])
 def test_create_rejects_version_or_configuration_without_audit(client, mocker, kind, status):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from contracts.errors.exceptions import ModelOutletConflictError, ModelOutletValidationError
 
     error = ModelOutletConflictError() if kind == 'stale' else ModelOutletValidationError('PARAMETER_UNKNOWN', '/unknown')
@@ -222,7 +222,7 @@ def test_validation_distinguishes_selection_version_and_configuration_errors(cli
 
 
 def test_duplicate_create_has_distinct_business_code_without_success_audit(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from contracts.errors.exceptions import DuplicateError
 
     mocker.patch.object(app, 'run_blocking', new=AsyncMock(side_effect=DuplicateError()))
@@ -235,7 +235,7 @@ def test_duplicate_create_has_distinct_business_code_without_success_audit(clien
 
 
 def test_aeu_saved_preview_uses_trusted_tenant_and_never_writes(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     result = {"field_specs": [], "parameter_values": {"temperature": 0.4}}
     run = mocker.patch.object(app, "run_blocking", new=AsyncMock(return_value=result))
     response = client.post("/model/outlets/42/profile_previews", json={"expected_revision": 7,
@@ -251,14 +251,14 @@ def test_aeu_saved_preview_uses_trusted_tenant_and_never_writes(client, mocker):
 
 @pytest.mark.parametrize("error,status", [(LookupError("MODEL_OUTLET_NOT_FOUND"), 404)])
 def test_aeu_saved_preview_does_not_expose_missing_or_foreign_rows(client, mocker, error, status):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     mocker.patch.object(app, "run_blocking", new=AsyncMock(side_effect=error))
     response = client.post("/model/outlets/42/profile_previews", json={"expected_revision": 7})
     assert response.status_code == status
 
 
 def test_aeu_catalog_only_preview_does_not_weaken_creation_validation(client, mocker):
-    from management.api.model import model_managment as app
+    from management.api.model import model_management as app
     from management.services.model.profiles import get_model_profile_catalog
     async def run(_name, fn, *args, **kwargs):
         return fn(*args, **kwargs)

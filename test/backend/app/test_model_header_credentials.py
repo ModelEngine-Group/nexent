@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import pytest
 
-from test.backend.app.test_model_managment_app import auth_header, client  # noqa: F401
+from test.backend.app.test_model_management_app import auth_header, client  # noqa: F401
 
 
 @pytest.mark.parametrize("method,path,body,service,envelope", [
@@ -30,7 +30,7 @@ def test_model_responses_exclude_header_credentials(client, auth_header, mocker,
            "temperature": 0}
     payload = {"models": [row], "total": 1, "page": 1, "page_size": 20} if envelope else [row]
     before = deepcopy(payload)
-    mocker.patch("management.api.model.model_managment." + service, return_value=payload)
+    mocker.patch("management.api.model.model_management." + service, return_value=payload)
     response = getattr(client, method)(path, headers=auth_header, **({"json": body} if body is not None else {}))
     assert response.status_code == 200
     public = response.json()["data"]
@@ -44,7 +44,7 @@ def test_model_responses_exclude_header_credentials(client, auth_header, mocker,
 
 @pytest.mark.parametrize("headers", [None, {}, {"X-Request-ID": "fixture"}])
 def test_sanitizer_omits_header_field_even_when_empty_or_noncredential(headers):
-    from management.api.model.model_managment import _sanitize_model_credentials
+    from management.api.model.model_management import _sanitize_model_credentials
 
     payload = {"models": [{"http_headers": headers, "api_key": None, "enabled": False}], "total": 1}
     before = deepcopy(payload)

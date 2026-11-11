@@ -18,7 +18,7 @@ from management.api.file.file_management import file_management_config_router as
 from management.api.file.image import router as proxy_router
 from management.api.knowledge_base.knowledge_summary import router as summary_router
 from management.api.identity.mock_user_management import router as mock_user_management_router
-from management.api.model.model_managment import router as model_manager_router
+from management.api.model.model_management import router as model_manager_router
 from management.api.identity.oauth import router as oauth_router
 from management.api.prompt.prompt import router as prompt_router
 from management.api.mcp.mcp_management import router as mcp_management_router
