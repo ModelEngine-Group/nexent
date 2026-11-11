@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import sys
 import types
+from contextlib import asynccontextmanager
 import warnings
 
 import pytest
@@ -154,6 +155,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.identity.tenant": {"router": APIRouter()},
             "management.api.identity.group": {"router": APIRouter()},
             "management.api.identity.user": {"router": APIRouter()},
+            "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.identity.api_key": {"router": api_key_router},
             "management.api.identity.invitation": {"router": APIRouter()},
             "management.api.notification.notification": {"router": APIRouter()},
@@ -167,6 +169,7 @@ class TestConfigAppRouterConfiguration:
             "management.api.evaluation.evaluator": {"router": APIRouter()},
             "management.api.evaluation.evaluation_annotation": {"router": APIRouter()},
             "management.api.identity.cas": {"router": APIRouter()},
+            "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.memory.memory_config": {"router": APIRouter()},
             "management.api.memory.memory_record": {"router": APIRouter()},
             "management.api.memory.memory_long_term": {"router": APIRouter()},
@@ -189,6 +192,15 @@ class TestConfigAppRouterConfiguration:
         retired_module = types.ModuleType("management.api.prompt.prompt_template")
         retired_module.router = retired_router
         monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
+
+        component = types.ModuleType("management.api.northbound_application")
+
+        @asynccontextmanager
+        async def _northbound_lifespan(_app):
+            yield
+
+        component.northbound_lifespan = _northbound_lifespan
+        monkeypatch.setitem(sys.modules, "management.api.northbound_application", component)
 
         const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
