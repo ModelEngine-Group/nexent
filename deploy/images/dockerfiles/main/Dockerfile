@@ -131,6 +131,7 @@ ENV NEXENT_SQL_STARTUP_MODE=off
 
 COPY backend/__init__.py /opt/backend/
 COPY backend/runtime /opt/backend/runtime
+COPY backend/tool_collection/langchain /opt/backend/tool_collection/langchain
 COPY backend/contracts /opt/backend/contracts
 COPY backend/configs /opt/backend/configs
 COPY backend/assets/baidu_stopwords.txt /opt/backend/assets/

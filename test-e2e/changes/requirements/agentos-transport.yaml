@@ -23,6 +23,8 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - A finite production total stream-open deadline cancels header stalls and closes transport once without truncating admitted SSE streams or converting external cancellation into timeout.
+    - Catalog Memory aliases retain the original unconfigured SDK behavior and gain no implicit Memory service or actor privileges.
     - Retired evaluation and conversation-scoped background/inspection compatibility operations have no routes or protocol declarations and never dispatch execution.
     - Catalog-bound file transfer and parallel classes retain SDK actor, workspace and timeout behavior while Runtime alone binds storage clients.
     - Knowledge search catalog aliases retain index authorization, document filtering, model revision and actual SDK search behavior through prepared execution.
@@ -157,6 +159,7 @@ change:
     - test/backend/services/test_agent_automation_prepared.py
     - test/backend/services/test_agent_automation_conversation_adapter.py
     - test/backend/app/test_agentos_catalog_system_tools.py
+    - test/backend/services/test_agentos_stream_deadline.py
     - test/backend/app/test_agentos_subagent_resources.py
     - test/backend/app/test_agentos_snapshot_diagnostics.py
     - test/backend/app/test_agentos_local_catalog_names.py

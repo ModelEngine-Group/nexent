@@ -41,6 +41,8 @@ LOCAL_SDK_CLASS_NAMES = {
     "DownloadFromS3Tool": "download_from_s3",
     "UploadToS3Tool": "upload_to_s3",
     "ParallelExecutorTool": "parallel_executor",
+    "StoreMemoryTool": "store_memory",
+    "SearchMemoryTool": "search_memory",
 }
 LOCAL_SDK_BINDING_PREFIX = "sdk_local:"
 LOCAL_RERANK_TOOL_CLASSES = frozenset({"DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"})
@@ -72,7 +74,10 @@ def local_tool_binding_name(binding_id: str) -> str:
 def is_catalog_local_tool(tool: ToolConfig) -> bool:
     return (
         tool.source == "local" and tool.class_name in LOCAL_SDK_CLASS_NAMES
-        and (tool.class_name, tool.name) != ("ParallelExecutorTool", "parallel_executor")
+        and (tool.class_name, tool.name) not in {
+            ("ParallelExecutorTool", "parallel_executor"),
+            ("StoreMemoryTool", "store_memory"), ("SearchMemoryTool", "search_memory"),
+        }
     )
 
 

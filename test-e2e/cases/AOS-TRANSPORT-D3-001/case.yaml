@@ -208,11 +208,11 @@ case:
     action: Compile a knowledge search catalog alias and execute its SDK search across signed AgentOS with allowed and denied indexes.
     expected: Alias dispatch retains the exact original SDK search query and output, document filtering, model revision and denied-index behavior without colliding with MCP.
   - order: 61
-    action: Export catalog-bound file transfer and parallel SDK classes and reconstruct them through signed AgentOS.
-    expected: Runtime retains the original owner, tenant, workspace restrictions and timeout while Management sends no storage client or callback.
+    action: Export catalog-bound file transfer, parallel and unconfigured Memory SDK classes and reconstruct them through signed AgentOS.
+    expected: Runtime retains the original owner, tenant, workspace restrictions, timeout and unconfigured Memory behavior while Management sends no storage client or callback.
   - order: 62
-    action: Hold a controlled HTTP response before headers and after the first stream chunk until the short verification read deadline expires.
-    expected: AgentOS maps the pre-header timeout, propagates the stream read timeout and closes each client; neither request waits indefinitely.
+    action: Hold controlled HTTP responses before headers and after the first stream chunk, testing both verification read deadlines and the production header deadline.
+    expected: AgentOS maps read and total pre-header timeouts, propagates the verification stream timeout and closes each client; admitted streams outlive the header deadline normally.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -646,12 +646,12 @@ case:
     expected_results: [61]
     forbidden_side_effects: [1, 2]
   - id: AC-70
-    description: Catalog-bound transfer and parallel tools materialize in Runtime from revisioned references with original actor scope, workspace boundaries and timeout and no transported clients.
+    description: Catalog-bound transfer, parallel and unconfigured Memory tools materialize in Runtime from revisioned references with original actor scope, workspace boundaries, timeout and Memory behavior and no transported clients.
     steps: [61]
     expected_results: [62]
     forbidden_side_effects: [1, 2]
   - id: AC-71
-    description: Controlled verification header and stream stalls have finite deadlines, correct pre-header error mapping and closed HTTP clients.
+    description: Controlled verification stalls and production header stalls have finite deadlines and closed clients; admitted SSE streams outlive the header deadline, and timeout error mapping remains correct.
     steps: [62]
     expected_results: [63]
     forbidden_side_effects: [1, 2]

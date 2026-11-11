@@ -1,6 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Neutral HTTP transport and typed clients for signed AgentOS operations."""
 
+import asyncio
+import logging
+
 import httpx
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
@@ -40,11 +43,13 @@ from contracts.agentos import (
     TrackedBackgroundResult,
 )
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.constants import environment
 from infrastructure.agentos_identity import AgentOSIdentityError, ServicePrincipal, sign_call
 
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
 _REQUEST_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 _MODEL_TIMEOUT = httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+logger = logging.getLogger(__name__)
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade",
@@ -112,10 +117,15 @@ class AgentOSClient:
         url, body, headers = self._request(operation, request, user_id, tenant_id)
         client = self.create_client(headers=headers, timeout=_STREAM_TIMEOUT, follow_redirects=False)
         try:
-            upstream = await client.send(client.build_request("POST", url, content=body), stream=True)
+            async with asyncio.timeout(environment.AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS):
+                upstream = await client.send(client.build_request("POST", url, content=body), stream=True)
         except BaseException as exc:
             await client.aclose()
-            if isinstance(exc, httpx.TimeoutException):
+            if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+                logger.warning(
+                    "agentos_stream_open_timeout operation=%s phase=headers threshold_seconds=%s error_type=%s",
+                    operation.name, environment.AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS, type(exc).__name__,
+                )
                 raise RuntimeServiceTimeoutError("Runtime agent run request timed out") from exc
             if isinstance(exc, httpx.RequestError):
                 raise RuntimeServiceUnavailableError("Runtime service is unavailable") from exc

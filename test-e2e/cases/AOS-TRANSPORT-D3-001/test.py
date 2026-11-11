@@ -530,7 +530,7 @@ async def test_local_catalog_name_over_signed_agentos(monkeypatch, tmp_path, cat
 
 @pytest.mark.stage("D3")
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
-@pytest.mark.parametrize("system_class", ["DownloadFromS3Tool", "UploadToS3Tool", "ParallelExecutorTool"])
+@pytest.mark.parametrize("system_class", ["DownloadFromS3Tool", "UploadToS3Tool", "ParallelExecutorTool", "StoreMemoryTool", "SearchMemoryTool"])
 @pytest.mark.asyncio
 async def test_catalog_system_tools_over_signed_agentos(monkeypatch, tmp_path, system_class):
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-catalog-system-secret")
@@ -614,7 +614,11 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
             config, = system_configs
             assert config.name == system_name and config.class_name == system_class
             system_tool = NexentAgent.create_local_tool(SimpleNamespace(observer=None), config)
-            if system_class == "ParallelExecutorTool":
+            if system_class in {"StoreMemoryTool", "SearchMemoryTool"}:
+                assert system_tool.memory_service is None
+                assert (system_tool.user_id, system_tool.tenant_id) == ("", "")
+                assert "MemoryService is not configured" in str(system_tool.forward("fixture"))
+            elif system_class == "ParallelExecutorTool":
                 assert system_tool.default_timeout_seconds == 47 and system_tool.forward([]) == []
             else:
                 assert (system_tool.user_id, system_tool.tenant_id) == ("user-a", "tenant-a")
@@ -678,7 +682,8 @@ async def _assert_stored_local_tool_over_signed_http(monkeypatch, tmp_path, *, c
             "class_name": "CreateFileTool", "description": "Create a file",
             "instance_params": {}, "params": [{"name": "init_path", "default": str(tool_workspace)}],
         }
-        system_params = {"default_timeout_seconds": 47} if system_class == "ParallelExecutorTool" else {"workspace_path": str(tool_workspace)}
+        system_params = ({"default_timeout_seconds": 47} if system_class == "ParallelExecutorTool" else
+                         {} if system_class in {"StoreMemoryTool", "SearchMemoryTool"} else {"workspace_path": str(tool_workspace)})
         system_rows = [{
             **row, "tool_instance_id": 27, "tool_id": 9, "name": system_name, "class_name": system_class,
             "instance_params": {}, "params": [{"name": key, "default": value} for key, value in system_params.items()],
@@ -4599,19 +4604,22 @@ async def test_background_without_automation_record_over_signed_agentos(monkeypa
 
 @pytest.mark.stage("D3")
 @pytest.mark.case_id("AOS-TRANSPORT-D3-001")
-@pytest.mark.parametrize("phase", ["headers", "body"])
+@pytest.mark.parametrize("phase", ["headers", "body", "open_deadline", "admitted_stream"])
 @pytest.mark.asyncio
 async def test_agentos_validation_transport_timeouts(monkeypatch, phase):
     from contracts.errors.exceptions import RuntimeServiceTimeoutError
 
     monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-timeout-key")
     monkeypatch.setattr(sys.modules[__name__], "_LOCAL_HTTP_TIMEOUT", httpx.Timeout(0.1))
+    if phase in {"open_deadline", "admitted_stream"}:
+        monkeypatch.setattr(environment, "AGENTOS_STREAM_OPEN_TIMEOUT_SECONDS", 0.1)
+        monkeypatch.setattr(sys.modules[__name__], "_LOCAL_HTTP_TIMEOUT", httpx.Timeout(1.0, read=None))
     app = FastAPI()
     clients = []
 
     @app.post("/api" + CompatibilityOperation.RUN.value)
     async def stalled():
-        if phase == "headers":
+        if phase in {"headers", "open_deadline"}:
             await asyncio.sleep(0.5)
             return Response(content="late")
         async def stream():
@@ -4627,9 +4635,13 @@ async def test_agentos_validation_transport_timeouts(monkeypatch, phase):
 
     with serve(app) as url:
         client = AgentOSClient(url, create)
-        if phase == "headers":
+        if phase in {"headers", "open_deadline"}:
             with pytest.raises(RuntimeServiceTimeoutError):
                 await asyncio.wait_for(client.run({"query": "fixture"}, "user-a", "tenant-a"), 1)
+        elif phase == "admitted_stream":
+            response = await asyncio.wait_for(client.run({"query": "fixture"}, "user-a", "tenant-a"), 1)
+            chunks = [chunk async for chunk in response.body_iterator]
+            assert b"".join(chunks) == b"data: first\n\ndata: late\n\n"
         else:
             response = await asyncio.wait_for(client.run({"query": "fixture"}, "user-a", "tenant-a"), 1)
             with pytest.raises(httpx.ReadTimeout):
