@@ -4112,3 +4112,146 @@ async def test_raw_scoped_preparation_over_signed_http(monkeypatch, workbench):
         assert b"Original knowledge ownership rejected" in b"".join([part async for part in foreign.body_iterator])
     assert len(compiled) == len(executed) == 1
     assert len(reads) == 1
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("sampling", [False, True])
+@pytest.mark.asyncio
+async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypatch, tmp_path, sampling):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, PreparedEphemeralRun
+    from infrastructure import agent_model_config
+    from infrastructure.agent_model_config import create_model_config_from_record
+    from infrastructure.agent_model_overrides import overlay_root_model
+    from management.api.agent import compatibility_dispatch
+    from management.services.agent import raw_execution, runtime_client, subscription, tool_identity
+    from management.services.agent.preparation import run as preparation, evaluation_snapshot
+    from management.services.model import run_controls
+    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.nexent_agent import NexentAgent
+    from runtime.agentos import management_dispatch
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("profile-user", "profile-tenant")
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-profile-key")
+    monkeypatch.setattr(environment, "NEXENT_SANDBOX_DEFAULT_LEVEL", "local")
+    monkeypatch.setattr(prepared_evaluation, "AGENT_WORKSPACE_ROOT", str(tmp_path / "profiles"))
+    monkeypatch.setattr(agent_model_config, "_resolve_reasoning_capability", lambda *_args, **_kwargs: {
+        "status": "supported", "control": "effort", "levels": ["low", "high"],
+    })
+    requests, snapshots = [], []
+    provider = FastAPI()
+
+    @provider.post("/v1/chat/completions")
+    async def completion(request: Request):
+        body = await request.json()
+        assert request.headers["Authorization"] == "Bearer synthetic-runtime-key"
+        assert body["stream"] is True
+        requests.append(body)
+
+        async def chunks():
+            for delta, finish in [({"role": "assistant", "content": "answer"}, None), ({}, "stop")]:
+                frame = {"id": "profile-completion", "object": "chat.completion.chunk", "created": 1,
+                         "model": "provider-model", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+                yield "data: " + json.dumps(frame) + "\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(chunks(), media_type="text/event-stream")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Exportable model profile used legacy execution")
+
+    async def control(_name, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(subscription, "run_blocking", control)
+    monkeypatch.setattr(run_controls, "validate_agent_model_selection", lambda *_args: None)
+    monkeypatch.setattr(run_controls, "preflight_agent_turn_controls", lambda *_args: None)
+    monkeypatch.setattr(preparation, "_ensure_agent_reasoning_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(preparation, "search_agent_info_by_agent_id", lambda *_args, **_kwargs: {"model_params_override": {}})
+    monkeypatch.setattr(tool_identity, "resolve_tool_user_context", lambda *_args: {})
+    monkeypatch.setattr(execution, "run_legacy_agent_stream", forbidden)
+    with serve(provider) as provider_url:
+        record = {
+            "model_id": 11, "tenant_id": actor.tenant_id, "delete_flag": "N", "model_type": "llm",
+            "model_name": "provider-model", "model_repo": None, "display_name": "model-a", "model_factory": "OpenAI-API-Compatible",
+            "api_key": "synthetic-runtime-key", "base_url": provider_url + "/v1", "update_time": "revision-1",
+            "temperature": 0.8, "top_p": 0.9, "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
+        }
+        base = create_model_config_from_record(record)
+
+        async def models(tenant, *, versions):
+            assert tenant == actor.tenant_id
+            versions[base.cite_name] = (11, "revision-1")
+            return [base.model_copy(deep=True)]
+
+        async def agent(**_kwargs):
+            return AgentConfig(agent_id=7, version_no=0, name="root", description="", model_name=base.cite_name, tools=[],
+                               worker_agents=[AgentConfig(agent_id=8, version_no=1, name="child", description="",
+                                                         model_name=base.cite_name, tools=[])])
+
+        monkeypatch.setattr(preparation, "create_model_config_list", models)
+        monkeypatch.setattr(preparation, "create_agent_config", agent)
+        monkeypatch.setattr(evaluation_snapshot, "get_model_records", lambda filters, tenant: [record] if filters["display_name"] == base.cite_name else [])
+        monkeypatch.setattr(prepared_evaluation, "get_model_by_model_id", lambda model_id, tenant: record if (model_id, tenant) == (11, actor.tenant_id) else None)
+        runtime = create_app(enable_monitoring=False)
+        runtime.add_middleware(AgentOSMiddleware)
+        runtime.include_router(create_compatibility_router(
+            execution.run_agentos_compatibility, None, conversation_run=execution.run_agentos_conversation,
+        ))
+
+        @runtime.post(AgentOperation.RUN_EPHEMERAL.value)
+        async def invoke(request: Request):
+            assert request.scope[PRINCIPAL_KEY] == actor
+            payload = PreparedEphemeralRun.model_validate_json(request.scope[BODY_KEY])
+            assert record["api_key"] not in payload.model_dump_json()
+            snapshots.append(payload)
+            info = prepared_evaluation.prepare_run_snapshot(payload, actor)
+            settings = {"temperature": 0.3, "top_p": 0.7} if sampling else {}
+            expected = overlay_root_model(base, settings, base.cite_name)
+            expected = overlay_root_model(expected, {"thinking_effort": "high"}, expected.cite_name)
+            by_alias = {model.cite_name: model for model in info.model_config_list}
+            root = by_alias[info.agent_config.model_name]
+            child = by_alias[info.agent_config.worker_agents[0].model_name]
+            assert root.model_copy(update={"cite_name": expected.cite_name}) == expected
+            assert child == (base if sampling else expected)
+
+            def call(config, role):
+                sdk = NexentAgent(info.observer, [config], info.stop_event, tenant_id=actor.tenant_id)
+                model = sdk.create_model(config.cite_name)
+                try:
+                    return model([{"role": "user", "content": role}]).content
+                finally:
+                    model.client.close()
+
+            try:
+                for original, restored, role in [(expected, root, "root"), (base if sampling else expected, child, "child")]:
+                    assert await asyncio.to_thread(call, original, role) == "answer"
+                    assert await asyncio.to_thread(call, restored, role) == "answer"
+            finally:
+                prepared_evaluation.discard_prepared_workspace(info)
+            return StreamingResponse(iter([b'data: {"type":"final_answer","content":"answer"}\n\n']),
+                                     headers={"run_id": "debug-" + payload.run_id})
+
+        manager = create_app(enable_monitoring=False)
+        manager.include_router(compatibility_dispatch.router)
+        with serve(runtime) as runtime_url, serve(manager) as manager_url:
+            factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+            client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
+            monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+            monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+            raw = {"query": "hello", "agent_id": 7, "is_debug": True, "reasoning_effort": "high"}
+            if sampling:
+                raw["generation_config"] = {"temperature": 0.3, "top_p": 0.7}
+            response = await client.run(raw, actor.user_id, actor.tenant_id)
+            assert response.status_code == 200, b"".join([part async for part in response.body_iterator])
+            assert b"answer" in b"".join([part async for part in response.body_iterator])
+    assert len(snapshots) == 1 and len(requests) == 4
+    assert requests[0] == requests[1] and requests[2] == requests[3]
+    assert requests[1]["temperature"] == (0.3 if sampling else 0.8)
+    assert requests[3]["temperature"] == 0.8
+    assert requests[1]["reasoning_effort"] == "high" and requests[3]["reasoning_effort"] == ("low" if sampling else "high")

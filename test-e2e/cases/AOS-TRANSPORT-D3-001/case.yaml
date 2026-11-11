@@ -180,6 +180,9 @@ case:
   - order: 51
     action: Send raw native and Workbench debug requests with selected knowledge and an unavailable selection through both services.
     expected: Management resolves the original policy against one resource tree, exports the same authorized tool map or Workbench plan and emits the original scope/configuration events and warnings before the answer. Other tenants are rejected and debug preparation cannot write conversation history or start legacy execution.
+  - order: 52
+    action: Dispatch raw debug requests with and without generation settings through both services and compare real SDK provider requests for the root and a child sharing its catalog model.
+    expected: The actual Management compiler and Runtime materializer retain the original effective model configurations. Nonempty generation settings export a root-only binding; legacy reasoning-only requests preserve the shared alias. A loopback provider receives identical JSON requests from the old effective profile and the restored profile, and credentials never enter the AgentOS payload.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -233,6 +236,7 @@ case:
   - Background requests retain their original run identity and configuration through the signed Management handoff, recover without a second start and propagate disconnect cancellation.
   - Raw internal debug requests preserve their original preparation policy, model and tool configuration, metadata, response headers and single execution across signed service boundaries.
   - Raw knowledge and Workbench debug preparation preserves the original authorized resources, warnings and event order with no history writes, and executes only through AgentOS.
+  - Raw generation settings export without legacy execution and retain original root/child provider request bodies, including the shared model behavior of legacy reasoning-only requests.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -555,4 +559,9 @@ case:
     description: Raw native and Workbench knowledge preparation uses the original policy and frozen resources, preserves public preparation events and cannot write history or enter legacy execution for supported snapshots.
     steps: [51]
     expected_results: [52]
+    forbidden_side_effects: [1, 2]
+  - id: AC-61
+    description: Raw generation settings cross signed AgentOS and the actual SDK model boundary with unchanged provider requests for root and shared child, without transporting credentials or entering legacy execution.
+    steps: [52]
+    expected_results: [53]
     forbidden_side_effects: [1, 2]

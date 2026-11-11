@@ -5,7 +5,7 @@ from contracts.agent import AgentRequest
 from contracts.agentos import CompatibilityConversationRun, PreparedEphemeralRun
 from infrastructure.agentos_identity import ServicePrincipal
 from management.services.agent.agentos_events import debug_preparation_events, present_ephemeral_stream
-from management.services.agent.preparation.evaluation_snapshot import PreparedDebug
+from management.services.agent.preparation.evaluation_snapshot import PreparedDebug, _turn_model_generation
 from management.services.agent.preparation.run import create_agent_run_info
 from management.services.agent.run import build_run_preparation_arguments
 from management.services.agent.subscription import _prepare_legacy_conversation
@@ -17,6 +17,8 @@ async def prepare_raw_debug(request: AgentRequest, actor: ServicePrincipal) -> P
     context = await _prepare_legacy_conversation(request, actor.user_id, actor.tenant_id, "zh", None, export_resources=True)
     arguments = build_run_preparation_arguments(request, actor.user_id, actor.tenant_id, "zh", False)
     arguments.update(conversation_id=0, export_evaluation=True, export_debug_planning=bool(request.enable_plan))
+    if context.workbench is None and arguments.get("runtime_generation_config"):
+        arguments["turn_generation"] = _turn_model_generation(request)
     if context.workbench is not None:
         from management.services.agent.workbench import PreparedWorkbench
 

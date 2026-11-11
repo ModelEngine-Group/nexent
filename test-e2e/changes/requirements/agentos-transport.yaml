@@ -41,6 +41,7 @@ change:
     - Fixed-ID background handoff pins the owned automation source and original model/tool configuration, writes projection metadata before Runtime admission and leaves schedule finalization with the original lease owner.
     - Raw internal debug execution reuses original preparation policy and argument assembly in Management before calling prepared AgentOS, retaining explicit fallback for unsupported resources without changing draft authorization.
     - Raw native knowledge and Workbench debug reuse the same resolved resource tree and authorized plan, preserve scope/configuration event order and use the existing granted debug dispatch without writing conversation history.
+    - Raw nonempty generation settings export through the existing native model profile and preserve legacy root/child model scope; omitted or empty settings retain shared reasoning overrides and credentials remain local.
     - Background disconnect propagates across signed HTTP to stop the same run; pending projections and lost acknowledgements recover from owned Management receipts without starting another execution.
     - Initial and existing claim dispatch errors preserve the original run ID and retry headers through the production HTTP exception handler.
     - Only typed legacy run/stop payloads dispatch.
@@ -146,6 +147,7 @@ change:
     - test/backend/app/test_agentos_raw_handoff.py
     - test/backend/services/test_agentos_raw_preparation.py
     - test/backend/services/test_agentos_raw_resources.py
+    - test/backend/services/test_agentos_raw_model_profile.py
     - test/backend/services/test_agentos_background_dispatch.py
     - test/backend/database/test_agent_automation_db.py
     - test/backend/services/test_startup_recovery_service.py
