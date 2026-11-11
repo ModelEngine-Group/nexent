@@ -69,6 +69,7 @@ function PermissionsProbe() {
     isAuthzReady,
     isAuthorized,
     isLoading,
+  isAuthzPromptModalOpen,
     canAccessRoute,
     refetch,
   } = useAuthorizationContext();
@@ -76,6 +77,7 @@ function PermissionsProbe() {
     <output
       data-testid="permissions"
       data-authorized={isAuthorized}
+      data-denied={isAuthzPromptModalOpen}
       data-workbench={canAccessRoute("/workbench")}
       data-loading={isLoading}
     >
@@ -119,6 +121,18 @@ function pendingRequest() {
   });
   return { promise, resolve, reject };
 }
+test("root resolves a single authorized route without a denial prompt", async () => {
+  const auth = response(["/system-config"]);
+  auth.user.role = USER_ROLES.OPS_ADMIN;
+  state.request.mockResolvedValueOnce(auth);
+  renderHome();
+  const probe = screen.getByTestId("permissions");
+  await waitFor(() =>
+    expect(state.replace).toHaveBeenCalledWith("/system-config")
+  );
+  expect(probe).toHaveAttribute("data-denied", "false");
+});
+
 async function retryButton() {
   return screen.findByRole("button", { name: /page.retryAuthorization/ });
 }

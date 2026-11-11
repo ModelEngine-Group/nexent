@@ -77,6 +77,25 @@ test("SU lands on authorized management without a denial prompt", () => {
   expect(state.prompt).not.toHaveBeenCalled();
 });
 
+test.each([
+  {
+    routes: ["/", "/resource-space", "/agent-space", "/resource-manage"],
+    target: "/agent-space",
+  },
+  { routes: ["/", "/agent-dev", "/models"], target: "/models" },
+])("skips section-only routes for default entry: $routes", ({ routes, target }) => {
+  state.routes = routes;
+  render(<Homepage />);
+  expect(state.replace).toHaveBeenCalledExactlyOnceWith(target);
+});
+
+test("retains Home when permissions contain only section-only routes", () => {
+  state.routes = ["/", "/resource-space", "/agent-dev"];
+  render(<Homepage />);
+  expect(state.replace).not.toHaveBeenCalled();
+  expect(screen.getByText("page.title")).toBeInTheDocument();
+});
+
 test.each(["deploymentReady", "authzReady"] as const)(
   "waits until %s is ready",
   (key) => {

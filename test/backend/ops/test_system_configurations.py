@@ -191,11 +191,9 @@ def test_authorizer_requires_explicit_route_permission(mocker):
     )
 
     mocker.patch("ops.services.authorization._decode_user_id", return_value="su-user")
-    session = Mock()
-    session.execute.side_effect = [_scalar("SU"), _scalar(None)]
     mocker.patch(
         "ops.services.authorization.configuration_database.session",
-        return_value=_session_context(session),
+        return_value=_authorization_session("SU", None),
     )
 
     with pytest.raises(OperationsForbiddenError):
@@ -208,11 +206,9 @@ def test_authorizer_returns_user_for_operations_role(mocker):
     decode = mocker.patch(
         "ops.services.authorization._decode_user_id", return_value="ops-user"
     )
-    session = Mock()
-    session.execute.side_effect = [_scalar("OPS_ADMIN"), _scalar("/system-config")]
     mocker.patch(
         "ops.services.authorization.configuration_database.session",
-        return_value=_session_context(session),
+        return_value=_authorization_session("OPS_ADMIN", "/system-config"),
     )
 
     assert authorize_operations("Bearer ops-token") == "ops-user"
@@ -245,3 +241,20 @@ def _session_context(session):
     context.__enter__ = Mock(return_value=session)
     context.__exit__ = Mock(return_value=False)
     return context
+
+
+def _authorization_session(role, permission):
+    session = Mock()
+
+    def execute(statement, _params):
+        sql = str(statement)
+        if "FROM nexent.user_tenant_t" in sql:
+            raise RuntimeError('column "user_role" does not exist')
+        if "FROM nexent.user_account_t" in sql:
+            return _scalar(role)
+        if "FROM nexent.role_permission_t" in sql:
+            return _scalar(permission)
+        raise AssertionError("Unexpected authorization query")
+
+    session.execute.side_effect = execute
+    return _session_context(session)

@@ -24,8 +24,8 @@ from gateway.authentication.auth import (
     ensure_cas_session_active_from_authorization,
     resolve_tenant_id_from_user_tenant_record,
 )
-from contracts.constants.environment import INVITE_CODE, JWT_SECRET
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from contracts.constants.environment import INVITE_CODE, IS_SPEED_MODE, JWT_SECRET
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, DEFAULT_USER_ID
 
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
@@ -275,7 +275,11 @@ async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
             return None
 
         tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant)
-        user_role = user_tenant["user_role"]
+        user_role = (
+            "SPEED"
+            if IS_SPEED_MODE and user_id == DEFAULT_USER_ID
+            else user_tenant["user_role"]
+        )
         user_email = user_tenant["user_email"]
 
         # Get group IDs

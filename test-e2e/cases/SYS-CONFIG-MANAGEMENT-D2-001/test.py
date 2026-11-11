@@ -35,10 +35,18 @@ def _scalar(value):
 
 def _authorization_session(role):
     session = Mock()
-    session.execute.side_effect = [
-        _scalar(role),
-        _scalar("/system-config" if role == "OPS_ADMIN" else None),
-    ]
+
+    def execute(statement, _params):
+        sql = str(statement)
+        if "FROM nexent.user_tenant_t" in sql:
+            raise RuntimeError('column "user_role" does not exist')
+        if "FROM nexent.user_account_t" in sql:
+            return _scalar(role)
+        if "FROM nexent.role_permission_t" in sql:
+            return _scalar("/system-config" if role == "OPS_ADMIN" else None)
+        raise AssertionError("Unexpected authorization query")
+
+    session.execute.side_effect = execute
     context = Mock()
     context.__enter__ = Mock(return_value=session)
     context.__exit__ = Mock(return_value=False)

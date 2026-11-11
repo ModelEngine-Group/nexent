@@ -206,6 +206,7 @@ export function useAuthorization(): AuthorizationContextType {
   );
 
   const hasAccess =
+    cleanPath === "/" ||
     isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
     isWithinAccessiblePrefix;

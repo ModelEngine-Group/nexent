@@ -53,7 +53,7 @@ def authorize_operations(authorization: str | None) -> str:
     with configuration_database.session() as session:
         role = session.execute(
             text(
-                "SELECT user_role FROM nexent.user_tenant_t "
+                "SELECT user_role FROM nexent.user_account_t "
                 "WHERE user_id = :user_id AND delete_flag = 'N' LIMIT 1"
             ),
             {"user_id": user_id},
