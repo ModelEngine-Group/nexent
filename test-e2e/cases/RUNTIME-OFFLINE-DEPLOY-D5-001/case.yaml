@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D5
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-OFFLINE-DEPLOY-D5-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids:
+  - RUNTIME-FIXED-REPLICAS-20261105
+  business_rule_ids:
+  - RUNTIME-REPLICAS-RULE-01
+  - RUNTIME-REPLICAS-RULE-02
+  title: 全停维护后固定副本 1→3→2，维护失败保持停止
+  type: DEPLOYMENT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明真实部署顺序、全停前提、批次幂等与失败恢复，不接受在线修改副本作为第一阶段通过。
+  preconditions:
+  - 产品、维护命令、Job 与固定脚本尚未实现，当前阻塞。
+  - 测试完全拥有独立 Kubernetes namespace、专属数据库/Redis 数据域及测试共享卷；可调用实际部署脚本和查询 Pod/Job。
+  - 初始固定副本 1；准备遗留 streaming 消息、RUNNING 评测、自动任务及锁、未终态预约、Run 目录、终态和非 Run 哨兵。
+  - 没有对开发者现有栈的部署权限或依赖；镜像、Helm/集群连接与机器本地数据均通过外部配置提供。
+  test_data:
+    replica_sequence:
+    - 1
+    - 3
+    - 2
+    invalid_replica_counts:
+    - 0
+    - -1
+    - 1.5
+    - invalid
+    epoch: 每次维护生成 UUID；暂停/激活同一 UUID，重试同一 UUID。
+    sentinels: 终态消息/评测、非 Run 目录和非本次产品数据的校验和。
+  steps:
+  - order: 1
+    action: 渲染并校验默认值与非法 replicaCount，再在隔离集群以固定 1 副本启动，记录无 HPA/KEDA。
+    expected: 默认 1；0/负数/小数/非法值被拒；仅部署内部暂停允许渲染 0。
+  - order: 2
+    action: 旧 Runtime 仍存在时尝试维护命令；随后按部署入口停业务、调度并等待全部旧 Runtime Pod（含 Terminating）消失。
+    expected: 提前维护在恢复/文件副作用前失败；正式流程确认 Deployment=0 且旧 Pod 全部退出。
+  - order: 3
+    action: 配置 3 副本，故意在恢复/清理的一个受控阶段使维护失败。
+    expected: 没有完成标记和新业务 Pod；消息与目录的部分已完成幂等步骤可重试，不启动额外业务执行。
+  - order: 4
+    action: 解除故障，以同一 epoch 重试并等待维护完成，再激活 3 副本。
+    expected: 遗留状态按原规则收敛、锁和预约释放、遗留 Run 清理，终态与哨兵不变；完成标记后才 3 副本就绪并恢复业务。
+  - order: 5
+    action: 重复已完成 epoch 的维护调用，并重启其中一个 Pod；下一维护窗口按全停流程将 3 调整为 2。
+    expected: 已完成批次不重复清理；普通启动无全局恢复；第二窗口使用新 epoch，2 副本就绪，始终无自动控制器。
+  - order: 6
+    action: 在无业务前提下停机回退固定 1，并回收所有本次拥有资源。
+    expected: 回退也遵守全停维护；没有外部数据改写、资源泄漏或业务自动重放。
+  expected_results:
+  - 固定副本配置与默认值边界正确，1→3→2 的每次调整均先全停。
+  - 维护前提、批次完成门槛、失败保持停止与幂等重试真实成立。
+  - 遗留状态收敛、终态和非 Run 数据保留、停机回退与清理完成。
+  forbidden_side_effects:
+  - 旧 Runtime 未退出或维护失败时激活新业务；普通 Pod 启动进行全局恢复。
+  - 重试导致模型工具调用、改写既有终态、清空 Redis 或共享卷。
+  - 创建 HPA/KEDA，或在有业务时直接 scale 后宣称第一阶段通过。
+  acceptance:
+  - id: AC-P1-001
+    description: 真实停机调整固定副本与配置边界。
+    steps:
+    - 1
+    - 5
+    - 6
+    expected_results:
+    - 1
+    - 3
+    forbidden_side_effects:
+    - 3
+  - id: AC-P1-002
+    description: 全停维护、失败阻止激活、重试与保留规则。
+    steps:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  tags:
+  - phase-1
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: deployment
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  risk_type: DEPLOYMENT
+  risk: 增加副本后每次启动全局恢复或清理，破坏其他运行；失败恢复后错误激活业务。
+  condition:
+  - 真实部署脚本、两个维护窗口、一次受控维护故障和一次停机回退；所有测试数据域独占。
+  metrics:
+  - 按时间排序的入口停止、旧 Pod 退出、维护开始/完成、N 副本 Ready 和业务恢复记录。
+  - 恢复前后状态/目录校验和、有效维护记录数、实际副本数与 HPA/KEDA 数量。
+  thresholds:
+  - 任何恢复/清理开始时旧 Runtime Pod 数=0；任意维护失败后活跃业务 Pod 数=0。
+  - 成功后 readyReplicas 等于配置 N；HPA/KEDA 对象数=0；额外模型调用=0。
+  - 终态与非 Run 哨兵变化数=0；本次资源泄漏数=0。
+  recovery_expectations:
+  - 故障解除后同批次重试可完成；失败期间持续停止。清理或回退同样先停止业务，不在线强制放行。

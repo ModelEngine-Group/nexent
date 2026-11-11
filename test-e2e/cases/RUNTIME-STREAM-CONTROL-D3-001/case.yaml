@@ -1,0 +1,105 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-STREAM-CONTROL-D3-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids:
+  - RUNTIME-FIXED-REPLICAS-20261105
+  business_rule_ids:
+  - RUNTIME-REPLICAS-RULE-05
+  - RUNTIME-REPLICAS-RULE-09
+  title: A 执行、B 订阅停止时流完整且运行代次隔离
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 证明跨实例状态控制、Redis 回放及稳定代理兼容；断开订阅不等于取消。
+  preconditions:
+  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  - 语音使用受控 STT/TTS WebSocket 协议服务；附件使用真实对象存储，提供两租户授权与越权场景。
+  test_data:
+    scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
+    model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
+    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+  steps:
+  - order: 1
+    action: 在 A 通过正常业务入口启动带有递增序列的长流，B 查询状态并订阅；记录 A/B 身份及同一 execution 代次。
+    expected: B 看见同一运行，收到有序事件；不是另起模型执行。
+  - order: 2
+    action: 在已知事件游标断开订阅，经 B 和稳定 Web/Northbound 代理续订，并重复提交上一已处理游标。
+    expected: 原执行继续落库；按现有游标和历史合并规则没有内容缺失或重复显示。
+  - order: 3
+    action: 阻塞最后一批事件的消费，让生产者先提交完成，再恢复消费；另用超过回放保留窗口的旧游标续订。
+    expected: 完成后尾部仍完整读出；超窗场景明确使用持久化历史回退，不能声称 Redis 提供完整回放。
+  - order: 4
+    action: 在 B 发起合法停止并等待 A 的 worker 结束，然后启动同会话下一代次并注入上一代次迟到事件/完成信号。
+    expected: 停止到达 A 且终态持久化；新代次没有旧事件，迟到完成不释放新预约。
+  - order: 5
+    action: 从另一租户和未授权用户查询、续订和停止该运行；随后正常结束并清理本次资源。
+    expected: 权限检查先于共享状态读取，无他人内容或取消信号；本次资源释放。
+  - order: 6
+    action: 通过 Web 稳定 Service 分别建立 STT/TTS WebSocket，收发带校验标记的音频/文本后主动关闭，再创建新连接；确认单条连接的 owner。
+    expected: upgrade、音频/文本和关闭契约兼容；一条连接始终属于一个 Pod，重连是新会话，不要求故障音频迁移。
+  - order: 7
+    action: 经 A 上传带唯一校验和的附件，在 B 的合法运行中读取；再用其他租户尝试读取并回收本次附件。
+    expected: 通过对象存储在任意副本读到正确内容，非法读取被拒；没有依赖 A 的本地临时路径或遗留文件。
+  expected_results:
+  - 跨 Pod 查询、续订与停止操作同一执行；代理保留响应标识和 SSE 契约。
+  - 断开订阅仍持久化，尾部完整、游标去重且截断可回退。
+  - 轮次与权限隔离正确；清理无遗留。
+  - 语音连接保留协议和 owner；A 上传的附件经 B 合法可读且越权被拒。
+  forbidden_side_effects:
+  - 续订重新触发模型执行或把旧轮次内容混入新轮次。
+  - 未授权控制、泄露响应内容或遗漏最后一批已提交事件。
+  - SSE 断开提前释放未完成预约；清理非测试资源。
+  - 为共享附件暴露 Pod 本地路径或绕过原鉴权；把 WebSocket 重连宣称为原音频会话迁移。
+  acceptance:
+  - id: AC-P1-005
+    description: 跨实例控制、回放、尾部与代次隔离。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-P1-009
+    description: 稳定代理契约与共享状态鉴权。
+    steps:
+    - 2
+    - 5
+    - 6
+    - 7
+    expected_results:
+    - 1
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 2
+    - 3
+    - 4
+  tags:
+  - phase-1
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: runtime
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  integration_boundary:
+  - A 的执行器与输出→共享 Redis/持久化历史→B 的状态/订阅/停止→Web 与 Northbound 稳定 Service。
+  observations:
+  - 事件序列与游标、代理响应头、持久化消息文本、取消到达 owner 的信号、执行代次与实际模型调用次数。
+  cleanup:
+  - 在 finally 结束本次各代次运行并清理本次流/消息/工作区，保留所有外部运行。

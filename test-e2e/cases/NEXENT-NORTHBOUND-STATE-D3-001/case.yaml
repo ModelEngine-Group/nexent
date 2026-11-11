@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: NEXENT-NORTHBOUND-STATE-D3-001
+  feature_id: NEXENT-SERVICE-REPLICAS
+  requirement_ids:
+  - NEXENT-FIXED-REPLICAS-20261106
+  business_rule_ids:
+  - NEXENT-SERVICE-REPLICAS-RULE-02
+  - NEXENT-SERVICE-REPLICAS-RULE-04
+  title: 跨 Northbound 保持全局幂等限流并实际取消 A2A 运行
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 通过真实 Redis/DB 与 Runtime 证明不同 Northbound 实例共享长请求占用、限流和 A2A 运行控制。
+  preconditions:
+  - 产品和本 Case 固定脚本/执行绑定尚未实现，当前阻塞；实施后仅使用本次拥有的独立实例和专属 DB/Redis 数据域。
+  - Northbound A/B、Runtime A/B 可定向访问，使用真实 Redis、PostgreSQL task/message/artifact；受控模型能长时间阻塞并产生副作用标记。
+  - 可指定访问 A/B，另行验证稳定 Service；测试凭据与连接参数在机器本地配置，输出脱敏。
+  test_data:
+    idempotency: 同租户相同幂等键与另一租户；长请求跨越普通 TTL；旧 owner 延迟释放屏障。
+    limit: 专属租户的小额限流预算与不同租户对照。
+    preparation: 现有准备目录没有多应用副本集群工厂；实施时补齐真实 families 或自包含准备依据，当前不虚构支持。
+  steps:
+  - order: 1
+    action: 相同幂等键同时请求 A/B，将获准运行维持超过普通键 TTL，再提交重复请求；交错旧 owner 的延迟释放与新占用。
+    expected: 仅一个有效运行；TTL 不授权重复执行；旧 owner 的释放不能删除新 owner 占用，不同租户键隔离。
+  - order: 2
+    action: 从 A/B 合计超过同一租户限额，再分别断开共享 Redis/协调依赖后尝试新请求。
+    expected: 总限额不随实例数放大；依赖故障在接纳前明确失败，不回退 _RATE_STATE/_IDEMPOTENCY_RUNNING，本次拒绝无模型调用。
+  - order: 3
+    action: 经 A 启动长流 A2A task，经 B 查询 message/artifact 并取消，再从 A/B 复查终态和 Runtime worker。
+    expected: 持久 task 状态一致，取消实际传递到所属 Runtime，worker 停止且不再产生输出；旧回调不能把取消改回完成。
+  - order: 4
+    action: A 保持健康 A2A/上传时重启 B，并复核限流、幂等、task 和上传版本。
+    expected: B 不全局恢复或清理 A 的记录/上传；有效占用和执行保持，完成后按 owner 正确释放。
+  - order: 5
+    action: 结束运行并清理本次 A2A/限流/幂等数据和实例。
+    expected: 仅本次数据被回收，无活动 worker、错误释放或他人键删除。
+  expected_results:
+  - 长请求全局防重、owner 条件释放及限流正确，依赖故障无本地降级。
+  - 跨实例 A2A 查询/取消作用于实际 Runtime；重启保留健康 owner 与上传。
+  - 本次资源与占用全部回收，其他租户不变。
+  forbidden_side_effects:
+  - 使用 TTL 到期重新调用副作用工具，旧请求删除新 owner 的锁，或配额按 Pod 独立计数。
+  - 仅改 DB 取消标志而 Runtime 仍继续执行；重启全局结束健康 A2A 或清理上传。
+  - 越权跨租户读取/取消、拒绝后调用模型、清空共享 Redis。
+  acceptance:
+  - id: AC-APP-002
+    description: Config/Northbound/Data Process 普通启动不执行全局恢复、上传清理或重复迁移；维护失败保持停止，健康 owner 的任务不变。
+    steps:
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-APP-004
+    description: Northbound 全局幂等和租户限流不随副本数增加，不退回本地保护；A2A 跨实例查询/取消实际控制同一 Runtime 运行。
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  tags:
+  - phase-2
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本、执行绑定与隔离准备/清理能力尚未实现。
+    primary_domain: runtime
+    preparation_plan: 测试独占 A/B 实例、DB/Redis 键域与本次身份/对象；受控协议仅替代外部提供者；记录资源 owner 和前置检查。
+    cleanup_plan: finally 停止本次运行/worker/连接，按本次标识回收数据/实例；核对无锁/预约/对象遗留，不清空外部 PVC/共享 Redis。
+  integration_boundary:
+  - Northbound A/B→真实 Redis 幂等/限流→PostgreSQL A2A task/message/artifact→Runtime 所有者控制与模型协议。
+  observations:
+  - HTTP/SSE 错误与调用标记、占用 owner/代次、全局限流计数、DB task 及 Runtime worker 停止证据、上传哨兵。
+  cleanup:
+  - 按测试资源标签关闭本次实例、连接与后台任务，回收本次数据及临时文件；保留外部基础设施与卷，并核对未拥有数据校验和。

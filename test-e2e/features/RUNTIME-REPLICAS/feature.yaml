@@ -1,0 +1,37 @@
+schema_version: '1.0'
+module:
+  id: RUNTIME-SCALING
+  name: Runtime replica scaling
+feature:
+  feature_id: RUNTIME-REPLICAS
+  name: Runtime 固定多副本与停机手动扩缩容
+  status: planned
+  description: Kubernetes Runtime 在全停维护后按固定副本运行，并保持跨实例互斥、配额、控制、调度和文件隔离。
+  business_rules:
+  - rule_id: RUNTIME-REPLICAS-RULE-01
+    description: 每次手动扩缩容都先全停维护，再配置正整数固定副本，默认 1；维护暂停为 0，运行期间没有自动伸缩控制器。
+  - rule_id: RUNTIME-REPLICAS-RULE-02
+    description: 全局恢复和共享 Run 清理只在旧 Runtime 全部退出的维护窗口执行；失败保持停止，重试幂等。
+  - rule_id: RUNTIME-REPLICAS-RULE-03
+    description: 所有根执行入口共享会话预约；冲突请求不能重置流、保存用户消息或调用模型工具。
+  - rule_id: RUNTIME-REPLICAS-RULE-04
+    description: 租户与 Agent 作用域的业务配额跨实例统一；本地 lane 有界，协调故障拒绝新执行。
+  - rule_id: RUNTIME-REPLICAS-RULE-05
+    description: 任意副本可以订阅、查询和停止同一代次运行；断开订阅不取消执行，尾部和历史回退完整。
+  - rule_id: RUNTIME-REPLICAS-RULE-06
+    description: 多调度器每个到期周期只产生一次有效执行；普通启动不全局恢复租约或覆盖共同恢复截止时间。
+  - rule_id: RUNTIME-REPLICAS-RULE-07
+    description: 跨节点使用实际共享存储；运行目录与日志按所属执行/进程隔离。
+  - rule_id: RUNTIME-REPLICAS-RULE-08
+    description: 普通 Pod 重启不能修改其他 owner；第一阶段失联预约保持占用至全停维护，无自动接管。
+  - rule_id: RUNTIME-REPLICAS-RULE-09
+    description: 稳定 Service 下公开路由、成功响应、运行标识、鉴权、冲突和容量错误兼容；语音 WebSocket 保留连接语义，附件经对象存储跨副本合法可读。
+  required_test_stages:
+  - D2
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - RUNTIME-FIXED-REPLICAS-20261105
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    notes: 设计交付；尚未实施。项目内 nexent-doc 按用户指示位于 Git 排除目录。

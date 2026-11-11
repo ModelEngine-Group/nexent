@@ -1,0 +1,99 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SCALING
+case:
+  case_id: RUNTIME-ADMISSION-D3-001
+  feature_id: RUNTIME-REPLICAS
+  requirement_ids:
+  - RUNTIME-FIXED-REPLICAS-20261105
+  business_rule_ids:
+  - RUNTIME-REPLICAS-RULE-03
+  - RUNTIME-REPLICAS-RULE-04
+  title: 两个实例竞争同会话与配额时仅接纳允许的根执行
+  type: INTEGRATION
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 在真实 PostgreSQL/Redis 下证明跨进程原子预约、全局配额及所有入口接入。
+  preconditions:
+  - 产品及本 Case 固定脚本未实现，当前阻塞；实施后使用本次测试拥有的独立应用实例和专属 PostgreSQL/Redis 数据域。
+  - 至少两个 Runtime 进程使用同一维护完成批次；可确定性访问 A/B 实例并另测稳定 Service，不能以随机路由证明跨实例。
+  - 运行协调、数据库、Redis 和 HTTP 路径使用真实实现；长流及故障由受控模型协议服务提供，不替换被测协调器。
+  - 机器本地配置提供集群/实例连接与凭据，凭据不写入合同；每次生成资源标签和数据标识，只清理本次拥有的资源。
+  test_data:
+    scope: 每次运行生成 tenant_a、tenant_b、user_a、user_b、Agent、已存在 conversation_a 及 request_tag；不同租户的共享系统 Agent 使用相同逻辑作用域。
+    model: 受控协议服务输出唯一轮次和递增事件序列，支持屏障、长流、完成和失败。
+    preparation: 设计待实现；现有准备目录不具备多副本集群工厂，具体 families 由实施后真实支持决定。
+    entrypoints:
+    - 普通 Agent
+    - Workbench
+    - Northbound
+    - NL2Agent Creator
+    - NL2Skill Creator
+    - 评测
+  steps:
+  - order: 1
+    action: 对每个适用入口复用同一已存在会话/评测，使用屏障从 A/B 同时启动，记录执行预约、消息及模型调用标记。
+    expected: 同一执行键只有一个接纳；失败请求无用户消息、流重置或模型调用。NL2Agent/NL2Skill 均先预约再写历史/建流；评测认领失败或提交失败不会遗留无实际 worker 的 RUNNING。
+  - order: 2
+    action: 配置同租户同 Agent 全局上限为 2，分别在 A/B 启动两条长运行，再向两端分别提交第三条。
+    expected: 跨实例合计只有两个预约；额外请求被拒；PREPARING 和 FINALIZING 仍计入容量。
+  - order: 3
+    action: 用 tenant_b 的 Workbench/共享 Creator 作用域启动，另在 tenant_a 用另一 Agent 启动；制造 A 本地 lane 满而 B 仍有容量。
+    expected: 租户和 Agent 作用域按设计隔离；本地拒绝不泄漏共享配额，也不会迁移已有本地队列。
+  - order: 4
+    action: 断开被接纳请求的 SSE，在其 worker 收尾前尝试再次接纳；随后让 worker 完成并重复触发旧终态回调。
+    expected: 订阅断开及提前完成信号不释放容量；真实收尾后只释放一次，旧回调不能结束后来同会话代次。
+  - order: 5
+    action: 在独立试验中分别使预约数据库、Redis、本地准备和提交失败，然后恢复依赖。
+    expected: 接纳前故障没有业务消息；接纳后失败将自己的预约收敛为失败并释放，合法运行可再次开始。
+  - order: 6
+    action: 等待测试 worker/Future 结束，删除本次会话和测试数据，关闭两个实例。
+    expected: 活动预约、测试工作区和实例资源均无本次遗留，其他数据不变。
+  expected_results:
+  - 真实并发只产生一个有效运行；普通 Agent、Workbench、Northbound、NL2Agent/NL2Skill Creator 和评测均受统一协调。
+  - 全局上限、作用域和进程容量同时成立；根运行的准备和收尾不提前释放。
+  - 失败补偿、重复回调、旧代次写入和清理不会污染后续运行。
+  forbidden_side_effects:
+  - 用随机命中同一个 Pod 的请求冒充多进程竞争。
+  - 因 Redis 键 TTL 到期或 SSE 断开释放未完成预约；多副本放大全局配额。
+  - 被拒请求追加历史、重置活跃流或调用模型工具；清理外部数据。
+  acceptance:
+  - id: AC-P1-003
+    description: 实际入口竞争只启动一个执行，失败无副作用。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 3
+  - id: AC-P1-004
+    description: 跨实例配额、作用域、收尾及故障补偿真实成立。
+    steps:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    expected_results:
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 2
+    - 3
+  tags:
+  - phase-1
+  - design-only
+  source:
+    spec_path: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md
+    blocked_reason: 产品、固定脚本和执行绑定尚未实现；隔离准备与清理能力尚待建设。
+    primary_domain: runtime
+    preparation_plan: 测试独占实例、数据库/Redis 数据域、身份和模型协议服务；执行前确认资源归属。
+    cleanup_plan: finally 停止测试运行并回收本次数据与实例；不得清空开发者栈、外部 PVC 或共享 Redis。
+  integration_boundary:
+  - 两个独立 Runtime 进程→Management 协调→真实 PostgreSQL 事务与 Redis→真实执行器→受控模型协议。
+  observations:
+  - A/B owner_instance_id、数据库未终态预约、业务消息数、按请求标签聚合的模型调用、worker 实际结束信号与稳定错误响应。
+  cleanup:
+  - finally 结束本次运行，按资源标签删除会话/预约/模型场景；回收两个测试实例，核对无活动 worker 和遗留工作区。

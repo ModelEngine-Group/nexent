@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: RUNTIME-FIXED-REPLICAS-20261105
+  change_type: requirement
+  requirement_id: RUNTIME-FIXED-REPLICAS-20261105
+  title: Runtime 第一阶段：固定多副本与停机手动扩缩容
+  description: '仅 Kubernetes，每次手动扩缩容先全部业务停止，再配置固定 Runtime 副本；不实施动态伸缩或失联自动接管。本次仅设计，SPEC: nexent-doc/docs/Developing/runtime-replica-scaling/proposal.md。'
+  affected_features:
+    existing: []
+    added:
+    - RUNTIME-REPLICAS
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - REL-AUTO-58D118DDC12E94CA
+    - REL-AUTO-1FAFCA5A681580F5
+    added:
+    - RUNTIME-ADMISSION-D2-001
+    - RUNTIME-ADMISSION-D3-001
+    - RUNTIME-STREAM-CONTROL-D3-001
+    - RUNTIME-SCHEDULER-D3-001
+    - RUNTIME-SHARED-STORAGE-D3-001
+    - RUNTIME-OFFLINE-DEPLOY-D5-001
+    - RUNTIME-POD-RESTART-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 普通 Kubernetes Pod 启动不全局恢复；维护前提、幂等、批次校验与失败保持停止。
+    - 同会话预约、租户/Agent 全局配额、稳定锁键和锁序、真实收尾后释放、依赖故障及准备/提交失败补偿。
+    - Redis 轮次、尾部读取、截断回退、未授权控制和断开订阅不取消执行。
+    - 多调度器启动不误恢复、租约与失租、忙碌/misfire；工作区路径/归属及非 Run 保留。
+    reason: 已检查启动恢复、工作区清理、本地执行注册、调度与 runtime_state UT；它们仅证明现有单进程规则，需加强并新增协调器/入口补偿断言。具体新增选择器在实施后确认，设计不虚构通过结果。
+  notes: Feature planned，Case blocked，尚无脚本/绑定或运行通过证据。默认责任 runtime；停机部署、共享存储、HPA Case 归 deployment，调度 Case 归 task。未增加
+    D1，保留历史全部 D1；D4 无新增用户流程。设计验证仅证明结构与引用一致，实施后补齐真实选择器、准备/清理与逐 AC 断言证据。

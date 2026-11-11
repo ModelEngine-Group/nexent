@@ -73,6 +73,7 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  NEXENT-SERVICE-REPLICAS: deployment
   BE-MODEL-OUTLET-SCHEMA: model
   BE-MODEL-OUTLET-PERSISTENCE: model
   SDK-MODEL-OUTLET-RESOLUTION: model
@@ -101,6 +102,8 @@ feature_overrides:
   OPS-BOOTSTRAP: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
+  RUNTIME-REPLICAS: runtime
+  RUNTIME-AUTOSCALING: runtime
   SAI-001: runtime
   SDK-SQL-ROWS: runtime
   SEARCH-DEEPSEEK: runtime
@@ -193,6 +196,16 @@ feature_overrides:
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  NEXENT-CONFIG-JOBS-D3-001: system
+  NEXENT-CONFIG-STATE-D3-001: system
+  NEXENT-NORTHBOUND-STATE-D3-001: runtime
+  NEXENT-MCP-SESSION-D3-001: mcp
+  NEXENT-DATA-WORKERS-D3-001: knowledge
+  NEXENT-WEB-CONFIG-D3-001: system
+  RUNTIME-OFFLINE-DEPLOY-D5-001: deployment
+  RUNTIME-SHARED-STORAGE-D3-001: deployment
+  RUNTIME-AUTOSCALE-D5-001: deployment
+  RUNTIME-SCHEDULER-D3-001: task
   MODEL-LEGACY-TOOLS-D3-001: model
   CHAT-MODEL-CONTROLS-D2-001: runtime
   CHAT-MODEL-CONTROLS-D3-001: runtime
