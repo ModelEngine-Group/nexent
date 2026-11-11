@@ -37,7 +37,7 @@ from contracts.errors.exceptions import (
     ValidationError,
     WorkbenchError,
 )
-from contracts.agent import AgentRequest
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.conversation.repository import resolve_conversation_runtime_metadata
@@ -188,36 +188,16 @@ def _detect_resume_position(
         }
 
 
-async def run_agent_stream(
+async def _prepare_legacy_conversation(
     agent_request: AgentRequest,
-    http_request: Request,
-    user_id: str = None,
-    tenant_id: str = None,
-    skip_user_save: bool = False,
-    resume: bool = False,
+    resolved_user_id: str,
+    resolved_tenant_id: str,
+    language: str,
+    timezone: str | None,
     *,
-    legacy_materializer: LegacyRunMaterializer | None = None,
-    thread_manager: ThreadManager | None = None,
-    execution_host=None,
-):
-    """
-    Start an agent run and stream responses.
-    The gateway must supply the authenticated user and tenant for every entrypoint.
-
-    Args:
-        resume: If True, check for existing streaming message and continue from where it left off
-    """
-    if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
-        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
-
-    resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
-        http_request=http_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-    )
-    if not resume:
-        thread_manager = require_legacy_thread_manager(thread_manager)
-    host = require_legacy_execution_host(execution_host)
+    resume: bool,
+) -> tuple[bool, WorkbenchSessionConfig | None]:
+    """Apply the compatibility request's conversation and authorization rules."""
     if not resume:
         from management.services.model import run_controls
 
@@ -235,7 +215,7 @@ async def run_agent_stream(
     # does not show the time marker.
     agent_request.query = prepend_current_time(
         agent_request.query,
-        http_request.headers.get("x-user-timezone") if http_request else None,
+        timezone,
         language=language,
     )  # pragma: no cover
 
@@ -276,8 +256,6 @@ async def run_agent_stream(
             if requested_workbench is None and isinstance(
                 conversation.get("workbench_config"), dict
             ):
-                from contracts.agent import WorkbenchSessionConfig
-
                 requested_workbench = WorkbenchSessionConfig.model_validate(
                     conversation["workbench_config"]
                 )
@@ -578,6 +556,45 @@ async def run_agent_stream(
             agent_id=agent_request.agent_id,
             user_id=resolved_user_id,
         )
+
+    return is_new_conversation, canonical_workbench
+
+
+async def run_agent_stream(
+    agent_request: AgentRequest,
+    http_request: Request,
+    user_id: str = None,
+    tenant_id: str = None,
+    skip_user_save: bool = False,
+    resume: bool = False,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
+    thread_manager: ThreadManager | None = None,
+    execution_host=None,
+):
+    """
+    Start an agent run and stream responses.
+    The gateway must supply the authenticated user and tenant for every entrypoint.
+
+    Args:
+        resume: If True, check for existing streaming message and continue from where it left off
+    """
+    if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
+        raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
+
+    resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
+        http_request=http_request,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+    if not resume:
+        thread_manager = require_legacy_thread_manager(thread_manager)
+    host = require_legacy_execution_host(execution_host)
+    is_new_conversation, canonical_workbench = await _prepare_legacy_conversation(
+        agent_request, resolved_user_id, resolved_tenant_id, language,
+        http_request.headers.get("x-user-timezone") if http_request else None,
+        resume=resume,
+    )
 
     # Resume mode: check for existing streaming message
     if resume:
