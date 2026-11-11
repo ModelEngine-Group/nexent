@@ -171,7 +171,7 @@ def _materialize_agent(
 ):
     if any((
         resource.mcp_server_refs, resource.knowledge_base_refs,
-        resource.memory_ref is not None, resource.sandbox_policy is not None,
+        resource.memory_ref is not None, bool(resource.sandbox_policy) and root_alias is None,
     )):
         raise ValueError("Unsupported evaluation resource")
     if root_alias is not None and resource.model_alias not in (None, root_alias):
@@ -250,6 +250,7 @@ def _materialize_agent(
         name=resource.name, description=resource.description, prompt_templates=resource.prompt_templates,
         agent_id=resource.agent_id, version_no=resource.version_no, tools=tools, model_name=alias,
         max_steps=resource.max_steps, origin=resource.origin, enable_planning=bool(plan_bindings),
+        sandbox_policy=resource.sandbox_policy,
         pre_run_tool_events=pre_run_tool_events,
         invocation_name=f"agent_{resource.agent_id}_v{resource.version_no}" if legacy_root else resource.invocation_name,
         runtime_ref=f"agent:{resource.agent_id}:v{resource.version_no}" if legacy_root else resource.runtime_ref,
@@ -371,7 +372,7 @@ def prepare_run_snapshot(
     with ExitStack() as cleanup:
         cleanup.callback(_remove_skill_files, workspace_path)
         try:
-            sandbox_config = resolve_deployed_sandbox(None)
+            sandbox_config = resolve_deployed_sandbox(payload.resource.sandbox_policy)
             sandbox_enabled = sandbox_config is not None and sandbox_config.level is not SandboxLevel.LOCAL
             if len(aliases) != len(bindings):
                 raise ValueError("Duplicate evaluation model binding")

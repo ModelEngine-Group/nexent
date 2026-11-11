@@ -29,6 +29,37 @@ from test.backend.app.test_agentos_prepared_evaluation import evaluation_payload
 
 
 @pytest.mark.parametrize("changed", [False, True])
+def test_root_sandbox_policy_crosses_agentos_and_is_resolved_in_runtime(mocker, changed):
+    from nexent.core.agents.agent_model import AgentConfig
+    from nexent.core.agents.sandbox import SandboxLevel
+
+    record = model_record(model_id=11)
+    model = create_model_config_from_record(record)
+    policy = {"level": "invalid" if changed else "local", "auto_sync_outputs": False}
+    agent = AgentConfig(
+        agent_id=7, version_no=2, name="agent", description="", tools=[],
+        model_name=model.cite_name, sandbox_policy=policy,
+    )
+    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[record])
+    mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
+    mocker.patch("contracts.constants.environment.NEXENT_SANDBOX_DEFAULT_LEVEL", "docker")
+    exported = evaluation_snapshot.export_snapshot(
+        agent, [model], "query", None, tenant_id="tenant-a", conversation_id=None, language="en",
+    )
+    payload = PreparedEvaluationRun.model_validate_json(exported.model_dump_json())
+    assert payload.resource.sandbox_policy == policy
+    actor = ServicePrincipal("actor", "tenant-a")
+    if changed:
+        with pytest.raises(HTTPException) as rejected:
+            prepared_evaluation.prepare_run_snapshot(payload, actor)
+        assert (rejected.value.status_code, rejected.value.detail) == (422, {"code": "AGENTOS_RESOURCE_UNSUPPORTED"})
+    else:
+        info = prepared_evaluation.prepare_run_snapshot(payload, actor)
+        assert info.sandbox_config.level is SandboxLevel.LOCAL
+        assert info.agent_config.sandbox_policy == policy
+
+
+@pytest.mark.parametrize("changed", [False, True])
 def test_snapshot_pins_the_first_catalog_model_for_a_legacy_duplicate_alias(mocker, changed):
     first = model_record(model_id=11, model_name="first", api_key="first-private-key")
     second = model_record(model_id=12, model_name="second", api_key="second-private-key")

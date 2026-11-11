@@ -119,7 +119,7 @@ def test_runtime_rejects_unavailable_model_before_constructing_sdk_objects(mocke
 
 @pytest.mark.parametrize("change", [
     {"tools": [{"tool_id": "download", "version": "1"}]},
-    {"sandbox_policy": {"level": "docker"}},
+    {"sandbox_policy": {"level": "unsupported"}},
     {"memory_ref": "some-memory"},
 ])
 def test_runtime_rejects_unsupported_resources_before_model_lookup(mocker, change):

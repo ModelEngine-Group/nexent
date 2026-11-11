@@ -636,9 +636,9 @@ def _export_memory_search(agent, allow_memory):
 
 def _export_resource(
     agent, aliases, tenant_id, language, read_servers, tool_servers, *, allow_public_tools=False, allow_memory=False,
-    allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None,
+    allow_debug_planning=False, workbench_skills=(), workbench_knowledge_tools=None, allow_sandbox_policy=False,
 ):
-    if agent.sandbox_policy is not None:
+    if agent.sandbox_policy and not allow_sandbox_policy:
         raise ValueError("Unsupported prepared resource")
     memory_search = _export_memory_search(agent, allow_memory)
     plan_tools = [tool for tool in agent.tools if tool.name in PLAN_TOOL_NAMES]
@@ -771,6 +771,7 @@ def _export_resource(
         workbench_skill_refs=refs if workbench_skills else [],
         invocation_name=agent.invocation_name, runtime_ref=agent.runtime_ref, origin=agent.origin,
         memory_search=memory_search,
+        sandbox_policy=agent.sandbox_policy or None,
         evaluation_options=EvaluationAgentOptions(**profile),
         subagents=[
             _export_resource(child, aliases, tenant_id, language, read_servers, tool_servers, allow_memory=allow_memory)
@@ -863,6 +864,7 @@ def export_snapshot(
             allow_debug_planning=allow_debug_planning,
             workbench_skills=workbench_skills,
             workbench_knowledge_tools=workbench_knowledge_tools,
+            allow_sandbox_policy=True,
         )
         bindings = [
             _export_model(
