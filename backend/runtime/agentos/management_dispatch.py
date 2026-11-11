@@ -6,7 +6,7 @@ from fastapi import Request
 
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
-from contracts.agentos import CompatibilityConversationRun
+from contracts.agentos import BackgroundRun, CompatibilityConversationRun
 from contracts.constants.environment import MANAGEMENT_AGENTOS_URL
 from infrastructure.agentos_client import AgentOSClient
 from infrastructure.agentos_identity import ServicePrincipal
@@ -14,6 +14,12 @@ from infrastructure.agentos_identity import ServicePrincipal
 
 def management_client() -> AgentOSClient:
     return AgentOSClient(MANAGEMENT_AGENTOS_URL, create_httpx_client)
+
+
+async def dispatch_signed_background(payload: BackgroundRun, actor: ServicePrincipal):
+    return await management_client().dispatch_background(
+        payload.model_copy(update={"preparation": "management"}), actor.user_id, actor.tenant_id,
+    )
 
 
 async def dispatch_signed_start(payload: CompatibilityConversationRun, actor: ServicePrincipal):

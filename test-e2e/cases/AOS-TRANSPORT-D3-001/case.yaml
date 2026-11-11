@@ -171,6 +171,9 @@ case:
   - order: 48
     action: Submit a signed old Northbound request whose user message is already saved, retry it, and attempt the same operation with a foreign actor.
     expected: Runtime delegates saved-message selection to Management. The exact actor and message position produce a stable claim and only one execution; a compatibility fallback skips user persistence. Retry returns the existing run and a foreign source is refused before claiming or executing.
+  - order: 49
+    action: Send the original fixed-run-ID background request through Runtime and Management, repeat a prepared request and disconnect a waiting request.
+    expected: Both service signatures bind the original actor and run ID. Management keeps the selected model and tool configuration, records projection before Agent.run and owns projection without finalizing the schedule. The explicit old-path fallback executes once. Retry replays the same run, foreign actors are refused and disconnect stops only that run.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -221,6 +224,7 @@ case:
   - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
   - Debug correlation is kept at the public boundary and debug cancellation uses signed Agent.stop.
   - Saved-user compatibility requests use the original message identity and never execute or persist the user twice.
+  - Background requests retain their original run identity and configuration through the signed Management handoff, recover without a second start and propagate disconnect cancellation.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -528,4 +532,9 @@ case:
     description: Old signed saved-user starts select the owned source in Management, retain one claim on retry and do not save the user again during fallback.
     steps: [48]
     expected_results: [49]
+    forbidden_side_effects: [1, 2]
+  - id: AC-58
+    description: Fixed-ID background dispatch crosses Management for preparation and projection while keeping configuration, scope, cancellation and a single execution.
+    steps: [49]
+    expected_results: [50]
     forbidden_side_effects: [1, 2]

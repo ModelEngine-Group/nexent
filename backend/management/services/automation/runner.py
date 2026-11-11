@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from contracts.agent import AgentRequest
 from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop
 from contracts.automation import AutomationRunStatus, ScheduleTrigger
@@ -121,7 +123,7 @@ class AgentAutomationRunner:
                 "error_message": f"Automation run exceeded {timeout_seconds} seconds.",
             })
         except asyncio.CancelledError:
-            if run.get("projection_message_index") is not None:
+            if run.get("projection_message_index") is not None or run.get("_background_outcome_unknown"):
                 raise
             await self.cancel_runtime_run(run.get("runtime_run_id"), task["conversation_id"], task["user_id"], task["tenant_id"])
             agent_automation_db.cancel_run(
@@ -132,7 +134,7 @@ class AgentAutomationRunner:
             )
             raise
         except Exception as exc:
-            if run.get("projection_message_index") is not None:
+            if run.get("projection_message_index") is not None or run.get("_background_outcome_unknown"):
                 logger.warning("Deferred automation projection run_id=%s error=%s", run["run_id"], type(exc).__name__)
                 return run
             return self._fail_run(run, task, "AUTOMATION_RUN_FAILED", str(exc))
@@ -211,12 +213,27 @@ class AgentAutomationRunner:
             current_user_message_id=turn["user_message_id"],
         )
         if snapshot is None:
-            result = await forward_tracked_background(
-                agent_request=agent_request,
-                run_id=run["runtime_run_id"],
-                user_id=task["user_id"],
-                tenant_id=task["tenant_id"],
-            )
+            try:
+                result = await forward_tracked_background(
+                    agent_request=agent_request,
+                    run_id=run["runtime_run_id"],
+                    user_id=task["user_id"],
+                    tenant_id=task["tenant_id"],
+                )
+            finally:
+                try:
+                    current = agent_automation_db.get_run(run["run_id"], run["tenant_id"], run["user_id"])
+                    if current is not None:
+                        run.update(current)
+                except (SQLAlchemyError, RuntimeError):
+                    run["_background_outcome_unknown"] = True
+                    logger.warning("Background projection ownership refresh deferred run_id=%s", run["run_id"])
+            if run.get("_background_outcome_unknown"):
+                return run
+            if run.get("projection_message_index") is not None:
+                return self._finish_prepared_projection(run, task, ProjectedRun(
+                    result.assistant_message_id, "completed", result.chunks,
+                ))
             return self._finish_run(run, task, AutomationRunStatus.SUCCEEDED.value, {
                 "generated_prompt": generated_prompt,
                 "user_message_id": turn["user_message_id"],

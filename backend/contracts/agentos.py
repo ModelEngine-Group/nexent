@@ -143,6 +143,14 @@ class AgentActiveRun(RunSpecModel):
 
 class BackgroundRun(CompatibilityRun):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
+    preparation: Literal["management", "legacy"] | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_preparation(self, serialize):
+        payload = serialize(self)
+        if self.preparation is None:
+            payload.pop("preparation", None)
+        return payload
 
 
 class TrackedBackgroundResult(BackgroundAgentResult):
@@ -742,6 +750,7 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 class ManagementOperation(str, Enum):
     CONVERSATION_DISPATCH = NAMESPACE + "v1/agent/dispatch-conversation"
+    BACKGROUND_DISPATCH = NAMESPACE + "v1/agent/dispatch-background"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"

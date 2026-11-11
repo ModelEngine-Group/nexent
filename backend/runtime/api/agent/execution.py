@@ -8,14 +8,14 @@ from functools import partial
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError as PayloadValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from nexent.core.concurrency import run_blocking
 from contracts.agent import AgentRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from management.services.agent.subscription import run_agent_stream as run_legacy_agent_stream
-from contracts.errors.exceptions import RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
+from contracts.errors.exceptions import RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from gateway.downstream.identity import IdentityError, trusted_identity
 from gateway.downstream.internal_tokens import verify_internal_runtime_jwt
 from infrastructure.agentos_identity import ServicePrincipal
@@ -25,7 +25,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution, untrack_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
-from runtime.agentos.management_dispatch import dispatch_public_start, dispatch_saved_start, dispatch_signed_start
+from runtime.agentos.management_dispatch import dispatch_public_start, dispatch_saved_start, dispatch_signed_start, dispatch_signed_background
 from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import direct_legacy_stream, start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
@@ -295,6 +295,15 @@ async def run_agentos_tracked_background(payload: BackgroundRun, principal: Serv
         "agentos-background-ownership", _require_owned_conversation,
         conversation_id, principal, lane="control-io", owner="runtime",
     )
+    if payload.preparation != "legacy":
+        try:
+            return await dispatch_signed_background(payload, principal)
+        except RuntimeServiceTimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Management service timed out") from exc
+        except RuntimeServiceUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Management service is unavailable") from exc
+        except RuntimeUpstreamError as exc:
+            return Response(content=exc.content, status_code=exc.status_code, headers=exc.headers)
     request.enable_automation_tool = False
     request._track_execution = True
     request._projection_run_id = payload.run_id

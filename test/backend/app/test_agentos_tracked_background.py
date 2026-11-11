@@ -90,7 +90,7 @@ async def test_background_disconnect_requests_stop_for_the_dispatched_run(mocker
     mocker.patch.object(execution, "run_blocking", direct)
     mocker.patch.object(execution, "run_agent_stream", stream)
     task = asyncio.create_task(execution.run_agentos_tracked_background(
-        BackgroundRun(run_id=run_id, request={"query": "run", "conversation_id": 42}), actor,
+        BackgroundRun(run_id=run_id, request={"query": "run", "conversation_id": 42}, preparation="legacy"), actor,
     ))
     try:
         await asyncio.wait_for(streaming.wait(), timeout=1)

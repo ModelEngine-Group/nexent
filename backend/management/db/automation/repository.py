@@ -407,6 +407,18 @@ def get_run(run_id: int, tenant_id: str, user_id: str) -> Optional[Dict[str, Any
         return as_dict(run) if run else None
 
 
+def get_run_by_runtime_id(
+    runtime_run_id: str, tenant_id: str, user_id: str, *, conversation_id: int,
+) -> Optional[Dict[str, Any]]:
+    with get_db_session() as session:
+        run = session.execute(select(AgentAutomationRun).where(
+            AgentAutomationRun.runtime_run_id == runtime_run_id, AgentAutomationRun.tenant_id == tenant_id,
+            AgentAutomationRun.user_id == user_id, AgentAutomationRun.conversation_id == conversation_id,
+            AgentAutomationRun.delete_flag == "N",
+        )).scalar_one_or_none()
+        return as_dict(run) if run else None
+
+
 def cancel_run(run_id: int, tenant_id: str, user_id: str, reason: str) -> Optional[Dict[str, Any]]:
     with get_db_session() as session:
         run = session.execute(

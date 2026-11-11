@@ -40,6 +40,7 @@ def _load_runner_with_stubs(monkeypatch):
     monkeypatch.setattr(runner_module, "forward_scoped_stop", AsyncMock())
     monkeypatch.setattr(runner_module, "forward_active_run", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
+    monkeypatch.setattr(runner_module.agent_automation_db, "get_run", lambda *args: None)
     monkeypatch.setattr(
         runner_module,
         "automation_conversation_adapter",

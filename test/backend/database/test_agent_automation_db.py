@@ -84,6 +84,17 @@ def _install_recording_session(monkeypatch, result):
     return session
 
 
+def test_background_runtime_lookup_keeps_conversation_tenant_and_user_scope(monkeypatch):
+    expected = {"run_id": 5, "runtime_run_id": "a" * 32}
+    session = _install_recording_session(monkeypatch, _RecordingResult(payload=expected))
+    assert agent_automation_db.get_run_by_runtime_id("a" * 32, "tenant", "actor", conversation_id=42) == expected
+    query = session.calls[0][0]
+    assert query.compile().params == {
+        "runtime_run_id_1": "a" * 32, "tenant_id_1": "tenant", "user_id_1": "actor",
+        "conversation_id_1": 42, "delete_flag_1": "N",
+    }
+
+
 def test_list_tasks_filters_by_owner_status_and_literal_title_search(monkeypatch):
     class ListSession(_FakeSession):
         def execute(self, statement, params=None):

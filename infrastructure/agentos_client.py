@@ -161,6 +161,13 @@ class AgentOSClient:
             raise RuntimeServiceUnavailableError("AgentOS returned a different background run ID")
         return tracked_result
 
+    async def dispatch_background(self, payload: BackgroundRun, user_id: str, tenant_id: str) -> TrackedBackgroundResult:
+        result = await self._post_json(ManagementOperation.BACKGROUND_DISPATCH, payload, user_id, tenant_id, _STREAM_TIMEOUT)
+        tracked = self._validate_result(TrackedBackgroundResult, result)
+        if (tracked.run_id, tracked.conversation_id) != (payload.run_id, payload.request.get("conversation_id")):
+            raise RuntimeServiceUnavailableError("AgentOS returned a different background run")
+        return tracked
+
     async def find_active_run(self, conversation_id: int, user_id: str, tenant_id: str) -> str | None:
         result = await self._post_json(
             AgentOperation.ACTIVE, CompatibilityStop(conversation_id=conversation_id), user_id, tenant_id,

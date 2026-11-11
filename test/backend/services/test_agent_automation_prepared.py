@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop
+from contracts.agentos import TrackedBackgroundResult
 from contracts.errors.exceptions import RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.services.agent.prepared_projection import ProjectedRun
 from management.services.automation import runner
@@ -168,6 +169,37 @@ async def test_first_preparation_preserves_existing_instruction_normalization(au
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("acknowledged", [False, True])
+async def test_background_handoff_refreshes_projection_ownership_without_losing_lease(automation, mocker, acknowledged):
+    executor, run, task, _ = automation
+    run["_lease_owner"] = "scheduler-original"
+    mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=lambda _id, values, *_args, **_kw: {**run, **values})
+    mocker.patch.object(runner, "prepare_conversation_snapshot", return_value=None)
+    current = {key: value for key, value in run.items() if not key.startswith("_")}
+
+    async def handoff(**kwargs):
+        assert kwargs["run_id"] == REFERENCE.run_id
+        current.update(projection_message_index=9, user_message_id=31)
+        if not acknowledged:
+            raise RuntimeServiceUnavailableError("reply lost")
+        return TrackedBackgroundResult(**REFERENCE.model_dump(), assistant_message_id=61, chunks=3)
+
+    mocker.patch.object(runner, "forward_tracked_background", side_effect=handoff)
+    mocker.patch.object(runner.agent_automation_db, "get_run", side_effect=lambda *_: current.copy())
+    finish = mocker.patch.object(executor, "_finish_prepared_projection", return_value={"status": "SUCCEEDED"})
+    legacy_finish = mocker.patch.object(executor, "_finish_run", side_effect=AssertionError("unfenced task finalization"))
+    if acknowledged:
+        assert await executor._execute_active_run(run, task) == {"status": "SUCCEEDED"}
+        finish.assert_called_once_with(run, task, ProjectedRun(61, "completed", 3))
+    else:
+        with pytest.raises(RuntimeServiceUnavailableError):
+            await executor._execute_active_run(run, task)
+        finish.assert_not_called()
+    assert run["projection_message_index"] == 9 and run["_lease_owner"] == "scheduler-original"
+    legacy_finish.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_recovery_uses_the_original_reference_and_never_dispatches(automation, mocker):
     executor, run, task, client = automation
     run["projection_message_index"] = 9
@@ -246,3 +278,25 @@ def test_canceled_projection_preserves_status_and_advances_the_occurrence(automa
     assert run_values["assistant_message_id"] == 55 and run_values["projection_message_index"] is None
     assert run_values["projection_memory_agent_id"] is None
     assert task_values["last_run_status"] == "CANCELED" and task_values["fire_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_background_refresh_failure_keeps_outcome_pending(automation, mocker):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    executor, run, task, client = automation
+    run["_lease_owner"] = "scheduler-original"
+    mocker.patch.object(runner, "prepare_conversation_snapshot", return_value=None)
+    mocker.patch.object(runner.agent_automation_db, "update_run", side_effect=lambda _id, values, *_args, **_kw: {**run, **values})
+    mocker.patch.object(runner.agent_automation_db, "get_run", side_effect=SQLAlchemyError("unavailable"))
+    mocker.patch.object(runner, "forward_tracked_background", return_value=TrackedBackgroundResult(
+        **REFERENCE.model_dump(), assistant_message_id=55, chunks=2,
+    ))
+    finish = mocker.patch.object(executor, "_finish_run")
+    finish_prepared = mocker.patch.object(executor, "_finish_prepared_projection")
+    result = await executor._execute_active_run(run, task)
+    assert result["status"] == "RUNNING" and result["_background_outcome_unknown"] is True
+    assert result["_lease_owner"] == "scheduler-original"
+    finish.assert_not_called()
+    finish_prepared.assert_not_called()
+    client.start_prepared_run.assert_not_awaited()

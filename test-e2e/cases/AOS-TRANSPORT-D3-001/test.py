@@ -1678,10 +1678,10 @@ async def _assert_public_stop_and_background(monkeypatch):
         assert fenced.status == "stopped"
         request = {"conversation_id": 42, "query": "automation"}
         with pytest.raises(RuntimeUpstreamError) as blocked:
-            await agentos.run_tracked_background(BackgroundRun(run_id=blocked_id, request=request), "user-a", "tenant-a")
+            await agentos.run_tracked_background(BackgroundRun(run_id=blocked_id, request=request, preparation="legacy"), "user-a", "tenant-a")
         assert blocked.value.status_code == 409 and not launches
 
-        result = await agentos.run_tracked_background(BackgroundRun(run_id=automation_id, request=request), "user-a", "tenant-a")
+        result = await agentos.run_tracked_background(BackgroundRun(run_id=automation_id, request=request, preparation="legacy"), "user-a", "tenant-a")
         assert (result.run_id, result.assistant_message_id) == (automation_id, 77)
         state = await agentos.inspect_run(AgentRunReference(conversation_id=42, run_id=automation_id), "user-a", "tenant-a")
         assert state.status == "completed" and state.resource_versions.agent_version_no == 4
@@ -3713,3 +3713,173 @@ async def test_saved_user_compatibility_over_signed_http(monkeypatch, fallback):
     assert source_reads == [23, 23] and len(claims) == 1
     assert prepared == [reference.run_id]
     assert executed == ([reference.run_id] if fallback else [])
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("mode", ["prepared", "unsupported", "unrecorded", "disconnect"])
+@pytest.mark.asyncio
+async def test_background_management_handoff_over_signed_http(monkeypatch, mode):
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, ManagementOperation
+    from management.api.agent import compatibility_dispatch
+    from management.db.conversation.prepared_turn import SavedUserTurn
+    from management.services.agent import background, runtime_client
+    from runtime.agentos import management_dispatch
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("background-user", "background-tenant")
+    reference = AgentRunReference(run_id="8" * 32, conversation_id=42)
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-background-http-key")
+    record = {
+        "run_id": 5, "runtime_run_id": reference.run_id, "conversation_id": 42,
+        "user_id": actor.user_id, "tenant_id": actor.tenant_id, "status": "RUNNING",
+        "generated_prompt": "hello", "user_message_id": None if mode == "unrecorded" else 23,
+    }
+    snapshot = PreparedAgentRun.model_validate({
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "hello"},
+        "resource": {"agent_id": 2, "version_no": 3, "name": "background_agent", "description": "test",
+                     "prompt_templates": {"system_prompt": "Answer"}, "tools": []},
+        "models": {"llm": {"model_id": 7, "alias": "llm", "revision": "fixture"}},
+    })
+    prepared, legacy, projected, stopped = [], [], [], []
+    projecting, stop_received = threading.Event(), threading.Event()
+    state = {}
+
+    async def control(_task, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    def owned(_conversation, *, user_id, tenant_id):
+        return (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
+
+    def lookup(run_id, tenant, user, *, conversation_id):
+        assert (run_id, tenant, user, conversation_id) == (
+            reference.run_id, actor.tenant_id, actor.user_id, 42,
+        )
+        return record.copy()
+
+    def update(run_id, values, user, *, expected_statuses, tenant_id):
+        assert (run_id, user, tenant_id, expected_statuses) == (5, actor.user_id, actor.tenant_id, ["RUNNING"])
+        record.update(values)
+        return record.copy()
+
+    def source(conversation, user, tenant, message, query, files):
+        assert (conversation, user, tenant, message, query, files) == (
+            42, actor.user_id, actor.tenant_id, 23, "hello", None,
+        )
+        return SavedUserTurn(23, 8, "AUTOMATION")
+
+    async def compile_snapshot(request, ref, user, tenant, **options):
+        assert (ref, user, tenant) == (reference, actor.user_id, actor.tenant_id)
+        assert request.model_id == 7 and request.enable_automation_tool is False
+        assert request.tool_params.agents["root"].tools == {"search": {"top_k": 5}}
+        assert options == {"current_user_message_id": 23}
+        return None if mode == "unsupported" else snapshot
+
+    async def project(client, ref, row):
+        assert ref == reference and row["projection_message_index"] == 9
+        projecting.set()
+        if mode == "disconnect":
+            await asyncio.Future()
+        if not projected:
+            projected.append(61)
+        return TrackedBackgroundResult(**ref.model_dump(), assistant_message_id=61, chunks=2)
+
+    async def legacy_stream(**options):
+        request = options["agent_request"]
+        assert options["skip_user_save"] is True and request.model_id == 7
+        assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
+        assert request._projection_run_id == reference.run_id and request._message_source == "AUTOMATION"
+        assert request.tool_params.agents["root"].tools == {"search": {"top_k": 5}}
+        legacy.append(reference.run_id)
+
+        async def events():
+            yield b"data: answer\n\n"
+            state.update(status="completed", assistant_message_id=61)
+        return StreamingResponse(events())
+
+    def read_state(run_id, user, tenant, conversation, **kwargs):
+        assert (run_id, user, tenant, conversation) == (reference.run_id, actor.user_id, actor.tenant_id, 42)
+        return state.copy() or None
+
+    def forbidden_finish(*_args, **_kwargs):
+        raise AssertionError("callback finalized the scheduler task")
+
+    monkeypatch.setattr(background, "_io", control)
+    monkeypatch.setattr(background, "conversation_belongs_to", owned)
+    monkeypatch.setattr(background.runs, "get_run_by_runtime_id", lookup)
+    monkeypatch.setattr(background.runs, "update_run", update)
+    monkeypatch.setattr(background.runs, "update_task", forbidden_finish)
+    monkeypatch.setattr(background.turns, "read_saved_user_turn_by_id", source)
+    monkeypatch.setattr(background, "prepare_conversation_snapshot", compile_snapshot)
+    monkeypatch.setattr(background, "_project", project)
+    monkeypatch.setattr(execution, "run_blocking", control)
+    monkeypatch.setattr(execution, "run_agent_stream", legacy_stream)
+    monkeypatch.setattr(execution, "read_execution", read_state)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.conversation_belongs_to", owned)
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_background_router(execution.run_agentos_tracked_background))
+
+    @runtime.post(AgentOperation.RUN.value)
+    async def start(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        assert PreparedAgentRun.model_validate_json(request.scope[BODY_KEY]) == snapshot
+        assert record["projection_message_index"] == 9
+        prepared.append(reference.run_id)
+        return reference.model_dump()
+
+    @runtime.post(AgentOperation.STOP.value)
+    async def stop(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        call = AgentStop.model_validate_json(request.scope[BODY_KEY])
+        assert call == AgentStop(**reference.model_dump(), prevent_start=True)
+        stopped.append(call.run_id)
+        stop_received.set()
+        return {**reference.model_dump(), "status": "stopped", "latest_event_id": None, "cancellation_requested": True}
+
+    manager = create_app(enable_monitoring=False)
+    manager.include_router(compatibility_dispatch.router)
+    with serve(runtime) as runtime_url, serve(manager) as manager_url:
+        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+        payload = BackgroundRun(run_id=reference.run_id, request={
+            "query": "hello", "agent_id": 2, "conversation_id": 42, "model_id": 7,
+            "tool_params": {"agents": {"root": {"tools": {"search": {"top_k": 5}}}}},
+        })
+        async with factory() as raw:
+            unsigned = await raw.post(f"{runtime_url}/api{AgentOperation.BACKGROUND.value}", json=payload.model_dump())
+            assert unsigned.status_code == 401
+        with pytest.raises(RuntimeUpstreamError) as foreign:
+            await client.run_tracked_background(payload, actor.user_id, "foreign-tenant")
+        assert foreign.value.status_code == 404
+        with pytest.raises(RuntimeUpstreamError) as loop:
+            await manager_client.dispatch_background(payload.model_copy(update={"preparation": "legacy"}), actor.user_id, actor.tenant_id)
+        assert loop.value.status_code == 422
+        if mode == "disconnect":
+            task = asyncio.create_task(client.run_tracked_background(payload, actor.user_id, actor.tenant_id))
+            try:
+                assert await asyncio.to_thread(projecting.wait, 5)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            assert await asyncio.to_thread(stop_received.wait, 5)
+        else:
+            result = await client.run_tracked_background(payload, actor.user_id, actor.tenant_id)
+            assert (result.run_id, result.conversation_id, result.assistant_message_id) == (reference.run_id, 42, 61)
+            if mode == "prepared":
+                assert await client.run_tracked_background(payload, actor.user_id, actor.tenant_id) == result
+    assert record["status"] == "RUNNING"
+    if mode in {"prepared", "disconnect"}:
+        assert prepared == [reference.run_id] and not legacy
+        assert record["projection_message_index"] == 9
+        assert projected == ([61] if mode == "prepared" else [])
+        assert stopped == ([reference.run_id] if mode == "disconnect" else [])
+    else:
+        assert legacy == [reference.run_id] and not prepared and not projected
+        assert "projection_message_index" not in record

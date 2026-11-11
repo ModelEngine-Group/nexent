@@ -8,6 +8,7 @@ from anyio import CancelScope
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
@@ -17,6 +18,7 @@ from contracts.agentos import (
     WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
 )
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH, RUNTIME_SERVICE_URL
+from contracts.conversation import MessageSource
 from contracts.errors.exceptions import (
     RunModelControlsError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError,
     ValidationError, WorkbenchError,
@@ -287,8 +289,32 @@ async def forward_tracked_background(
     client = _agentos_client()
     try:
         return await client.run_tracked_background(payload, user_id, tenant_id)
-    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError):
+    except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as failure:
+        if isinstance(failure, RuntimeUpstreamError) and failure.status_code not in {503, 504}:
+            raise
         if agent_request.conversation_id is not None and agent_request.conversation_id > 0:
+            from management.db.automation import repository as runs
+            from management.db.conversation.repository import get_prepared_projection_receipt
+
+            try:
+                record = await run_blocking(
+                    "background-recover-source", runs.get_run_by_runtime_id, run_id, tenant_id, user_id,
+                    conversation_id=agent_request.conversation_id, lane="control-io", owner="management",
+                )
+                if record is not None and record.get("projection_message_index") is not None:
+                    receipt = await run_blocking(
+                        "background-recover-receipt", get_prepared_projection_receipt,
+                        projection_run_id=run_id, conversation_id=agent_request.conversation_id,
+                        message_index=record["projection_message_index"], message_source=MessageSource.AUTOMATION,
+                        user_id=user_id, tenant_id=tenant_id, lane="control-io", owner="management",
+                    )
+                    if receipt is not None and receipt[1] == "completed":
+                        return TrackedBackgroundResult(
+                            run_id=run_id, conversation_id=agent_request.conversation_id,
+                            assistant_message_id=receipt[0], chunks=0,
+                        )
+            except (SQLAlchemyError, RuntimeError):
+                logger.warning("Management background receipt recovery deferred run_id=%s", run_id)
             lookup = AgentRunLookup(run_id=run_id, conversation_id=agent_request.conversation_id)
             try:
                 state = await client.inspect_run(lookup, user_id, tenant_id)

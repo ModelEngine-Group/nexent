@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bind authenticated AgentOS transport to the current Agent execution handlers."""
 
-import asyncio
-
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
+
+from backend.http.server.agentos_lifecycle import run_until_disconnect
 
 from contracts.agentos import (
     BODY_KEY, PRINCIPAL_KEY, AgentOperation, BackgroundRun, CompatibilityConversationRun, CompatibilityOperation,
@@ -99,22 +99,3 @@ def create_background_router(tracked_run) -> APIRouter:
         return await run_until_disconnect(request, tracked_run(payload, principal))
 
     return router
-
-
-async def run_until_disconnect(request: Request, run):
-    async def wait_for_disconnect():
-        while (await request.receive())["type"] != "http.disconnect":
-            pass
-
-    execution = asyncio.create_task(run)
-    disconnected = asyncio.create_task(wait_for_disconnect())
-    try:
-        completed, _ = await asyncio.wait((execution, disconnected), return_when=asyncio.FIRST_COMPLETED)
-        if execution in completed:
-            return execution.result()
-        return JSONResponse({"code": "AGENTOS_CLIENT_DISCONNECTED"}, status_code=499)
-    finally:
-        disconnected.cancel()
-        if not execution.done():
-            execution.cancel()
-        await asyncio.gather(disconnected, execution, return_exceptions=True)
