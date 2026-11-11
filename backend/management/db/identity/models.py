@@ -256,8 +256,6 @@ class UserAccount(TableBase):
     password_hash_scheme = Column(String(30), comment="Password encoding scheme: scrypt or imported bcrypt")
     password_login_enabled = Column(Boolean, nullable=False, server_default=text("false"),
                                     comment="Whether this identity permits password authentication")
-    account_status = Column(String(30), nullable=False, server_default=text("'active'"),
-                            comment="Authentication state: active or disabled")
     token_version = Column(Integer, nullable=False, server_default=text("0"),
                            comment="Credential revision; password changes invalidate earlier JWTs")
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")

@@ -160,7 +160,7 @@ def require_active_account(user_id: str) -> dict:
     from management.db.identity.account import get_account
 
     account = get_account(user_id)
-    if not account or account["account_status"] != "active":
+    if not account or account.get("delete_flag", "N") != "N":
         raise TokenExpiredError("Account is unavailable")
     return account
 

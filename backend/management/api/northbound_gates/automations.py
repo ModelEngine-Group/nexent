@@ -11,7 +11,7 @@ until then (indistinguishable from nonexistent).
 
 from typing import Annotated, Callable, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from contracts.authentication import AuthenticatedIdentity
 from management.services.permission.identity.dependency import unified_identity
@@ -21,12 +21,14 @@ from management.services.permission.identity.gate_policies import (
     northbound_envelope_factory,
 )
 from management.services.automation.service import agent_automation_facade
+from management.api.northbound_gates.conversations import _error_response
 
 nb_automation_router = APIRouter(prefix="/nb/v1/automations", tags=["northbound-gates"])
 
 
 @nb_automation_router.get("")
 async def nb_list_automations(
+    request: Request,
     status: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None, max_length=200),
     agent_name: Optional[str] = Query(default=None, max_length=200),
@@ -36,27 +38,28 @@ async def nb_list_automations(
     envelope: Callable = Depends(northbound_envelope_factory),
 ):
     """List the calling partner's automation tasks."""
-    return envelope(
-        agent_automation_facade.list_tasks(
-            ctx.tenant_id,
-            ctx.user_id,
-            status,
-            search,
-            agent_name,
-            page,
-            page_size,
+    try:
+        data = agent_automation_facade.list_tasks(
+            ctx.tenant_id, ctx.user_id, status, search, agent_name, page, page_size,
         )
-    )
+    except Exception as exc:
+        return _error_response(exc, request)
+    return envelope(data)
 
 
 @nb_automation_router.get("/{task_id}")
 async def nb_get_automation(
     task_id: int,
+    request: Request,
     ctx: AuthenticatedIdentity = Depends(unified_identity),
     envelope: Callable = Depends(northbound_envelope_factory),
 ):
     """Fetch one automation task owned by the calling partner."""
-    return envelope(agent_automation_facade.get_task(task_id, ctx.tenant_id, ctx.user_id))
+    try:
+        data = agent_automation_facade.get_task(task_id, ctx.tenant_id, ctx.user_id)
+    except Exception as exc:
+        return _error_response(exc, request)
+    return envelope(data)
 
 
 # ── Dark action gates: present in code, serving only after the manifest ──

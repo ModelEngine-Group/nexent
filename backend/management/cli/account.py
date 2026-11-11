@@ -39,7 +39,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
                 .all()
             )
             if (
-                account["account_status"] != "active"
+                account.get("delete_flag", "N") != "N"
                 or not members
                 or any(m.user_role != "SU" for m in members)
             ):
