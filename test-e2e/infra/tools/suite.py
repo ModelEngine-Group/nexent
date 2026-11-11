@@ -328,7 +328,7 @@ def worker(repo, home, record, directory, settings):
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 
-def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
+def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, on_batch_created=None):
     from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
     assert_recovered(home, allow_retry=daily)
     if daily:
@@ -356,19 +356,22 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
         return execute_campaign(repo, home, records, settings, daily=daily, publish_latest=publish_latest,
                                 execute_one=partial(_execute, validation_report=validation) if daily else _execute,
                                 all_records=all_records, hook=execute_hooks,
-                                machine_env=machine_environment, validation_report=validation)
+                                machine_env=machine_environment, validation_report=validation,
+                                on_batch_created=on_batch_created)
     if retry is not None:
         raise RuntimeError("Pending Daily recovery requires an enabled deployment campaign")
     return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest,
-                    validation_report=validation)
+                    validation_report=validation, on_batch_created=on_batch_created)
 
 
 def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None,
-             on_result=None, validation_report=None):
+             on_result=None, validation_report=None, on_batch_created=None):
     directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
         directory.chmod(0o700)
+    if on_batch_created is not None:
+        on_batch_created(directory)
     required_static = static_requirements(repo, records, daily=daily)
     provenance = {**fingerprint(repo), "config_sha256": config_fingerprint(home),
                   "batch_mode": "daily" if daily else "run", "full_static_assets": daily,
@@ -395,6 +398,8 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     state = {"status": "RUNNING", "started_at": now(), "stages": {f"D{i}": "PENDING" for i in range(7)}}
     save(directory / "status.json", state)
     print(f"Local batch: {directory}", flush=True)
+    from suite_notify import notification_environment
+    env = notification_environment(home)
     try:
         env = machine_environment(home, repo)
         if validation_report is not None and not validation_report.get("ready"):
@@ -520,7 +525,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
         except OSError:
             # Keep the previously finalized report and continue the existing notification path.
             print("Could not refresh publication status in the finalized report", flush=True)
-    if daily and settings.get("notify") and summary["execution_complete"]:
+    if daily and settings.get("notify"):
         from suite_notify import send_report
         send_report(directory, env)
     return 0 if summary["status"] == "PASSED" else 1

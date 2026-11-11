@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import uuid
@@ -61,11 +62,17 @@ def main(argv=None):
     if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(os.path.abspath(runtime)):
         parser.error("Invoke the launcher with the dedicated test-home Python")
     directory = home / "runs/daily-launch" / (now().replace(":", "") + "-" + uuid.uuid4().hex[:8])
+    directory.mkdir(parents=True)
+    state = {"branch": args.branch, "started_at": now(), "status": "PREPARING"}
+    save(directory / "status.json", state)
+    old_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    def record_batch(batch):
+        state["batch"] = str(batch)
+        save(directory / "status.json", state)
+
     try:
         with BatchLock(home / "state/daily.lock"):
-            directory.mkdir(parents=True)
-            state = {"branch": args.branch, "started_at": now(), "status": "PREPARING"}
-            save(directory / "status.json", state)
             try:
                 with deployment_lock(repo), prepare_daily_retry(repo, home, directory):
                     state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
@@ -89,21 +96,30 @@ def main(argv=None):
                     settings = suite.config(repo, home)
                     state["status"] = "EXECUTING"
                     save(directory / "status.json", state)
-                    code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
+                    code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest,
+                                         on_batch_created=record_batch)
                     state["status"] = "PASSED" if code == 0 else "FAILED"
                     return code
             except (Exception, KeyboardInterrupt) as exc:
-                state.update(status="INCOMPLETE", error=str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)
+                state.update(status="INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "INCOMPLETE",
+                             error="Interrupted" if isinstance(exc, KeyboardInterrupt) else
+                             str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)
                 if isinstance(exc, RuntimeError) and str(exc) == "another daily run is active":
                     raise
                 return 2
-            finally:
-                state["finished_at"] = now()
-                save(directory / "status.json", state)
-                print(f"Daily launch: {directory}; status={state['status']}")
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 3
+    except (Exception, KeyboardInterrupt) as exc:
+        state.update(status="INTERRUPTED" if isinstance(exc, KeyboardInterrupt) else "INCOMPLETE",
+                     error="Interrupted" if isinstance(exc, KeyboardInterrupt) else
+                     str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__)
+        print(state["error"], file=sys.stderr)
+        return 3 if isinstance(exc, RuntimeError) else 2
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
+        state["finished_at"] = now()
+        save(directory / "status.json", state)
+        print(f"Daily launch: {directory}; status={state['status']}")
+        from suite_notify import notify_launch
+        notify_launch(directory, home)
 
 
 if __name__ == "__main__":
