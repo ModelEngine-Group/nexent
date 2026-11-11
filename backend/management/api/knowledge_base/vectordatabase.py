@@ -33,7 +33,7 @@ from contracts.knowledge import (
     IndexingResponse,
 )
 from contracts.roles import has_any_role
-from permissions.operations import resource_read_tenant
+from permissions.resource_access import resource_read_tenant
 from gateway.authentication.auth import get_current_user_context, get_current_user_id
 from management.db.knowledge_base.file_lifecycle import get_file_record
 from management.db.knowledge_base.repository import (

@@ -133,14 +133,14 @@ consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 permissions_mock = types.ModuleType("permissions")
 permissions_depends_mock = types.ModuleType("permissions.depends")
 permissions_models_mock = types.ModuleType("permissions.models")
-permissions_operations_mock = types.ModuleType("permissions.operations")
-permissions_operations_mock.resource_read_tenant = lambda request, *, shared=False: None
+permissions_resource_access_mock = types.ModuleType("permissions.resource_access")
+permissions_resource_access_mock.resource_read_tenant = lambda request, *, shared=False: None
 permissions_depends_mock.require = lambda _permission: (lambda: None)
 permissions_models_mock.CurrentUser = object
 sys.modules["permissions"] = permissions_mock
 sys.modules["permissions.depends"] = permissions_depends_mock
 sys.modules["permissions.models"] = permissions_models_mock
-sys.modules["permissions.operations"] = permissions_operations_mock
+sys.modules["permissions.resource_access"] = permissions_resource_access_mock
 
 class SkillException(Exception):
     pass

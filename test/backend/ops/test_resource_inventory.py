@@ -51,7 +51,7 @@ def inventory(mocker):
         with Session(engine.execution_options(schema_translate_map=schema_map)) as session:
             db = mocker.patch.object(access, "get_db_session", side_effect=lambda: nullcontext(session))
             mocker.patch(
-                "permissions.operations.has_permission",
+                "permissions.resource_access.has_permission",
                 side_effect=lambda roles, action: action == "resource.inventory:read" and bool(set(roles) & {"OPS", "SU"}),
             )
             yield db

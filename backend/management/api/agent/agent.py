@@ -63,7 +63,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from permissions.operations import resource_read_tenant
+from permissions.resource_access import resource_read_tenant
 from gateway.authentication.auth import get_current_user_info, get_current_user_id
 
 agent_config_router = APIRouter(prefix="/agent")

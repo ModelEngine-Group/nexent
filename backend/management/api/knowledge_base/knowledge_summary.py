@@ -9,7 +9,8 @@ from nexent.vector_database.base import VectorDatabaseCore
 from contracts.knowledge import ChangeSummaryRequest
 from contracts.errors.exceptions import TokenExpiredError
 from management.db.knowledge_base.repository import get_knowledge_record
-from permissions.operations import resource_read_tenant
+from permissions.models import CurrentUser
+from permissions.resource_access import resource_read_tenant
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from gateway.authentication.auth import authenticate, get_current_user_id, get_current_user_info
@@ -92,13 +93,14 @@ def change_summary(
         raise HTTPException(status_code=500, detail=f"Knowledge base summary update failed: {str(e)}")
 
 
-@router.get("/{index_name}/summary", dependencies=[Depends(authenticate)])
+@router.get("/{index_name}/summary")
 def get_summary(
     index_name: str = Path(..., description="Name of the index to get documents from"),
     request: Request = None,
+    current_user: CurrentUser = Depends(authenticate),
 ):
     """Get Elasticsearch index_name Summary"""
-    if authorized_tenant := resource_read_tenant(request):
+    if authorized_tenant := resource_read_tenant(request, user=current_user):
         if not get_knowledge_record({"index_name": index_name, "tenant_id": authorized_tenant}):
             raise HTTPException(status_code=404, detail="Knowledge base not found")
     try:

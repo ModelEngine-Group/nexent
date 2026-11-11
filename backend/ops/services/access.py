@@ -5,11 +5,11 @@ from sqlalchemy import func, literal, select, union_all
 
 from management.db.client import get_db_session
 from management.db.models import AgentInfo, KnowledgeRecord, McpRecord, ModelRecord
-from permissions.operations import operations_scope
+from permissions.resource_access import require_inventory_scope
 
 
 def resource_inventory(user, tenant_id=None, page=1, page_size=20):
-    tenant = operations_scope(user, tenant_id, "resource.inventory:read")
+    tenant = require_inventory_scope(user, tenant_id)
     definitions = (
         (ModelRecord, ModelRecord.model_id, ModelRecord.model_name, "model"),
         (McpRecord, McpRecord.mcp_id, McpRecord.mcp_name, "mcp"),

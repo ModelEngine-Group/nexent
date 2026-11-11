@@ -14,7 +14,7 @@ from contracts.constants.environment import ENABLE_UPLOAD_IMAGE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
 from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerMcpServiceRequest, UpdateMcpServiceRequest, EnableMcpServiceRequest, DisableMcpServiceRequest, HealthcheckMcpServiceRequest, TestMcpConnectionRequest, ListMcpServicesQuery
-from permissions.operations import resource_read_tenant
+from permissions.resource_access import resource_read_tenant
 from management.services.mcp.service import get_remote_mcp_server_list, check_mcp_health_and_update_db, delete_mcp_by_container_id, upload_and_start_mcp_image, update_remote_mcp_server_list, attach_mcp_container_permissions, get_mcp_record_by_id, list_mcp_service_tools_by_id, refresh_mcp_service_tool_count, add_container_mcp_service, update_mcp_service, update_mcp_service_enabled, delete_mcp_service, check_mcp_service_health, test_mcp_connection, check_container_port_conflict, suggest_container_port
 from management.services.mcp.registration import add_mcp_service
 from management.services.tool.discovery import get_tool_from_remote_mcp_server

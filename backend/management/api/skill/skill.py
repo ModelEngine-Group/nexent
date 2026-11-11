@@ -19,7 +19,7 @@ from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingErro
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
-from permissions.operations import resource_read_tenant
+from permissions.resource_access import resource_read_tenant
 from gateway.authentication.auth import get_current_user_id
 
 

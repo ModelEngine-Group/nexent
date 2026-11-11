@@ -22,7 +22,7 @@ from management.services.permission.identity.groups import (
 )
 from management.services.permission.identity.tenants import get_tenant_info
 from permissions.models import CurrentUser
-from permissions.operations import tenant_scope
+from permissions.tenant_scope import resolve_tenant_scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -130,7 +130,7 @@ async def get_groups_endpoint(
     Returns:
         JSONResponse: List of groups for the tenant (paginated or all)
     """
-    tenant_scope(current_user, request.tenant_id)
+    resolve_tenant_scope(current_user, request.tenant_id)
     try:
         get_tenant_info(request.tenant_id, initialize_name=False)
         # Get groups under given tenant with pagination and sorting
@@ -394,7 +394,7 @@ async def get_group_users_endpoint(
     Returns:
         JSONResponse: List of group users
     """
-    authorized_tenant = tenant_scope(current_user)
+    authorized_tenant = resolve_tenant_scope(current_user, allow_all_tenants=True)
     try:
         users = get_group_users(group_id, tenant_id=authorized_tenant) if authorized_tenant else get_group_users(group_id)
 

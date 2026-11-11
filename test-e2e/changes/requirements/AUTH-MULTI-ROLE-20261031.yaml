@@ -65,6 +65,8 @@ change:
     - test/backend/permissions/test_rbac.py
     - test/backend/permissions/test_dac.py
     - test/backend/permissions/test_operations.py
+    - test/backend/permissions/test_resource_access.py
+    - test/backend/permissions/test_tenant_scope.py
     - test/backend/services/test_model_health_outlet_routing.py
     - test/backend/management/test_identity_import_architecture.py
     - test/backend/services/test_role_assignment.py

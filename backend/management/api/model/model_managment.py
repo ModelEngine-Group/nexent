@@ -113,8 +113,9 @@ from management.services.monitor.audit import record_security_event
 from management.utils.app_factory import ModelCredentialRoute
 from nexent.core.concurrency import run_blocking
 from permissions.depends import require
-from permissions.operations import operations_scope
 from permissions.models import CurrentUser
+from permissions.resource_access import INVENTORY_READ, require_inventory_scope
+from permissions.tenant_scope import resolve_tenant_scope
 
 # Permission strings normalized by backend RBAC cache (lower-case type:subtype).
 # Roles allowed on the cross-tenant /manage/* endpoints. ADMIN shares the same
@@ -212,11 +213,9 @@ def _require_manage_scope(current_user: CurrentUser, target_tenant_id: str) -> N
             status_code=HTTPStatus.FORBIDDEN,
             detail="This operation requires SU or tenant ADMIN role",
         )
-    if not has_any_role(role, {'SU'}) and target_tenant_id != current_user.tenant_id:
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="Tenant admins may only manage models of their own tenant",
-        )
+    resolve_tenant_scope(
+        current_user, target_tenant_id, denied_detail="Tenant admins may only manage models of their own tenant",
+    )
 
 
 def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
@@ -423,7 +422,7 @@ async def suggest_model_capacity(
 
 @router.get("/capacity-coverage")
 async def get_model_capacity_coverage(
-    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative="resource.inventory:read")),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative=INVENTORY_READ)),
 ):
     """Return bare-capacity LLM/VLM coverage for the current tenant.
 
@@ -858,7 +857,7 @@ async def check_temporary_model_health(
 @router.post("/manage/healthcheck")
 async def manage_check_model_health(
     request: ManageTenantModelHealthcheckRequest,
-    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION, alternative="resource.inventory:read")),
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION, alternative=INVENTORY_READ)),
 ):
     """Check and update model connectivity for a specified tenant (admin/manage operation).
 
@@ -872,7 +871,7 @@ async def manage_check_model_health(
     """
     read_only = not has_any_role(current_user.effective_roles, _MANAGE_ALLOWED_ROLES)
     if read_only:
-        operations_scope(current_user, request.tenant_id, "resource.inventory:read")
+        require_inventory_scope(current_user, request.tenant_id)
     else:
         _require_manage_scope(current_user, request.tenant_id)
     try:
@@ -1147,7 +1146,7 @@ async def manage_batch_create_models(
 @router.post("/manage/list", response_model=ManageTenantModelListResponse)
 async def manage_list_models(
     request: ManageTenantModelListRequest,
-    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative="resource.inventory:read")),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative=INVENTORY_READ)),
 ):
     """List models for a specified tenant (admin/manage operation).
 
@@ -1162,7 +1161,7 @@ async def manage_list_models(
     if has_any_role(current_user.effective_roles, {"OPS"}) and not has_any_role(
         current_user.effective_roles, _MANAGE_ALLOWED_ROLES
     ):
-        operations_scope(current_user, request.tenant_id, "resource.inventory:read")
+        require_inventory_scope(current_user, request.tenant_id)
     else:
         _require_manage_scope(current_user, request.tenant_id)
     try:
