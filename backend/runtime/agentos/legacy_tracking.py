@@ -56,3 +56,34 @@ async def fail_legacy_setup(identity: RunIdentity) -> None:
         )
     finally:
         untrack_execution(identity)
+
+
+async def rollback_legacy_launch(
+    *,
+    registry,
+    thread_manager,
+    execution,
+    deferred_run,
+    reservation_token,
+    run_identifier,
+    user_id,
+    conversation_id,
+    tracked_execution,
+    channel,
+    admission_scope,
+) -> None:
+    """Cancel an admitted worker and release the state opened during setup."""
+    deferred_run.cancel()
+    thread_manager.cancel(
+        execution.execution_id,
+        reason="agent stream setup failed",
+        wait_timeout=0,
+        mark_stuck_on_timeout=False,
+    )
+    try:
+        if tracked_execution is not None:
+            await fail_legacy_setup(tracked_execution)
+        if channel is not None and (admission_scope is not None or tracked_execution is not None):
+            await abort_legacy_channel(channel, conversation_id, user_id)
+    finally:
+        registry.release_agent_run_reservation(run_identifier, user_id, reservation_token)

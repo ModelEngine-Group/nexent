@@ -29,8 +29,8 @@ from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
 from runtime.agentos.legacy_tracking import (
-    abort_legacy_channel, begin_legacy_tracking, bind_legacy_channel, fail_legacy_setup, open_legacy_channel,
-    reset_legacy_stream,
+    begin_legacy_tracking, bind_legacy_channel, open_legacy_channel,
+    reset_legacy_stream, rollback_legacy_launch,
 )
 from runtime.executions import AgentRunManager, agent_run_manager, stop_registered_run
 from runtime.thread_management import (
@@ -59,8 +59,7 @@ class LegacyExecutionHost:
     reset_stream: Callable
     open_channel: Callable
     bind_channel: Callable
-    abort_channel: Callable
-    fail_setup: Callable
+    rollback_launch: Callable
     untrack: Callable
     unregister: Callable[..., bool]
     producer_tasks: set[asyncio.Task]
@@ -77,8 +76,7 @@ _legacy_execution_host = LegacyExecutionHost(
     reset_stream=reset_legacy_stream,
     open_channel=open_legacy_channel,
     bind_channel=bind_legacy_channel,
-    abort_channel=abort_legacy_channel,
-    fail_setup=fail_legacy_setup,
+    rollback_launch=rollback_legacy_launch,
     untrack=untrack_execution,
     unregister=partial(unregister_after_worker_exit, agent_run_manager),
     producer_tasks=agent_stream_producer_tasks,

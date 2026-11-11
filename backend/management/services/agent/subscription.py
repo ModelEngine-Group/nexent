@@ -703,24 +703,19 @@ async def run_agent_stream(
                 conversation_id=agent_request.conversation_id, identity=tracked_execution, admission_scope=admission_scope,
             )
     except (Exception, asyncio.CancelledError):
-        deferred_run.cancel()
-        thread_manager.cancel(
-            execution.execution_id,
-            reason="agent stream setup failed",
-            wait_timeout=0,
-            mark_stuck_on_timeout=False,
+        await host.rollback_launch(
+            registry=host.registry,
+            thread_manager=thread_manager,
+            execution=execution,
+            deferred_run=deferred_run,
+            reservation_token=reservation_token,
+            run_identifier=run_identifier,
+            user_id=resolved_user_id,
+            conversation_id=agent_request.conversation_id,
+            tracked_execution=tracked_execution,
+            channel=channel,
+            admission_scope=admission_scope,
         )
-        try:
-            if tracked_execution is not None:
-                await host.fail_setup(tracked_execution)
-            if (admission_scope is not None or tracked_execution is not None) and channel is not None:
-                await host.abort_channel(channel, agent_request.conversation_id, resolved_user_id)
-        finally:
-            host.registry.release_agent_run_reservation(
-                _agent_run_identifier(agent_request),
-                resolved_user_id,
-                reservation_token,
-            )
         raise
 
     stream_kwargs = {

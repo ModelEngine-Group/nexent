@@ -15,6 +15,7 @@ import pytest_asyncio
 from fastapi import Request
 
 from . import test_agent_service as service_tests
+from runtime.agentos import legacy_admission, legacy_producer, legacy_tracking
 
 
 @pytest_asyncio.fixture
@@ -29,6 +30,8 @@ async def lifecycle(monkeypatch):
     manager = module.AgentRunManager()
     monkeypatch.setattr(service_tests.legacy_execution_host, "registry", manager)
     monkeypatch.setattr(service, "AgentRunAlreadyActiveError", module.AgentRunAlreadyActiveError)
+    monkeypatch.setattr(legacy_admission, "AgentRunAlreadyActiveError", module.AgentRunAlreadyActiveError)
+    monkeypatch.setattr(legacy_producer, "cleanup_channel_later", AsyncMock())
     monkeypatch.setattr(service, "_resolve_user_tenant_language", MagicMock(return_value=("u", "t", "en")))
     monkeypatch.setattr(service, "get_conversation_service", MagicMock(return_value={"conversation_id": 123}))
     monkeypatch.setattr(service, "create_new_conversation", MagicMock(return_value={"conversation_id": 123}))
@@ -39,7 +42,7 @@ async def lifecycle(monkeypatch):
     future = Future()
     execution = SimpleNamespace(future=future, execution_id="lifecycle-worker")
     deferred = MagicMock()
-    monkeypatch.setattr(service, "DeferredAgentRun", MagicMock(return_value=deferred))
+    monkeypatch.setattr(legacy_admission, "DeferredAgentRun", MagicMock(return_value=deferred))
     monkeypatch.setattr(service_tests.legacy_thread_manager, "submit", MagicMock(return_value=execution))
     monkeypatch.setattr(service_tests.legacy_thread_manager, "wait_until_started", AsyncMock())
     cancel = MagicMock(side_effect=lambda *_args, **_kwargs: future.cancel())
@@ -299,8 +302,6 @@ async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecyc
 
 @pytest.mark.asyncio
 async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle, monkeypatch):
-    from infrastructure.rdb import agent_admission
-
     env = lifecycle
     run_id = "a" * 32
     scope = "b" * 64
@@ -316,7 +317,7 @@ async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle
         order.append("bound")
         return True
 
-    monkeypatch.setattr(agent_admission, "set_conversation_admission", record)
+    monkeypatch.setattr(legacy_tracking, "set_conversation_admission", record)
 
     async def source(_request, **_kwargs):
         order.append("producer")
@@ -333,15 +334,13 @@ async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle
 
 @pytest.mark.asyncio
 async def test_failed_admission_binding_cleans_journal_before_releasing_reservation(lifecycle, monkeypatch):
-    from infrastructure.rdb import agent_admission
-
     env = lifecycle
     env.request._projection_run_id = "a" * 32
     env.request._run_admission_scope = "b" * 64
     monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
     monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value="a" * 32), raising=False)
     monkeypatch.setattr(env.channel, "finish_journal", AsyncMock(), raising=False)
-    monkeypatch.setattr(agent_admission, "set_conversation_admission", lambda *args, **kwargs: False)
+    monkeypatch.setattr(legacy_tracking, "set_conversation_admission", lambda *args, **kwargs: False)
 
     async def remove(conversation_id, user_id, *, expected_channel):
         assert (conversation_id, user_id, expected_channel) == (123, "u", env.channel)
@@ -480,17 +479,16 @@ async def test_agentos_stop_between_preparation_and_sdk_dispatch(lifecycle, monk
 @pytest.mark.asyncio
 async def test_tracked_run_owns_identity_and_finalizes_with_redis_disabled(lifecycle, monkeypatch):
     env = lifecycle
-    execution = service_tests.agent_execution
     calls = []
     run_id = "d" * 32
     env.request._track_execution = True
     env.request._projection_run_id = run_id
     monkeypatch.setattr(env.service.runtime_state_service, "enabled", False)
-    monkeypatch.setattr(env.service, "track_execution", lambda identity: calls.append(("track", identity.run_id)))
-    monkeypatch.setattr(env.service, "untrack_execution", lambda identity: None)
-    monkeypatch.setattr(env.service, "begin_execution", lambda identity: calls.append(("begin", identity.run_id)))
+    monkeypatch.setattr(legacy_tracking, "track_execution", lambda identity: calls.append(("track", identity.run_id)))
+    monkeypatch.setattr(service_tests.legacy_execution_host, "untrack", lambda identity: None, raising=False)
+    monkeypatch.setattr(legacy_tracking, "begin_execution", lambda identity: calls.append(("begin", identity.run_id)))
     monkeypatch.setattr(
-        execution, "finish_execution", lambda identity, status: calls.append(("finish", identity.run_id, status)),
+        legacy_producer, "finish_execution", lambda identity, status: calls.append(("finish", identity.run_id, status)),
     )
 
     async def direct(_name, function, *args, **kwargs):
@@ -502,8 +500,9 @@ async def test_tracked_run_owns_identity_and_finalizes_with_redis_disabled(lifec
         env.future.set_result(None)
         yield "done"
 
-    monkeypatch.setattr(env.service, "run_blocking", direct)
-    monkeypatch.setattr(execution, "run_blocking", direct)
+    monkeypatch.setattr(legacy_tracking, "run_blocking", direct)
+    monkeypatch.setattr(legacy_producer, "run_blocking", direct)
+    monkeypatch.setattr(service_tests.legacy_execution_host, "begin_tracking", legacy_tracking.begin_legacy_tracking, raising=False)
     response = await env.start(source)
     await response.agentos_producer
     assert response.headers["run_id"] == response.headers["X-AgentOS-Run-ID"] == run_id
