@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-63:
+  - test_raw_new_conversation_over_signed_agentos
   AC-62:
   - test_background_management_handoff_over_signed_http
   AC-61:

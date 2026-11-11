@@ -2525,21 +2525,35 @@ async def _assert_workbench_root_skills_over_signed_http(monkeypatch, tmp_path, 
     assert scoped_reads == [4, 4, 4, 4, 4]
 
 
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("prior_users", [0, 4])
+@pytest.mark.parametrize("memory", [False, True])
+@pytest.mark.asyncio
+async def test_raw_new_conversation_over_signed_agentos(monkeypatch, prior_users, memory):
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-new-transport-key")
+    await _assert_public_prepared_turn_over_signed_http(
+        monkeypatch, new_conversation=True, raw_prior_users=prior_users, use_memory=memory,
+    )
+
+
 async def _assert_public_prepared_turn_over_signed_http(
     monkeypatch, *, new_conversation=False, northbound=False, metadata=None, use_workbench=False,
     use_knowledge_scope=False, clarification=False, use_memory=False, use_root_skill=False,
-    check_cursorless_resume=False,
+    check_cursorless_resume=False, raw_prior_users=None,
 ):
+    from contracts.agentos import CompatibilityConversationRun
     from contracts.agent import WorkbenchSessionConfig
     from contracts.clarification import ClarificationResponse
-    from contracts.constants.constants import DEFAULT_EN_TITLE
+    from contracts.constants.constants import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionScopeError
     from infrastructure.redis.agent_events import START
     from management.api.agent import conversation_run
     from management.services.agent import conversation_submission, prepared_projection, prepared_turn, runtime_client
     from runtime.agentos import prepared_run, resume
 
-    boundary = 0 if new_conversation else 4
+    raw_new = raw_prior_users is not None
+    boundary = raw_prior_users * 2 if raw_new else 0 if new_conversation else 4
     metadata_version = 1 if new_conversation else 6
     actor = ServicePrincipal("public-user", "public-tenant")
     reference = AgentRunReference(conversation_id=55, run_id="b" * 32)
@@ -2566,7 +2580,7 @@ async def _assert_public_prepared_turn_over_signed_http(
     if use_workbench:
         llm["root_generation"] = config.generation_config.model_dump(mode="json")
     snapshot = PreparedAgentRun.model_validate({
-        **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "en",
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "test"}, "language": "zh" if raw_new else "en",
         **({"memory_enabled": True} if use_memory else {}),
         **({"runtime_metadata": metadata, "runtime_metadata_version": metadata_version} if metadata is not None else {}),
         **({"workbench_config_version": 4} if use_workbench else {}),
@@ -2596,9 +2610,10 @@ async def _assert_public_prepared_turn_over_signed_http(
         state["claimed"] = True
         return AdmissionClaim(reference.run_id, "pending", None, False, True)
 
-    def stage(_scope, ref, user_id, tenant_id, index, turn, *, initial_title=None):
+    def stage(_scope, ref, user_id, tenant_id, index, turn, *, initial_title=None, omitted_user=False):
         assert (ref, user_id, tenant_id, index) == (reference, actor.user_id, actor.tenant_id, boundary)
-        assert initial_title == (DEFAULT_EN_TITLE if new_conversation else None)
+        assert initial_title == (DEFAULT_ZH_TITLE if raw_new else DEFAULT_EN_TITLE if new_conversation else None)
+        assert omitted_user is raw_new
         assert turn["query"] == "test"
         assert turn.get("memory_agent_id") == pending.memory_agent_id
         assert turn.get("clarification_response") == (response.model_dump(mode="json") if response else None)
@@ -2712,6 +2727,9 @@ async def _assert_public_prepared_turn_over_signed_http(
         assert (user_id, tenant_id) == (actor.user_id, actor.tenant_id)
         if new_conversation:
             assert kwargs["new_conversation"] is True and "before_message_index" not in kwargs
+        if raw_new:
+            assert kwargs["preserve_shared_reasoning"] is True
+            assert (kwargs["language"], kwargs["timezone"]) == ("zh", None)
         assert request.metadata == metadata
         assert request.clarification_response == response
         assert kwargs.get("metadata_from_northbound", False) == (metadata is not None and northbound)
@@ -2745,12 +2763,38 @@ async def _assert_public_prepared_turn_over_signed_http(
     runtime.add_middleware(AgentOSMiddleware)
     runtime.include_router(prepared_run.create_prepared_run_router())
     runtime.include_router(resume.create_run_lifecycle_router())
-    management = FastAPI()
+    if raw_new:
+        from backend.http.server.app_factory import create_app
+
+        management = create_app(enable_monitoring=False)
+    else:
+        management = FastAPI()
     management.include_router(conversation_run.router)
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda token: (actor.user_id, token))
     with serve(runtime) as runtime_url:
         monkeypatch.setattr(runtime_client, "_agentos_client",
                             lambda: AgentOSClient(runtime_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw)))
+        if raw_new:
+            from management.api.agent import compatibility_dispatch
+
+            management.include_router(compatibility_dispatch.router)
+            body = CompatibilityConversationRun(request={
+                "query": "test", "agent_id": 7,
+                "history": [{"role": "user", "content": "earlier"} for _ in range(raw_prior_users)],
+            }, invocation="northbound", language="en", timezone="Asia/Shanghai")
+            with serve(management) as management_url:
+                caller = AgentOSClient(management_url, lambda **kw: httpx.AsyncClient(trust_env=False, **kw))
+                first = await caller.dispatch_conversation(body, actor.user_id, actor.tenant_id)
+                text = b"".join([chunk async for chunk in first.body_iterator]).decode()
+                assert first.status_code == 200 and first.headers["conversation_id"] == str(reference.conversation_id)
+                assert "run_id" not in first.headers and "conversation_created" in text
+                assert '"type":"final_answer","content":"answer"' in text
+                assert "agentos_terminal" not in text
+                denied = await caller.dispatch_conversation(body, actor.user_id, "foreign")
+                denied_body = b"".join([chunk async for chunk in denied.body_iterator])
+                assert denied.status_code == 404 and b"AGENTOS_RUN_NOT_FOUND" in denied_body
+            assert calls == ["stage", "start", "confirm", "project", "close"]
+            return
         if northbound:
             await _assert_northbound_prepared_turn(management, monkeypatch, reference, actor, metadata)
             assert calls == ["stage", "start", "confirm", "project", "close"]

@@ -62,10 +62,28 @@ async def test_raw_export_reuses_original_preparation_and_exact_run_arguments(pr
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unsupported", ["nondebug", "export"])
-async def test_raw_unsupported_keeps_original_payload_in_explicit_fallback(preparation, unsupported):
+async def test_raw_unsupported_keeps_original_payload_in_explicit_fallback(preparation, unsupported, mocker):
     request = {"query": "hello", "agent_id": 7, "is_debug": True}
     if unsupported == "nondebug":
         request["is_debug"] = False
+        # Assistant-only raw starts now attempt portable admission before fallback.
+        from management.services.agent import prepared_turn, conversation_submission
+
+        async def submit(payload, user, tenant, dispatch, **_kwargs):
+            return await dispatch(payload.model_copy(update={"claimed_run_id": "a" * 32}), user, tenant)
+
+        mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
+        mocker.patch.object(prepared_turn, "start_turn", return_value=None)
+        mocker.patch.object(prepared_turn, "reject_unstaged_turn")
+        payload = CompatibilityConversationRun(request=request, invocation="northbound")
+        preparation.client.run_conversation.return_value = StreamingResponse(iter([]))
+        response = await service.forward_raw_run(payload, ACTOR)
+        assert response is preparation.client.run_conversation.return_value
+        preparation.client.run_conversation.assert_awaited_once_with(
+            payload.model_copy(update={"preparation": "legacy"}), "user", "tenant",
+        )
+        preparation.client.run_ephemeral.assert_not_awaited()
+        return
     else:
         preparation.compile.return_value = None
     payload = CompatibilityConversationRun(request=request, invocation="northbound")

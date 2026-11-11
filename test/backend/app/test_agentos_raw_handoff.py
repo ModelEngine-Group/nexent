@@ -47,12 +47,13 @@ async def test_explicit_raw_fallback_cannot_reenter_management(mocker):
     ("unauthorized", 401, "original"), ("forbidden", 403, "original"),
     ("validation", 422, "original"), ("model", 404, {"code": "model_not_available"}),
     ("unexpected", 500, "Agent run error."),
+    ("upstream", 429, {"code": "RUNTIME_CAPACITY_FULL"}),
 ])
 async def test_management_raw_callback_preserves_original_error_mapping(mocker, failure, status, detail):
     from backend.http.server.app_factory import create_app
     from contracts.agentos import CompatibilityConversationRun, ManagementOperation
     from contracts.constants import environment
-    from contracts.errors.exceptions import ForbiddenError, RunModelControlsError, UnauthorizedError, ValidationError
+    from contracts.errors.exceptions import ForbiddenError, RunModelControlsError, RuntimeUpstreamError, UnauthorizedError, ValidationError
     from infrastructure.agentos_identity import sign_call
     from management.api.agent import compatibility_dispatch
 
@@ -60,6 +61,9 @@ async def test_management_raw_callback_preserves_original_error_mapping(mocker, 
         "unauthorized": UnauthorizedError("original"), "forbidden": ForbiddenError("original"),
         "validation": ValidationError("original"), "model": RunModelControlsError("model_not_available"),
         "unexpected": RuntimeError("private failure"),
+        "upstream": RuntimeUpstreamError(429, b'{"code":"RUNTIME_CAPACITY_FULL"}', {
+            "Content-Type": "application/json", "Retry-After": "3",
+        }),
     }
     mocker.patch.object(environment, "JWT_SECRET", "synthetic-raw-callback-key")
     mocker.patch.object(compatibility_dispatch, "forward_raw_run", new=AsyncMock(side_effect=errors[failure]))
@@ -71,4 +75,6 @@ async def test_management_raw_callback_preserves_original_error_mapping(mocker, 
     app.include_router(compatibility_dispatch.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://management") as client:
         response = await client.post("/api" + operation.value, content=body, headers={"Authorization": "Bearer " + token})
-    assert response.status_code == status and response.json() == {"message": detail}
+    assert response.status_code == status and response.json() == (detail if failure == "upstream" else {"message": detail})
+    if failure == "upstream":
+        assert response.headers["Retry-After"] == "3"

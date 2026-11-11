@@ -376,6 +376,7 @@ async def prepare_conversation_snapshot(
     before_message_index: int | None = None, new_conversation: bool = False,
     metadata_from_northbound: bool = False, workbench: "PreparedWorkbench | None" = None,
     native_knowledge: PreparedNativeKnowledge | None = None, owned_conversation: dict | None = None,
+    preserve_shared_reasoning: bool = False,
 ) -> PreparedAgentRun | None:
     """Compile a conversation bound to an owned row or an internal reserved sequence value."""
     from management.services.agent.preparation.run import create_agent_run_info
@@ -449,7 +450,9 @@ async def prepare_conversation_snapshot(
     if request.metadata is not None and workbench is None and not metadata_from_northbound:
         # Native requests check the specified version or the draft policy before compilation.
         await _authorize_prepared_metadata(request.model_copy(update={"version_no": metadata_policy_version}), tenant_id)
-    if workbench is None and (generation := _turn_model_generation(request)) is not None:
+    if (workbench is None and (not preserve_shared_reasoning or (
+        request.generation_config is not None and request.generation_config.model_fields_set
+    )) and (generation := _turn_model_generation(request)) is not None):
         compile_options["turn_generation"] = generation
     historical_context = None
     if current_user_message_id is not None or before_message_index is not None:

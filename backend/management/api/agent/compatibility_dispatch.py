@@ -47,6 +47,8 @@ async def dispatch_conversation(request: Request):
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeUpstreamError as exc:
+            return Response(content=exc.content, status_code=exc.status_code, headers=exc.headers)
         except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError) as exc:
             status = 504 if isinstance(exc, RuntimeServiceTimeoutError) else 503
             raise HTTPException(status_code=status, detail="Runtime service is unavailable") from exc

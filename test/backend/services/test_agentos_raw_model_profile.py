@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from contracts.agent import AgentRequest
-from contracts.agentos import PreparedEphemeralRun
+from contracts.agentos import AgentRunReference, PreparedAgentRun, PreparedEphemeralRun
 from infrastructure import agent_model_config
 from infrastructure.agent_model_config import create_model_config_from_record
 from infrastructure.agent_model_overrides import overlay_root_model
@@ -18,9 +18,10 @@ from .test_agentos_raw_preparation import ACTOR, preparation
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("debug", [True, False], ids=["debug", "new-conversation"])
 @pytest.mark.parametrize("settings", [None, {}, {"temperature": 0.3, "top_p": 0.7}, {"temperature": None}],
                          ids=["omitted", "empty", "sampling", "explicit-null"])
-async def test_raw_profile_round_trip_matches_legacy_root_and_shared_child(preparation, mocker, settings):
+async def test_raw_profile_round_trip_matches_legacy_root_and_shared_child(preparation, mocker, settings, debug):
     record = {
         "model_id": 11, "tenant_id": ACTOR.tenant_id, "delete_flag": "N", "model_type": "llm",
         "model_name": "provider-model", "model_repo": None, "display_name": "model-a",
@@ -53,10 +54,23 @@ async def test_raw_profile_round_trip_matches_legacy_root_and_shared_child(prepa
     mocker.patch.object(tool_identity, "resolve_tool_user_context", return_value={})
     lookup = mocker.patch.object(prepared_evaluation, "get_model_by_model_id", return_value=record)
     scoped = bool(settings)
-    request = AgentRequest(query="hello", agent_id=7, is_debug=True, generation_config=settings, reasoning_effort="high")
-    prepared = await service.prepare_raw_debug(request, ACTOR)
-    assert prepared is not None
-    payload = PreparedEphemeralRun.model_validate_json(prepared.payload.model_dump_json())
+    request = AgentRequest(query="hello", agent_id=7, is_debug=debug, generation_config=settings, reasoning_effort="high")
+    if debug:
+        prepared = await service.prepare_raw_debug(request, ACTOR)
+        assert prepared is not None
+        payload = PreparedEphemeralRun.model_validate_json(prepared.payload.model_dump_json())
+    else:
+        mocker.patch.object(run, "query_current_version_no", return_value=0)
+        mocker.patch.object(evaluation_snapshot, "get_memory_switch", return_value=False)
+        mocker.patch("management.services.model.run_controls.validate_agent_model_selection")
+        mocker.patch("management.services.model.run_controls.preflight_agent_turn_controls")
+        reference = AgentRunReference(conversation_id=42, run_id="a" * 32)
+        prepared = await evaluation_snapshot.prepare_conversation_snapshot(
+            request.model_copy(update={"conversation_id": 42}), reference, ACTOR.user_id, ACTOR.tenant_id,
+            new_conversation=True, preserve_shared_reasoning=True,
+        )
+        assert prepared is not None
+        payload = PreparedAgentRun.model_validate_json(prepared.model_dump_json())
     assert record["api_key"] not in payload.model_dump_json()
     expected = overlay_root_model(base, settings or {}, base.cite_name)
     expected = overlay_root_model(expected, {"thinking_effort": "high"}, expected.cite_name)

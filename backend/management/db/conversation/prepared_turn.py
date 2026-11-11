@@ -366,8 +366,11 @@ def _require_workbench_version(conversation: ConversationRecord, expected: int, 
 
 def stage_turn(
     scope: str, reference: AgentRunReference, user_id: str, tenant_id: str, message_index: int, user_turn: dict,
-    *, initial_title: str | None = None, saved_user: SavedUserTurn | None = None,
+    *, initial_title: str | None = None, saved_user: SavedUserTurn | None = None, omitted_user: bool = False,
 ) -> PreparedTurn:
+    if omitted_user and (initial_title is None or saved_user is not None or type(message_index) is not int
+                         or message_index < 0 or message_index % 2):
+        raise PreparedTurnConflict
     if saved_user is not None and (initial_title is not None or saved_user.message_index != message_index):
         raise PreparedTurnConflict
     admission = ConversationRunAdmission
@@ -419,7 +422,7 @@ def stage_turn(
         if row is None or row.conversation_id is not None:
             raise AdmissionScopeError
         if initial_title is not None:
-            if message_index != 0:
+            if message_index != 0 and not omitted_user:
                 raise PreparedTurnConflict
             create_conversation(
                 initial_title, user_id, agent_id=user_turn["agent_id"], chat_mode=user_turn["chat_mode"],
@@ -435,6 +438,8 @@ def stage_turn(
             **{key: value for key, value in user_turn.items() if key != "automation"},
             "new_conversation": initial_title is not None,
         }
+        if omitted_user:
+            row.prepared_user_turn = {**row.prepared_user_turn, "omitted_user": True}
         if saved_user is not None:
             row.prepared_user_turn = {
                 **row.prepared_user_turn, "source_user_message_id": saved_user.message_id,
@@ -468,7 +473,15 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
         if row.prepared_assistant_id is None:
             user_turn = row.prepared_user_turn
             source_message_id = user_turn.get("source_user_message_id")
-            if source_message_id is None:
+            omitted_user = user_turn.get("omitted_user") is True
+            if omitted_user:
+                if (not user_turn.get("new_conversation") or source_message_id is not None
+                        or session.scalar(select(ConversationMessage.message_id).where(
+                            ConversationMessage.conversation_id == conversation_id,
+                            ConversationMessage.delete_flag == "N",
+                        ).limit(1)) is not None):
+                    raise PreparedTurnConflict
+            elif source_message_id is None:
                 if _next_index(session, conversation_id) != row.prepared_message_index - 1:
                     raise PreparedTurnConflict
             else:
@@ -515,7 +528,7 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 user_message["clarification_response"] = clarification
                 options["expected_clarification_source_id"] = user_turn["clarification_source_id"]
             try:
-                if source_message_id is None:
+                if source_message_id is None and not omitted_user:
                     source_message_id = create_conversation_message(user_message, turn.user_id, db_session=session, **options)
             except AppException as exc:
                 if clarification is None or exc.error_code != ErrorCode.COMMON_VALIDATION_ERROR:
@@ -535,6 +548,8 @@ def confirm_turn(turn: PreparedTurn) -> PreparedTurn | None:
                 key: user_turn[key]
                 for key in ("memory_agent_id", "workbench_skill_root", "source_user_message_source") if key in user_turn
             } or None
+            if omitted_user and user_turn.get("memory_agent_id") is not None:
+                row.prepared_user_turn = {**(row.prepared_user_turn or {}), "omitted_user_query": user_turn["query"]}
             if row.prepared_automation_context is not None:
                 row.prepared_automation_context = {
                     **row.prepared_automation_context, "source_message_id": source_message_id,
@@ -566,7 +581,12 @@ def close_turn(turn: PreparedTurn, *, failure_status: str | None = None) -> None
                 message.created_by == turn.user_id, message.message_role == "assistant",
                 message.streaming_owner == "management", message.status == "streaming", message.delete_flag == "N",
             ).values(status=failure_status, updated_by=turn.user_id, update_time=func.now()))
-        row.prepared_user_turn = None
+        memory_context = row.prepared_user_turn or {}
+        row.prepared_user_turn = {
+            "omitted_user_query": memory_context["omitted_user_query"],
+            "memory_agent_id": memory_context["memory_agent_id"],
+        } if (row.prepared_assistant_id is not None and "omitted_user_query" in memory_context
+              and memory_context.get("memory_agent_id") is not None) else None
         row.prepared_automation_context = None
         row.prepared_message_index = None
 

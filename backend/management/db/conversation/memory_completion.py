@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB, insert
 from contracts.conversation import MessageSource
 from infrastructure.rdb.base import SCHEMA, TableBase
 from infrastructure.rdb.client import get_db_session
+from infrastructure.rdb.agent_admission import ConversationRunAdmission
 from infrastructure.rdb.conversation_record import ConversationMessage, ConversationRecord
 from infrastructure.rdb.conversation_state import tenant_membership_matches
 from management.db.conversation.projection_receipt import ConversationProjectionReceipt
@@ -132,6 +133,17 @@ def read_source(job: MemoryJob) -> MemorySource | None:
                 return None
             prompt = prompt.where(message.message_id == job.source_message_id)
         query = session.scalar(prompt.limit(1))
+        if assistant.message_source == MessageSource.CHAT.value:
+            admission = ConversationRunAdmission
+            context = session.scalar(select(admission.prepared_user_turn).where(
+                admission.run_id == job.run_id, admission.conversation_id == assistant.conversation_id,
+                admission.prepared_assistant_id == assistant.message_id, admission.created_by == row.created_by,
+                admission.tenant_id == row.tenant_id, admission.status == "admitted", admission.delete_flag == "N",
+            ).limit(1))
+            if isinstance(context, dict) and "omitted_user_query" in context:
+                if context.get("memory_agent_id") != job.agent_id or type(context["omitted_user_query"]) is not str:
+                    return None
+                query = context["omitted_user_query"]
         if query is None:
             return None
         return MemorySource(

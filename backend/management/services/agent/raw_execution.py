@@ -50,6 +50,27 @@ async def forward_raw_run(payload: CompatibilityConversationRun, actor: ServiceP
         raise ValueError("Invalid raw Northbound handoff")
     request = AgentRequest.model_validate(payload.request)
     client = _agentos_client()
+    if not request.is_debug and request.conversation_id is None:
+        from management.services.agent import prepared_turn
+        from management.services.agent.conversation_submission import submit_conversation
+
+        async def dispatch(claimed, user_id, tenant_id):
+            response = await prepared_turn.start_turn(
+                claimed.model_copy(update={"language": "zh", "timezone": None}), request, user_id, tenant_id, client,
+                include_journal_controls=False, omitted_user=True,
+            )
+            if response is not None:
+                response.headers["Connection"] = "keep-alive"
+                return response
+            await prepared_turn.reject_unstaged_turn(claimed, user_id, tenant_id)
+            return await client.run_conversation(
+                payload.model_copy(update={"preparation": "legacy"}), user_id, tenant_id,
+            )
+
+        return await submit_conversation(
+            prepared_turn.with_submission_key(payload), actor.user_id, actor.tenant_id, dispatch,
+            include_claim_headers=False,
+        )
     prepared = await prepare_raw_debug(request, actor)
     if prepared is None:
         # Use the original request, before time-prefix and preparation mutations.

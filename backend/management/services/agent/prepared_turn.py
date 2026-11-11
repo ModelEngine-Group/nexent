@@ -108,13 +108,16 @@ async def reject_unstaged_turn(payload, user_id, tenant_id):
 async def start_turn(
     payload, request, user_id, tenant_id, client, *, include_journal_controls=True, metadata_from_northbound=False,
     saved_user: store.SavedUserTurn | None = None,
+    omitted_user: bool = False,
 ):
+    if omitted_user and (request.conversation_id is not None or request.is_debug or saved_user is not None):
+        raise ValueError("Only an internal new conversation can omit its user message")
     run_id = payload.claimed_run_id
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
     initial_title = None
     try:
         conversation_id = request.conversation_id
-        if conversation_id is None and request.clarification_response is not None:
+        if conversation_id is None and request.clarification_response is not None and not omitted_user:
             raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification requires an existing conversation")
         workbench = None
         native_conversation = None
@@ -139,9 +142,11 @@ async def start_turn(
         if conversation_id is None:
             conversation_id = await _io("prepared-turn-sequence", store.allocate_conversation_id)
             request = request.model_copy(update={"conversation_id": conversation_id})
-            boundary = 0
+            boundary = 2 * sum(item.role == "user" for item in request.history or []) if omitted_user else 0
             initial_title = DEFAULT_EN_TITLE if payload.language == "en" else DEFAULT_ZH_TITLE
             options = {"new_conversation": True}
+            if omitted_user:
+                options["preserve_shared_reasoning"] = True
         else:
             if saved_user is None:
                 boundary = await _io("prepared-turn-boundary", store.next_message_index,
@@ -183,6 +188,8 @@ async def start_turn(
                 "has_attachments": bool(request.minio_files),
             }
         creation = {"initial_title": initial_title} if initial_title is not None else {}
+        if omitted_user:
+            creation["omitted_user"] = True
         if saved_user is not None:
             creation["saved_user"] = saved_user
         user_turn = {
@@ -193,7 +200,7 @@ async def start_turn(
         }
         if snapshot.memory_enabled:
             user_turn["memory_agent_id"] = snapshot.resource.agent_id
-        if request.clarification_response is not None:
+        if request.clarification_response is not None and not omitted_user:
             user_turn["clarification_response"] = request.clarification_response.model_dump(mode="json")
         if workbench is not None:
             user_turn["workbench_update"] = {
