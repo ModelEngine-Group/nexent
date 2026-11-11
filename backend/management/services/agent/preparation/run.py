@@ -8,20 +8,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from contracts.agentos import PreparedConversationScope, TurnModelGeneration
-from contracts.constants.environment import (
-    AGENT_WORKSPACE_ROOT,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
-    NEXENT_TOOL_FASTPATH_ENABLED,
-    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
-)
+from contracts.constants.environment import TOKEN
 from contracts.errors.exceptions import RunModelControlsError
 from contracts.tool import ToolParamsRequest
 from backend.http.client import create_httpx_client
 from infrastructure.agent_model_overrides import apply_turn_model_generation, merge_provider_body
-from infrastructure.redis.client import get_redis_client
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
 from management.db.model.repository import get_model_by_model_id
@@ -467,28 +458,21 @@ async def create_agent_run_info(
     converted_history = _convert_history_with_minio_files(history, language=language)
 
     return legacy_materializer(
-        workspace_root=AGENT_WORKSPACE_ROOT,
         query=final_query,
         model_config_list=model_list,
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=converted_history,
-        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         context_budget_snapshot=getattr(
             agent_config,
             "context_budget_snapshot",
             None,
         ),
-        tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
-        tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,
         tenant_id=tenant_id,
         minio_files=effective_minio_files,
-        redis_client=get_redis_client(),
         user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
     )

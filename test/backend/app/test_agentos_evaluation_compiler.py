@@ -309,7 +309,8 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     model = create_model_config_from_record(model_record(model_id=11, connect_status="available"))
     agent = AgentConfig(name="test", description="test", tools=[], model_name=model.cite_name, sandbox_policy={"level": "local"})
     mocker.patch.object(run, "_build_run_workspace", return_value=str(workspace))
-    mocker.patch.object(run, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    mocker.patch.object(factory.environment, "AGENT_WORKSPACE_ROOT", str(tmp_path))
+    mocker.patch.object(factory.environment, "MCP_REQUEST_TIMEOUT_SECONDS", 23)
     mocker.patch.object(run, "_validate_run_minio_files")
     mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
     mocker.patch.object(run, "create_agent_config", return_value=agent)
@@ -318,7 +319,8 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     mocker.patch.object(run, "get_remote_mcp_server_list", return_value=[])
     mocker.patch.object(run, "get_tenant_local_mcp_server", return_value="http://mcp/mcp")
     mocker.patch.object(run, "resolve_tool_user_context", return_value={"tenant_id": "tenant"})
-    mocker.patch.object(run, "get_redis_client", return_value=None)
+    redis = object()
+    mocker.patch.object(factory, "get_redis_client", return_value=redis)
     storage = object()
     storage_client = mocker.patch.object(factory, "get_sandbox_minio_client", return_value=storage)
 
@@ -331,6 +333,8 @@ async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tm
     assert prepared.user_context == {"tenant_id": "tenant"}
     assert not prepared.stop_event.is_set()
     assert prepared.minio_client is storage
+    assert prepared.redis_client is redis
+    assert prepared.mcp_request_timeout_seconds == 23
     storage_client.assert_called_once_with()
     assert prepared.sandbox_config.output_dir == str(workspace / "outputs")
     assert prepared.sandbox_config.extra_kwargs["workspace_root"] == str(tmp_path.resolve())
