@@ -6,7 +6,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from runtime.agentos import legacy_tracking
+from runtime.agentos import legacy_producer, legacy_tracking
 
 from test.backend.services import test_agent_service as legacy
 
@@ -209,7 +209,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     monkeypatch.setattr(agent_subscription, 'update_conversation_chat_mode_service', MagicMock())
     monkeypatch.setattr(agent_subscription, 'save_messages', MagicMock())
     monkeypatch.setattr(agent_subscription, 'build_agent_run_context', MagicMock(return_value=SimpleNamespace(metadata={}, enable_memory=False)))
-    monkeypatch.setattr(agent_subscription, 'agent_monitoring_context', lambda _metadata: nullcontext())
+    monkeypatch.setattr(legacy_producer, 'agent_monitoring_context', lambda _metadata: nullcontext())
     execution = MagicMock()
     execution.execution_id = 'execution-a'
     execution.future.done.return_value = True

@@ -26,7 +26,7 @@ from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execut
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
 from runtime.agentos.legacy_admission import admit_legacy_execution
-from runtime.agentos.legacy_producer import start_legacy_producer
+from runtime.agentos.legacy_producer import direct_legacy_stream, start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
 from runtime.agentos.legacy_tracking import (
     begin_legacy_tracking, bind_legacy_channel, open_legacy_channel,
@@ -55,6 +55,7 @@ class LegacyExecutionHost:
     registry: AgentRunManager
     admit: Callable
     start_producer: Callable
+    direct_stream: Callable
     begin_tracking: Callable
     reset_stream: Callable
     open_channel: Callable
@@ -72,6 +73,7 @@ _legacy_execution_host = LegacyExecutionHost(
     registry=agent_run_manager,
     admit=partial(admit_legacy_execution, agent_run_manager),
     start_producer=start_legacy_producer,
+    direct_stream=direct_legacy_stream,
     begin_tracking=begin_legacy_tracking,
     reset_stream=reset_legacy_stream,
     open_channel=open_legacy_channel,

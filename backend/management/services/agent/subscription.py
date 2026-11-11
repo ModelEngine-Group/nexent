@@ -60,9 +60,6 @@ from nexent.core.concurrency import (
     ThreadManager,
     run_blocking,
 )
-from nexent.monitor import (
-    agent_monitoring_context,
-)
 from management.services.conversation.service import (
     create_new_conversation,
     get_conversation_service,
@@ -634,10 +631,12 @@ async def run_agent_stream(
                 async for data_chunk in channel.subscribe_with_history(0):
                     yield data_chunk
             else:
-                # Debug/A2A streams intentionally retain the direct execution
-                # path and its existing disconnect semantics.
-                with agent_monitoring_context(agent_metadata):
-                    async for data_chunk in stream_gen:
+                async with host.direct_stream(
+                    stream_gen, agent_metadata, registry=host.registry, thread_manager=thread_manager,
+                    execution=execution, deferred_run=deferred_run, run_identifier=run_identifier,
+                    user_id=resolved_user_id, reservation_token=reservation_token,
+                ) as direct_stream:
+                    async for data_chunk in direct_stream:
                         yield data_chunk
         except Exception as stream_exc:
             logger.error(
@@ -646,21 +645,6 @@ async def run_agent_stream(
                 exc_info=True,
             )
             yield _safe_agent_stream_error_chunk(stream_exc)
-        finally:
-            if channel is None and not execution.future.done():
-                deferred_run.cancel()
-                thread_manager.cancel(
-                    execution.execution_id,
-                    reason="agent response stream closed",
-                    wait_timeout=0,
-                    mark_stuck_on_timeout=False,
-                )
-            if channel is None:
-                host.registry.release_agent_run_reservation(
-                    _agent_run_identifier(agent_request),
-                    resolved_user_id,
-                    reservation_token,
-                )
 
     headers = {
         "Cache-Control": "no-cache",

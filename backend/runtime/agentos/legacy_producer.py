@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from contracts.agentos import AGENTOS_PREPARATION_STOP
 from infrastructure.agent_stream_channels import streaming_channel_manager
@@ -176,3 +177,35 @@ def start_legacy_producer(
     host.producer_tasks.add(producer)
     producer.add_done_callback(release_producer_resources)
     return producer
+
+
+
+@asynccontextmanager
+async def direct_legacy_stream(
+    stream_gen,
+    agent_metadata,
+    *,
+    registry,
+    thread_manager,
+    execution,
+    deferred_run,
+    run_identifier,
+    user_id,
+    reservation_token,
+):
+    """Keep a direct debug or A2A worker bound to its response stream."""
+    try:
+        with agent_monitoring_context(agent_metadata):
+            yield stream_gen
+    finally:
+        try:
+            if not execution.future.done():
+                deferred_run.cancel()
+                thread_manager.cancel(
+                    execution.execution_id,
+                    reason="agent response stream closed",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
+        finally:
+            registry.release_agent_run_reservation(run_identifier, user_id, reservation_token)
