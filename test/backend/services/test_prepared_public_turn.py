@@ -9,7 +9,7 @@ import pytest
 from starlette.responses import StreamingResponse
 
 from contracts.agent import AgentRequest
-from contracts.agentos import AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
+from contracts.agentos import AgentLegacyResume, AgentRunLookup, AgentRunReference, AgentStop, CompatibilityConversationRun
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, RuntimeMetadataVersionConflict, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from management.services.agent import prepared_turn, runtime_client
@@ -172,7 +172,7 @@ async def test_unobserved_admission_is_fenced_before_discarding_the_staged_input
 async def test_cursorless_resume_uses_the_pending_prepared_turn(flow, mocker):
     _, _, client, staged = flow
     current = SimpleNamespace(**{**vars(staged), "assistant_message_id": 61})
-    client.run_conversation = AsyncMock()
+    client.resume_legacy = AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
     lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value=current)
     payload = CompatibilityConversationRun(request={"query": "", "conversation_id": 42}, resume=True)
@@ -182,7 +182,7 @@ async def test_cursorless_resume_uses_the_pending_prepared_turn(flow, mocker):
     lookup.assert_called_once_with(42, *ACTOR)
     assert response.headers["X-Stream-Status"] == "resumed"
     assert response.headers["run_id"] == REFERENCE.run_id
-    client.run_conversation.assert_not_awaited()
+    client.resume_legacy.assert_not_awaited()
     client.start_prepared_run.assert_not_awaited()
     await response.body_iterator.aclose()
 
@@ -197,7 +197,7 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
     from infrastructure.rdb.agent_admission import AdmissionScopeError
 
     operations, _, client, staged = flow
-    client.run_conversation = AsyncMock()
+    client.resume_legacy = AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
     lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value={
         "awaiting": staged, "unknown": None,
@@ -220,7 +220,7 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
     else:
         result = await runtime_client.forward_conversation_run(payload, *ACTOR)
         if state == "unknown":
-            assert result is client.run_conversation.return_value
+            assert result is client.resume_legacy.return_value
         elif state == "awaiting":
             assert json.loads(result.body) == {"status": "streaming", "message": "Waiting for Runtime admission"}
         elif state == "no_assistant_message":
@@ -230,9 +230,9 @@ async def test_cursorless_resume_handles_only_owned_prepared_turns(flow, mocker,
             assert json.loads(result.body) == {"status": state, "message": f"Stream already {state}: backend_{state}"}
     lookup.assert_called_once_with(42, *ACTOR)
     if state == "unknown":
-        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+        client.resume_legacy.assert_awaited_once_with(AgentLegacyResume(conversation_id=42), *ACTOR)
     else:
-        client.run_conversation.assert_not_awaited()
+        client.resume_legacy.assert_not_awaited()
     assert operations == []
     client.start_prepared_run.assert_not_awaited()
     client.resume.assert_not_awaited()
@@ -247,7 +247,7 @@ async def test_cursorless_resume_confirms_legacy_receipt_with_agentos(flow, mock
     )
     mocker.patch.object(prepared_turn.store, "read_cursorless_resume", return_value=receipt)
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
-    client.run_conversation = AsyncMock()
+    client.resume_legacy = AsyncMock()
     client.inspect_run = AsyncMock(return_value=SimpleNamespace(
         **REFERENCE.model_dump(), assistant_message_id=62 if status == "mismatch" else 61,
         status=receipt.status if status == "mismatch" else status,
@@ -262,11 +262,11 @@ async def test_cursorless_resume_confirms_legacy_receipt_with_agentos(flow, mock
     if status in {"completed", "failed", "stopped"}:
         assert json.loads(response.body) == {"status": status, "message": f"Stream already {status}: backend_{status}"}
         client.find_active_run.assert_not_awaited()
-        client.run_conversation.assert_not_awaited()
+        client.resume_legacy.assert_not_awaited()
     else:
-        assert response is client.run_conversation.return_value
+        assert response is client.resume_legacy.return_value
         client.find_active_run.assert_awaited_once_with(42, *ACTOR)
-        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+        client.resume_legacy.assert_awaited_once_with(AgentLegacyResume(conversation_id=42), *ACTOR)
     client.resume.assert_not_awaited()
 
 
@@ -282,7 +282,7 @@ async def test_cursorless_resume_inspects_old_terminal_message_without_receipt(f
         return_value=prepared_turn.store.LegacyTerminalMessage(61, status),
     )
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
-    client.run_conversation = AsyncMock()
+    client.resume_legacy = AsyncMock()
     client.inspect_run = AsyncMock(return_value=SimpleNamespace(
         conversation_id=43 if outcome == "other-conversation" else 42,
         assistant_message_id=62 if outcome == "other-message" else 61,
@@ -299,10 +299,10 @@ async def test_cursorless_resume_inspects_old_terminal_message_without_receipt(f
     if outcome in {"completed", "failed", "stopped"}:
         assert json.loads(result.body) == {"status": status, "message": f"Stream already {status}: backend_{status}"}
         client.find_active_run.assert_not_awaited()
-        client.run_conversation.assert_not_awaited()
+        client.resume_legacy.assert_not_awaited()
     else:
         client.find_active_run.assert_awaited_once_with(42, *ACTOR)
-        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+        client.resume_legacy.assert_awaited_once_with(AgentLegacyResume(conversation_id=42), *ACTOR)
 
 
 @pytest.mark.asyncio
@@ -312,7 +312,7 @@ async def test_cursorless_resume_adapts_retained_legacy_journal(flow, mocker, mo
 
     _, _, client, _ = flow
     fallback = StreamingResponse(iter(()))
-    client.run_conversation = AsyncMock(return_value=fallback)
+    client.resume_legacy = AsyncMock(return_value=fallback)
     client.find_active_run.return_value = None if mode == "missing" else REFERENCE.run_id
     client.inspect_run = AsyncMock(return_value=SimpleNamespace(
         **REFERENCE.model_dump(), assistant_message_id=None if mode == "missing_message" else 61,
@@ -353,10 +353,10 @@ async def test_cursorless_resume_adapts_retained_legacy_journal(flow, mocker, mo
         }
         if mode == "broken":
             assert json.loads(chunks[2][6:])["type"] == "error"
-        client.run_conversation.assert_not_awaited()
+        client.resume_legacy.assert_not_awaited()
     else:
         assert output is fallback
-        client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+        client.resume_legacy.assert_awaited_once_with(AgentLegacyResume(conversation_id=42), *ACTOR)
     if mode not in {"missing", "missing_message"}:
         index.assert_called_once_with(42, 61, *ACTOR)
         client.resume.assert_awaited_once_with(AgentResume(**REFERENCE.model_dump()), *ACTOR)
@@ -371,7 +371,7 @@ async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(fl
     from fastapi import HTTPException
 
     _, _, client, _ = flow
-    client.run_conversation = AsyncMock()
+    client.resume_legacy = AsyncMock()
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
     mocker.patch.object(runtime_client, "ENABLE_AGENT_WORKBENCH", False)
     lookup = mocker.patch.object(prepared_turn.store, "read_cursorless_resume")
@@ -385,7 +385,7 @@ async def test_explicit_workbench_resume_obeys_disabled_feature_before_lookup(fl
     assert denied.value.status_code == 404
     assert denied.value.detail == {"code": "WORKBENCH_DISABLED"}
     lookup.assert_not_called()
-    client.run_conversation.assert_not_awaited()
+    client.resume_legacy.assert_not_awaited()
 
 
 @pytest.mark.asyncio

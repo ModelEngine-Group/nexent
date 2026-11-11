@@ -2,8 +2,10 @@
 
 """Serve cursorless compatibility replays from Runtime-owned stream state."""
 
+from fastapi import HTTPException
 from starlette.responses import JSONResponse
 
+from contracts.agentos import AgentLegacyResume
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.errors.exceptions import ForbiddenError, WorkbenchError
 from infrastructure.agent_stream_channels import streaming_channel_manager
@@ -13,6 +15,15 @@ from infrastructure.rdb.conversation_state import read_legacy_resume_state
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
 from runtime.executions import agent_run_manager
+
+
+async def resume_legacy_run(payload: AgentLegacyResume, actor: ServicePrincipal):
+    try:
+        return await resume_legacy_conversation(payload.conversation_id, actor, workbench=payload.workbench)
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
 
 
 async def resume_legacy_conversation(conversation_id: int, actor: ServicePrincipal, *, workbench: bool):

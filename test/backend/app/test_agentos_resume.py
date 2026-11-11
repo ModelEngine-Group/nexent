@@ -16,6 +16,46 @@ ACTOR = ServicePrincipal("actor", "tenant")
 
 
 @pytest.mark.asyncio
+async def test_legacy_resume_has_a_signed_lifecycle_route_without_startup(mocker):
+    import httpx
+    from fastapi import FastAPI
+    from starlette.responses import JSONResponse
+
+    from contracts.agentos import AgentLegacyResume, AgentOperation
+    from contracts.constants import environment
+    from contracts.errors.exceptions import ForbiddenError
+    from management.clients.agentos import AgentOSClient
+    from runtime.agentos import legacy_resume
+    from runtime.agentos.middleware import AgentOSMiddleware
+
+    async def replay(conversation_id, actor, *, workbench):
+        assert conversation_id == 42 and workbench is True
+        if actor != ACTOR:
+            raise ForbiddenError("Conversation is not accessible to the current identity")
+        return JSONResponse({"status": "completed"})
+
+    handler = mocker.patch.object(legacy_resume, "resume_legacy_conversation", side_effect=replay)
+    mocker.patch.object(environment, "JWT_SECRET", "synthetic-legacy-resume-key")
+    app = FastAPI(root_path="/api")
+    app.add_middleware(AgentOSMiddleware)
+    app.include_router(resume.create_run_lifecycle_router())
+    transport = httpx.ASGITransport(app=app)
+    agentos = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs))
+    payload = AgentLegacyResume(conversation_id=42, workbench=True)
+    async with httpx.AsyncClient(transport=transport, base_url="http://runtime") as client:
+        unsigned = await client.post(f"/api{AgentOperation.RESUME_LEGACY.value}", json=payload.model_dump())
+        assert unsigned.status_code == 401
+    handler.assert_not_called()
+
+    result = await agentos.resume_legacy(payload, ACTOR.user_id, ACTOR.tenant_id)
+    assert result.status_code == 200
+    assert b"".join([chunk async for chunk in result.body_iterator]) == b'{"status":"completed"}'
+    denied = await agentos.resume_legacy(payload, ACTOR.user_id, "other")
+    assert denied.status_code == 403
+    await denied.background()
+
+
+@pytest.mark.asyncio
 async def test_signed_inspect_supports_owned_terminal_message_reference(mocker):
     import httpx
     from fastapi import FastAPI
@@ -174,7 +214,7 @@ def test_journal_key_binds_all_scope_fields():
 
 @pytest.mark.asyncio
 async def test_legacy_channel_records_complete_sse_frames(mocker):
-    from management.services.agent import channels
+    from infrastructure import agent_stream_channels as channels
 
     async def control_io(_task, function, *args, **_kwargs):
         return function(*args)
@@ -197,7 +237,7 @@ async def test_legacy_channel_records_complete_sse_frames(mocker):
 
 @pytest.mark.asyncio
 async def test_legacy_channel_marks_gap_and_keeps_serving_when_journal_fails(mocker):
-    from management.services.agent import channels
+    from infrastructure import agent_stream_channels as channels
 
     async def control_io(_task, function, *args, **_kwargs):
         return function(*args)

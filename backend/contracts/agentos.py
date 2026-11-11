@@ -81,6 +81,7 @@ class AgentOperation(str, Enum):
     RUN_EPHEMERAL = NAMESPACE + "v1/agent/run-ephemeral"
     EVALUATION_CASE = NAMESPACE + "v1/agent/evaluation-case"
     RESUME = NAMESPACE + "v1/agent/resume"
+    RESUME_LEGACY = NAMESPACE + "v1/agent/resume-legacy"
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"
     ACTIVE = NAMESPACE + "v1/agent/active"
@@ -101,6 +102,11 @@ class AgentRunReference(RunSpecModel):
 
 class AgentResume(AgentRunReference):
     after_event_id: str | None = Field(default=None, pattern=EVENT_ID_PATTERN)
+
+
+class AgentLegacyResume(RunSpecModel):
+    conversation_id: PositiveInt
+    workbench: bool = False
 
 
 class DebugRunReference(RunSpecModel):

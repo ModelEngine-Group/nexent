@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.agentos import (
-    BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentMessageRunLookup, AgentOperation, AgentResume, AgentRunLookup,
+    BODY_KEY, PRINCIPAL_KEY, REPLAY_COUNT_HEADER, AgentActiveRun, AgentLegacyResume, AgentMessageRunLookup, AgentOperation, AgentResume, AgentRunLookup,
     AgentRunReference, AgentRunState, AgentStop, CompatibilityStop, DebugRunReference,
 )
 from infrastructure.rdb.agent_execution import active_execution, read_execution, read_terminal_execution_for_message
@@ -19,6 +19,7 @@ from infrastructure.redis.agent_events import START, RunJournal
 from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import run_blocking
 from runtime.agentos import debug
+from runtime.agentos.legacy_resume import resume_legacy_run
 
 
 async def _control_io(task, function, *args, **kwargs):
@@ -199,6 +200,10 @@ def create_run_lifecycle_router():
 
     router.add_api_route(
         AgentOperation.RESUME.value, handler(AgentResume, resume_run), methods=["POST"], include_in_schema=False,
+    )
+    router.add_api_route(
+        AgentOperation.RESUME_LEGACY.value, handler(AgentLegacyResume, resume_legacy_run),
+        methods=["POST"], include_in_schema=False,
     )
     router.add_api_route(
         AgentOperation.INSPECT.value, handler(AgentRunLookup | AgentMessageRunLookup, inspect_run),

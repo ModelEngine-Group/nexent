@@ -12,7 +12,7 @@ from redis.exceptions import RedisError
 from backend.http.client import create_httpx_client
 from contracts.agent import AgentRequest
 from contracts.agentos import (
-    AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
+    AgentLegacyResume, AgentResume, AgentRunLookup, AgentRunReference, AgentStop, BackgroundRun, CompatibilityConversationRun, EvaluationAgentResult,
     EvaluationAgentRun, PreparedAgentCreatorRun, PreparedSkillCreatorRun, TrackedBackgroundResult,
     WorkbenchDebugSkillLookup, WorkbenchSkillMounts,
 )
@@ -186,6 +186,10 @@ async def forward_conversation_run(
                 response = await prepared_turn.resume_cursorless(conversation_id, owner, tenant, client)
                 if response is not None:
                     return response
+                return await client.resume_legacy(
+                    AgentLegacyResume(conversation_id=conversation_id, workbench=request.entrypoint == "workbench"),
+                    owner, tenant,
+                )
             elif await prepared_turn.find_pending_turn(conversation_id, owner, tenant) is not None:
                 raise prepared_turn.active_turn_conflict()
         if northbound_fallback is not None:
