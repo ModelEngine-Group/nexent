@@ -77,7 +77,7 @@ journey("PW-AUTH-02", async ({ page, contract, expect }) => {
     await page.keyboard.press("Enter");
     const [response] = await Promise.all([
       page.waitForResponse((candidate) => candidate.url().includes("/api/invitations") && candidate.request().method() === "POST"),
-      dialog.getByRole("button", { name: "确 定", exact: true }).click(),
+      dialog.getByRole("button", { name: "确定", exact: true }).click(),
     ]);
     expect([200, 201]).toContain(response.status());
     invitationCreated = true;
@@ -150,7 +150,7 @@ journey("PW-AUTH-02", async ({ page, contract, expect }) => {
     await dialog.getByPlaceholder("请输入密码").fill(newUserPassword);
     const [response] = await Promise.all([
       reloginPage.waitForResponse((candidate) => candidate.url().includes("/api/user/signin") && candidate.request().method() === "POST"),
-      dialog.getByRole("button", { name: "登 录", exact: true }).click(),
+      dialog.getByRole("button", { name: "登录", exact: true }).click(),
     ]);
     const current = await reloginPage.request.get("/api/user/current_user_info");
     const body = await current.json().catch(() => null);
