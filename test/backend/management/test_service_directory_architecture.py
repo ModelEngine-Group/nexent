@@ -44,6 +44,7 @@ MIGRATED_MODULES = {
     'agent/execution.py',
     'agent/icon.py',
     'agent/management.py',
+    'agent/mcp_passthrough.py',
     'agent/naming.py',
     'agent/policy.py',
     'agent/profile.py',

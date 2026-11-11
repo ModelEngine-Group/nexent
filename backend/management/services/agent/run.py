@@ -150,8 +150,9 @@ async def prepare_agent_run(
         "conversation_id": agent_request.conversation_id,
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
-        "metadata": agent_request.metadata,
     }
+    if agent_request.metadata is not None:
+        create_run_kwargs["metadata"] = agent_request.metadata
     runtime_knowledge_context = getattr(
         agent_request, "_runtime_knowledge_context", None
     )

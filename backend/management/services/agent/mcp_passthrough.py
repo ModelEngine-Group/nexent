@@ -276,8 +276,6 @@ def apply_mcp_header_passthrough(
             )
 
     total_unresolved: List[str] = []
-    had_injection = False
-    had_resolution = False
 
     for item in mcp_host:
         if not isinstance(item, dict) or "url" not in item:
@@ -307,19 +305,22 @@ def apply_mcp_header_passthrough(
         # ---- Dynamic injection (static priority merge) ----
         if passthrough_allowed and mode is not None:
             dynamic = route_passthrough_headers(mode, passthrough_headers, server_url)
-            item["headers"] = merge_static_priority(resolved, dynamic)
+            effective_headers = merge_static_priority(resolved, dynamic)
             if dynamic:
-                had_injection = True
                 logger.info(
                     "agent_id=%s run_id=%s server_url=%s "
                     "event=passthrough_injected keys=%s",
                     agent_id, run_id, server_url, sorted(dynamic.keys()),
                 )
         else:
-            item["headers"] = resolved
+            effective_headers = resolved
+
+        # Keep the original mcp_host shape: entries that had no headers must
+        # stay header-less, otherwise every agent payload grows an empty dict.
+        if effective_headers or "headers" in item:
+            item["headers"] = effective_headers
 
         if resolved_names:
-            had_resolution = True
             logger.info(
                 "agent_id=%s run_id=%s server_url=%s "
                 "event=placeholder_resolved placeholders=%s",

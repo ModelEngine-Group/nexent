@@ -430,7 +430,9 @@ async def create_agent_run_info(
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
-        runtime_metadata=metadata or {},
+        # Only surface the kwarg when the caller actually sent metadata, so
+        # agents without metadata keep the exact pre-existing payload shape.
+        **({"runtime_metadata": metadata} if metadata is not None else {}),
         mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=converted_history,
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
