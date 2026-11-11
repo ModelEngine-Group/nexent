@@ -165,6 +165,10 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
             raise HTTPException(status_code=504, detail="Management service timed out") from exc
         except RuntimeServiceUnavailableError as exc:
             raise HTTPException(status_code=503, detail="Management service is unavailable") from exc
+    if payload.invocation == "northbound":
+        if payload.resume or payload.idempotency_key is not None or payload.claimed_run_id is not None or payload.user_message != "new":
+            raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_RAW_HANDOFF"})
+        return await _execute_northbound_run(request, principal.user_id, principal.tenant_id, management_dispatch=False)
     context = Request({"type": "http", "headers": headers})
     request._track_execution = not payload.resume and not request.is_debug
 
@@ -359,16 +363,20 @@ async def run_agentos_tracked_background(payload: BackgroundRun, principal: Serv
     )
 
 
-async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str):
+async def _execute_northbound_run(agent_request: AgentRequest, user_id: str, tenant_id: str, *, management_dispatch=True):
     agent_request._track_execution = not agent_request.is_debug and (agent_request.conversation_id or 0) > 0
     try:
+        if management_dispatch and (agent_request.is_debug or (agent_request.conversation_id or 0) <= 0):
+            return await dispatch_signed_start(CompatibilityConversationRun(
+                request=agent_request.model_dump(mode="json", exclude_unset=True), invocation="northbound",
+            ), ServicePrincipal(user_id, tenant_id))
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=None,
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
-            management_dispatch=not agent_request.is_debug and (agent_request.conversation_id or 0) > 0,
+            management_dispatch=management_dispatch and not agent_request.is_debug and (agent_request.conversation_id or 0) > 0,
         )
     except ActiveExecutionError:
         return _execution_conflict_response()

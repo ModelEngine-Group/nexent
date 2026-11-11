@@ -336,6 +336,11 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
+        "runtime.api.agent.execution.dispatch_signed_start",
+        new_callable=AsyncMock,
+        side_effect=AppException(error_code, details={"reason": reason}),
+    )
+    mocker.patch(
         "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=AppException(
@@ -494,12 +499,18 @@ async def test_signed_compatibility_run_tracks_only_persistent_execution(mocker,
     stream = mocker.patch.object(
         execution, "run_agent_stream", new_callable=AsyncMock, return_value=StreamingResponse(iter(())),
     )
+    dispatch = mocker.patch.object(execution, "dispatch_signed_start", new_callable=AsyncMock, return_value=stream.return_value)
     actor = ServicePrincipal("user-a", "tenant-a")
     response = await execution.run_agentos_compatibility(
         {"agent_id": 1, "conversation_id": conversation_id, "query": "hello", "is_debug": debug}, actor,
     )
 
     assert response is stream.return_value
+    if debug:
+        payload, principal = dispatch.await_args.args
+        assert payload.invocation == "northbound" and payload.request["is_debug"] is True and principal == actor
+        stream.assert_not_awaited()
+        return
     options = stream.await_args.kwargs
     assert options["agent_request"]._track_execution is tracked
     assert (options["user_id"], options["tenant_id"], options["skip_user_save"]) == ("user-a", "tenant-a", True)
@@ -739,7 +750,7 @@ async def test_agentos_automation_checks_owner_before_tracked_background_run(moc
     }])
     run = mocker.patch.object(execution, "run_agent_stream", new=AsyncMock(return_value=StreamingResponse(chunks())))
     actor = ServicePrincipal("user-a", "tenant-a")
-    payload = BackgroundRun(run_id="a" * 32, request={
+    payload = BackgroundRun(run_id="a" * 32, preparation="legacy", request={
         "conversation_id": 123, "query": "scheduled", "agent_id": 7, "enable_automation_tool": True,
     })
 

@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-59:
+  - test_raw_northbound_preparation_over_signed_http
   AC-58:
   - test_background_management_handoff_over_signed_http
   AC-57:

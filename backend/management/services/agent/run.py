@@ -112,27 +112,10 @@ def apply_workbench_runtime_plan(
     )
 
 
-async def prepare_agent_run(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-    language: str = LANGUAGE["ZH"],
-    allow_memory_search: bool = True,
-    reservation_token: Optional[str] = None,
-    resource_versions: dict | None = None,
-    *,
-    legacy_materializer: LegacyRunMaterializer | None = None,
-    execution_host=None,
-):
-    """
-    Prepare for an agent run by creating context and run info, and registering the run.
-    """
-
-    host = require_legacy_execution_host(execution_host)
-    memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
-    )
-
+def build_run_preparation_arguments(
+    agent_request: AgentRequest, user_id: str, tenant_id: str, language: str, allow_memory_search: bool,
+) -> dict:
+    """Keep request configuration identical across local and exported preparation."""
     create_run_kwargs = {
         "agent_id": agent_request.agent_id,
         "minio_files": agent_request.minio_files,
@@ -190,6 +173,33 @@ async def prepare_agent_run(
         ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
+    return create_run_kwargs
+
+
+async def prepare_agent_run(
+    agent_request: AgentRequest,
+    user_id: str,
+    tenant_id: str,
+    language: str = LANGUAGE["ZH"],
+    allow_memory_search: bool = True,
+    reservation_token: Optional[str] = None,
+    resource_versions: dict | None = None,
+    *,
+    legacy_materializer: LegacyRunMaterializer | None = None,
+    execution_host=None,
+):
+    """
+    Prepare for an agent run by creating context and run info, and registering the run.
+    """
+
+    host = require_legacy_execution_host(execution_host)
+    memory_context = build_memory_context(
+        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
+    )
+
+    create_run_kwargs = build_run_preparation_arguments(
+        agent_request, user_id, tenant_id, language, allow_memory_search,
+    )
     if resource_versions is not None:
         create_run_kwargs["resource_versions"] = resource_versions
     if legacy_materializer is not None:
@@ -197,6 +207,7 @@ async def prepare_agent_run(
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
+    runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
     if runtime_mount_plan is not None:
         from management.services.agent.workbench import compile_runtime_mount_plan
 

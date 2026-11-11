@@ -3883,3 +3883,100 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
     else:
         assert legacy == [reference.run_id] and not prepared and not projected
         assert "projection_message_index" not in record
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("unsupported", [False, True])
+@pytest.mark.asyncio
+async def test_raw_northbound_preparation_over_signed_http(monkeypatch, unsupported):
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY, CompatibilityConversationRun, PreparedEphemeralRun
+    from contracts.errors.exceptions import ForbiddenError
+    from management.api.agent import compatibility_dispatch
+    from management.services.agent import raw_execution, runtime_client
+    from runtime.agentos import management_dispatch
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("raw-user", "raw-tenant")
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-raw-northbound-key")
+    compiled, executed, legacy, checked = [], [], [], []
+    snapshot = PreparedEvaluationRun.model_validate({
+        "mode": "nexent", "input": {"query": "prefixed"},
+        "resource": {"agent_id": 7, "version_no": 0, "name": "raw", "description": "test",
+                     "prompt_templates": {"system_prompt": "Answer"}, "tools": []},
+        "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "fixture"}},
+    })
+
+    async def preflight(request, user, tenant, language, timezone):
+        if tenant != actor.tenant_id:
+            raise ForbiddenError("Original scope rejected")
+        assert (user, language, timezone) == (actor.user_id, "zh", None)
+        checked.append(request.query)
+        request.query = "prefixed"
+        request.__dict__.update(_debug_run_id="debug-" + "9" * 32, _runtime_metadata_snapshot={"tag": "original"})
+        return False, None
+
+    async def compile_snapshot(**values):
+        assert (values["override_model_id"], values["override_version_no"], values["conversation_id"]) == (11, None, 0)
+        assert values["runtime_generation_config"] == {"temperature": 0.3}
+        assert values["reasoning_effort"] == "high" and values["query"] == "prefixed"
+        assert values["tool_params"].agents["root"].tools == {"search": {"top_k": 5}}
+        compiled.append(values["query"])
+        return None if unsupported else snapshot
+
+    async def legacy_stream(**options):
+        request = options["agent_request"]
+        assert request.query == "hello" and request.model_id == 11
+        assert options["skip_user_save"] is True
+        assert (options["user_id"], options["tenant_id"]) == (actor.user_id, actor.tenant_id)
+        legacy.append(request.query)
+        return StreamingResponse(iter([b'data: {"type":"final_answer","content":"answer"}\n\n']),
+                                 headers={"run_id": "debug-" + "9" * 32, "conversation_id": "42"})
+
+    monkeypatch.setattr(raw_execution, "_prepare_legacy_conversation", preflight)
+    monkeypatch.setattr(raw_execution, "create_agent_run_info", compile_snapshot)
+    monkeypatch.setattr(execution, "run_legacy_agent_stream", legacy_stream)
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_compatibility_router(
+        execution.run_agentos_compatibility, None, conversation_run=execution.run_agentos_conversation,
+    ))
+
+    @runtime.post(AgentOperation.RUN_EPHEMERAL.value)
+    async def run_prepared(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        payload = PreparedEphemeralRun.model_validate_json(request.scope[BODY_KEY])
+        assert payload.debug is True and payload.resource.version_no == 0
+        assert payload.runtime_metadata == {"tag": "original"} and payload.run_id == "9" * 32
+        executed.append(payload.run_id)
+        return StreamingResponse(iter([b'data: {"type":"final_answer","content":"answer"}\n\n']),
+                                 headers={"run_id": "debug-" + payload.run_id})
+
+    manager = create_app(enable_monitoring=False)
+    manager.include_router(compatibility_dispatch.router)
+    with serve(runtime) as runtime_url, serve(manager) as manager_url:
+        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+        raw = {
+            "query": "hello", "agent_id": 7, "is_debug": True, "conversation_id": 42, "model_id": 11,
+            "generation_config": {"temperature": 0.3}, "reasoning_effort": "high",
+            "tool_params": {"agents": {"root": {"tools": {"search": {"top_k": 5}}}}},
+        }
+        result = await client.run(raw, actor.user_id, actor.tenant_id)
+        assert result.status_code == 200 and result.headers["conversation_id"] == "42"
+        assert result.headers["run_id"] == "debug-" + "9" * 32
+        assert b"answer" in b"".join([item async for item in result.body_iterator])
+        foreign = await client.run(raw, actor.user_id, "foreign-tenant")
+        assert foreign.status_code == 403
+        assert b"Original scope rejected" in b"".join([item async for item in foreign.body_iterator])
+        invalid = await manager_client.dispatch_conversation(CompatibilityConversationRun(
+            request=raw, invocation="northbound", resume=True,
+        ), actor.user_id, actor.tenant_id)
+        assert invalid.status_code == 422
+        await invalid.body_iterator.aclose()
+    assert checked == ["hello"] and compiled == ["prefixed"]
+    assert executed == ([] if unsupported else ["9" * 32])
+    assert legacy == (["hello"] if unsupported else [])
