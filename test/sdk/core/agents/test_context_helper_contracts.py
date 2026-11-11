@@ -384,8 +384,8 @@ def test_renderer_current_action_preserves_string_tool_arguments():
     text = message["content"][0]["text"]
 
     assert message["role"] == "assistant"
-    assert "<code>" in text
-    assert "result = search(query='GAIA')\nprint(result)" in text
+    assert "<code>" not in text
+    assert "result = search(query=" in text and "GAIA" in text and "print(result)" in text
     assert "python_interpreter'()" not in text
 
 

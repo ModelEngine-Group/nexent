@@ -17,7 +17,6 @@ from pydantic import ValidationError
 from .clarification import CLARIFICATION_SCHEMA_GUIDANCE, ClarificationForm
 
 
-
 OutputProtocol = Literal["code_action", "final_envelope"]
 
 

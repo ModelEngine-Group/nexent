@@ -16,7 +16,10 @@ from nexent.core.agents.context.rendering import ContextItemRenderer
 from nexent.core.agents.context.runtime import ManagedContextRuntime
 from nexent.core.agents.core_agent import CoreAgent
 from nexent.core.agents.output_protocol import (
-    ExecutableAction, ExplicitFinalAnswer, ModelOutputProtocolError, NonterminalThought, classify_model_output,
+    ExecutableAction,
+    ModelOutputProtocolError,
+    NonterminalThought,
+    classify_model_output,
 )
 from nexent.core.utils.observer import MessageObserver
 
