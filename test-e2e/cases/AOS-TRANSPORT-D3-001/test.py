@@ -242,8 +242,9 @@ async def test_signed_agentos_transport(monkeypatch, tmp_path):
         await _assert_shared_aidp_over_signed_http(aidp_patches, tmp_path)
     await _assert_resume_over_signed_http(monkeypatch)
     await _assert_run_lifecycle_over_signed_http(monkeypatch)
-    with monkeypatch.context() as submission_patches:
-        await _assert_public_conversation_over_signed_http(submission_patches)
+    for signed_ingress in (False, True):
+        with monkeypatch.context() as submission_patches:
+            await _assert_public_conversation_over_signed_http(submission_patches, signed_ingress=signed_ingress)
     with monkeypatch.context() as lifecycle_patches:
         await _assert_public_stop_and_background(lifecycle_patches)
     await _assert_runtime_legacy_ingress_and_lifecycle(monkeypatch)
@@ -1381,11 +1382,12 @@ async def _assert_resume_over_signed_http(monkeypatch):
 
 
 
-async def _assert_public_conversation_over_signed_http(monkeypatch):
+async def _assert_public_conversation_over_signed_http(monkeypatch, *, signed_ingress):
+    from contracts.agentos import CompatibilityConversationRun
     from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
-    from management.api.agent import conversation_run
+    from management.api.agent import compatibility_dispatch, conversation_run
     from management.services.agent import conversation_submission, prepared_turn, runtime_client
-    from runtime.agentos import admission, resume
+    from runtime.agentos import admission, management_dispatch, resume
     from runtime.api.agent import execution
 
     received = []
@@ -1470,9 +1472,12 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
     monkeypatch.setattr(conversation_run, "get_current_user_id", lambda _authorization: ("user-a", "tenant-a"))
     management = FastAPI(root_path="/api")
     management.include_router(conversation_run.router)
+    management.include_router(compatibility_dispatch.router)
     with serve(runtime) as runtime_url, serve(management) as management_url:
         agentos = AgentOSClient(runtime_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
+        manager = AgentOSClient(management_url, lambda **kwargs: httpx.AsyncClient(trust_env=False, **kwargs))
         monkeypatch.setattr(runtime_client, "_agentos_client", lambda: agentos)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager)
         async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
             response = await client.post(
                 f"{management_url}/api/agent/run?resume=true",
@@ -1489,7 +1494,15 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             url = f"{management_url}/api/agent/run"
             headers = {"Idempotency-Key": "retry-1", "Cookie": "NEXT_LOCALE=en", "X-User-Timezone": "Asia/Shanghai"}
             request_body = {"query": "question"}
-            first = await client.post(url, json=request_body, headers=headers)
+            if signed_ingress:
+                original = CompatibilityConversationRun(
+                    request=request_body, idempotency_key="retry-1", language="en", timezone="Asia/Shanghai",
+                )
+                first = await agentos.run_conversation(original, "user-a", "tenant-a")
+                assert b"".join([chunk async for chunk in first.body_iterator]) == _EVENTS
+            else:
+                first = await client.post(url, json=request_body, headers=headers)
+                assert first.content == _EVENTS
             retry = await client.post(url, json=request_body, headers=headers)
             changed = await client.post(url, json={"query": "changed"}, headers=headers)
             assert first.status_code == 200 and first.headers["X-AgentOS-Run-ID"] == run_id
@@ -1497,8 +1510,9 @@ async def _assert_public_conversation_over_signed_http(monkeypatch):
             assert retry.json() == {"run_id": run_id, "status": "admitted", "conversation_id": 42, "journal_available": True}
             assert changed.status_code == 409 and changed.json()["detail"]["code"] == "AGENTOS_IDEMPOTENCY_CONFLICT"
 
-        assert len(received) == len(resumed) == 1
-        submitted, actor = received[0]
+        assert len(received) == (2 if signed_ingress else 1) and len(resumed) == 1
+        assert [item.preparation for item, _ in received] == ([None, "legacy"] if signed_ingress else ["legacy"])
+        submitted, actor = received[-1]
         assert submitted.claimed_run_id == run_id
         assert (submitted.resume, submitted.language, submitted.timezone) == (False, "en", "Asia/Shanghai")
         replay = await agentos.run_conversation(submitted, actor.user_id, actor.tenant_id)

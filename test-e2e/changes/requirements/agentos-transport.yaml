@@ -33,6 +33,7 @@ change:
     - Workbench mounted Skills pin contributed Local, MCP, and LangChain tools and reject conflicting or unauthorized catalog configuration.
     - Streaming forwarding preserves headers and closes upstream resources.
     - Existing pending claims retain their run ID through Management without reacquisition or consuming the claim before staging.
+    - Signed compatibility conversation starts visit Management before consuming a claim; an explicit internal fallback preserves the original fingerprint and executes at most once.
     - Initial and existing claim dispatch errors preserve the original run ID and retry headers through the production HTTP exception handler.
     - Only typed legacy run/stop payloads dispatch.
     - Evaluation case requests preserve observer events and cannot select a real conversation.

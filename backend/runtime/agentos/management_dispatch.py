@@ -16,6 +16,13 @@ def management_client() -> AgentOSClient:
     return AgentOSClient(MANAGEMENT_AGENTOS_URL, create_httpx_client)
 
 
+async def dispatch_signed_start(payload: CompatibilityConversationRun, actor: ServicePrincipal):
+    """Return an unconsumed claim to its resource preparation owner."""
+    return await management_client().dispatch_conversation(
+        payload.model_copy(update={"preparation": "management"}), actor.user_id, actor.tenant_id,
+    )
+
+
 async def dispatch_public_start(request: AgentRequest, context: Request | None, actor: ServicePrincipal):
     language = "zh"
     timezone = None

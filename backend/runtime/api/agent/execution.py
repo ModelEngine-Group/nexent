@@ -25,7 +25,7 @@ from contracts.agentos import (
 from infrastructure.rdb.agent_execution import ActiveExecutionError, read_execution, untrack_execution
 from runtime.adapters.nexent.factory import materialize_legacy_run
 from runtime.agentos.debug import stop_agentos_debug
-from runtime.agentos.management_dispatch import dispatch_public_start
+from runtime.agentos.management_dispatch import dispatch_public_start, dispatch_signed_start
 from runtime.agentos.legacy_admission import admit_legacy_execution
 from runtime.agentos.legacy_producer import direct_legacy_stream, start_legacy_producer
 from runtime.agentos.legacy_resume import resume_legacy_conversation
@@ -154,6 +154,13 @@ async def run_agentos_conversation(payload: CompatibilityConversationRun, princi
             headers.append((b"x-user-timezone", payload.timezone.encode("latin-1")))
     except (PayloadValidationError, UnicodeEncodeError) as exc:
         raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_AGENT_REQUEST"}) from exc
+    if not payload.resume and payload.preparation != "legacy":
+        try:
+            return await dispatch_signed_start(payload, principal)
+        except RuntimeServiceTimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Management service timed out") from exc
+        except RuntimeServiceUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="Management service is unavailable") from exc
     context = Request({"type": "http", "headers": headers})
     request._track_execution = not payload.resume and not request.is_debug
 

@@ -624,7 +624,7 @@ def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
 
 
 @pytest.mark.asyncio
-async def test_agentos_conversation_uses_signed_actor_and_preserves_request_context(mocker):
+async def test_agentos_prepared_legacy_fallback_uses_signed_actor_and_preserves_request_context(mocker):
     from contracts.agentos import CompatibilityConversationRun
     from infrastructure.agentos_identity import ServicePrincipal
     from runtime.api.agent import execution
@@ -634,7 +634,7 @@ async def test_agentos_conversation_uses_signed_actor_and_preserves_request_cont
     actor = ServicePrincipal("actor", "tenant")
     payload = CompatibilityConversationRun(
         request={"query": "question", "conversation_id": 42},
-        language="en", timezone="Asia/Shanghai",
+        language="en", timezone="Asia/Shanghai", preparation="legacy",
     )
     result = await execution.run_agentos_conversation(payload, actor)
     assert result is runner.return_value

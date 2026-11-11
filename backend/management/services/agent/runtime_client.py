@@ -194,7 +194,7 @@ async def forward_conversation_run(
                 raise prepared_turn.active_turn_conflict()
         if northbound_fallback is not None:
             return await northbound_fallback()
-        return await client.run_conversation(claimed, owner, tenant)
+        return await client.run_conversation(claimed.model_copy(update={"preparation": "legacy"}), owner, tenant)
 
     if candidate or payload.idempotency_key is not None:
         return await submit_conversation(

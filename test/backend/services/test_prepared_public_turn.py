@@ -634,7 +634,7 @@ async def test_unsupported_workbench_uses_unchanged_compatibility_request(mocker
     mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
     assert await runtime_client.forward_conversation_run(payload, *ACTOR) is response
     assert reject.await_args.args[0].claimed_run_id == REFERENCE.run_id
-    client.run_conversation.assert_awaited_once_with(payload, *ACTOR)
+    client.run_conversation.assert_awaited_once_with(payload.model_copy(update={"preparation": "legacy"}), *ACTOR)
 
 
 @pytest.mark.asyncio

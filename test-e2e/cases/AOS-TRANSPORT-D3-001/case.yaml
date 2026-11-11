@@ -46,11 +46,11 @@ case:
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
   - order: 7
-    action: Submit an ordinary conversation through the public Management route.
-    expected: Management signs the actor and forwards locale, timezone and legacy resume fields; Runtime streams unchanged SSE.
+    action: Submit an ordinary conversation through the public Management route and the old signed Runtime operation; also request a cursorless resume.
+    expected: Both new-start entrypoints reach Management with the signed actor, locale and timezone before Runtime consumes the claim. An explicit legacy fallback executes once with unchanged SSE and the original run ID. Cursorless resume uses its dedicated signed AgentOS operation.
   - order: 8
     action: Submit a signed conversation twice with one idempotency key and then change the request under that key.
-    expected: Management returns the original run ID on retry and 409 on changed input. Runtime receives one signed submission carrying the claimed ID and rejects a replay of that handoff before starting again.
+    expected: Management returns the original run ID on retry and 409 on changed input. The execution receives the claimed ID exactly once across the Management handoff and explicit fallback; replaying the consumed execution handoff is rejected before another start.
   - order: 9
     action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.

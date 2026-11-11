@@ -42,12 +42,17 @@ class CompatibilityConversationRun(CompatibilityRun):
     timezone: str | None = Field(default=None, max_length=128)
     idempotency_key: str | None = Field(default=None, pattern=IDEMPOTENCY_KEY_PATTERN)
     claimed_run_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
+    preparation: Literal["management", "legacy"] | None = Field(
+        default=None, description="Internal migration hop, excluded from the conversation admission fingerprint.",
+    )
 
     @model_serializer(mode="wrap")
-    def omit_unclaimed_run_id(self, serialize):
+    def omit_unused_handoff_fields(self, serialize):
         payload = serialize(self)
         if self.claimed_run_id is None:
             payload.pop("claimed_run_id", None)
+        if self.preparation is None:
+            payload.pop("preparation", None)
         return payload
 
 

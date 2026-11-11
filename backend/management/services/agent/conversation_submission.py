@@ -59,7 +59,7 @@ async def submit_conversation(
 
     scope = conversation_claim_scope(user_id, tenant_id, payload.idempotency_key)
     fingerprint = conversation_request_fingerprint(
-        payload.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id"}),
+        payload.model_dump(mode="json", exclude={"idempotency_key", "claimed_run_id", "preparation"}),
     )
     if payload.claimed_run_id is not None:
         try:

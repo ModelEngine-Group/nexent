@@ -60,8 +60,9 @@ async def test_runtime_public_start_uses_signed_management_dispatch(mocker, mana
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rejected", [False, True])
 @pytest.mark.parametrize("existing_claim", [False, True])
+@pytest.mark.parametrize("via_runtime", [False, True])
 async def test_signed_claim_reaches_prepared_dispatch_with_original_run_id(
-    mocker, management_endpoint, rejected, existing_claim,
+    mocker, management_endpoint, rejected, existing_claim, via_runtime,
 ):
     from management.services.agent import conversation_submission, prepared_turn, runtime_client
     from infrastructure.rdb.agent_admission import AdmissionClaim
@@ -87,12 +88,29 @@ async def test_signed_claim_reaches_prepared_dispatch_with_original_run_id(
     payload = CompatibilityConversationRun(
         request={"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False},
         idempotency_key="claim", claimed_run_id=run_id if existing_claim else None,
+        language="en", timezone="Asia/Shanghai",
     )
-    client = AgentOSClient("http://management", lambda **kwargs: httpx.AsyncClient(
+    management_client = AgentOSClient("http://management", lambda **kwargs: httpx.AsyncClient(
         transport=httpx.ASGITransport(app=management_endpoint), **kwargs,
     ))
+    if via_runtime:
+        from runtime.agentos import admission
+        from runtime.agentos.compatibility import create_compatibility_router
+        from runtime.agentos.middleware import AgentOSMiddleware
+        from runtime.api.agent import execution
 
-    response = await client.dispatch_conversation(payload, "actor", "tenant")
+        mocker.patch.object(management_dispatch, "management_client", return_value=management_client)
+        mocker.patch.object(admission, "admit_conversation_run", side_effect=AssertionError("Runtime consumed claim"))
+        mocker.patch.object(execution, "run_legacy_agent_stream", side_effect=AssertionError("Runtime prepared resources"))
+        runtime = create_app(enable_monitoring=False)
+        runtime.add_middleware(AgentOSMiddleware)
+        runtime.include_router(create_compatibility_router(None, None, conversation_run=execution.run_agentos_conversation))
+        client = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=runtime), **kwargs,
+        ))
+        response = await client.run_conversation(payload, "actor", "tenant")
+    else:
+        response = await management_client.dispatch_conversation(payload, "actor", "tenant")
 
     assert response.status_code == (422 if rejected else 200)
     assert response.headers["X-AgentOS-Run-ID"] == run_id
@@ -102,7 +120,10 @@ async def test_signed_claim_reaches_prepared_dispatch_with_original_run_id(
         assert b"AGENTOS_RESOURCE_UNSUPPORTED" in body
     else:
         assert body == b"data: done\n\n"
-    assert prepared.await_args.args[0] == payload.model_copy(update={"claimed_run_id": run_id})
+    expected = {"claimed_run_id": run_id}
+    if via_runtime:
+        expected["preparation"] = "management"
+    assert prepared.await_args.args[0] == payload.model_copy(update=expected)
     assert prepared.await_args.args[2:4] == ("actor", "tenant")
     if existing_claim:
         assert validate.call_args.kwargs == {"consume": False}
@@ -129,3 +150,103 @@ async def test_management_dispatch_verifies_body_and_operation(mocker, managemen
         response = await client.post(path, content=body, headers=headers)
     assert response.status_code == (400 if invalid == "query" else 401)
     forward.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_signed_legacy_fallback_prepares_once_then_consumes_the_same_claim(mocker, management_endpoint):
+    from infrastructure.rdb.agent_admission import conversation_request_fingerprint
+    from management.services.agent import conversation_submission, prepared_turn, runtime_client
+    from runtime.agentos import admission
+    from runtime.agentos.compatibility import create_compatibility_router
+    from runtime.agentos.middleware import AgentOSMiddleware
+    from runtime.api.agent import execution
+
+    async def direct(_task, function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    payload = CompatibilityConversationRun(
+        request={"query": "hello", "agent_id": 7, "conversation_id": 42, "is_debug": False},
+        idempotency_key="existing", claimed_run_id="a" * 32, language="en", timezone="Asia/Shanghai",
+    )
+    mocker.patch.object(conversation_submission, "_control_io", side_effect=direct)
+    mocker.patch.object(admission, "_control_io", side_effect=direct)
+    for unit in (conversation_submission, admission):
+        mocker.patch.object(unit, "conversation_belongs_to", return_value=True)
+    validate = mocker.patch.object(conversation_submission, "authorize_conversation_dispatch", return_value=True)
+    consume = mocker.patch.object(admission, "authorize_conversation_dispatch", return_value=True)
+    claim = mocker.patch.object(conversation_submission, "claim_conversation_run", side_effect=AssertionError("second claim"))
+    prepare = mocker.patch.object(prepared_turn, "start_turn", new=AsyncMock(return_value=None))
+    mocker.patch.object(prepared_turn, "find_pending_turn", new=AsyncMock(return_value=None))
+    legacy = mocker.patch.object(execution, "run_legacy_agent_stream", new=AsyncMock(return_value=StreamingResponse(
+        iter([b"data: legacy\n\n"]), headers={"conversation_id": "42"},
+    )))
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    observed = []
+
+    async def dispatch(request, actor):
+        observed.append((request, actor))
+        assert len(observed) <= 2, "conversation handoff looped"
+        return await execution.run_agentos_conversation(request, actor)
+
+    runtime.include_router(create_compatibility_router(None, None, conversation_run=dispatch))
+    runtime_client_instance = AgentOSClient("http://runtime", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime), **kwargs,
+    ))
+    management_client_instance = AgentOSClient("http://management", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=management_endpoint), **kwargs,
+    ))
+    mocker.patch.object(runtime_client, "_agentos_client", return_value=runtime_client_instance)
+    mocker.patch.object(management_dispatch, "management_client", return_value=management_client_instance)
+
+    response = await runtime_client_instance.run_conversation(payload, "actor", "tenant")
+
+    assert response.status_code == 200
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b"data: legacy\n\n"
+    assert response.headers["X-AgentOS-Run-ID"] == payload.claimed_run_id
+    assert [request.preparation for request, _ in observed] == [None, "legacy"]
+    assert all(actor == ServicePrincipal("actor", "tenant") for _, actor in observed)
+    assert all(request.request == payload.request and request.claimed_run_id == payload.claimed_run_id for request, _ in observed)
+    assert prepare.await_args.args[0].preparation == "management"
+    prepare.assert_awaited_once()
+    legacy.assert_awaited_once()
+    claim.assert_not_called()
+    assert validate.call_args.args == consume.call_args.args
+    assert validate.call_args.kwargs == {"consume": False} and consume.call_args.kwargs == {}
+    expected = conversation_request_fingerprint({
+        "request": payload.request, "resume": False, "language": "en", "timezone": "Asia/Shanghai",
+    })
+    assert consume.call_args.args[1] == expected
+    assert "preparation" not in payload.model_dump() and "preparation" not in payload.model_dump_json()
+
+    rejected = await management_client_instance.dispatch_conversation(
+        payload.model_copy(update={"preparation": "legacy"}), "actor", "tenant",
+    )
+    assert rejected.status_code == 422
+    assert b"AGENTOS_INVALID_PREPARATION_HANDOFF" in b"".join([chunk async for chunk in rejected.body_iterator])
+    prepare.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure,status", [("unavailable", 503), ("timeout", 504)])
+async def test_signed_handoff_transport_failure_never_consumes_or_executes(mocker, failure, status):
+    from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError
+    from runtime.agentos import admission
+    from runtime.api.agent import execution
+
+    error = RuntimeServiceUnavailableError if failure == "unavailable" else RuntimeServiceTimeoutError
+    forward = mocker.patch.object(execution, "dispatch_signed_start", new=AsyncMock(side_effect=error("unavailable")))
+    consume = mocker.patch.object(admission, "admit_conversation_run", new=AsyncMock())
+    legacy = mocker.patch.object(execution, "run_legacy_agent_stream", new=AsyncMock())
+    payload = CompatibilityConversationRun(
+        request={"query": "hello", "agent_id": 7}, idempotency_key="existing", claimed_run_id="a" * 32,
+    )
+    actor = ServicePrincipal("actor", "tenant")
+
+    with pytest.raises(HTTPException) as rejected:
+        await execution.run_agentos_conversation(payload, actor)
+
+    assert rejected.value.status_code == status
+    forward.assert_awaited_once_with(payload, actor)
+    consume.assert_not_awaited()
+    legacy.assert_not_awaited()
