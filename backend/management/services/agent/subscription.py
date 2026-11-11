@@ -88,7 +88,6 @@ from management.services.knowledge_base.scope import (
     resolve_knowledge_scope,
 )
 from infrastructure.legacy_stream_replay import replay_legacy_stream
-from infrastructure.rdb.agent_execution import RunIdentity, begin_execution, finish_execution, track_execution, untrack_execution
 from infrastructure.redis.run_state import (
     runtime_state_service,
 )
@@ -666,14 +665,9 @@ async def run_agent_stream(
     try:
         if getattr(agent_request, "_track_execution", False) is True and not agent_request.is_debug:
             agent_request._projection_run_id = agent_request._projection_run_id or uuid.uuid4().hex
-            identity = RunIdentity(
-                resolved_tenant_id, resolved_user_id, agent_request.conversation_id, agent_request._projection_run_id,
+            tracked_execution = await host.begin_tracking(
+                agent_request.conversation_id, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
             )
-            await run_blocking(
-                "agentos-execution-start", begin_execution, identity, lane="control-io", owner="runtime",
-            )
-            tracked_execution = identity
-            track_execution(identity)
         await runtime_state_service.reset_stream_async(
             user_id=resolved_user_id,
             conversation_id=agent_request.conversation_id,
@@ -715,16 +709,10 @@ async def run_agent_stream(
             if runtime_state_service.enabled is True:
                 journal_run_id = await channel.start_journal(resolved_tenant_id, agent_request._projection_run_id)
             if admission_scope is not None:
-                from infrastructure.rdb.agent_admission import set_conversation_admission
-
-                recorded = await run_blocking(
-                    "agentos-bind-conversation", set_conversation_admission,
+                await host.bind_admission(
                     admission_scope, agent_request._projection_run_id, resolved_user_id, resolved_tenant_id,
                     conversation_id=agent_request.conversation_id, journal_available=journal_run_id is not None,
-                    lane="control-io", owner="runtime",
                 )
-                if not recorded:
-                    raise RuntimeError("Conversation run claim is no longer pending")
     except (Exception, asyncio.CancelledError):
         deferred_run.cancel()
         thread_manager.cancel(
@@ -735,10 +723,7 @@ async def run_agent_stream(
         )
         try:
             if tracked_execution is not None:
-                await run_blocking(
-                    "agentos-execution-setup-failed", finish_execution, tracked_execution, "failed",
-                    lane="control-io", owner="runtime",
-                )
+                await host.fail_setup(tracked_execution)
             if (admission_scope is not None or tracked_execution is not None) and channel is not None:
                 await channel.finish_journal("failed")
                 await streaming_channel_manager.remove_channel(
@@ -888,7 +873,7 @@ async def run_agent_stream(
             """Retain preparation ownership until the detached producer exits."""
             host.producer_tasks.discard(task)
             if tracked_execution is not None:
-                untrack_execution(tracked_execution)
+                host.untrack(tracked_execution)
             if not task.cancelled() and task.exception() is not None:
                 logger.error("Agent stream producer did not finalize", exc_info=task.exception())
             reservation_released = host.registry.release_agent_run_reservation(
