@@ -18,7 +18,7 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
+    NEXENT_MCP_INTERNAL_TOKEN,
 )
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
@@ -347,7 +347,7 @@ async def create_agent_run_info(
                 mcp_config["httpx_client_factory"] = create_httpx_client
                 mcp_config["headers"] = {
                     "X-Tenant-ID": str(tenant_id),
-                    "X-Nexent-Internal-Token": TOKEN,
+                    "X-Nexent-Internal-Token": NEXENT_MCP_INTERNAL_TOKEN,
                 }
             headers = {}
             auth_token = mcp_record.get("authorization_token")

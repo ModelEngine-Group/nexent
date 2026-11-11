@@ -1383,6 +1383,41 @@ class TestTenantMCPRouter:
     """Tests for tenant-scoped MCP request dispatch."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("configured_token", "supplied_token", "expected_status"),
+        [
+            ("fixture-mcp", "fixture-mcp", 200),
+            ("fixture-mcp", "wrong", 403),
+            ("", "fixture-mcp", 403),
+        ],
+    )
+    async def test_internal_mcp_token(self, monkeypatch, configured_token, supplied_token, expected_status):
+        monkeypatch.setattr(mcp_service, "NEXENT_MCP_INTERNAL_TOKEN", configured_token)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        async def tenant_app(scope, receive, send_response):
+            await send_response({"type": "http.response.start", "status": 200, "headers": []})
+
+        monkeypatch.setitem(mcp_service._tenant_mcp_apps, "tenant1", tenant_app)
+        await mcp_service.TenantMCPRouter()(
+            {
+                "type": "http",
+                "path": "/mcp/tenant1/sse",
+                "headers": [
+                    (b"x-tenant-id", b"tenant1"),
+                    (b"x-nexent-internal-token", supplied_token.encode()),
+                ],
+            },
+            None,
+            send,
+        )
+
+        assert sent[0]["status"] == expected_status
+
+    @pytest.mark.asyncio
     async def test_missing_authorization_is_rejected(self):
         sent = []
 

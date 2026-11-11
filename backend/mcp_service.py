@@ -14,7 +14,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from management.db.tool.outer_api import query_available_openapi_services
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import NEXENT_MCP_INTERNAL_TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -457,7 +457,11 @@ class TenantMCPRouter:
         authorization = request_headers.get(b"authorization")
         requested_tenant = request_headers.get(b"x-tenant-id", b"").decode()
         internal_token = request_headers.get(b"x-nexent-internal-token", b"").decode()
-        if not authorization and (requested_tenant != tenant_id or not TOKEN or internal_token != TOKEN):
+        if not authorization and (
+            requested_tenant != tenant_id
+            or not NEXENT_MCP_INTERNAL_TOKEN
+            or internal_token != NEXENT_MCP_INTERNAL_TOKEN
+        ):
             await _send_forbidden(send)
             return
         if authorization:
