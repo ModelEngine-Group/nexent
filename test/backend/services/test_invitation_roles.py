@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contracts.errors.exceptions import ForbiddenError, ValidationError
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import DuplicateError, ForbiddenError, UnauthorizedError, ValidationError
 from contracts.identity import (
     InvitationCreateRequest,
     InvitationUpdateRequest,
@@ -109,4 +110,54 @@ def test_special_invites_retain_feature_gate(invitation_state, mocker):
     )
     with pytest.raises(ValidationError):
         service.create_invitation_code("a", code_type="ASSET_OWNER_INVITE", user_id="admin")
+    add.assert_not_called()
+
+
+
+def test_legacy_invite_preserves_role_and_uses_default_group(invitation_state, mocker):
+    _, _, add = invitation_state
+    mocker.patch.object(service, "get_tenant_default_group_id", return_value=None)
+
+    result = service.create_invitation_code("a", "ADMIN_INVITE", "legacy", user_id="admin")
+
+    assert (result["invitation_code"], result["code_type"], result["roles"], result["group_ids"]) == (
+        "LEGACY", "ADMIN_INVITE", ["ADMIN"], [],
+    )
+    assert add.call_args.kwargs["roles"] == ["ADMIN"]
+
+
+def test_legacy_type_cannot_conflict_with_explicit_grant(invitation_state):
+    _, _, add = invitation_state
+
+    with pytest.raises(ValueError, match="role and type conflict"):
+        service.create_invitation_code("a", "ADMIN_INVITE", "legacy", roles=["OPS"], user_id="admin")
+
+    add.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["ADMIN", "SU"])
+def test_asset_owner_invitation_keeps_legacy_platform_scope(invitation_state, mocker, role):
+    actor, _, add = invitation_state
+    actor["roles"] = [role]
+    mocker.patch.object(service, "require_asset_owner_enabled")
+
+    if role == "ADMIN":
+        with pytest.raises(UnauthorizedError, match="platform administration"):
+            service.create_invitation_code("a", "ASSET_OWNER_INVITE", "special", user_id="admin")
+        add.assert_not_called()
+    else:
+        result = service.create_invitation_code("a", "ASSET_OWNER_INVITE", "special", group_ids=[1], user_id="admin")
+        assert result["roles"] == ["ASSET_OWNER"]
+        assert result["group_ids"] == []
+        assert add.call_args.kwargs["tenant_id"] == ASSET_OWNER_TENANT_ID
+
+
+def test_duplicate_invitation_code_never_reaches_insert(invitation_state):
+    _, _, add = invitation_state
+    service.query_invitation_by_code.return_value = {"invitation_id": 19}
+
+    with pytest.raises(DuplicateError, match="already exists"):
+        service.create_invitation_code("a", roles=["OPS"], invitation_code="used", user_id="admin")
+
+    service.query_invitation_by_code.assert_called_once_with("USED")
     add.assert_not_called()

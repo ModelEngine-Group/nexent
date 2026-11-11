@@ -35,8 +35,8 @@ def state(mocker):
     mocker.patch.object(repository, "api_only_account", return_value=False)
     write = mocker.patch.object(
         repository,
-        "write_roles",
-        side_effect=lambda db, member, values, actor: members[member["user_id"]].update(roles=list(values)),
+        "set_account_profile",
+        side_effect=lambda uid, role, email, actor, db, *, roles: members[uid].update(roles=list(roles)),
     )
     return members, write
 
@@ -123,4 +123,49 @@ def test_invalid_grant_has_no_write(state, values):
     _, write = state
     with pytest.raises(ValueError):
         service.replace_roles("actor", "target", values)
+    write.assert_not_called()
+
+
+
+def test_role_write_updates_authoritative_array_and_legacy_display_role(state):
+    _, write = state
+
+    service.replace_roles("actor", "target", ["OPS", "DEV"])
+
+    user_id, primary, email, actor_id, session = write.call_args.args
+    assert (user_id, primary, email, actor_id) == ("target", "DEV", None, "actor")
+    assert session is not None
+    assert write.call_args.kwargs["roles"] == ("DEV", "OPS")
+
+
+def test_membership_move_after_lock_requires_retry(state, mocker):
+    members, write = state
+    locked = deepcopy(members)
+    locked["target"]["tenant_id"] = "b"
+    mocker.patch.object(repository, "locked_members", return_value=locked)
+
+    with pytest.raises(RoleAssignmentConflict, match="Membership changed"):
+        service.replace_roles("actor", "target", ["USER"])
+
+    write.assert_not_called()
+
+
+def test_admin_limit_applies_only_to_new_admin_grants(state, mocker):
+    members, write = state
+    mocker.patch.object(repository, "active_admin_count", return_value=repository.MAX_ADMINS_PER_TENANT)
+
+    with pytest.raises(RoleAssignmentConflict, match="administrator limit"):
+        service.replace_roles("actor", "target", ["ADMIN", "OPS"])
+
+    write.assert_not_called()
+    members["target"]["roles"] = ["ADMIN"]
+    assert service.replace_roles("actor", "target", ["ADMIN", "OPS"])["roles"] == ["ADMIN", "OPS"]
+    write.assert_called_once()
+
+
+def test_reapplying_same_roles_does_not_write_account(state):
+    _, write = state
+
+    assert service.replace_roles("actor", "target", ["DEV"])["roles"] == ["DEV"]
+
     write.assert_not_called()

@@ -65,6 +65,10 @@ change:
     - test/backend/management/test_identity_import_architecture.py
     - test/backend/services/test_role_assignment.py
     - test/backend/services/test_invitation_roles.py
+    - test/backend/services/test_invitation_lifecycle.py
+    - test/backend/services/test_invited_registration.py
+    - test/backend/app/test_identity_role_endpoints.py
+    - test/backend/ops/test_resource_inventory.py
     - test/backend/services/test_invitation_service.py
     - test/backend/services/test_user_service.py
     - test/backend/services/test_api_key_service.py
@@ -99,3 +103,6 @@ change:
     account-profile UT and D3 registration assertions cover this ownership. The completed one-time migration Case and script were deleted at the
     user's request; local execution evidence remains available and migration acceptance
     does not add a maintained operations migration Case. Existing AUTH-LOCAL-D5-001 is strengthened only for its account-import and deployment responsibilities, including user_roles and scalar-column removal.
+    Coverage backfill adds isolated assertions for locked invitation updates and redemption, registration rollback,
+    user endpoint error mapping, and the inventory query projection and pagination. Existing D2 and D3 retain
+    live tenant authorization and registration concurrency proof.
