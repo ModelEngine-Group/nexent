@@ -39,7 +39,7 @@ def register_source(meta, source):
 
 
 def unverified_sources(meta):
-    return {"source_coverage_verified": False, "has_uncaptured_history": True}
+    return {"source_coverage_verified": False, "has_uncaptured_history": True, "latest_source_captured": None}
 
 
 def verified_sources(meta, observed, upper=None):
@@ -66,4 +66,5 @@ def verified_sources(meta, observed, upper=None):
         "has_uncaptured_history": historical_gap or unknown,
         "source_history_gap": historical_gap,
         "source_coverage_verified": True,
+        "latest_source_captured": (max(observed, key=int) in registered) if observed and not unknown else None,
     }

@@ -26,9 +26,8 @@ def identity():
 @pytest.fixture
 def store(tmp_path):
     root = tmp_path / "traces"
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(root, root_id)
-    return TrajectoryFileStore(root, root_id, authorize=lambda identity: None, clock=lambda: NOW)
+    TrajectoryFileStore.provision(root)
+    return TrajectoryFileStore(root, authorize=lambda identity: None, clock=lambda: NOW)
 
 
 def request(identity, run_id, *, span_id="0000000000000001", text='你好\n"\\'):
@@ -230,7 +229,7 @@ def test_symlink_and_misconfigured_mount_fail_closed(store, identity, tmp_path):
         start(store, identity)
     assert list(outside.iterdir()) == []
     with pytest.raises(TrajectoryConflict):
-        TrajectoryFileStore(store.root, str(uuid4()), authorize=lambda _: None)
+        TrajectoryFileStore(store.root, authorize=lambda _: None, storage_mode="shared_directory")
 
 
 def test_mixed_ownership_payload_is_rejected_without_confirmation(store, identity):

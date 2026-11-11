@@ -1,92 +1,94 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Spin } from "antd";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { StandardDrawer } from "@/components/common/StandardDrawer";
 import { StandardButton } from "@/components/common/StandardButton";
-import { trajectoryService } from "@/services/trajectoryService";
-import { BodyCache, recordKey } from "@/lib/trajectory";
+import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
+import { useConversationTrajectory } from "@/hooks/trajectory/useConversationTrajectory";
 import type { TrajectoryRecord } from "@/types/trajectory";
 import { TrajectoryError, CoverageNotice } from "./TrajectoryFeedback";
 import { TrajectoryTimeline } from "./TrajectoryTimeline";
 import { TrajectoryNodeDetail } from "./TrajectoryNodeDetail";
 
-interface Address {
-  cursor?: string;
-  node_id?: string;
-}
-
 export function TrajectoryDrawer({
   row,
+  queryId,
   onClose,
+  onReset,
 }: {
   row: TrajectoryRecord;
+  queryId?: string;
   onClose: () => void;
+  onReset?: () => void;
 }) {
   const { t } = useTranslation();
-  const [address, setAddress] = useState<Address>({});
-  const [history, setHistory] = useState<Address[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
   const [invalidated, setInvalidated] = useState<unknown>(null);
   const [, setContentRevision] = useState(0);
-  const snapshotId = useRef<string | undefined>(undefined);
   const cache = useMemo(() => new BodyCache(), []);
   useEffect(() => () => cache.clear(), [cache]);
-  const query = useQuery({
-    queryKey: ["trajectory-snapshot", recordKey(row), address, revision],
-    queryFn: async ({ signal }) => {
-      const page = await trajectoryService.snapshot(
-        row,
-        { ...address, snapshot_id: snapshotId.current },
-        signal
-      );
-      if (!signal.aborted) snapshotId.current = page.snapshot_id;
-      return page;
-    },
-    enabled: !!row.trajectory_id,
-    retry: false,
-    gcTime: 0,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
-  const page = query.data;
+  const query = useConversationTrajectory(row, queryId);
+  const pages = query.data?.pages;
   const nodes = useMemo(
     () => [
       ...new Map(
-        [...(page?.context_nodes ?? []), ...(page?.nodes ?? [])].map((node) => [
-          node.id,
-          node,
-        ])
+        (pages ?? [])
+          .flatMap(({ run, snapshot }) => {
+            if (!run || !snapshot) return [];
+            const key = (id: string) => `${run.trajectory_id}/${id}`;
+            return [...snapshot.context_nodes, ...snapshot.nodes].map(
+              (node) => ({
+                ...node,
+                id: key(node.id),
+                parent_id: node.parent_id ? key(node.parent_id) : null,
+                execution_root_id: snapshot.root_node_id
+                  ? key(snapshot.root_node_id)
+                  : undefined,
+                trajectory_id: run.trajectory_id,
+                round_no: run.round_no,
+                matches_filters: run.matches_filters,
+              })
+            );
+          })
+          .map((node) => [node.id, node])
       ).values(),
     ],
-    [page]
+    [pages]
   );
-  const root = nodes.find((node) => node.id === page?.root_node_id);
-  const selected =
-    nodes.find((node) => node.id === selectedId) ?? root ?? nodes[0];
+  const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
+  const unavailable = (pages ?? []).filter(
+    ({ run, snapshot }) => run && !snapshot
+  );
+  const fatal =
+    invalidated ?? (invalidatesTrajectory(query.error) ? query.error : null);
+  useEffect(() => {
+    if (fatal != null) cache.clear();
+  }, [fatal, cache]);
   const retry = () => {
-    cache.clear();
-    snapshotId.current = undefined;
-    setAddress({});
-    setHistory([]);
-    setSelectedId(null);
-    setInvalidated(null);
-    setRevision((value) => value + 1);
+    if (fatal && onReset) {
+      onReset();
+      return;
+    }
+    if (fatal) {
+      cache.clear();
+      setSelectedId(null);
+      void query.refetch().then((result) => {
+        if (result.isSuccess) setInvalidated(null);
+      });
+      return;
+    }
+    if (query.isFetchNextPageError && !fatal) void query.fetchNextPage();
+    else if (query.isFetchPreviousPageError && !fatal)
+      void query.fetchPreviousPage();
+    else void query.refetch();
   };
-  const navigate = (next: Address) => {
-    cache.clear();
-    setHistory((previous) => [...previous.slice(-199), address]);
-    setAddress(next);
-    setSelectedId(next.node_id ?? null);
-  };
+  const canLoad = query.hasNextPage && !query.isFetching && !query.isError;
   return (
     <StandardDrawer
       open
-      title={row.root_agent_name || t("trajectory.executionDetail")}
+      title={row.conversation_title || t("trajectory.executionDetail")}
       closeLabel={t("trajectory.close")}
       closeText={t("trajectory.close")}
       onClose={onClose}
@@ -100,35 +102,47 @@ export function TrajectoryDrawer({
           <code>{row.conversation_id}</code>
           <span>{t("trajectory.shanghai")}</span>
         </div>
-        {!row.trajectory_id && (
-          <Alert
-            type="info"
-            showIcon
-            title={t(`trajectory.availability.${row.availability}`, {
-              defaultValue: row.availability,
-            })}
-          />
-        )}
-        {query.isPending && row.trajectory_id && (
+        {query.isPending && (
           <div className="p-6 text-center">
             <Spin />
           </div>
         )}
-        {(query.isError || invalidated != null) && (
-          <TrajectoryError error={invalidated ?? query.error} retry={retry} />
+        {(query.isError || fatal != null) && (
+          <TrajectoryError error={fatal ?? query.error} retry={retry} />
         )}
-        {page && invalidated == null && (
+        {fatal == null && pages && (
           <>
-            <CoverageNotice coverage={page.coverage} />
+            <CoverageNotice
+              coverage={pages[0]?.directory?.coverage ?? row.coverage}
+            />
+            {!nodes.length && !unavailable.length && (
+              <Alert
+                type="info"
+                showIcon
+                title={t(
+                  `trajectory.availability.${pages[0]?.directory?.availability ?? row.availability}`
+                )}
+              />
+            )}
+            {query.hasPreviousPage && (
+              <StandardButton
+                loading={query.isFetchingPreviousPage}
+                onClick={() => void query.fetchPreviousPage()}
+              >
+                {t("trajectory.previousRounds")}
+              </StandardButton>
+            )}
             <div className="trajectory-detail-grid">
               <TrajectoryTimeline
-                key={JSON.stringify(address)}
                 nodes={nodes}
-                root={root}
+                unavailable={unavailable.map(({ run }) => run!)}
                 selected={selected?.id}
-                complete={page.scope.complete}
+                complete={!query.hasNextPage && !query.hasPreviousPage}
                 cache={cache}
                 onSelect={(node) => setSelectedId(node.id)}
+                onEndReached={
+                  canLoad ? () => void query.fetchNextPage() : undefined
+                }
               />
               {selected && (
                 <TrajectoryNodeDetail
@@ -141,40 +155,21 @@ export function TrajectoryDrawer({
                     cache.clear();
                     setInvalidated(error);
                   }}
-                  onParent={(id) => {
-                    if (nodes.some((node) => node.id === id)) setSelectedId(id);
-                    else navigate({ node_id: id });
-                  }}
+                  onParent={setSelectedId}
                 />
               )}
             </div>
             <div className="trajectory-segment-navigation">
               <small>
-                {t(
-                  page.scope.complete
-                    ? "trajectory.currentExecution"
-                    : "trajectory.loadedRange"
-                )}
+                {t("trajectory.loadedRange")} · {nodes.length}{" "}
+                {t("trajectory.nodes")}
               </small>
               <StandardButton
-                disabled={!history.length}
-                onClick={() => {
-                  const previous = history.at(-1);
-                  if (previous) {
-                    cache.clear();
-                    setAddress(previous);
-                    setHistory((items) => items.slice(0, -1));
-                    setSelectedId(null);
-                  }
-                }}
+                disabled={!query.hasNextPage}
+                loading={query.isFetchingNextPage}
+                onClick={() => void query.fetchNextPage()}
               >
-                {t("trajectory.previousSegment")}
-              </StandardButton>
-              <StandardButton
-                disabled={!page.next_cursor}
-                onClick={() => navigate({ cursor: page.next_cursor! })}
-              >
-                {t("trajectory.nextSegment")}
+                {t("trajectory.loadMore")}
               </StandardButton>
             </div>
           </>

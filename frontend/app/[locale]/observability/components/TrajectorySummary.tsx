@@ -59,9 +59,9 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
         <section style={{ borderColor: "#08979C", color: "#08979C" }}>
           <header>
             {t("trajectory.runDuration")}
-            <small>{samples(valid?.duration.sample_count)}</small>
+            <small>{samples(valid?.conversation_duration?.sample_count)}</small>
           </header>
-          {percentiles(valid?.duration)}
+          {percentiles(valid?.conversation_duration)}
         </section>
       </div>
       {summary && (

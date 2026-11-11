@@ -134,6 +134,7 @@ async def list_records(request: Request, authorization: str | None = Header(None
             service,
             actor,
             query.filters,
+            view=query.view,
             query_id=query.query_id,
             page=query.page,
             page_size=query.page_size,
@@ -154,6 +155,7 @@ async def get_conversation(
     cursor: Annotated[str | None, Query(max_length=8192)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     include: str | None = None,
+    query_id: Annotated[str | None, Query(max_length=8192)] = None,
     message_cursor: Annotated[str | None, Query(max_length=8192)] = None,
     snapshot_id: Annotated[str | None, Query(max_length=8192)] = None,
 ):
@@ -170,6 +172,7 @@ async def get_conversation(
             include=include,
             message_cursor=message_cursor,
             snapshot_id=snapshot_id,
+            query_id=query_id,
         ),
     )
 

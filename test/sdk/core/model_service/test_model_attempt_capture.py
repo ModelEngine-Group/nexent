@@ -24,7 +24,7 @@ def capture():
     provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(remote)))
     manager = SimpleNamespace(
         is_enabled=True,
-        _config=SimpleNamespace(trace_sink="both", export_traces=True),
+        _config=SimpleNamespace(provider="local_file", export_traces=True),
         tracer=provider.get_tracer("test"),
         record_llm_metrics=Mock(),
     )
@@ -79,7 +79,7 @@ def test_physical_retries_are_detached_safe_and_remote_shape_is_preserved(captur
 @pytest.mark.parametrize("sink", ["otlp", None, Mock()])
 def test_default_sink_does_not_start_local_attempts(capture, sink):
     manager, local, _ = capture
-    manager._config.trace_sink = sink
+    manager._config.provider = sink
     session = ModelAttemptSession(manager, "model", None, "request", 1)
     assert session.begin({"messages": []}) is None
     session.complete({"content_parts": []})

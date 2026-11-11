@@ -60,12 +60,12 @@ def environment():
     return {**os.environ, "PYTHONPATH": os.pathsep.join([str(REPO / "backend"), str(REPO / "sdk")])}
 
 
-def open_store(root, root_id):
-    return TrajectoryFileStore(root, root_id, authorize=lambda identity: None)
+def open_store(root):
+    return TrajectoryFileStore(root, authorize=lambda identity: None)
 
 
-def child(root, root_id, fault):
-    store = open_store(root, root_id)
+def child(root, fault):
+    store = open_store(root)
     writer = store.start(IDENTITY, str(uuid4()), str(uuid4()), core_type="smolagents")
     payload = request(writer.trajectory_id, "confirmed-prefix")
     batch_id = str(uuid4())
@@ -144,14 +144,14 @@ def child(root, root_id, fault):
 )
 def test_trj_recovery_process_death_preserves_confirmed_prefix(tmp_path, fault):
     with tempfile.TemporaryDirectory(dir=tmp_path) as directory:
-        root, root_id = Path(directory), str(uuid4())
-        TrajectoryFileStore.provision(root, root_id)
+        root = Path(directory)
+        TrajectoryFileStore.provision(root)
         # The canary sits outside the registered root's tenant directory tree.
         canary = root.parent / f"canary-{root.name}"
         canary.write_text("untouched")
         try:
             completed = subprocess.run(
-                [sys.executable, __file__, "child", str(root), root_id, fault],
+                [sys.executable, __file__, "child", str(root), fault],
                 cwd=REPO,
                 env=environment(),
                 capture_output=True,
@@ -161,7 +161,7 @@ def test_trj_recovery_process_death_preserves_confirmed_prefix(tmp_path, fault):
             )
             assert completed.returncode == 17, completed.stderr
             ack = json.loads(completed.stdout.splitlines()[0])
-            store = open_store(root, root_id)
+            store = open_store(root)
             before = store.manifest(IDENTITY)["runs"][0]
             run_id = ack["trajectory_id"]
             store.recover(IDENTITY, run_id)
@@ -195,10 +195,10 @@ def test_trj_recovery_process_death_preserves_confirmed_prefix(tmp_path, fault):
 
 def test_trj_recovery_live_file_lock_and_corruption(tmp_path):
     with tempfile.TemporaryDirectory(dir=tmp_path) as directory:
-        root, root_id = Path(directory), str(uuid4())
-        TrajectoryFileStore.provision(root, root_id)
+        root = Path(directory)
+        TrajectoryFileStore.provision(root)
         process = subprocess.Popen(
-            [sys.executable, __file__, "child", str(root), root_id, "hold"],
+            [sys.executable, __file__, "child", str(root), "hold"],
             cwd=REPO,
             env=environment(),
             stdin=subprocess.PIPE,
@@ -211,7 +211,7 @@ def test_trj_recovery_live_file_lock_and_corruption(tmp_path):
                 selector.register(process.stdout, selectors.EVENT_READ)
                 assert selector.select(timeout=15), "Writer never acknowledged its first durable batch"
                 ack = json.loads(process.stdout.readline())
-            store = open_store(root, root_id)
+            store = open_store(root)
             with pytest.raises(TrajectoryConflict):
                 store.recover(IDENTITY, ack["trajectory_id"])
             process.terminate()
@@ -234,9 +234,9 @@ def test_trj_recovery_live_file_lock_and_corruption(tmp_path):
 @pytest.mark.parametrize("failure_code", [errno.ENOSPC, errno.EACCES])
 def test_trj_recovery_queue_and_disk_failures_keep_business_independent(tmp_path, monkeypatch, failure_code):
     with tempfile.TemporaryDirectory(dir=tmp_path) as directory:
-        root, root_id = Path(directory), str(uuid4())
-        TrajectoryFileStore.provision(root, root_id)
-        store = open_store(root, root_id)
+        root = Path(directory)
+        TrajectoryFileStore.provision(root)
+        store = open_store(root)
         meta = SimpleNamespace(
             tenant_id=IDENTITY.tenant_id,
             user_id=IDENTITY.owner_user_id,
@@ -287,10 +287,10 @@ def test_trj_recovery_queue_and_disk_failures_keep_business_independent(tmp_path
 
 def test_trj_recovery_publication_order_and_no_resurrection(tmp_path, monkeypatch):
     with tempfile.TemporaryDirectory(dir=tmp_path) as directory:
-        root, root_id = Path(directory), str(uuid4())
-        TrajectoryFileStore.provision(root, root_id)
+        root = Path(directory)
+        TrajectoryFileStore.provision(root)
         now = datetime(2026, 11, 9, tzinfo=UTC)
-        store = open_store(root, root_id)
+        store = open_store(root)
         store.clock = lambda: now
         writer = store.start(IDENTITY, str(uuid4()), str(uuid4()), core_type="smolagents")
         syncs = []
@@ -323,8 +323,8 @@ def test_trj_recovery_publication_order_and_no_resurrection(tmp_path, monkeypatc
             writer.close()
 
 
-def child_active(root, root_id):
-    store = open_store(root, root_id)
+def child_active(root):
+    store = open_store(root)
     metadata = SimpleNamespace(
         tenant_id=IDENTITY.tenant_id,
         user_id=IDENTITY.owner_user_id,
@@ -351,10 +351,9 @@ def child_active(root, root_id):
 
 
 def test_trj_recovery_active_fragments_and_abandoned_temporaries(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     process = subprocess.Popen(
-        [sys.executable, __file__, "active", str(tmp_path), root_id],
+        [sys.executable, __file__, "active", str(tmp_path)],
         cwd=REPO,
         env=environment(),
         stdin=subprocess.PIPE,
@@ -369,7 +368,7 @@ def test_trj_recovery_active_fragments_and_abandoned_temporaries(tmp_path):
             before = json.loads(process.stdout.readline())
         process.kill()
         process.wait(timeout=5)
-        store = open_store(tmp_path, root_id)
+        store = open_store(tmp_path)
         store.recover(IDENTITY, before["trajectory_id"])
         run = store.manifest(IDENTITY)["runs"][0]
         directory = tmp_path / "fixture-tenant/fixture-owner/42/123"
@@ -398,9 +397,8 @@ def test_trj_recovery_active_fragments_and_abandoned_temporaries(tmp_path):
 
 
 def test_trj_recovery_publication_retries_after_repeated_metadata_failure(tmp_path, monkeypatch):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    store = open_store(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
+    store = open_store(tmp_path)
     meta = SimpleNamespace(
         tenant_id=IDENTITY.tenant_id,
         user_id=IDENTITY.owner_user_id,
@@ -448,7 +446,7 @@ def test_trj_recovery_publication_retries_after_repeated_metadata_failure(tmp_pa
 
 if __name__ == "__main__":
     if sys.argv[1] == "active":
-        child_active(Path(sys.argv[2]), sys.argv[3])
+        child_active(Path(sys.argv[2]))
     else:
         assert sys.argv[1] == "child"
-        child(Path(sys.argv[2]), sys.argv[3], sys.argv[4])
+        child(Path(sys.argv[2]), sys.argv[3])

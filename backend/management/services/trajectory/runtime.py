@@ -3,7 +3,7 @@
 
 import threading
 
-from .primitives import QueryError, TokenSigner
+from .primitives import QueryError, ReferenceStore
 
 _lock = threading.Lock()
 _service = None
@@ -31,11 +31,10 @@ def get_service():
             from .service import TrajectoryService
 
             try:
-                signer = TokenSigner(config.TRAJECTORY_SIGNING_KEY)
+                references = ReferenceStore()
                 catalog = TrajectoryCatalog()
                 store = TrajectoryFileStore(
                     config.TRAJECTORY_ROOT_DIR,
-                    config.TRAJECTORY_STORAGE_ROOT_ID,
                     authorize=lambda identity: catalog.resolve(
                         [identity.tenant_id],
                         identity.conversation_id,
@@ -51,9 +50,8 @@ def get_service():
             _service = TrajectoryService(
                 store,
                 catalog,
-                signer,
+                references,
                 max_bytes=config.TRAJECTORY_QUERY_MAX_BYTES,
-                seconds=config.TRAJECTORY_QUERY_TIMEOUT_SECONDS,
                 max_candidates=config.TRAJECTORY_QUERY_MAX_CANDIDATES,
                 source_query=capture_sources,
             )

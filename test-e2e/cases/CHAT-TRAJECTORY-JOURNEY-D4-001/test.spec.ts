@@ -73,9 +73,30 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .toBeNull();
   });
   await contract.step(steps[1], async () => {
+    await expect(table.getByText("V3", { exact: true })).toBeVisible();
     await open();
+    await expect(
+      page.getByRole("treeitem", { name: /Friday.*V3/ }),
+    ).toBeVisible();
+    for (const [name, version] of [
+      ["存储设计", "V2"],
+      ["安全审查", "草稿"],
+      ["容量规划", "未知"],
+    ]) {
+      await page
+        .getByRole("treeitem", { name: new RegExp(`${name}.*${version}`) })
+        .click();
+      await expect(
+        page
+          .locator(".trajectory-node-detail")
+          .getByText(version, { exact: true }),
+      ).toBeVisible();
+    }
     await expect(page.locator(".trajectory-range-guide").first()).toBeVisible();
     await page.getByRole("treeitem", { name: /DeepSeek/ }).click();
+    await expect(
+      page.locator(".trajectory-node-detail").getByText(/智能体版本/),
+    ).toHaveCount(0);
     await expect(
       page
         .locator(".trajectory-node-detail")
@@ -88,6 +109,9 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     await expect(page.getByText(/结束时间:/)).toBeVisible();
     await page.getByRole("treeitem", { name: /policy.check/ }).click();
+    await expect(
+      page.locator(".trajectory-node-detail").getByText(/智能体版本/),
+    ).toHaveCount(0);
     await expect(
       page
         .locator(".trajectory-node-detail")
@@ -121,7 +145,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .first()
       .click();
     await expect(page.locator(".trajectory-body pre").first()).toHaveText("终");
-    await page.getByRole("button", { name: "下一段", exact: true }).click();
+    await page.getByRole("button", { name: "加载更多", exact: true }).click();
     await expect(
       page.getByRole("treeitem", { name: /Later tool/ }),
     ).toBeVisible();
@@ -208,6 +232,50 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .click();
     await page.goto("about:blank");
     expect(state.cleanups).toHaveLength(3);
+  });
+  await contract.step(steps[6], async () => {
+    state.multiRound = true;
+    await page.goto(`${base}/zh/observability`);
+    await expect(
+      table.getByRole("columnheader", { name: "轮数" }),
+    ).toBeVisible();
+    expect(
+      state.records
+        .filter((url) => !url.searchParams.has("facet"))
+        .at(-1)
+        ?.searchParams.get("view"),
+    ).toBe("conversation");
+    await open();
+    // The product may prefetch the next segment when the end sentinel enters the viewport.
+    for (
+      let index = 0;
+      index < 3 &&
+      (await page.getByRole("treeitem", { name: /重试成功/ }).count()) === 0;
+      index++
+    ) {
+      await page.getByRole("button", { name: "加载更多", exact: true }).click();
+    }
+    await expect(
+      page.getByRole("treeitem", { name: /重试成功/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
+    expect(
+      await page
+        .locator(".trajectory-time-cell[data-round='2'] .trajectory-time-bar")
+        .evaluate((element) => (element as HTMLElement).style.left),
+    ).toBe("0%");
+    await page.getByRole("treeitem", { name: /Friday/ }).click();
+    await expect(page.locator(".trajectory-node-detail h2")).toHaveText(
+      "Friday",
+    );
+    await page
+      .getByRole("textbox", { name: "搜索名称、已加载输入 / 输出" })
+      .fill("重试成功");
+    await expect(page.getByRole("treeitem", { name: /Friday/ })).toHaveCount(0);
+    await expect(
+      page.getByRole("treeitem", { name: /重试成功/ }),
+    ).toBeVisible();
+    await close();
   });
   for (const id of contract.expectedIds("assertions")) {
     await contract.assertion(id, async () => {

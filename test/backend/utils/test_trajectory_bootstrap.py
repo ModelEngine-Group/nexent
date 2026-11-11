@@ -5,14 +5,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from uuid import uuid4
 
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
 
 
 def test_backend_bootstrap_writes_full_local_agent_model_tool_trace(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     root = Path(__file__).resolve().parents[3]
     code = r"""
 import asyncio
@@ -64,12 +62,12 @@ assert manager.snapshot().active_count == 0
         **os.environ,
         "PYTHONPATH": os.pathsep.join([str(root / "backend"), str(root / "sdk")]),
         "ENABLE_TELEMETRY": "true",
-        "MONITORING_TRACE_SINK": "local_file",
-        "OTEL_EXPORTER_OTLP_METRICS_ENABLED": "false",
+        "MONITORING_PROVIDER": "local_file",
+        "OTEL_EXPORTER_OTLP_METRICS_ENABLED": "true",
         "MONITORING_INSTRUMENT_REQUESTS": "false",
         "MONITORING_TRACE_MAX_CHARS": "3",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
-        "TRAJECTORY_STORAGE_ROOT_ID": root_id,
+
         "TRAJECTORY_CLEANUP_ENABLED": "false",
     }
     completed = subprocess.run(

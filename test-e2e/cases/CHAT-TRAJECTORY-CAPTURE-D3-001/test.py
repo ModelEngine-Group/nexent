@@ -170,9 +170,9 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
             return 'leaf-result-' + value
 
     monkeypatch.setattr(module, 'CaptureLeafTool', CaptureLeafTool, raising=False)
-    child = AgentConfig(name='child', agent_id=9, description='Controlled child', model_name='child', max_steps=2,
+    child = AgentConfig(name='child', agent_id=9, version_no=2, description='Controlled child', model_name='child', max_steps=2,
                         tools=[ToolConfig(class_name='CaptureLeafTool', name='capture_leaf', source='local', params={})])
-    root = AgentConfig(name='root', agent_id=7, description='Controlled root', model_name='model', max_steps=2,
+    root = AgentConfig(name='root', agent_id=7, version_no=3, description='Controlled root', model_name='model', max_steps=2,
                        tools=[ToolConfig(class_name='ParallelExecutorTool', name='parallel_executor',
                                          source='local', params={})],
                        worker_agents=[child])
@@ -201,6 +201,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     root_invocation = attrs(next(span for span in saved if span['name'] == 'agent.run'))['nexent.invocation_id']
     child_invocations = {attrs(span)['nexent.record_id']: attrs(span)['subagent.invocation_id'] for span in children}
     for span in children:
+        assert attrs(span)['agent.version_no'] == '2'
         assert attrs(span)['nexent.invocation_id'] == attrs(span)['subagent.invocation_id']
         assert attrs(span)['nexent.parent_invocation_id'] == root_invocation
     assert {call['nexent.local.nexent.invocation_id'] for call in calls} == set(child_invocations.values())
@@ -211,6 +212,7 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
     agents = [n for n in nodes.values() if n['kind'] == 'agent' and n['parent_id'] is not None]
     assert len(agents) == 2
     for agent in agents:
+        assert agent['agent_version_no'] == 2
         assert agent['attributes']['nexent.invocation_id'] == child_invocations[agent['id']]
         assert agent['attributes']['nexent.parent_invocation_id'] == root_invocation
         assert agent['model_call_count'] == 2 and agent['tool_call_count'] == 2
@@ -219,7 +221,36 @@ def test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry(ru
         leaves = [n for n in nodes.values() if n['parent_id'] == tools[0]['id']]
         assert len(leaves) == 1 and leaves[0]['name'] == 'capture_leaf'
     root = next(n for n in nodes.values() if n['parent_id'] is None)
+    assert root['agent_version_no'] == 3
+    assert all(n['agent_version_no'] is None for n in nodes.values() if n['kind'] != 'agent')
     assert root['model_call_count'] == 6 and root['tool_call_count'] == 6
+
+
+def test_capture_versions_are_frozen_per_execution_and_cold_read(runtime):
+    def reply(request, number, emit):
+        emit('<final_answer>done</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        for version, name in [(3, 'Historical'), (0, None), (None, None)]:
+            config = AgentConfig(name='root', agent_id=7, version_no=version, version_name=name,
+                                 description='Versioned Agent', model_name='model', tools=[], max_steps=2)
+            info, _ = runtime.run(base, config=config)
+            assert info.attempt_outcome == 'completed'
+            config.version_no = 99
+            config.version_name = 'Current'
+        assert len(requests) == 3
+    with runtime.client() as client:
+        rows = data(client.get('/trajectory/records', headers={'Authorization': 'admin'}))['items']
+        assert {row['root_agent_version_no'] for row in rows} == {3, 0, None}
+        for row in rows:
+            result = data(client.get('/trajectory/conversations/123/snapshot', headers={'Authorization': 'admin'},
+                                     params={'trajectory_id': row['trajectory_id']}))
+            root = next(n for n in result['nodes'] if n['parent_id'] is None)
+            assert root['agent_version_no'] == row['root_agent_version_no']
+            assert root['agent_version_name'] == ('Historical' if root['agent_version_no'] == 3 else None)
+    agents = [attrs(span) for span in runtime.spans() if span['name'] == 'agent.run']
+    assert {item.get('agent.version_no') for item in agents} == {'3', '0', None}
 
 
 @pytest.mark.parametrize('first_agent', [7, None])
@@ -250,7 +281,7 @@ def test_capture_root_switch_keeps_directory_and_native_context(runtime, first_a
         assert len(result['executions']) == 2
 
 
-@pytest.mark.parametrize('sink', ['otlp', 'local_file', 'both'])
+@pytest.mark.parametrize('sink', ['otlp', 'local_file'])
 @pytest.mark.parametrize('content_mode', ['summary', 'metrics', 'full'])
 def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_receiver, sink, content_mode):
     runtime.configure(sink, telemetry_receiver.endpoint, content_mode=content_mode)
@@ -286,10 +317,10 @@ def test_capture_actual_configuration_sinks_and_full_safety(runtime, telemetry_r
 
 
 @pytest.mark.parametrize('failed_sink', ['remote', 'local'])
-def test_capture_dual_sink_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, monkeypatch):
+def test_capture_selected_exporter_faults_do_not_retry_business(runtime, telemetry_receiver, failed_sink, monkeypatch):
     from infrastructure.observability.trajectory_store import RunWriter
 
-    runtime.configure('both', telemetry_receiver.endpoint)
+    runtime.configure('otlp' if failed_sink == 'remote' else 'local_file', telemetry_receiver.endpoint)
     if failed_sink == 'remote':
         telemetry_receiver.status = 503
     else:
@@ -306,9 +337,13 @@ def test_capture_dual_sink_faults_do_not_retry_business(runtime, telemetry_recei
         info, _ = runtime.run(base)
         assert info.attempt_outcome == 'completed' and len(requests) == 1
     runtime.flush_remote()
-    assert telemetry_receiver.requests
-    run = json.loads(next(runtime.root.rglob('meta.json')).read_text())['runs'][0]
-    assert run['capture_state'] == ('ready' if failed_sink == 'remote' else 'incomplete')
+    if failed_sink == 'remote':
+        assert telemetry_receiver.requests
+        assert not list(runtime.root.rglob('meta.json'))
+    else:
+        assert not telemetry_receiver.requests
+        run = json.loads(next(runtime.root.rglob('meta.json')).read_text())['runs'][0]
+        assert run['capture_state'] == 'incomplete'
 
 
 def test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read(runtime, telemetry_receiver):

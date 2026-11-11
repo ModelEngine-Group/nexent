@@ -10,7 +10,7 @@ import pytest
 from management.services.trajectory.access import Actor, authorize
 from management.services.trajectory.archive import Archive
 from management.services.trajectory.collection import records
-from management.services.trajectory.primitives import QueryError, TokenSigner
+from management.services.trajectory.primitives import QueryError, ReferenceStore
 from management.services.trajectory.service import TrajectoryService
 
 
@@ -47,7 +47,7 @@ def service():
     catalog.resolve.return_value = row
     catalog.names.return_value = {"t": "Tenant"}
     catalog.message_upper.return_value = 0
-    instance = TrajectoryService(Mock(), catalog, TokenSigner("a" * 32))
+    instance = TrajectoryService(Mock(), catalog, ReferenceStore())
     instance.archive = SimpleNamespace(
         manifest=Mock(return_value=meta),
         available=lambda run: Archive.available(instance.archive, run),
@@ -119,6 +119,28 @@ def test_model_and_child_id_filtering_empty_values(service):
     assert empty["total"] == 0
     assert empty["summary"]["duration"]["p50_ms"] is None
     assert empty["summary"]["ttft"]["sample_count"] == 0
+
+
+def test_list_projects_historical_root_version_not_child_or_current_agent(service):
+    original = service.load.side_effect
+
+    def load(*args):
+        nodes, root, coverage = original(*args)
+        nodes[0].update(agent_version_no=3, agent_version_name="Historical release")
+        nodes[1].update(agent_version_no=99, agent_version_name="not root")
+        return nodes, root, coverage
+
+    service.load.side_effect = load
+    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    assert all(row["root_agent_version_no"] == 3 for row in result["items"])
+    assert all(row["root_agent_version_name"] == "Historical release" for row in result["items"])
+    service.catalog.agent_names.assert_not_called()
+
+
+def test_old_archive_root_version_stays_unknown(service):
+    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    assert all(row["root_agent_version_no"] is None for row in result["items"])
+    assert all(row["root_agent_version_name"] is None for row in result["items"])
 
 
 @pytest.mark.parametrize("role", ["USER", "DEV", "SPEED", ""])

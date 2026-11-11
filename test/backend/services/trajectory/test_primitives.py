@@ -8,27 +8,8 @@ import pytest
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
 from infrastructure.observability.trajectory_reader import JSONReader, read_text
 from management.services.trajectory.primitives import (
-    QueryError,
-    TokenSigner,
     percentiles,
 )
-
-
-def test_token_scope_tampering_and_expiry():
-    signer = TokenSigner("a" * 32, clock=lambda: 100)
-    token = signer.sign("snapshot", {"actor": "admin", "conversation": "1"})
-    assert signer.verify(token, "snapshot", actor="admin")["conversation"] == "1"
-    for bad, kind, actor in [
-        (token + "x", "snapshot", "admin"),
-        (token, "content", "admin"),
-        (token, "snapshot", "other"),
-    ]:
-        with pytest.raises(QueryError):
-            signer.verify(bad, kind, actor=actor)
-    with pytest.raises(QueryError):
-        TokenSigner("a" * 32, clock=lambda: 4000).verify(
-            token, "snapshot", actor="admin"
-        )
 
 
 @pytest.mark.parametrize("ensure_ascii", [True, False])

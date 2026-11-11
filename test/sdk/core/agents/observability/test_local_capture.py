@@ -12,7 +12,7 @@ from opentelemetry import trace
 
 
 def test_local_tool_schema_and_call_identity_are_captured(spans, monkeypatch):
-    monkeypatch.setattr(spans.manager._config, 'trace_sink', 'local_file')
+    monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
     observer = MessageObserver()
     seen = []
     tool = SimpleNamespace(name='lookup', description='Tool definition', inputs={'query': {'type': 'string'}},
@@ -30,7 +30,7 @@ def test_local_tool_schema_and_call_identity_are_captured(spans, monkeypatch):
 @pytest.mark.parametrize('outcome,expected', [('completed', 'completed'), ('stopped', 'cancelled'), ('failed', 'failed')])
 def test_local_worker_preserves_business_outcome(spans, monkeypatch, outcome, expected):
     module = importlib.import_module('nexent.core.agents.run_agent')
-    monkeypatch.setattr(spans.manager._config, 'trace_sink', 'local_file')
+    monkeypatch.setattr(spans.manager._config, 'provider', 'local_file')
     info = SimpleNamespace(agent_config=None, query='q', model_config_list=[], history=[], attempt_outcome=None)
     monkeypatch.setattr(module, '_agent_run_thread', lambda run: setattr(run, 'attempt_outcome', outcome))
     module.agent_run_thread(info)

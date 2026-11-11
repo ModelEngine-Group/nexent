@@ -90,8 +90,8 @@ def payload(identity, run_id, start, finish):
 @pytest.fixture
 def files(tmp_path):
     private = tmp_path / "retention-owned"
-    root, root_id = private / "traces", str(uuid4())
-    TrajectoryFileStore.provision(root, root_id)
+    root = private / "traces"
+    TrajectoryFileStore.provision(root)
     owner = CaptureIdentity("tenant-a", "owner-a", "123", "42")
     other = CaptureIdentity("tenant-b", "owner-b", "456", "42")
     clock = [NOW]
@@ -108,7 +108,7 @@ def files(tmp_path):
             }
 
         return TrajectoryFileStore(
-            root, root_id, authorize=authorize, clock=lambda: clock[0]
+            root, authorize=authorize, clock=lambda: clock[0]
         )
 
     store = open_store()
@@ -160,7 +160,6 @@ def files(tmp_path):
     hashes = {path: digest(path) for path in resources}
     state = SimpleNamespace(
         root=root,
-        root_id=root_id,
         owner=owner,
         other=other,
         clock=clock,
@@ -191,7 +190,6 @@ def command(files, run, fault):
         sys.executable,
         str(WORKER),
         str(files.root),
-        files.root_id,
         json.dumps(asdict(files.owner)),
         run.id,
         timestamp(files.clock[0]),
@@ -217,9 +215,10 @@ def worker(files, run, fault, *, config=None):
         child_environment.update(
             {
                 "ENABLE_TELEMETRY": "true",
-                "MONITORING_TRACE_SINK": "local_file",
+                "MONITORING_PROVIDER": "local_file",
+                "TRAJECTORY_READ_ENABLED": "true",
                 "TRAJECTORY_ROOT_DIR": str(files.root),
-                "TRAJECTORY_STORAGE_ROOT_ID": files.root_id,
+
                 **config,
             }
         )

@@ -23,7 +23,7 @@ def cleanup(service, actor, before_days, cursor=None):
     authorize(service.catalog, actor, actor.tenant_id)
     binding = {"actor": actor.binding, "tenant": actor.tenant_id, "days": before_days}
     state = (
-        service.signer.verify(cursor, "cleanup", **binding)
+        service.references.resolve(cursor, "cleanup", **binding)
         if cursor
         else {
             **binding,
@@ -118,7 +118,7 @@ def cleanup(service, actor, before_days, cursor=None):
         return {
             "cutoff_at": state["cutoff"],
             **result,
-            "next_cursor": service.signer.sign("cleanup", next_state)
+            "next_cursor": service.references.issue("cleanup", next_state)
             if next_state
             else None,
             "done": next_state is None,

@@ -675,17 +675,12 @@ disable_dashboard() {
 }
 
 docker_monitoring_active_services() {
+  [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ] || return 0
   printf '%s\n' otel-collector
 
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
     phoenix)
       printf '%s\n' phoenix
-      ;;
-    grafana)
-      printf '%s\n' tempo grafana
-      ;;
-    zipkin)
-      printf '%s\n' zipkin
       ;;
     langfuse)
       printf '%s\n' langfuse-worker langfuse-web langfuse-clickhouse langfuse-minio langfuse-redis langfuse-postgres
@@ -696,9 +691,6 @@ docker_monitoring_active_services() {
 docker_monitoring_profile_services() {
   printf '%s\n' \
     phoenix \
-    tempo \
-    grafana \
-    zipkin \
     langfuse-worker \
     langfuse-web \
     langfuse-clickhouse \
@@ -711,9 +703,6 @@ docker_monitoring_container_names() {
   printf '%s\n' \
     nexent-otel-collector \
     nexent-phoenix \
-    nexent-tempo \
-    nexent-grafana \
-    nexent-zipkin \
     nexent-langfuse-worker \
     nexent-langfuse-web \
     nexent-langfuse-clickhouse \
@@ -737,7 +726,7 @@ docker_monitoring_containers_exist() {
 }
 
 stop_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
 
   [ -f "$COMPOSE_DIR/docker-compose-monitoring.yml" ] || return 0
   docker_monitoring_containers_exist || return 0
@@ -750,7 +739,7 @@ stop_monitoring_services() {
 }
 
 cleanup_stale_monitoring_services() {
-  local all_profile_args=(--profile phoenix --profile grafana --profile zipkin --profile langfuse)
+  local all_profile_args=(--profile phoenix --profile langfuse)
   local active_services
   local service
   local stale_services=()
@@ -1328,7 +1317,7 @@ deploy_infrastructure() {
 }
 
 deploy_monitoring() {
-  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+  if ! deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" || [ "$DEPLOYMENT_MONITORING_PROVIDER" = "local_file" ]; then
     stop_monitoring_services || return 1
     return 0
   fi
@@ -1345,7 +1334,7 @@ deploy_monitoring() {
 
   local profile_args=()
   case "$DEPLOYMENT_MONITORING_PROVIDER" in
-    phoenix|grafana|zipkin|langfuse)
+    phoenix|langfuse)
       profile_args+=(--profile "$DEPLOYMENT_MONITORING_PROVIDER")
       ;;
   esac

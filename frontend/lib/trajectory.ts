@@ -148,10 +148,5 @@ export function recordKey(row: {
   conversation_id: string;
   trajectory_id: string | null;
 }): string {
-  return JSON.stringify([
-    row.tenant_id,
-    row.user_id,
-    row.conversation_id,
-    row.trajectory_id,
-  ]);
+  return JSON.stringify([row.tenant_id, row.user_id, row.conversation_id]);
 }

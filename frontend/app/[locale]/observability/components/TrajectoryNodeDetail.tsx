@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { BodyCache, formatMetric, formatTraceTime } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 import { TrajectoryBody } from "./TrajectoryBody";
+import { AgentVersion } from "./AgentVersion";
 
 export function TrajectoryNodeDetail({
   node,
@@ -63,6 +64,15 @@ export function TrajectoryNodeDetail({
     <div className="trajectory-node-detail" ref={container}>
       <header>
         <h2>{node.name}</h2>
+        {node.kind === "agent" && (
+          <Tag>
+            {t("trajectory.agentVersion")}:{" "}
+            <AgentVersion
+              version={node.agent_version_no}
+              name={node.agent_version_name}
+            />
+          </Tag>
+        )}
         <Tag
           color={
             node.kind === "agent"

@@ -27,17 +27,17 @@ class TrajectoryService:
         self,
         store,
         catalog,
-        signer,
+        references,
         *,
         max_bytes=256 * 1024 * 1024,
-        seconds=8,
+        seconds=30,
         max_candidates=10_000,
         source_query=None,
     ):
-        self.archive, self.catalog, self.signer = (
+        self.archive, self.catalog, self.references = (
             Archive(store, source_query=source_query),
             catalog,
-            signer,
+            references,
         )
         self.max_bytes, self.seconds, self.max_candidates = (
             max_bytes,
@@ -128,7 +128,7 @@ class TrajectoryService:
         }
 
     def _validate(self, actor, row, token, kind, meta):
-        data = self.signer.verify(
+        data = self.references.resolve(
             token,
             kind,
             actor=actor.binding,
@@ -211,7 +211,7 @@ class TrajectoryService:
             "byte_count": value.byte_count,
             "char_count": value.char_count,
             "complete": len(value.encode()) == value.byte_count,
-            "content_id": self.signer.sign("content", data),
+            "content_id": self.references.issue("content", data),
         }
 
     def _dto(self, actor, row, meta, run, node):
@@ -299,7 +299,7 @@ class TrajectoryService:
         current = self.archive.manifest(self.recheck(actor, row))
         self.archive.run(current, trajectory_id, state)
         return {
-            "snapshot_id": self.signer.sign("snapshot", state),
+            "snapshot_id": self.references.issue("snapshot", state),
             "conversation_id": conversation_id,
             "trace_id": conversation_id,
             "trajectory_id": trajectory_id,
@@ -308,7 +308,9 @@ class TrajectoryService:
             "context_nodes": [
                 n for key, n in context.items() if key not in selected_ids
             ],
-            "next_cursor": self.signer.sign("nodes", {**state, "position": position})
+            "next_cursor": self.references.issue(
+                "nodes", {**state, "position": position}
+            )
             if position < len(ordered)
             else None,
             "coverage": coverage,
@@ -331,6 +333,7 @@ class TrajectoryService:
         include=None,
         message_cursor=None,
         snapshot_id=None,
+        query_id=None,
     ):
         if not 1 <= limit <= 200 or include not in (None, "messages"):
             raise QueryError("invalid_parameters")
@@ -346,11 +349,37 @@ class TrajectoryService:
                 "message_upper": self.catalog.message_upper(conversation_id),
             }
         )
+        if query_id and not reference:
+            query = self.references.resolve(query_id, "query", actor=actor.binding)
+            cached = self.queries.get(query["query"])
+            if cached is None:
+                raise QueryError("snapshot_reset", 409)
+            member = next(
+                (
+                    item
+                    for item in cached["members"]
+                    if all(
+                        item[key] == row[key]
+                        for key in ("tenant_id", "user_id", "conversation_id")
+                    )
+                ),
+                None,
+            )
+            if member is None or cached.get("view") != "conversation":
+                raise QueryError("invalid_reference")
+            if member["cleanup"] != (meta or {}).get("cleanup_version", 0):
+                raise QueryError("snapshot_reset", 409)
+            state.update(
+                publication=member["publication"],
+                run_ids=member["runs"],
+                matching_runs=member["matching_runs"],
+            )
         after = state.get("run_after", 0)
         runs = [
             run
             for run in (meta or {}).get("runs", [])
             if run["turn_no"] > after
+            and ("run_ids" not in state or run["trajectory_id"] in state["run_ids"])
             and (run.get("publication_no") or state["publication"] + 1)
             <= state["publication"]
         ]
@@ -363,6 +392,9 @@ class TrajectoryService:
                     "turn_id",
                     "turn_no",
                     "root_agent_id",
+                    "root_agent_version_no",
+                    "root_agent_version_name",
+                    "cleanup_reason",
                     "core_type",
                     "started_at",
                     "finished_at",
@@ -372,12 +404,17 @@ class TrajectoryService:
                     "source_message_id",
                 )
             }
-            | {"availability": self.archive.available(run)}
+            | {
+                "availability": self.archive.available(run),
+                "round_no": run["turn_no"],
+                "matches_filters": run["trajectory_id"]
+                in state.get("matching_runs", [run["trajectory_id"]]),
+            }
             for run in runs[:limit]
         ]
         availability = self.conversation_availability(meta, state["publication"])
         result = {
-            "snapshot_id": self.signer.sign("conversation", state),
+            "snapshot_id": self.references.issue("conversation", state),
             "conversation_id": conversation_id,
             "trace_id": conversation_id,
             "conversation_title": row["conversation_title"],
@@ -388,7 +425,7 @@ class TrajectoryService:
                 for r in (meta or {}).get("runs", [])
                 if r.get("publication_no") is None
             ),
-            "next_cursor": self.signer.sign(
+            "next_cursor": self.references.issue(
                 "runs", {**state, "run_after": runs[limit - 1]["turn_no"]}
             )
             if len(runs) > limit
@@ -413,12 +450,12 @@ class TrajectoryService:
                 result["messages"].append(
                     {k: v for k, v in message.items() if k != "hash"}
                     | {
-                        "content_id": self.signer.sign("content", data),
+                        "content_id": self.references.issue("content", data),
                         "complete": len(message["preview"]) == message["char_count"],
                     }
                 )
             result["message_cursor"] = (
-                self.signer.sign(
+                self.references.issue(
                     "messages",
                     {**state, "message_after": messages[limit - 1]["message_id"]},
                 )
@@ -467,7 +504,7 @@ class TrajectoryService:
             or not 4 <= limit <= 1024 * 1024
         ):
             raise QueryError("invalid_content_range")
-        state = self.signer.verify(content_id, "content", actor=actor.binding)
+        state = self.references.resolve(content_id, "content", actor=actor.binding)
         if state.get("conversation") != conversation_id:
             raise QueryError("trajectory_not_found", 404)
         if state.get("field") not in {"input", "output", "reasoning", "raw", "chat"}:

@@ -5,6 +5,8 @@ implementations:
   file: test.py
   selector: test_trj_query
 acceptance_bindings:
+  AC-08:
+  - test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed
   AC-01:
   - test_trj_query_existing_directory_admin_branch_and_user_reuse
   - test_trj_query_storage_states_and_tenant_migration
@@ -38,16 +40,20 @@ acceptance_bindings:
   - test_trj_query_facets_and_only_declared_trajectory_routes
   - test_trj_query_complete_subtree_and_static_node_paging
   - test_trj_query_expiry_rechecks_cached_records_and_content
+  AC-09:
+  - test_trj_query_whole_result_metrics_filters_and_stable_membership
 preparation:
   families: []
   anchors: false
   special_assets: false
   d4_groups: []
-notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and product OTLP file storage/reader. Only PG authority/catalog
-  and existing unrelated directory services are controlled; no live PG, provider or deployed multiworker proof is claimed. Each fixture owns its
-  temporary root and TestClient, shuts down the managed workers in finally and asserts zero active workers. No shared preparation family, deployment,
-  browser or business asset is required.
-  The after-read content transition variants invoke the actual decoder before controlled
-  expiry, real local cleanup or catalog membership revocation. Final HTTP responses must
-  reject that already-read chunk without a success body. These assertions are prepared;
-  their current execution remains deferred by the user.
+notes: Self-contained HTTP contract with actual FastAPI routing, ThreadManager and
+  product OTLP file storage/reader. Only PG authority/catalog and existing unrelated
+  directory services are controlled; no live PG, provider or deployed multiworker
+  proof is claimed. Each fixture owns its temporary root and TestClient, shuts down
+  the managed workers in finally and asserts zero active workers. No shared preparation
+  family, deployment, browser or business asset is required. The after-read content
+  transition variants invoke the actual decoder before controlled expiry, real local
+  cleanup or catalog membership revocation. Final HTTP responses must reject that
+  already-read chunk without a success body. These assertions are prepared; their
+  current execution remains deferred by the user.

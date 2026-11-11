@@ -15,7 +15,7 @@ from infrastructure.observability.trajectory_store import (
     TrajectoryFileStore,
 )
 from management.api.observability import trajectory as api
-from management.services.trajectory.primitives import QueryError, TokenSigner
+from management.services.trajectory.primitives import QueryError, ReferenceStore
 from management.services.trajectory.service import TrajectoryService
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
@@ -144,8 +144,7 @@ class Catalog:
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
     now = [datetime.now(UTC)]
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     catalog = Catalog()
 
     def authorize(identity):
@@ -156,9 +155,9 @@ def harness(tmp_path, monkeypatch):
         )
 
     store = TrajectoryFileStore(
-        tmp_path, root_id, authorize=authorize, clock=lambda: now[0]
+        tmp_path, authorize=authorize, clock=lambda: now[0]
     )
-    service = TrajectoryService(store, catalog, TokenSigner("query-test-key-" * 4))
+    service = TrajectoryService(store, catalog, ReferenceStore())
     manager = ThreadManager(
         "trajectory-http-fixture",
         {
@@ -222,7 +221,6 @@ def harness(tmp_path, monkeypatch):
         root=tmp_path,
         now=now,
         app=app,
-        root_id=root_id,
     )
 
     def add_conversation(

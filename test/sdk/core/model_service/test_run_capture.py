@@ -13,7 +13,7 @@ from nexent.monitor.run_capture import capture_run_input, capture_run_result
 
 def manager(sink="local_file"):
     return SimpleNamespace(
-        is_enabled=True, _config=SimpleNamespace(export_traces=True, trace_sink=sink)
+        is_enabled=True, _config=SimpleNamespace(export_traces=True, provider=sink)
     )
 
 
@@ -26,6 +26,8 @@ def test_root_input_captures_authorized_context_and_detaches_configuration():
         model_name="model",
         max_steps=3,
         prompt_templates={"system": "完整提示词"},
+        agent_id=7,
+        version_no=0,
     )
     model = ModelConfig(
         cite_name="model",
@@ -46,6 +48,7 @@ def test_root_input_captures_authorized_context_and_detaches_configuration():
     values = span.set_attributes.call_args.args[0]
     body = json.loads(values["nexent.local.input.value"])
     assert body["effective_config"]["agent_config"]["max_steps"] == 3
+    assert body["effective_config"]["agent_config"]["version_no"] == 0
     assert body["context"]["history"][0]["content"] == "authorized history"
     assert "完整提示词" in values["nexent.local.input.value"]
     assert "credential" not in values["nexent.local.input.value"]

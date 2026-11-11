@@ -130,8 +130,6 @@ def test_fractional_second_range_compares_instants():
 def test_read_configuration_is_independent_and_shared_per_process(
     tmp_path, monkeypatch
 ):
-    from uuid import uuid4
-
     from contracts.constants import environment
     from infrastructure.observability.trajectory_store import TrajectoryFileStore
     from management.services.trajectory import runtime
@@ -141,32 +139,31 @@ def test_read_configuration_is_independent_and_shared_per_process(
     monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", False)
     with pytest.raises(QueryError, match="trajectory_read_disabled"):
         runtime.get_service()
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     monkeypatch.setattr(environment, "ENABLE_TELEMETRY", False)
     monkeypatch.setattr(environment, "TRAJECTORY_READ_ENABLED", True)
-    monkeypatch.setattr(environment, "TRAJECTORY_SIGNING_KEY", "a" * 32)
     monkeypatch.setattr(environment, "TRAJECTORY_ROOT_DIR", str(tmp_path))
-    monkeypatch.setattr(environment, "TRAJECTORY_STORAGE_ROOT_ID", root_id)
     service = runtime.get_service()
     assert service is runtime.get_service()
     assert service.max_bytes == environment.TRAJECTORY_QUERY_MAX_BYTES
-    assert service.seconds == environment.TRAJECTORY_QUERY_TIMEOUT_SECONDS
+    assert service.seconds == 30
     assert service.max_candidates == environment.TRAJECTORY_QUERY_MAX_CANDIDATES
     monkeypatch.setattr(runtime, "_service", None)
-    monkeypatch.setattr(environment, "TRAJECTORY_SIGNING_KEY", "short")
-    with pytest.raises(QueryError, match="trajectory_configuration_invalid"):
-        runtime.get_service()
+    fresh = runtime.get_service()
+    assert fresh is not service
+    reference = service.references.issue("snapshot", {"actor": "admin"})
+    with pytest.raises(QueryError, match="invalid_reference"):
+        fresh.references.resolve(reference, "snapshot")
 
 
 @pytest.mark.parametrize(
     "availability", ["not_captured", "serialization_failed", "redacted"]
 )
 def test_missing_body_preserves_capture_availability(availability):
-    from management.services.trajectory.primitives import TokenSigner
+    from management.services.trajectory.primitives import ReferenceStore
     from management.services.trajectory.service import TrajectoryService
 
-    service = TrajectoryService(Mock(), Mock(), TokenSigner("a" * 32))
+    service = TrajectoryService(Mock(), Mock(), ReferenceStore())
     body = service._body(
         None,
         None,

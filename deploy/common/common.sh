@@ -40,7 +40,7 @@ deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
 deployment_sandbox_mode_list="disabled lightweight full"
 deployment_registry_profile_list="general mainland"
-deployment_monitoring_provider_list="otlp phoenix langfuse langsmith grafana zipkin"
+deployment_monitoring_provider_list="local_file otlp phoenix langfuse langsmith"
 
 deployment_locale_value_is_zh() {
   local value="$1"
@@ -152,12 +152,11 @@ deployment_i18n_format() {
       tui.monitoring.subtitle) printf '仅在选择 monitoring 组件时使用。' ;;
       tui.monitoring.description) printf 'Provider 决定 OpenTelemetry traces 的存储和查看位置。' ;;
       tui.radio.help) printf '使用 Up/Down 或 j/k 移动，Enter 确认，b/Backspace 返回，q 退出。' ;;
+      tui.monitoring.local_file) printf '本地轨迹文件及内置查看页面' ;;
       tui.monitoring.otlp) printf '仅 Collector；用于转发到外部 OTLP 后端' ;;
       tui.monitoring.phoenix) printf '本地 Phoenix UI，用于查看 LLM traces 和 span' ;;
       tui.monitoring.langfuse) printf '本地自托管 Langfuse；生产环境请替换默认密钥' ;;
       tui.monitoring.langsmith) printf '转发 traces 到托管 LangSmith；需要 LANGSMITH_API_KEY' ;;
-      tui.monitoring.grafana) printf '本地 Grafana + Tempo traces 看板' ;;
-      tui.monitoring.zipkin) printf '本地 Zipkin trace 浏览 UI' ;;
       tui.https.title) printf '选择 HTTPS 模式' ;;
       tui.https.subtitle) printf '启用 HTTPS 后会额外安装一个 Nginx 反向代理容器，在独立端口终结 TLS（Docker %s / K8s %s）；原 HTTP 入口保持不变。端口可通过 NEXENT_WEB_PORT / NEXENT_HTTPS_PORT 修改。' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
       tui.https.description) printf '自签证书自动生成（SAN 自动探测，无需输入）；custom 模式使用你自己的证书与私钥。' ;;
@@ -247,12 +246,11 @@ deployment_i18n_format() {
       tui.monitoring.subtitle) printf 'This is used only when the monitoring component is selected.' ;;
       tui.monitoring.description) printf 'Provider controls where OpenTelemetry traces are stored and viewed.' ;;
       tui.radio.help) printf 'Use Up/Down or j/k to move, Enter to confirm, b/Backspace to go back, q to quit.' ;;
+      tui.monitoring.local_file) printf 'local trajectory files and built-in viewer' ;;
       tui.monitoring.otlp) printf 'collector only; use this when forwarding to an external OTLP backend' ;;
       tui.monitoring.phoenix) printf 'local Phoenix UI for LLM traces and span inspection' ;;
       tui.monitoring.langfuse) printf 'local self-hosted Langfuse stack; replace default secrets for production' ;;
       tui.monitoring.langsmith) printf 'forward traces to hosted LangSmith; requires LANGSMITH_API_KEY' ;;
-      tui.monitoring.grafana) printf 'local Grafana + Tempo dashboard for traces' ;;
-      tui.monitoring.zipkin) printf 'local Zipkin UI for trace browsing' ;;
       tui.https.title) printf 'Select HTTPS mode' ;;
       tui.https.subtitle) printf 'Enabling HTTPS installs an extra Nginx reverse-proxy container that terminates TLS on a dedicated port (Docker %s / K8s %s); the plain HTTP entry stays unchanged. Ports can be changed via NEXENT_WEB_PORT / NEXENT_HTTPS_PORT.' "${NEXENT_HTTPS_PORT:-3100}" "${NEXENT_HTTPS_PORT:-31000}" ;;
       tui.https.description) printf 'Self-signed certificates are generated automatically (SAN auto-detected, no input needed); custom mode uses your own certificate and key.' ;;
@@ -766,16 +764,15 @@ deployment_monitoring_collector_config_file() {
     langsmith)
       config_name="otel-collector-langsmith-config.yml"
       ;;
-    grafana)
-      config_name="otel-collector-grafana-config.yml"
-      ;;
-    zipkin)
-      config_name="otel-collector-zipkin-config.yml"
+    local_file)
+      config_name=""
       ;;
     otlp|*)
       config_name="otel-collector-config.yml"
       ;;
   esac
+
+  [ -n "$config_name" ] || return 0
 
   case "$target" in
     docker)
@@ -824,6 +821,10 @@ deployment_prepare_monitoring_env() {
 
   deployment_update_monitoring_env_var "ENABLE_TELEMETRY" "$telemetry_enabled"
   deployment_update_monitoring_env_var "MONITORING_PROVIDER" "$provider"
+  if [ "$provider" = "local_file" ]; then
+    deployment_update_monitoring_env_var "TRAJECTORY_READ_ENABLED" "true"
+    deployment_update_monitoring_env_var "MONITORING_DASHBOARD_URL" ""
+  fi
 
   deployment_source_env_file "$env_file"
   existing_dashboard_url="$(deployment_get_env_var_file "$env_file" "MONITORING_DASHBOARD_URL" 2>/dev/null || true)"
@@ -1526,14 +1527,13 @@ deployment_tui_select_monitoring_provider() {
   [ -n "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && return 0
   [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
 
-  local providers=(otlp phoenix langfuse langsmith grafana zipkin)
+  local providers=(local_file otlp phoenix langfuse langsmith)
   local details=(
+    "$(deployment_i18n tui.monitoring.local_file)"
     "$(deployment_i18n tui.monitoring.otlp)"
     "$(deployment_i18n tui.monitoring.phoenix)"
     "$(deployment_i18n tui.monitoring.langfuse)"
     "$(deployment_i18n tui.monitoring.langsmith)"
-    "$(deployment_i18n tui.monitoring.grafana)"
-    "$(deployment_i18n tui.monitoring.zipkin)"
   )
   local cursor=0
   local i key key_tail
@@ -2140,9 +2140,8 @@ deployment_compute_docker_ports() {
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     case "$DEPLOYMENT_MONITORING_PROVIDER" in
+      local_file) ;;
       phoenix) ports+=(6006) ;;
-      grafana) ports+=(30006) ;;
-      zipkin) ports+=(9411) ;;
       langfuse) ports+=(30011) ;;
       otlp|langsmith|*) ports+=(4318) ;;
     esac
@@ -2237,9 +2236,6 @@ deployment_apply_image_source() {
 
   export OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.151.0}"
   export PHOENIX_IMAGE="${PHOENIX_IMAGE:-arizephoenix/phoenix:15}"
-  export TEMPO_IMAGE="${TEMPO_IMAGE:-grafana/tempo:2.10.5}"
-  export GRAFANA_IMAGE="${GRAFANA_IMAGE:-grafana/grafana:12.4}"
-  export ZIPKIN_IMAGE="${ZIPKIN_IMAGE:-openzipkin/zipkin:latest}"
   export LANGFUSE_WORKER_IMAGE="${LANGFUSE_WORKER_IMAGE:-docker.io/langfuse/langfuse-worker:3}"
   export LANGFUSE_WEB_IMAGE="${LANGFUSE_WEB_IMAGE:-docker.io/langfuse/langfuse:3}"
   export CLICKHOUSE_IMAGE="${CLICKHOUSE_IMAGE:-docker.io/clickhouse/clickhouse-server:26.3-alpine}"
@@ -2262,9 +2258,6 @@ deployment_apply_image_source() {
       OPENSSH_SERVER_IMAGE \
       OTEL_COLLECTOR_IMAGE \
       PHOENIX_IMAGE \
-      TEMPO_IMAGE \
-      GRAFANA_IMAGE \
-      ZIPKIN_IMAGE \
       LANGFUSE_WORKER_IMAGE \
       LANGFUSE_WEB_IMAGE \
       CLICKHOUSE_IMAGE \
@@ -2299,23 +2292,11 @@ deployment_monitoring_dashboard_url() {
     docker:langfuse)
       printf 'http://localhost:%s' "${LANGFUSE_PORT:-3001}"
       ;;
-    docker:grafana)
-      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${GRAFANA_PORT:-3002}"
-      ;;
-    docker:zipkin)
-      printf 'http://localhost:%s' "${ZIPKIN_PORT:-9411}"
-      ;;
     k8s:phoenix|helm:phoenix)
       printf 'http://localhost:%s' "${K8S_PHOENIX_NODE_PORT:-30006}"
       ;;
     k8s:langfuse|helm:langfuse)
       printf 'http://localhost:%s' "${K8S_LANGFUSE_NODE_PORT:-30001}"
-      ;;
-    k8s:grafana|helm:grafana)
-      printf 'http://localhost:%s/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1' "${K8S_GRAFANA_NODE_PORT:-30002}"
-      ;;
-    k8s:zipkin|helm:zipkin)
-      printf 'http://localhost:%s' "${K8S_ZIPKIN_NODE_PORT:-30011}"
       ;;
     *:langsmith)
       printf 'https://smith.langchain.com/'
@@ -2347,9 +2328,6 @@ deployment_render_docker_env() {
     printf 'OPENSSH_SERVER_IMAGE="%s"\n' "$OPENSSH_SERVER_IMAGE"
     printf 'OTEL_COLLECTOR_IMAGE="%s"\n' "$OTEL_COLLECTOR_IMAGE"
     printf 'PHOENIX_IMAGE="%s"\n' "$PHOENIX_IMAGE"
-    printf 'TEMPO_IMAGE="%s"\n' "$TEMPO_IMAGE"
-    printf 'GRAFANA_IMAGE="%s"\n' "$GRAFANA_IMAGE"
-    printf 'ZIPKIN_IMAGE="%s"\n' "$ZIPKIN_IMAGE"
     printf 'LANGFUSE_WORKER_IMAGE="%s"\n' "$LANGFUSE_WORKER_IMAGE"
     printf 'LANGFUSE_WEB_IMAGE="%s"\n' "$LANGFUSE_WEB_IMAGE"
     printf 'CLICKHOUSE_IMAGE="%s"\n' "$CLICKHOUSE_IMAGE"
@@ -2575,6 +2553,8 @@ deployment_render_helm_monitoring_global_values() {
   printf '    traceContentMode: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_CONTENT_MODE "full")")"
   printf '    traceMaxChars: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_CHARS "4000")")"
   printf '    traceMaxItems: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_TRACE_MAX_ITEMS "20")")"
+  printf '    trajectoryRootDir: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TRAJECTORY_ROOT_DIR "/mnt/nexent-data/trajectory")")"
+  printf '    trajectoryReadEnabled: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value TRAJECTORY_READ_ENABLED "false")")"
 }
 
 deployment_render_monitoring_image_value() {
@@ -2594,9 +2574,6 @@ deployment_render_helm_monitoring_chart_values() {
   local langfuse_nextauth_url
   local otel_collector_tag
   local phoenix_tag
-  local tempo_tag
-  local grafana_tag
-  local zipkin_tag
   local langfuse_tag
   local clickhouse_tag
   local minio_tag
@@ -2606,9 +2583,6 @@ deployment_render_helm_monitoring_chart_values() {
   langfuse_nextauth_url="$(deployment_monitoring_env_value K8S_LANGFUSE_NEXTAUTH_URL "http://localhost:${K8S_LANGFUSE_NODE_PORT:-30001}")"
   otel_collector_tag="$(deployment_monitoring_env_value OTEL_COLLECTOR_VERSION "0.151.0")"
   phoenix_tag="$(deployment_monitoring_env_value PHOENIX_VERSION "15")"
-  tempo_tag="$(deployment_monitoring_env_value TEMPO_VERSION "2.10.5")"
-  grafana_tag="$(deployment_monitoring_env_value GRAFANA_VERSION "12.4")"
-  zipkin_tag="$(deployment_monitoring_env_value ZIPKIN_VERSION "latest")"
   langfuse_tag="$(deployment_monitoring_env_value LANGFUSE_VERSION "3")"
   clickhouse_tag="$(deployment_monitoring_env_value LANGFUSE_CLICKHOUSE_VERSION "26.3-alpine")"
   minio_tag="$(deployment_monitoring_env_value LANGFUSE_MINIO_VERSION "RELEASE.2023-12-20T01-00-02Z")"
@@ -2621,9 +2595,6 @@ deployment_render_helm_monitoring_chart_values() {
   printf '  images:\n'
   deployment_render_monitoring_image_value otelCollector otel/opentelemetry-collector-contrib "$otel_collector_tag"
   deployment_render_monitoring_image_value phoenix arizephoenix/phoenix "$phoenix_tag"
-  deployment_render_monitoring_image_value tempo grafana/tempo "$tempo_tag"
-  deployment_render_monitoring_image_value grafana grafana/grafana "$grafana_tag"
-  deployment_render_monitoring_image_value zipkin openzipkin/zipkin "$zipkin_tag"
   deployment_render_monitoring_image_value langfuseWeb docker.io/langfuse/langfuse "$langfuse_tag"
   deployment_render_monitoring_image_value langfuseWorker docker.io/langfuse/langfuse-worker "$langfuse_tag"
   deployment_render_monitoring_image_value clickhouse docker.io/clickhouse/clickhouse-server "$clickhouse_tag"
@@ -2644,20 +2615,6 @@ deployment_render_helm_monitoring_chart_values() {
   printf '    service:\n'
   printf '      port: %s\n' "$(deployment_monitoring_env_value PHOENIX_PORT "6006")"
   printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_PHOENIX_NODE_PORT "30006")"
-  printf '  grafana:\n'
-  printf '    adminUser: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_USER "admin")")"
-  printf '    adminPassword: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_ADMIN_PASSWORD "nexent@4321")")"
-  printf '    defaultLanguage: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value GRAFANA_DEFAULT_LANGUAGE "zh-Hans")")"
-  printf '    service:\n'
-  printf '      port: %s\n' "$(deployment_monitoring_env_value GRAFANA_PORT "3002")"
-  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_GRAFANA_NODE_PORT "30002")"
-  printf '  tempo:\n'
-  printf '    service:\n'
-  printf '      port: %s\n' "$(deployment_monitoring_env_value TEMPO_PORT "3200")"
-  printf '  zipkin:\n'
-  printf '    service:\n'
-  printf '      port: %s\n' "$(deployment_monitoring_env_value ZIPKIN_PORT "9411")"
-  printf '      nodePort: %s\n' "$(deployment_monitoring_env_value K8S_ZIPKIN_NODE_PORT "30011")"
   printf '  langfuse:\n'
   printf '    nextauthUrl: %s\n' "$(deployment_yaml_quote "$langfuse_nextauth_url")"
   printf '    nextauthSecret: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value LANGFUSE_NEXTAUTH_SECRET "nexent-langfuse-secret")")"

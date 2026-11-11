@@ -322,6 +322,10 @@ class AgentConfig(BaseModel):
         description="Resolved immutable Agent version used by this run",
         default=None,
     )
+    version_name: Optional[str] = Field(
+        description="Version label already resolved for this execution, when available",
+        default=None,
+    )
     invocation_name: Optional[str] = Field(
         description="Stable, unique callable name within the resolved Agent tree",
         default=None,

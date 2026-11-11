@@ -3,6 +3,7 @@
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
 import type {
   CleanupResult,
+  ConversationPage,
   ContentChunk,
   FacetPage,
   RecordsPage,
@@ -50,6 +51,24 @@ export const trajectoryService = {
         search,
         cursor,
         limit: 20,
+      }),
+      signal
+    ),
+  conversation: (
+    row: TrajectoryRecord,
+    params: {
+      cursor?: string;
+      snapshot_id?: string;
+      query_id?: string;
+      limit?: number;
+    },
+    signal?: AbortSignal
+  ) =>
+    read<ConversationPage>(
+      queryUrl(API_ENDPOINTS.trajectory.conversation(row.conversation_id), {
+        tenant_id: row.tenant_id,
+        target_user_id: row.user_id,
+        ...params,
       }),
       signal
     ),

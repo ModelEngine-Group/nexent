@@ -37,7 +37,7 @@ def directory(
         "group": group_key,
         "search": search.strip().casefold(),
     }
-    state = service.signer.verify(cursor, "directory", **binding) if cursor else binding
+    state = service.references.resolve(cursor, "directory", **binding) if cursor else binding
     rows = service.catalog.directory_page(
         tenant_id,
         target_user_id,
@@ -88,5 +88,5 @@ def directory(
         "items": [options[key][0] for key in selected],
         "included": [],
         "pinned": [],
-        "next_cursor": service.signer.sign("directory", {**binding, "after": checked_after}) if has_more else None,
+        "next_cursor": service.references.issue("directory", {**binding, "after": checked_after}) if has_more else None,
     }

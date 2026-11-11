@@ -6,7 +6,7 @@ from unittest.mock import Mock, call
 
 import pytest
 from management.services.trajectory.access import Actor
-from management.services.trajectory.primitives import QueryError, TokenSigner
+from management.services.trajectory.primitives import QueryError, ReferenceStore
 from management.services.trajectory.service import TrajectoryService
 
 ACTOR = Actor("admin", "tenant", "ADMIN")
@@ -25,13 +25,13 @@ def service():
         "user_name": "owner",
     }
     catalog.message_content.return_value = (b"answer", "initial-hash", 6, 6)
-    result = TrajectoryService(Mock(), catalog, TokenSigner("a" * 32))
+    result = TrajectoryService(Mock(), catalog, ReferenceStore())
     result.archive = SimpleNamespace(manifest=Mock(return_value=None))
     return result
 
 
 def content_id(service, expected_hash="initial-hash"):
-    return service.signer.sign(
+    return service.references.issue(
         "content",
         {
             "actor": ACTOR.binding,

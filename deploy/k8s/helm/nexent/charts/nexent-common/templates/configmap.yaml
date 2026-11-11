@@ -105,6 +105,8 @@ data:
   # Telemetry and Monitoring Configuration
   ENABLE_TELEMETRY: {{ ternary (get $monitoring "enabled") .Values.config.telemetry.enabled (hasKey $monitoring "enabled") | quote }}
   MONITORING_PROVIDER: {{ default .Values.config.telemetry.provider $monitoring.provider | quote }}
+  TRAJECTORY_ROOT_DIR: {{ default "/mnt/nexent-data/trajectory" $monitoring.trajectoryRootDir | quote }}
+  TRAJECTORY_READ_ENABLED: {{ ternary true (default false $monitoring.trajectoryReadEnabled) (eq (default "otlp" $monitoring.provider) "local_file") | quote }}
   MONITORING_PROJECT_NAME: {{ default .Values.config.telemetry.projectName $monitoring.projectName | quote }}
   OTEL_SERVICE_NAME: {{ default .Values.config.telemetry.serviceName $monitoring.serviceName | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ default .Values.config.telemetry.otlpEndpoint $monitoring.otlpEndpoint | quote }}
@@ -117,7 +119,7 @@ data:
   OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION: {{ default .Values.config.telemetry.otlpLangfuseIngestionVersion $monitoring.otlpLangfuseIngestionVersion | quote }}
   LANGSMITH_API_KEY: {{ default .Values.config.telemetry.langsmithApiKey $monitoring.langsmithApiKey | quote }}
   LANGSMITH_PROJECT: {{ default .Values.config.telemetry.langsmithProject $monitoring.langsmithProject | quote }}
-  OTEL_EXPORTER_OTLP_METRICS_ENABLED: {{ ternary (get $monitoring "otlpMetricsEnabled") .Values.config.telemetry.otlpMetricsEnabled (hasKey $monitoring "otlpMetricsEnabled") | quote }}
+  OTEL_EXPORTER_OTLP_METRICS_ENABLED: {{ ternary false (ternary (get $monitoring "otlpMetricsEnabled") .Values.config.telemetry.otlpMetricsEnabled (hasKey $monitoring "otlpMetricsEnabled")) (eq (default "otlp" $monitoring.provider) "local_file") | quote }}
   MONITORING_INSTRUMENT_REQUESTS: {{ ternary (get $monitoring "instrumentRequests") .Values.config.telemetry.instrumentRequests (hasKey $monitoring "instrumentRequests") | quote }}
   MONITORING_FASTAPI_INCLUDED_URLS: {{ default .Values.config.telemetry.fastapiIncludedUrls $monitoring.fastapiIncludedUrls | quote }}
   MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}

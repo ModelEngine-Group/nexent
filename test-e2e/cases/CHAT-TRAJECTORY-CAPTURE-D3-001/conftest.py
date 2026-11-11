@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
 from management.api.observability import trajectory as api
-from management.services.trajectory.primitives import TokenSigner
+from management.services.trajectory.primitives import ReferenceStore
 from management.services.trajectory.service import TrajectoryService
 from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
 from nexent.core.agents.run_agent import agent_run_thread
@@ -48,7 +48,6 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON
 
@@ -155,6 +154,14 @@ class Catalog:
     def user_active(self, tenant_id, user_id):
         return (tenant_id, user_id) == ('tenant', 'owner')
 
+    def names(self, tenants):
+        assert tenants == ['tenant']
+        return {'tenant': 'Controlled tenant'}
+
+    def candidates(self, tenants, *, target_user_id=None, conversation_id=None, limit):
+        assert limit > 0 and conversation_id in (None, '123')
+        return [self.resolve(tenants, '123', target_user_id=target_user_id)]
+
     def message_upper(self, conversation_id):
         return 0
 
@@ -169,7 +176,6 @@ class Catalog:
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     from nexent.core.agents import nexent_agent as agent_module
-    from nexent.monitor.span_processor import MonitoringSpanProcessor
 
     monkeypatch.setattr(SandboxPoolManager, '_instance', None)
     clients = []
@@ -182,9 +188,8 @@ def runtime(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent_module.NexentAgent, 'create_model', observed_model)
     directory = tmp_path.resolve()
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(directory, root_id)
-    store = TrajectoryFileStore(directory, root_id, authorize=lambda _: None)
+    TrajectoryFileStore.provision(directory)
+    store = TrajectoryFileStore(directory, authorize=lambda _: None)
     local = LocalTrajectoryProcessor(store, get_agent_monitoring_context)
     threads = ThreadManager('capture-fixture', {
         lane: LanePolicy(lane, 6, 8)
@@ -194,10 +199,9 @@ def runtime(tmp_path, monkeypatch):
     remote = InMemorySpanExporter()
     provider = TracerProvider(sampler=local.wrap_sampler(ALWAYS_ON), shutdown_on_exit=False)
     provider.add_span_processor(local)
-    provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(remote)))
     manager = MonitoringManager()
     previous = dict(manager.__dict__)
-    manager._config = MonitoringConfig(enable_telemetry=True, trace_sink='both', local_span_processor=local,
+    manager._config = MonitoringConfig(enable_telemetry=True, provider='local_file', local_span_processor=local,
                                        export_metrics=False, trace_max_chars=32)
     manager._tracer = provider.get_tracer('capture-fixture')
     local.start(threads, ManagedThreadSpec('trajectory-writer', 'capture-test', close_hook=local.request_stop))
@@ -228,7 +232,7 @@ def runtime(tmp_path, monkeypatch):
             patch.setattr(metrics, 'set_meter_provider', lambda value: None)
             patch.setattr(metrics, 'get_meter', lambda *a, **kw: manager._meter_provider.get_meter(*a, **kw))
             manager.configure(MonitoringConfig(
-                enable_telemetry=enabled, trace_sink=sink, local_span_processor=local,
+                enable_telemetry=enabled, provider=sink, local_span_processor=local,
                 export_metrics=False, instrument_requests=False, otlp_endpoint=endpoint,
                 trace_content_mode=content_mode, trace_max_chars=32,
             ))
@@ -243,7 +247,7 @@ def runtime(tmp_path, monkeypatch):
             models=None):
         current = active_provider[0]
         delegate = ALWAYS_ON if sampled else ALWAYS_OFF
-        current.sampler = local.wrap_sampler(delegate) if manager._config.trace_sink != 'otlp' else delegate
+        current.sampler = local.wrap_sampler(delegate) if manager._config.provider != 'otlp' else delegate
         manager._tracer = current.get_tracer('capture-fixture', str(uuid4()))
         observer = MessageObserver()
         observer.capture_first_output = threading.Event()
@@ -284,8 +288,8 @@ def runtime(tmp_path, monkeypatch):
     @contextmanager
     def cold_client():
         # A new store/service/cache must derive everything from the published files.
-        reader = TrajectoryFileStore(directory, root_id, authorize=lambda _: None)
-        service = TrajectoryService(reader, catalog, TokenSigner('capture-test-key-' * 4))
+        reader = TrajectoryFileStore(directory, authorize=lambda _: None)
+        service = TrajectoryService(reader, catalog, ReferenceStore())
         monkeypatch.setattr(api, 'get_service', lambda: service)
         monkeypatch.setattr(api, 'get_current_user_context',
                             lambda header: ('admin', 'tenant', 'ADMIN') if header == 'admin'
@@ -309,7 +313,7 @@ def runtime(tmp_path, monkeypatch):
         with errors.open('w') as stderr:
             process = subprocess.Popen(
                 [sys.executable, str(Path(__file__).with_name('reader.py')), '--root', str(directory),
-                 '--root-id', root_id, '--fd', str(listener.fileno())],
+                 '--fd', str(listener.fileno())],
                 pass_fds=(listener.fileno(),), stdout=subprocess.PIPE, stderr=stderr,
                 text=True, env=environment,
             )

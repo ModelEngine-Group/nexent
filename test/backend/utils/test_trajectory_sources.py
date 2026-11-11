@@ -17,11 +17,9 @@ from management.services.trajectory.service import TrajectoryService
 
 @pytest.fixture
 def linked(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     store = TrajectoryFileStore(
         tmp_path,
-        root_id,
         authorize=lambda _: None,
         clock=lambda: datetime(2026, 11, 1, tzinfo=UTC),
     )
@@ -80,6 +78,7 @@ def test_enabling_capture_after_first_message_does_not_claim_full_history(linked
     meta = run(linked, "20")
     assert not meta["captured_from_start"] and meta["has_uncaptured_history"]
     assert meta["source_history_gap"] is True
+    assert meta["latest_source_captured"] is True
 
 
 def test_missing_receipt_is_unlinked_and_does_not_query_source(linked):
@@ -112,6 +111,7 @@ def test_query_detects_new_uncaptured_message_without_rewriting_manifest(linked)
     source_query = Mock(return_value=["10", "20"])
     archive = Archive(linked.store, source_query=source_query)
     current = archive.manifest(linked.row)
+    assert current["latest_source_captured"] is False
     assert current["has_uncaptured_history"] and current["source_history_gap"]
     assert current["captured_from_start"] is True
     assert linked.store.manifest(linked.identity) == initial
@@ -126,6 +126,7 @@ def test_query_source_failure_preserves_archive_and_explains_unknown(linked):
     current = archive.manifest(linked.row)
     assert current["runs"][0]["capture_state"] == "ready"
     assert current["source_coverage_verified"] is False
+    assert current["latest_source_captured"] is None
     coverage = TrajectoryService.coverage(current)
     assert not coverage["complete"]
     assert "source_verification_unavailable" in coverage["reasons"]

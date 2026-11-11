@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CONVERSATION-20261111
+  change_type: requirement
+  requirement_id: CHAT-TRAJECTORY-CONVERSATION-20261111
+  title: 对齐可观测中心会话聚合及多轮详情
+  description: 依据最新设计补齐每会话一行、最新状态四态、累计指标及按执行顺序分页展示。
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-QUERY-D2-001
+    - CHAT-TRAJECTORY-JOURNEY-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 会话聚合、先最新状态后历史条件、未知与清理、快照固定和失效、旧执行视图兼容。
+    - 多轮依次追加、跨轮节点身份与时间轴、搜索相交、请求取消及缓存有界。
+    reason: 现有UT与D2覆盖执行级过滤、分页、授权；未覆盖会话聚合与跨轮追加。复用D2/D4责任边界，无需新增D1。
+    test_selectors:
+    - test/backend/services/trajectory/test_conversation_view.py
+    - test/backend/services/trajectory/test_collection.py
+    - test/backend/utils/test_trajectory_latest_execution.py
+    - test/backend/utils/test_trajectory_sources.py
+    - frontend/tests/component/trajectoryConversation.test.tsx
+    - frontend/tests/component/trajectoryComponents.test.tsx
+    - frontend/tests/component/trajectoryService.test.tsx
+    - frontend/tests/component/trajectoryHooks.test.tsx
+  notes: Baseline dev/trace 9d5cfc811 with existing uncommitted changes preserved.
+    Runtime responsibility inherited. D2 owns TestClient, managed workers and temporary
+    OTLP files; D4 owns browser context, routes and cookies; both release owned resources
+    in teardown and require no shared preparation families. User deferred formal runtime
+    acceptance.

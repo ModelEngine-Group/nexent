@@ -11,7 +11,7 @@ import pytest
 from infrastructure.observability.trajectory_io import TrajectoryConflict
 from management.services.trajectory.access import Actor
 from management.services.trajectory.cleanup import cleanup
-from management.services.trajectory.primitives import QueryError, TokenSigner
+from management.services.trajectory.primitives import QueryError, ReferenceStore
 
 ACTOR = Actor("admin", "tenant", "ADMIN")
 
@@ -47,7 +47,7 @@ def service(caplog):
     return SimpleNamespace(
         archive=SimpleNamespace(store=store, manifest=Mock(return_value={"runs": []})),
         catalog=catalog,
-        signer=TokenSigner("a" * 32),
+        references=ReferenceStore(),
         recheck=Mock(),
     )
 

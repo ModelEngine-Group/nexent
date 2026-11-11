@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from infrastructure.observability.trajectory_io import TrajectoryCorrupt
 from infrastructure.observability.trajectory_reader import Text
+from nexent.monitor.agent_version import valid_agent_version
 
 from .primitives import finite_number
 
@@ -29,6 +30,29 @@ def any_value(value):
 
 def attributes(items):
     return {str(item["key"]): any_value(item["value"]) for item in items}
+
+
+def agent_version(span, attrs):
+    """Decode OTLP int64 JSON without accepting a stringValue as a version."""
+    encoded = next(
+        (item.get("value", {}) for item in span.get("attributes", []) if item["key"] == "agent.version_no"),
+        {},
+    )
+    value = encoded.get("intValue")
+    if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 19:
+        value = int(value)
+    if not valid_agent_version(value):
+        availability = attrs.get("nexent.availability.agent_version_no", "not_captured") if not encoded else "invalid"
+        return None, None, {"nexent.availability.agent_version_no": availability}
+    name = next(
+        (
+            item.get("value", {}).get("stringValue")
+            for item in span.get("attributes", [])
+            if item["key"] == "agent.version_name"
+        ),
+        None,
+    )
+    return value, name if isinstance(name, str) and name.strip() else None, {}
 
 
 def native_id(span):
@@ -216,6 +240,9 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
             if span.get("parentSpanId")
             else None
         )
+        version_no, version_name, version_availability = (
+            agent_version(span, attrs) if kind == "agent" else (None, None, {})
+        )
         node = {
             "id": identity,
             "parent_id": attrs.get("nexent.parent_record_id"),
@@ -232,6 +259,8 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 or span.get("name", "")
             ),
             "status": str(status),
+            "agent_version_no": version_no,
+            "agent_version_name": version_name,
             "started_at": started,
             "finished_at": finished,
             "duration_ms": duration,
@@ -278,6 +307,7 @@ def build_nodes(requests, *, conversation_id, complete=True, check=lambda **_: N
                 if f"nexent.availability.{slot}" in attrs
             },
         }
+        node["attributes"].update(version_availability)
         nodes[identity] = node
     # Technical spans retain source ancestry but do not become Agent/model/tool calls.
     for node in nodes.values():

@@ -363,3 +363,12 @@
     padding: 8px;
   }
 }
+
+.trajectory-round-axis {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: #8c8c8c;
+  font-size: 9px;
+  font-weight: 400;
+}

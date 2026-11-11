@@ -4,49 +4,46 @@
 import json
 import runpy
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 from infrastructure.observability.trajectory_io import TrajectoryConflict
-from infrastructure.observability.trajectory_runtime import create_local_processor, main
+from infrastructure.observability.trajectory_runtime import create_local_processor
 from infrastructure.observability.trajectory_store import TrajectoryFileStore
 
 
 @pytest.mark.parametrize("mode", ["single_node", "shared_directory"])
 def test_registered_mode_is_idempotent_and_cannot_be_overwritten(tmp_path, mode):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id, storage_mode=mode)
+    TrajectoryFileStore.provision(tmp_path, storage_mode=mode)
     marker = tmp_path / ".storage-root.json"
     original = marker.read_bytes()
     assert json.loads(original)["storage_mode"] == mode
-    TrajectoryFileStore.provision(tmp_path, root_id, storage_mode=mode)
+    TrajectoryFileStore.provision(tmp_path, storage_mode=mode)
     assert marker.read_bytes() == original
     store = TrajectoryFileStore(
-        tmp_path, root_id, authorize=lambda _: None, storage_mode=mode
+        tmp_path, authorize=lambda _: None, storage_mode=mode
     )
     assert store.storage_mode == mode
     other = "single_node" if mode == "shared_directory" else "shared_directory"
     with pytest.raises(TrajectoryConflict):
-        TrajectoryFileStore.provision(tmp_path, root_id, storage_mode=other)
+        TrajectoryFileStore.provision(tmp_path, storage_mode=other)
     with pytest.raises(TrajectoryConflict):
         TrajectoryFileStore(
-            tmp_path, root_id, authorize=lambda _: None, storage_mode=other
+            tmp_path, authorize=lambda _: None, storage_mode=other
         )
     assert marker.read_bytes() == original
 
 
 def test_legacy_registration_is_single_node_and_is_not_silently_promoted(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     marker = tmp_path / ".storage-root.json"
-    marker.write_text(json.dumps({"schema_version": 1, "storage_root_id": root_id}))
+    marker.write_text(json.dumps({"schema_version": 1, "unused_legacy_marker": "ignored"}))
     original = marker.read_bytes()
-    store = TrajectoryFileStore(tmp_path, root_id, authorize=lambda _: None)
+    store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     assert store.storage_mode == "single_node"
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     with pytest.raises(TrajectoryConflict):
         TrajectoryFileStore(
-            tmp_path, root_id, authorize=lambda _: None, storage_mode="shared_directory"
+            tmp_path, authorize=lambda _: None, storage_mode="shared_directory"
         )
     assert marker.read_bytes() == original
 
@@ -54,20 +51,19 @@ def test_legacy_registration_is_single_node_and_is_not_silently_promoted(tmp_pat
 @pytest.mark.parametrize("mode", [None, "", "shared", "other", True])
 def test_invalid_mode_is_rejected_before_creating_registration(tmp_path, mode):
     with pytest.raises(ValueError, match="storage mode"):
-        TrajectoryFileStore.provision(tmp_path, str(uuid4()), storage_mode=mode)
+        TrajectoryFileStore.provision(tmp_path, storage_mode=mode)
     assert list(tmp_path.iterdir()) == []
 
 
 def test_each_root_open_rechecks_registered_mode(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    store = TrajectoryFileStore(tmp_path, root_id, authorize=lambda _: None)
+    TrajectoryFileStore.provision(tmp_path)
+    store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     marker = tmp_path / ".storage-root.json"
     marker.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "storage_root_id": root_id,
+                "unused_legacy_marker": "ignored",
                 "storage_mode": "shared_directory",
             }
         )
@@ -110,13 +106,13 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     from contracts.constants import environment
     from management.services.trajectory import runtime
 
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id, storage_mode="shared_directory")
+    TrajectoryFileStore.provision(tmp_path, storage_mode="shared_directory")
     values = {
         "ENABLE_TELEMETRY": True,
-        "MONITORING_TRACE_SINK": "local_file",
+        "TRAJECTORY_READ_ENABLED": True,
+        "MONITORING_PROVIDER": "local_file",
         "TRAJECTORY_ROOT_DIR": str(tmp_path),
-        "TRAJECTORY_STORAGE_ROOT_ID": root_id,
+
         "TRAJECTORY_STORAGE_MODE": "shared_directory",
         "TRAJECTORY_RETENTION_DAYS": 30,
         "TRAJECTORY_FLUSH_INTERVAL_MS": 200,
@@ -135,7 +131,7 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     for key, value in {
         **values,
         "TRAJECTORY_READ_ENABLED": True,
-        "TRAJECTORY_SIGNING_KEY": "a" * 32,
+
     }.items():
         monkeypatch.setattr(environment, key, value)
     monkeypatch.setattr(runtime, "_service", None)
@@ -147,24 +143,3 @@ def test_capture_maintenance_and_query_receive_the_same_mode(tmp_path, monkeypat
     with pytest.raises(QueryError) as raised:
         runtime.get_service()
     assert raised.value.status == 503 and raised.value.code == "storage_busy"
-
-
-def test_provision_cli_accepts_mode(tmp_path, monkeypatch):
-    root_id = str(uuid4())
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "provision",
-            "--root",
-            str(tmp_path),
-            "--storage-root-id",
-            root_id,
-            "--storage-mode",
-            "shared_directory",
-        ],
-    )
-    main()
-    assert (
-        json.loads((tmp_path / ".storage-root.json").read_text())["storage_mode"]
-        == "shared_directory"
-    )

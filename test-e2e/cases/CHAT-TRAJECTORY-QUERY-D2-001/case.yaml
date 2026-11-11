@@ -6,6 +6,8 @@ case:
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
   - CHAT-LOCAL-TRAJECTORY-20261103
+  - CHAT-TRAJECTORY-REFERENCES-20261111
+  - CHAT-TRAJECTORY-CONVERSATION-20261111
   business_rule_ids:
   - TRJ-RULE-002
   - TRJ-RULE-003
@@ -24,7 +26,8 @@ case:
   - 使用隔离测试会话、租户和独占轨迹根目录；记录被测提交、配置快照和本用例资源清单。
   - 读取使用可信ADMIN/SU身份，目标会话由独立普通用户创建；actor与owner区分，非管理员读取应拒绝。
   - 业务trace_id直接复用现有conversation_id；菜单按用户→最近根智能体→会话，打开后读取整个会话范围；PG复用现有表结构和查询，轨迹正文及执行清单全部为文件。
-  - 基于现有MonitoringManager，通过MONITORING_TRACE_SINK选择otlp/local_file/both；本地业务正文为正文内嵌的标准OTLP JSONL，会话meta.json保存归属、执行清单和确认进度。
+  - 基于现有MonitoringManager，通过MONITORING_PROVIDER选择互斥的local_file/otlp及远端提供方；本地业务正文为正文内嵌的标准OTLP
+    JSONL，会话meta.json保存归属、执行清单和确认进度。
   - 目录使用tenant/user/storage_agent/conversation业务ID，storage_agent_id固定为首次采集根Agent；稳定owner/会话锁串行首次定位与登记。会话切换根Agent仍读写同一物理目录。
   - 所有正文内嵌OTLP Span属性/Events；256KiB为批量刷盘阈值，单行可更大。读写须处理大型字符串的增量编码/解码，正文API按解码后的UTF-8区间返回。
   - 清理服务具备可控UTC时钟与独占文件夹具；定期默认30天/3600秒，可关闭；主动POST /trajectory/cleanup固定可信租户和首次截止时间。
@@ -40,7 +43,8 @@ case:
     action: 通过详情固定publication_no/cleanup_version和聊天message_id上界，分页读取节点DTO/源摘要；期间归档新运行，篡改cursor和limit，并测试清理换代。
     expected: 摘要默认50最多200且≤2MiB，节点DTO单段≤500条/8MiB，源UUID/seq保持字符串；原快照内旧成员无重复/跳过，新归档仅显式查询后出现；清理换代返回snapshot_reset，参数/游标篡改拒绝。最近Agent只筛会话，不裁剪会话内其他Agent执行，trace_id与conversation_id同值。
   - order: 3
-    action: 以管理员冷读OTLP中已归档reasoning、模型输入输出及工具结果，覆盖内嵌值和Unicode/尾随换行；核对节点DTO的parent_id/source、物理attempt和片段归并，另测试未返回思考、未采集、过期、损坏及未挂载。 覆盖1MiB及4MiB字段、转义引号/反斜杠/换行、Unicode多字节跨块，监测解析缓冲。
+    action: 以管理员冷读OTLP中已归档reasoning、模型输入输出及工具结果，覆盖内嵌值和Unicode/尾随换行；核对节点DTO的parent_id/source、物理attempt和片段归并，另测试未返回思考、未采集、过期、损坏及未挂载。
+      覆盖1MiB及4MiB字段、转义引号/反斜杠/换行、Unicode多字节跨块，监测解析缓冲。
     expected: OTLP→节点DTO思考/工具内容和业务父子正确，物理attempt各自独立；fragment与最终Span按源ID/区间去重。普通正文完整，超大字段按至多1MiB分块读全；未知思考不补造，410/503/trajectory_corrupt明确。节点id复用record_id、parent_id关联业务父，source保留实际traceId/spanId及export_seq，排序位置独立；duration_ms=20表示20ms，OTLP业务trace属性与原生ID分别保留。
       大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。
   - order: 4
@@ -51,10 +55,16 @@ case:
     expected: 仅新增1个清理POST，新增轨迹GET保持4条、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
   - order: 6
     action: 依次请求POST /users/list、两个现有会话GET的默认分支和view=trajectory分支；比较旧调用响应、普通身份自己的轨迹视图、跨用户/租户参数、工作台/NULL组、大量置顶项及篡改游标，核对路由数量。
-    expected: 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标签名绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
+    expected: 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
   - order: 7
     action: 以多租户、多用户、同会话多次执行以及嵌套/并行模型构造集合；遍历分页和facet，改变排序、刷新、撤权、到期及超预算，核对全量指标和分段子树指标。
-    expected: 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一签名查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
+    expected: 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一服务端查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
+  - order: 8
+    action: 不配置轨迹密钥，获取节点正文引用并读取；改动引用ID、错用快照作为正文、换管理员后读取，再重建引用缓存并重新查询。
+    expected: 引用为服务端随机ID，成功正文与原值一致；未知/错类型/跨身份及缓存失效引用422且不返回正文，重新查询的新引用可读取；普通角色仍403。
+  - order: 9
+    action: 准备同会话失败后成功及过期/未采集数据，筛选历史执行并翻页打开多轮详情，期间新增执行/清理并切换会话。
+    expected: view=conversation每会话一行，最新执行状态优先于历史模型/ID条件；累计指标与命中执行汇总分开；四态可筛选且未知不填零。查询快照固定成员和最新状态，详情按顺序分页返回round_no、版本和匹配标记，清理与撤权仍即时失效；省略view保留逐执行合同。
   expected_results:
   - 授权目录默认20最多100，用户/最近agent_id/会话不匹配404，普通创建者403；actor与target_user区分，HTTP包装不变。分组只用现有agent_id，切换后仅在最近组，子Agent不入根组，未知不造ID；文件头不符候选被过滤且无标题/聊天泄漏，允许短页并按已检查候选返回游标，不扫描正文或无界追读凑页。
     物理目录按tenant/user/首次根Agent/conversation组织，meta各层一致；最近Agent筛选不要求其等于storage_agent_id，切换和删除Agent后仍可读取全部保留执行。
@@ -63,8 +73,10 @@ case:
     大行中的正文增量解码后与原安全值一致，正文游标使用解码后UTF-8字节区间，拼接各块无缺失/重复/乱码；不把JSON转义字节偏移当作正文偏移。解析缓冲及峰值内存有实际证据。
   - 工具结果和大正文共用contents且每块至多1MiB，通过普通HTTP读取；非白名单来源422、跨会话引用404。新增轨迹GET恰为4条，三级选择直接复用用户POST并扩展2个会话GET，未知指标为null，新归档仅在新查询中出现；页面的网络请求及交互均对应静态历史查看。
   - 仅新增1个清理POST，新增轨迹GET保持4条、2个会话GET的原分支保持兼容，用户POST直接复用；成功沿用code/message/data，逐批返回固定cutoff_at、scanned_runs/deleted_runs/deleted_bytes/skipped_active/pending_runs/failed_runs/next_cursor/done。统计为本批，done只表示扫描结束，失败或待处理明确展示；每批重新授权。非法参数/游标422、普通角色403、占用409且有Retry-After、挂载失败503；客户端只能传天数/游标，无法指定租户或路径。
-  - 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标签名绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
-  - 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一签名查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
+  - 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
+  - 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一服务端查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
+  - 引用为服务端随机ID，成功正文与原值一致；未知/错类型/跨身份及缓存失效引用422且不返回正文，重新查询的新引用可读取；普通角色仍403。
+  - view=conversation每会话一行，最新执行状态优先于历史模型/ID条件；累计指标与命中执行汇总分开；四态可筛选且未知不填零。查询快照固定成员和最新状态，详情按顺序分页返回round_no、版本和匹配标记，清理与撤权仍即时失效；省略view保留逐执行合同。
   forbidden_side_effects:
   - 不得因查询、重新查询或历史分段调用模型/工具或改变聊天。
   - 不得泄漏凭证、绝对路径、范围外用户数据，也不得将预览伪称全文。
@@ -105,17 +117,29 @@ case:
     expected_results:
     - 5
   - id: AC-06
-    description: 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标签名绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
+    description: 直接复用用户分页搜索并保持原message/data/pagination；两个会话路由默认查询登录用户，权限/包装/512字符游标及置顶保持。view=trajectory时只准ADMIN/SU，target_user_id必填且先核验可信租户；agent:ID/other及普通/工作台分类正确，items默认20最多100，pinned/included为空，游标在服务端绑定actor/tenant/owner/分类/组/搜索且上限2048。非轨迹请求传target_user_id拒绝，跨用户/租户游标不可复用；meta归属不符候选不泄漏，短页按已检查位置推进。
     steps:
     - 6
     expected_results:
     - 6
   - id: AC-07
-    description: 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一签名查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
+    description: 集合在ADMIN当前租户/SU授权全部范围先授权再筛选，按历史root_agent_id、模型、状态、UTC闭区间及会话/子节点ID筛选；分页排序和四卡汇总基于同一服务端查询成员集，新执行仅刷新纳入、撤权及过期立即排除。全量去重会话数、根耗时均值/线性插值分位数及有效模型TTFT（含0）准确；空值最后，超预算503而非部分总数。facet候选授权、搜索分页及上下级范围正确；智能体Token/调用次数按完整子树计算，与节点分页无关，fragment/重复Span不重复计数，未知保留null。
     steps:
     - 7
     expected_results:
     - 7
+  - id: AC-08
+    description: 引用为服务端随机ID，成功正文与原值一致；未知/错类型/跨身份及缓存失效引用422且不返回正文，重新查询的新引用可读取；普通角色仍403。
+    steps:
+    - 8
+    expected_results:
+    - 8
+  - id: AC-09
+    description: view=conversation每会话一行，最新执行状态优先于历史模型/ID条件；累计指标与命中执行汇总分开；四态可筛选且未知不填零。查询快照固定成员和最新状态，详情按顺序分页返回round_no、版本和匹配标记，清理与撤权仍即时失效；省略view保留逐执行合同。
+    steps:
+    - 9
+    expected_results:
+    - 9
   source:
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     acceptance_criteria:
@@ -128,20 +152,22 @@ case:
     - AC-008
     - AC-011
     - AC-012
+    - AC-REF-01
   execution:
     profiles:
     - name: mock
       required_services: []
   contract:
     protocol: HTTP/JSON
-    endpoint: GET /trajectory/records; POST /users/list; GET /conversation/agent_groups; GET /conversation/agent_groups/{group_key}/conversations;
-      GET /trajectory/conversations/{conversation_id}; GET /trajectory/conversations/{conversation_id}/snapshot; GET /trajectory/conversations/{conversation_id}/contents/{content_id};
+    endpoint: GET /trajectory/records; POST /users/list; GET /conversation/agent_groups;
+      GET /conversation/agent_groups/{group_key}/conversations; GET /trajectory/conversations/{conversation_id};
+      GET /trajectory/conversations/{conversation_id}/snapshot; GET /trajectory/conversations/{conversation_id}/contents/{content_id};
       POST /trajectory/cleanup
     method: GET / POST
     request_expectations:
     - 所有轨迹读取（含view=trajectory分支）先校验ADMIN/SU、可信租户和选定用户/智能体/会话关联；会话列表要求view=trajectory、target_user_id和路径group_key，NULL组为other。
-    - 签名游标绑定actor/tenant/target_user/selected_agent/会话/快照；不接入实时协议。
-    - 清理POST只接收before_days及cursor；ADMIN当前租户/SU受信目标租户，签名游标绑定身份/租户/天数/固定UTC截止时间和扫描位置。
+    - 服务端游标绑定actor/tenant/target_user/selected_agent/会话/快照；不接入实时协议。
+    - 清理POST只接收before_days及cursor；ADMIN当前租户/SU受信目标租户，服务端游标绑定身份/租户/天数/固定UTC截止时间和扫描位置。
     response_expectations:
     - 用户/智能体/会话分页、静态节点DTO、正文引用、覆盖和错误符合设计“查询与自研展示”。
     - 思考只展示真实已采集值；静态快照及再次查询的成员规则明确，contents仅接受聊天正文和record的input/output/raw/reasoning。

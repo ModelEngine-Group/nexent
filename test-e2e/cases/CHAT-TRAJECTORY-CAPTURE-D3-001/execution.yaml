@@ -8,13 +8,14 @@ acceptance_bindings:
   AC-01:
   - test_capture_actual_worker_retry_keeps_failed_partial_and_cold_reads
   AC-02:
+  - test_capture_versions_are_frozen_per_execution_and_cold_read
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_parallel_subagents_keep_invocations_and_nested_tool_ancestry
   - test_capture_actual_worker_cancel_preserves_partial_output
   - test_capture_rejected_protocol_retains_output_without_executing_code
   AC-03:
   - test_capture_actual_configuration_sinks_and_full_safety
-  - test_capture_dual_sink_faults_do_not_retry_business
+  - test_capture_selected_exporter_faults_do_not_retry_business
   - test_capture_root_switch_keeps_directory_and_native_context
   - test_capture_parallel_tools_nested_output_and_full_local_body
   - test_capture_independent_process_reads_published_facts_without_runtime_caches

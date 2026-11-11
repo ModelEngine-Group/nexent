@@ -6,27 +6,34 @@ feature:
   feature_id: CHAT-TRAJECTORY
   name: 本地文件与自研管理员历史轨迹查看
   status: planned
-  description: 现有MonitoringManager选择otlp/local_file/both导出；本地按租户/用户/首次根Agent/会话ID分组，每会话meta.json＋每执行正文完整内嵌的OTLP JSONL，管理员按用户→最近Agent→会话使用自研查看器静态查看轨迹，默认保留30天，直接复用用户POST、扩展2个会话GET及新增4个轨迹GET和1个清理POST；支持配置定期清理及管理员主动清理N天以前。
+  description: 现有MonitoringManager选择local_file/otlp及远端提供方导出；本地按租户/用户/首次根Agent/会话ID分组，每会话meta.json＋每执行正文完整内嵌的OTLP
+    JSONL，管理员按用户→最近Agent→会话使用自研查看器静态查看轨迹，默认保留30天，直接复用用户POST、扩展2个会话GET及新增4个轨迹GET和1个清理POST；支持配置定期清理及管理员主动清理N天以前。
   business_rules:
   - rule_id: TRJ-RULE-001
     description: 复用OTel埋点，物理模型attempt、工具及Agent为实际Span，完整输入输出/失败片段/思考在属性和Events保留，聊天回滚兼容。
+      根和子Agent分别保存实际version_no及可用版本名称，0为草稿、缺失为未知，历史查询不查当前版本。
   - rule_id: TRJ-RULE-002
     description: PG复用现有目录，本地按tenant/user/storage_agent/conversation组织；meta保存固定归属/执行清单，每执行一份OTLP，全部正文内嵌属性/Events并按字段分块读取。256KiB为刷盘阈值，单行可更大，增量编码/解码须实际验证。
   - rule_id: TRJ-RULE-003
-    description: 管理员用户→最近根Agent→会话查询，自研调用树/思考/工具详情/折叠与本段概览，不建历史Agent关联。 用户列表直接复用；两个会话分组接口扩展view=trajectory管理员分支，保留原登录用户合同。 可观测中心按历史根Agent筛选授权执行集合，静态分页与全量耗时/TTFT汇总基于同一成员快照，Token与调用数按完整子树计算。
+    description: 管理员用户→最近根Agent→会话查询，自研调用树/思考/工具详情/折叠与本段概览，不建历史Agent关联。 用户列表直接复用；两个会话分组接口扩展view=trajectory管理员分支，保留原登录用户合同。
+      可观测中心按历史根Agent筛选授权执行集合，静态分页与全量耗时/TTFT汇总基于同一成员快照，Token与调用数按完整子树计算。 列表展示根版本，树和详情展示所选Agent自身版本，模型和工具不展示。
+      会话视图每会话一行，先确定最新执行四态再匹配历史执行，累计指标独立于匹配指标；详情按根执行顺序连续追加全部保留轮次。
   - rule_id: TRJ-RULE-004
     description: 显式查询静态历史快照，真实指标可为空；切换选择清理旧请求，无实时订阅或自动刷新。 模型TTFT记录首个非空回答/思考/工具参数增量，空块和usage排除，未知可空且零值有效；模型Span、事件、Histogram和本地OTLP使用同一实测值。
   - rule_id: TRJ-RULE-005
     description: 仅ADMIN/SU可读可信租户当前用户，PG归属、目录各层及固定meta同时核验；迁租旧归属检查只用于拒绝冲突，文件保持原租户。
+      引用状态在服务端有界缓存保存，随机ID逐次核验类型及身份/资源绑定，部署无需轨迹密钥，失效后重新查询。
   - rule_id: TRJ-RULE-006
-    description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。 定期清理开关/天数/周期可配置，管理员可按天数主动清理当前可信租户；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
+    description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。
+      定期清理开关/天数/周期可配置，管理员可按天数主动清理当前可信租户；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
   - rule_id: TRJ-RULE-007
-    description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file/both分支隔离，SDK仅接参数，单节点/共享卷验证。
+    description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file仅写本地且关闭远端导出，默认目录/mnt/nexent-data/trajectory，查询固定30秒，启动自动初始化且无需根UUID，SDK仅接参数，单节点/共享卷验证。
   - rule_id: TRJ-RULE-008
     description: trace_id=conversation_id；先PG确定owner，再有界定位固定会话目录，返回全部保留执行和覆盖；查找预算耗尽返回503，未采集判断须完成归属查找。
   - rule_id: TRJ-RULE-009
-    description: 'Historical contract retained only for the two retired Cases; the user withdrew execution-recovery preparation on 2026-11-05.
-      Retirement evidence: nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json'
+    description: 'Historical contract retained only for the two retired Cases; the
+      user withdrew execution-recovery preparation on 2026-11-05. Retirement evidence:
+      nexent-doc/docs/Developing/chat-local-file-trajectory/evidence/record-view-scope-change.json'
   required_test_stages:
   - D2
   - D3
@@ -35,6 +42,11 @@ feature:
   source:
     requirement_ids:
     - CHAT-LOCAL-TRAJECTORY-20261103
+    - CHAT-TRAJECTORY-VERSION-20261111
+    - CHAT-TRAJECTORY-REFERENCES-20261111
+    - CHAT-TRAJECTORY-DEPLOYMENT-20261111
+    - CHAT-TRAJECTORY-CONVERSATION-20261111
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
-    notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is historical provenance for retired Cases. Unit contracts stay
-      in UT; preserve existing D1.
+    notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
+      historical provenance for retired Cases. Unit contracts stay in UT; preserve
+      existing D1.

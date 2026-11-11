@@ -1,4 +1,4 @@
-{{- if .Values.enabled }}
+{{- if and .Values.enabled (ne (include "nexent-monitoring.provider" .) "local_file") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -9,7 +9,6 @@ import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 from infrastructure.observability.trajectory_processor import LocalTrajectoryProcessor
@@ -35,9 +34,8 @@ pytestmark = [pytest.mark.case_id('CHAT-TRAJECTORY-TTFT-D3-001'), pytest.mark.st
 
 @pytest.fixture
 def capture(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    store = TrajectoryFileStore(tmp_path, root_id, authorize=lambda _: None)
+    TrajectoryFileStore.provision(tmp_path)
+    store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     identity = SimpleNamespace(tenant_id='tenant', user_id='owner', agent_id=7, conversation_id=123, extra_metadata={})
     processor = LocalTrajectoryProcessor(store, lambda: identity)
     threads = ThreadManager('ttft-fixture', {'background-service': LanePolicy('background-service', 1, 0)})
@@ -49,7 +47,7 @@ def capture(tmp_path):
     manager = MonitoringManager()
     previous = dict(manager.__dict__)
     manager._config = MonitoringConfig(
-        enable_telemetry=True, trace_sink='local_file', local_span_processor=processor, export_metrics=False,
+        enable_telemetry=True, provider='local_file', local_span_processor=processor, export_metrics=False,
     )
     manager._tracer = provider.get_tracer('ttft-fixture')
     manager._llm_ttft_duration = metrics.get_meter('ttft-fixture').create_histogram('llm.time_to_first_token')

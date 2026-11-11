@@ -400,6 +400,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         current,
         agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
         agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
+        agent_version_no=getattr(agent_run_info.agent_config, "version_no", None),
+        agent_version_name=getattr(agent_run_info.agent_config, "version_name", None),
         query=current.query if current.query is not None else agent_run_info.query,
     )
     from nexent.monitor.local_content import local_capture_enabled

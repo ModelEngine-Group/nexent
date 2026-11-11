@@ -7,7 +7,7 @@ export interface TrajectoryFilters {
   conversation_id?: string;
   id_query?: string;
   model?: string;
-  status?: "success" | "error";
+  status?: "success" | "error" | "not_captured" | "expired";
   started_from?: string;
   started_to?: string;
 }
@@ -40,6 +40,10 @@ export interface Usage {
   known?: { input: number; output: number; total: number };
 }
 export interface TrajectoryRecord {
+  round_count?: number;
+  execution_count?: number;
+  matching_execution_count?: number;
+  cleanup_reason?: string | null;
   tenant_id: string;
   tenant_name: string;
   user_id: string;
@@ -49,6 +53,8 @@ export interface TrajectoryRecord {
   trajectory_id: string | null;
   root_agent_id: string | null;
   root_agent_name: string | null;
+  root_agent_version_no: number | null;
+  root_agent_version_name: string | null;
   models: string[];
   status: "success" | "error" | null;
   business_status: string | null;
@@ -68,6 +74,7 @@ export interface Percentiles {
 export interface TrajectorySummary {
   conversation_count: number;
   duration: Percentiles & { mean_ms: number | null };
+  conversation_duration?: Percentiles;
   ttft: Percentiles;
   complete: boolean;
   coverage: Coverage;
@@ -82,6 +89,7 @@ export interface RecordsPage {
   summary: TrajectorySummary;
 }
 export interface RecordsRequest extends TrajectoryFilters {
+  view?: "execution" | "conversation";
   query_id?: string;
   page?: number;
   page_size?: number;
@@ -99,12 +107,18 @@ export interface ContentReference {
   char_count?: number;
 }
 export interface TrajectoryNode {
+  trajectory_id?: string;
+  round_no?: number;
+  execution_root_id?: string;
+  matches_filters?: boolean;
   id: string;
   parent_id: string | null;
   display_trace_id: string;
   kind: "agent" | "model" | "tool" | string;
   name: string;
   status: string;
+  agent_version_no: number | null;
+  agent_version_name: string | null;
   started_at: string | null;
   finished_at: string | null;
   duration_ms: number | null;
@@ -154,4 +168,25 @@ export interface CleanupResult {
   failed_runs: number;
   next_cursor: string | null;
   done: boolean;
+}
+
+export interface TrajectoryExecution {
+  trajectory_id: string;
+  round_no: number;
+  turn_no: number;
+  root_agent_id: string | null;
+  root_agent_version_no: number | null;
+  root_agent_version_name: string | null;
+  business_status: string;
+  availability: string;
+  matches_filters: boolean;
+}
+export interface ConversationPage {
+  snapshot_id: string;
+  conversation_id: string;
+  executions: TrajectoryExecution[];
+  next_cursor: string | null;
+  coverage: Coverage;
+  availability: string;
+  active_execution_count: number;
 }

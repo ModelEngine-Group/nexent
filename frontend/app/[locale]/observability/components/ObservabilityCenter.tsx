@@ -27,6 +27,7 @@ import {
   recordKey,
   resetFilters,
 } from "@/lib/trajectory";
+import { AgentVersion } from "./AgentVersion";
 import { DirectoryFilter } from "./DirectoryFilter";
 import { TrajectorySummary } from "./TrajectorySummary";
 import { TrajectoryError } from "./TrajectoryFeedback";
@@ -50,6 +51,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const [cleaning, setCleaning] = useState(false);
   const scope = JSON.stringify([user.id, user.tenantId, user.role]);
   const records = useTrajectoryRecords(scope, {
+    view: "conversation",
     ...filters,
     ...paging,
     ...sorting,
@@ -124,6 +126,17 @@ export function ObservabilityCenter({ user }: { user: User }) {
       ),
     },
     {
+      title: t("trajectory.agentVersion"),
+      key: "root_agent_version_no",
+      width: 100,
+      render: (_, row) => (
+        <AgentVersion
+          version={row.root_agent_version_no}
+          name={row.root_agent_version_name}
+        />
+      ),
+    },
+    {
       title: t("trajectory.conversations"),
       width: 220,
       render: (_, row) => (
@@ -134,6 +147,12 @@ export function ObservabilityCenter({ user }: { user: User }) {
           <small className="text-gray-500">{row.conversation_id}</small>
         </div>
       ),
+    },
+    {
+      title: t("trajectory.rounds"),
+      key: "round_count",
+      width: 80,
+      render: (_, row) => formatMetric(row.round_count, 0),
     },
     {
       title: t("trajectory.users"),
@@ -161,6 +180,11 @@ export function ObservabilityCenter({ user }: { user: User }) {
       filters: [
         { text: t("trajectory.success"), value: "success" },
         { text: t("trajectory.error"), value: "error" },
+        {
+          text: t("trajectory.availability.not_captured"),
+          value: "not_captured",
+        },
+        { text: t("trajectory.availability.expired"), value: "expired" },
       ],
       filterMultiple: false,
       render: (_, row) => (
@@ -432,7 +456,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           dataSource={records.data?.items ?? []}
           loading={records.isFetching}
           pagination={false}
-          scroll={{ x: 1450 }}
+          scroll={{ x: 1550 }}
           locale={{
             emptyText: records.isError
               ? t("trajectory.queryFailed")
@@ -484,6 +508,8 @@ export function ObservabilityCenter({ user }: { user: User }) {
         <TrajectoryDrawer
           key={recordKey(selected)}
           row={selected}
+          queryId={records.data?.query_id}
+          onReset={refresh}
           onClose={() => setSelected(null)}
         />
       )}

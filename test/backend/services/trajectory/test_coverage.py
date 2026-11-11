@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from management.services.trajectory.access import Actor
 from management.services.trajectory.archive import Archive
-from management.services.trajectory.primitives import QueryError, TokenSigner
+from management.services.trajectory.primitives import QueryError, ReferenceStore
 from management.services.trajectory.service import TrajectoryService
 
 
@@ -49,7 +49,7 @@ def service():
         "cleanup_version": 0,
         "captured_from_start": True,
     }
-    result = TrajectoryService(Mock(), catalog, TokenSigner("a" * 32))
+    result = TrajectoryService(Mock(), catalog, ReferenceStore())
     result.archive = SimpleNamespace(
         manifest=Mock(return_value=meta),
         available=lambda run: Archive.available(result.archive, run),

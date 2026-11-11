@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Wrappers for sub-agents invoked by a managed parent.
 
 The parent agent owns a single ``MessageObserver``. When the parent's ReAct
@@ -81,6 +82,7 @@ class SubAgentToolWrapper:
         "_agent_name",
         "_invocation_name",
         "_runtime_identity",
+        "_agent_version_name",
         "_task_extractor",
         "_invocation_factory",
     })
@@ -103,6 +105,7 @@ class SubAgentToolWrapper:
         object.__setattr__(self, "_invocation_factory", invocation_factory)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
+        object.__setattr__(self, "_agent_version_name", (runtime_identity or {}).get("version_name"))
         object.__setattr__(self, "_runtime_identity", {
             key: value for key, value in (runtime_identity or {}).items()
             if key in {"runtime_ref", "version_no", "display_name", "origin"} and value is not None
@@ -198,6 +201,8 @@ class SubAgentToolWrapper:
             metadata = replace(
                 parent, agent_id=self._agent_id, agent_name=self._agent_name,
                 agent_display_name=getattr(self._inner, "display_name", None), query=task_text,
+                agent_version_no=self._runtime_identity.get("version_no"),
+                agent_version_name=self._agent_version_name,
             )
             attributes = manager.build_agent_run_attributes(metadata, attributes={
                 "subagent.invocation_id": invocation_id,

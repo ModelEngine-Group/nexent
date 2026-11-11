@@ -16,12 +16,13 @@ from pydantic import (
 
 class RecordsQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    view: Literal["execution", "conversation"] = "execution"
     tenant_id: str | None = Field(None, min_length=1, max_length=128)
     target_user_id: str | None = Field(None, min_length=1, max_length=128)
     agent_id: str | None = None
     conversation_id: str | None = None
     model: str | None = Field(None, max_length=200)
-    status: Literal["success", "error"] | None = None
+    status: Literal["success", "error", "not_captured", "expired"] | None = None
     started_from: str | None = None
     started_to: str | None = None
     id_query: str = Field("", max_length=200)
@@ -61,6 +62,8 @@ class RecordsQuery(BaseModel):
 
     @model_validator(mode="after")
     def validate_range(self):
+        if self.view != "conversation" and self.status in {"not_captured", "expired"}:
+            raise ValueError("Availability filters require the conversation view")
         if (
             self.started_from
             and self.started_to

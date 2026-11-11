@@ -48,6 +48,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar, cast
 
+from .agent_version import agent_version_attributes
 from .first_token import stream_token_basis, valid_ttft
 from .span_filter_config import (
     DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
@@ -175,8 +176,7 @@ SUPPORTED_PROVIDERS = {
     "phoenix",
     "langfuse",
     "langsmith",
-    "grafana",
-    "zipkin",
+    "local_file",
 }
 
 
@@ -198,6 +198,8 @@ class AgentRunMetadata:
     extra_metadata: Dict[str, Any] = field(default_factory=dict)
     user_email: Optional[str] = None
     agent_display_name: Optional[str] = None
+    agent_version_no: Optional[int] = None
+    agent_version_name: Optional[str] = None
 
     def metadata(self) -> Dict[str, Any]:
         """Return compact metadata for OpenInference/Langfuse attributes."""
@@ -425,7 +427,6 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
-    trace_sink: str = "otlp"
     local_span_processor: Any = None
     excluded_elasticsearch_operations: List[str] | str = field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
@@ -440,19 +441,14 @@ class MonitoringConfig:
         self.excluded_span_names = normalize_span_exclusions(self.excluded_span_names)
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
-            logger.warning(
-                f"Unknown monitoring provider '{self.provider}'. Using 'otlp'."
-            )
-            self.provider = "otlp"
+            raise ValueError("Unsupported monitoring provider")
 
         self.enable_telemetry = _as_bool(self.enable_telemetry)
-        self.trace_sink = str(self.trace_sink).strip().lower()
-        if self.trace_sink not in {"otlp", "local_file", "both"}:
-            raise ValueError("Unknown monitoring trace sink")
         self.export_traces = _as_bool(self.export_traces, True)
-        if self.enable_telemetry and self.export_traces and self.trace_sink != "otlp" and self.local_span_processor is None:
+        if (self.enable_telemetry and self.export_traces and self.provider == "local_file"
+                and self.local_span_processor is None):
             raise ValueError("Local monitoring requires an injected span processor")
-        self.export_metrics = _as_bool(self.export_metrics, True)
+        self.export_metrics = _as_bool(self.export_metrics, True) and self.provider != "local_file"
         self.instrument_requests = _as_bool(self.instrument_requests, False)
         self.fastapi_included_urls = str(self.fastapi_included_urls or "").strip()
         self.fastapi_excluded_urls = str(self.fastapi_excluded_urls or "").strip()
@@ -603,13 +599,13 @@ class MonitoringManager:
 
             # Initialize TracerProvider with OTLP exporter
             self._tracer_provider = TracerProvider(resource=resource)
-            if self._config.export_traces and self._config.trace_sink != "otlp":
+            if self._config.export_traces and self._config.provider == "local_file":
                 local = self._config.local_span_processor
                 self._tracer_provider.sampler = local.wrap_sampler(self._tracer_provider.sampler)
                 self._tracer_provider.add_span_processor(local)
             trace.set_tracer_provider(self._tracer_provider)
 
-            if self._config.export_traces and self._config.trace_sink != "local_file":
+            if self._config.export_traces and self._config.provider != "local_file":
                 # Choose exporter based on protocol
                 if self._config.otlp_protocol == "grpc":
                     span_exporter = OTLPSpanExporterGRPC(
@@ -868,6 +864,11 @@ class MonitoringManager:
         }
         if attributes:
             plain_attrs.update(attributes)
+
+        if span_kind == OPENINFERENCE_SPAN_KIND_AGENT:
+            plain_attrs.update(agent_version_attributes(
+                agent_metadata.agent_version_no, agent_metadata.agent_version_name,
+            ))
 
         return self.build_openinference_attributes(
             span_kind=span_kind,
@@ -1311,7 +1312,7 @@ class MonitoringManager:
                 summary["keys"],
                 ensure_ascii=False,
             )
-        if self._config and self._config.export_traces and self._config.trace_sink != "otlp":
+        if self._config and self._config.export_traces and self._config.provider == "local_file":
             slot = "output" if prefix.endswith("output") else "input" if prefix.endswith("input") else None
             if slot:
                 from .local_content import safe_local_content

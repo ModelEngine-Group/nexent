@@ -65,6 +65,46 @@ def test_nested_parallel_metrics_deduplicate_exports():
     assert nodes["tool"]["usage"] is None and nodes[root]["throughput"] is None
 
 
+@pytest.mark.parametrize("version, expected", [
+    (3, 3), (0, 0), ("0", 0), ("3", 3), (str(2**63 - 1), 2**63 - 1),
+    (None, None), (True, None), (-1, None), (1.5, None), ("garbage", None), (str(2**63), None),
+])
+def test_agent_version_uses_otlp_integer_and_preserves_unknown(version, expected):
+    root = span("root")
+    if version is not None:
+        root["attributes"].append({"key": "agent.version_no", "value": {"intValue": version}})
+    root["attributes"].append({"key": "agent.version_name", "value": {"stringValue": "Frozen"}})
+    nodes, _, _ = build_nodes(request(root), conversation_id="1")
+    assert nodes[0]["agent_version_no"] == expected
+    assert nodes[0]["agent_version_name"] == ("Frozen" if expected is not None else None)
+    if expected is None:
+        assert "nexent.availability.agent_version_no" in nodes[0]["attributes"]
+
+
+def test_version_is_independent_for_children_and_absent_on_non_agents():
+    items = [span("root"), span("child", "root"), span("model", "child", "LLM"), span("tool", "child", "TOOL")]
+    for item, version in zip(items, (3, 2, 99, 99)):
+        item["attributes"].append({"key": "agent.version_no", "value": {"intValue": str(version)}})
+    nodes, _, _ = build_nodes(request(*items), conversation_id="1")
+    assert [n["agent_version_no"] for n in nodes] == [3, 2, None, None]
+
+
+def test_string_attribute_cannot_masquerade_as_integer_version():
+    nodes, _, _ = build_nodes(request(span("root", **{"agent.version_no": "3"})), conversation_id="1")
+    assert nodes[0]["agent_version_no"] is None
+
+
+def test_version_name_requires_string_attribute():
+    root = span("root")
+    root["attributes"].extend([
+        {"key": "agent.version_no", "value": {"intValue": "3"}},
+        {"key": "agent.version_name", "value": {"intValue": "99"}},
+    ])
+    nodes, _, _ = build_nodes(request(root), conversation_id="1")
+    assert nodes[0]["agent_version_no"] == 3
+    assert nodes[0]["agent_version_name"] is None
+
+
 @pytest.mark.parametrize("ttft", ["-1", "21", "nan", "inf", "unknown"])
 def test_unknown_usage_and_invalid_ttft_stay_null(ttft):
     nodes, _, _ = build_nodes(

@@ -15,6 +15,7 @@ export async function installTrajectoryFixture(
     writes: [] as string[],
     failure: "",
     cleanupPaused: false,
+    multiRound: false,
   };
   const body = (text: string, complete = true) => ({
     availability: "available",
@@ -36,6 +37,17 @@ export async function installTrajectoryFixture(
     display_trace_id: parent_id ? id : "9223372036854775806",
     kind,
     name,
+    agent_version_no:
+      kind !== "agent"
+        ? null
+        : id === "root"
+          ? 3
+          : id === "storage"
+            ? 2
+            : id === "security"
+              ? 0
+              : null,
+    agent_version_name: null,
     status: "completed",
     started_at: new Date(
       Date.parse("2026-11-10T01:00:00Z") + offset,
@@ -78,9 +90,14 @@ export async function installTrajectoryFixture(
     user_name: "Owner",
     conversation_id: "9223372036854775806",
     conversation_title: "并行轨迹评估",
+    round_count: 1,
+    execution_count: 1,
+    matching_execution_count: 1,
     trajectory_id: "execution",
     root_agent_id: "12",
     root_agent_name: "Friday",
+    root_agent_version_no: 3,
+    root_agent_version_name: null,
     models: ["DeepSeek"],
     status: "success",
     business_status: "completed",
@@ -169,11 +186,36 @@ export async function installTrajectoryFixture(
             summary: {
               conversation_count: 20,
               duration: { ...percentiles, mean_ms: 2000 },
+              conversation_duration: percentiles,
               ttft: { ...percentiles, p50_ms: 0 },
               complete: true,
               coverage: { complete: true },
             },
           };
+    } else if (/\/trajectory\/conversations\/[^/]+$/.test(path)) {
+      state.reads.push(url);
+      const second = url.searchParams.get("cursor") === "second-round";
+      data = {
+        snapshot_id: "conversation-snapshot",
+        conversation_id: row.conversation_id,
+        availability: "available",
+        coverage: { complete: true },
+        active_execution_count: 0,
+        executions: [
+          {
+            trajectory_id: second ? "execution-2" : "execution",
+            round_no: second ? 2 : 1,
+            turn_no: second ? 2 : 1,
+            root_agent_id: "12",
+            root_agent_version_no: 3,
+            root_agent_version_name: null,
+            business_status: second ? "completed" : "failed",
+            availability: "available",
+            matches_filters: !second,
+          },
+        ],
+        next_cursor: state.multiRound && !second ? "second-round" : null,
+      };
     } else if (path.endsWith("/snapshot")) {
       state.reads.push(url);
       if (state.failure) {
@@ -184,16 +226,19 @@ export async function installTrajectoryFixture(
         return;
       }
       const later = url.searchParams.has("cursor");
+      const second = url.searchParams.get("trajectory_id") === "execution-2";
       data = {
         snapshot_id: "snapshot",
         conversation_id: row.conversation_id,
-        trajectory_id: row.trajectory_id,
+        trajectory_id: second ? "execution-2" : row.trajectory_id,
         root_node_id: "root",
-        nodes: later
-          ? [makeNode("later", "root", "tool", "Later tool")]
-          : nodes,
+        nodes: second
+          ? [makeNode("root", null, "agent", "重试成功")]
+          : later
+            ? [makeNode("later", "root", "tool", "Later tool")]
+            : nodes,
         context_nodes: later ? [nodes[0]] : [],
-        next_cursor: later ? null : "next-segment",
+        next_cursor: later || second ? null : "next-segment",
         coverage: { complete: true },
         scope: {
           kind: "execution",

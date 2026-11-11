@@ -1,12 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Empty, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
 import { BodyCache, filterTree, formatMetric } from "@/lib/trajectory";
-import type { TrajectoryNode } from "@/types/trajectory";
+import type { TrajectoryExecution, TrajectoryNode } from "@/types/trajectory";
+import { AgentVersion } from "./AgentVersion";
 
 export function TrajectoryTimeline({
   nodes,
@@ -15,6 +16,8 @@ export function TrajectoryTimeline({
   complete,
   cache,
   onSelect,
+  onEndReached,
+  unavailable = [],
 }: {
   nodes: TrajectoryNode[];
   root?: TrajectoryNode;
@@ -22,8 +25,29 @@ export function TrajectoryTimeline({
   complete: boolean;
   cache: BodyCache;
   onSelect: (node: TrajectoryNode) => void;
+  onEndReached?: () => void;
+  unavailable?: TrajectoryExecution[];
 }) {
   const { t } = useTranslation();
+  const container = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 800 });
+  useEffect(() => {
+    if (
+      !onEndReached ||
+      !end.current ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onEndReached();
+      },
+      { root: container.current, rootMargin: "80px" }
+    );
+    observer.observe(end.current);
+    return () => observer.disconnect();
+  }, [onEndReached]);
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
   const [collapsed, setCollapsed] = useState(new Set<string>());
@@ -40,13 +64,13 @@ export function TrajectoryTimeline({
     siblings.push(node);
     children.set(key, siblings);
   }
-  const rows: { node: TrajectoryNode; depth: number }[] = [];
+  const treeRows: { node: TrajectoryNode; depth: number }[] = [];
   const visited = new Set<string>();
   function walk(node: TrajectoryNode, depth: number) {
     if (visited.has(node.id)) return;
     visited.add(node.id);
     if (!visible.has(node.id)) return;
-    rows.push({ node, depth });
+    treeRows.push({ node, depth });
     if (filtering || !collapsed.has(node.id))
       for (const child of children.get(node.id) ?? []) walk(child, depth + 1);
   }
@@ -67,9 +91,36 @@ export function TrajectoryTimeline({
     }
     if (!hidden) walk(node, 0);
   }
-  const origin = root?.started_at ? Date.parse(root.started_at) : NaN;
+  const rows: (
+    | { node: TrajectoryNode; depth: number }
+    | { execution: TrajectoryExecution; depth: number }
+  )[] = treeRows;
+  if (!filtering) {
+    for (const execution of unavailable) {
+      const index = rows.findIndex(
+        (entry) =>
+          ("node" in entry
+            ? (entry.node.round_no ?? 0)
+            : entry.execution.round_no) > execution.round_no
+      );
+      rows.splice(index < 0 ? rows.length : index, 0, { execution, depth: 0 });
+    }
+  }
   const duration = root?.duration_ms;
+  const originNode = (node: TrajectoryNode) =>
+    byId.get(node.execution_root_id ?? "") ?? root;
+  const start = Math.min(
+    Math.max(0, rows.length - 1),
+    Math.max(0, Math.floor((viewport.top - 180) / 44) - 10)
+  );
+  const finish = Math.min(
+    rows.length,
+    Math.ceil((viewport.top + viewport.height) / 44) + 10
+  );
   const geometry = (node: TrajectoryNode) => {
+    const base = originNode(node);
+    const origin = base?.started_at ? Date.parse(base.started_at) : NaN;
+    const duration = base?.duration_ms;
     if (
       !Number.isFinite(origin) ||
       duration == null ||
@@ -91,19 +142,37 @@ export function TrajectoryTimeline({
     };
   };
   return (
-    <div className="trajectory-timeline">
+    <div
+      className="trajectory-timeline"
+      ref={container}
+      onScroll={(event) => {
+        const target = event.currentTarget;
+        setViewport({
+          top: target.scrollTop,
+          height: target.clientHeight || 800,
+        });
+      }}
+    >
       <div className="flex flex-wrap gap-2 p-3">
         <StandardInput
           className="!min-w-28 !flex-1"
           aria-label={t("trajectory.nodeSearch")}
           placeholder={t("trajectory.nodeSearch")}
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            container.current?.scrollTo?.(0, 0);
+            setViewport((previous) => ({ ...previous, top: 0 }));
+          }}
         />
         <Select
           aria-label={t("trajectory.nodeType")}
           value={kind}
-          onChange={setKind}
+          onChange={(value) => {
+            setKind(value);
+            container.current?.scrollTo?.(0, 0);
+            setViewport((previous) => ({ ...previous, top: 0 }));
+          }}
           options={[
             { value: "", label: t("trajectory.allTypes") },
             ...["agent", "model", "tool"].map((value) => ({
@@ -136,6 +205,7 @@ export function TrajectoryTimeline({
         {t("trajectory.searchScope")}:{" "}
         {t(
           complete &&
+            !nodes.some((node) => node.round_no != null) &&
             nodes.every((node) => node.input?.complete && node.output?.complete)
             ? "trajectory.currentExecution"
             : "trajectory.loadedRange"
@@ -157,7 +227,27 @@ export function TrajectoryTimeline({
         aria-label={t("trajectory.timeline")}
       >
         {rows.length === 0 && <Empty description={t("trajectory.noNodes")} />}
-        {rows.map(({ node, depth }, index) => {
+        <div
+          style={{ height: Math.min(start, rows.length) * 44 }}
+          aria-hidden
+        />
+        {rows.slice(start, finish).map((entry, localIndex) => {
+          if ("execution" in entry)
+            return (
+              <div
+                className="trajectory-timeline-row items-center px-3 text-xs text-gray-500"
+                key={entry.execution.trajectory_id}
+              >
+                <span>
+                  {t("trajectory.round", { number: entry.execution.round_no })}
+                </span>
+                <span>
+                  {t(`trajectory.availability.${entry.execution.availability}`)}
+                </span>
+              </div>
+            );
+          const { node, depth } = entry;
+          const index = start + localIndex;
           const hasChildren = (children.get(node.id)?.length ?? 0) > 0;
           const open = filtering || !collapsed.has(node.id);
           const bar = geometry(node);
@@ -206,21 +296,71 @@ export function TrajectoryTimeline({
                   role="treeitem"
                   aria-level={depth + 1}
                   aria-selected={node.id === selected}
-                  className="trajectory-node-name"
-                  title={node.name}
+                  className="trajectory-node-name flex min-w-0 items-center"
+                  title={[
+                    node.name,
+                    node.parent_id === null ? node.input?.text : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                   onClick={() => onSelect(node)}
                 >
-                  <span style={{ color }}>●</span> {node.name}
+                  {node.parent_id === null && node.round_no != null && (
+                    <small
+                      className="mr-1"
+                      title={
+                        node.matches_filters
+                          ? t("trajectory.matchedRound")
+                          : undefined
+                      }
+                    >
+                      {t("trajectory.round", { number: node.round_no })}
+                      {node.matches_filters ? " •" : ""} ·{" "}
+                      {t(`trajectory.businessStatus.${node.status}`, {
+                        defaultValue: node.status,
+                      })}
+                    </small>
+                  )}
+                  <span className="truncate">
+                    <span style={{ color }}>●</span> {node.name}
+                  </span>
+                  {node.parent_id === null &&
+                    node.round_no != null &&
+                    node.input?.text && (
+                      <span className="ml-1 truncate text-xs font-normal text-gray-500">
+                        {node.input.text}
+                      </span>
+                    )}
+                  {node.kind === "agent" && (
+                    <span className="ml-1 shrink-0 text-xs text-gray-500">
+                      <AgentVersion
+                        version={node.agent_version_no}
+                        name={node.agent_version_name}
+                      />
+                    </span>
+                  )}
                 </button>
                 {node.direct_child_count > 0 && (
                   <small>{node.direct_child_count}</small>
                 )}
               </div>
               <button
+                data-round={node.round_no}
                 className="trajectory-time-cell"
                 aria-label={`${node.name}: ${formatMetric(node.duration_ms)} ms`}
                 onClick={() => onSelect(node)}
               >
+                {node.parent_id === null && node.round_no != null && (
+                  <span className="trajectory-round-axis">
+                    0 s ·{" "}
+                    {formatMetric(
+                      originNode(node)?.duration_ms == null
+                        ? null
+                        : originNode(node)!.duration_ms! / 1000
+                    )}{" "}
+                    s
+                  </span>
+                )}
                 {bar && (
                   <>
                     <span
@@ -264,6 +404,11 @@ export function TrajectoryTimeline({
             </div>
           );
         })}
+        <div
+          style={{ height: Math.max(0, rows.length - finish) * 44 }}
+          aria-hidden
+        />
+        <div ref={end} />
       </div>
     </div>
   );

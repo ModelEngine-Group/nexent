@@ -989,12 +989,10 @@ wait_for_nexent_ready() {
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         deployments="$deployments nexent-openssh"
     fi
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ "$DEPLOYMENT_MONITORING_PROVIDER" != "local_file" ]; then
         deployments="$deployments nexent-otel-collector"
         case "$DEPLOYMENT_MONITORING_PROVIDER" in
             phoenix) deployments="$deployments nexent-phoenix" ;;
-            grafana) deployments="$deployments nexent-tempo nexent-grafana" ;;
-            zipkin) deployments="$deployments nexent-zipkin" ;;
             langfuse) deployments="$deployments nexent-langfuse-postgres nexent-langfuse-clickhouse nexent-langfuse-minio nexent-langfuse-redis nexent-langfuse-web nexent-langfuse-worker" ;;
         esac
     fi

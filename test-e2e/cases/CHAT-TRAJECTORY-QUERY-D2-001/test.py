@@ -153,8 +153,61 @@ def test_trj_query_whole_result_metrics_filters_and_stable_membership(harness):
     assert get(harness, "/trajectory/records", agent_id="007").status_code == 422
     assert get(harness, "/trajectory/records", tenant_id="t2").status_code == 404
     assert get(harness, "/trajectory/records", actor="user").status_code == 403
+    conversation = data(get(harness, "/trajectory/records", view="conversation", id_query=second.model1))
+    assert conversation["total"] == 1
+    row = conversation["items"][0]
+    assert row["round_count"] == 3 and row["matching_execution_count"] == 1
+    assert row["status"] == "success" and row["duration_ms"] == 8000
+    assert conversation["summary"]["duration"]["mean_ms"] == 3000
+    assert conversation["summary"]["conversation_duration"]["p50_ms"] == 3000
+    assert data(get(harness, "/trajectory/records", view="conversation", status="error"))["total"] == 0
+    detail = data(get(harness, "/trajectory/conversations/123", query_id=conversation["query_id"], limit=1))
+    assert detail["executions"][0]["round_no"] == 1
+    assert detail["executions"][0]["matches_filters"] is False
+    harness.add_run(status="failed", duration=7000)
+    remaining = data(get(harness, "/trajectory/conversations/123", cursor=detail["next_cursor"], limit=20))
+    assert [run["round_no"] for run in remaining["executions"]] == [2, 3]
+    assert [run["matches_filters"] for run in remaining["executions"]] == [True, False]
+    old = data(get(harness, "/trajectory/records", view="conversation", id_query=second.model1,
+                   query_id=conversation["query_id"]))
+    assert old["items"][0]["status"] == "success"
+    assert data(get(harness, "/trajectory/records", view="conversation"))["items"][0]["status"] == "error"
+    harness.add_conversation("125", "t1", "u1")
+    missing = data(get(harness, "/trajectory/records", view="conversation", status="not_captured"))
+    assert missing["total"] == 1 and missing["items"][0]["conversation_id"] == "125"
+    assert missing["items"][0]["duration_ms"] is None
+    assert missing["summary"]["duration"]["sample_count"] == 0
+    harness.now[0] += timedelta(days=40)
+    expired = data(get(harness, "/trajectory/records", view="conversation", status="expired"))
+    assert expired["total"] == 1 and expired["items"][0]["status"] is None
+    assert expired["summary"]["duration"]["sample_count"] == 0
+    assert get(harness, "/trajectory/records", status="expired").status_code == 422
+    assert get(harness, "/trajectory/records", view="conversation", query_id=conversation["query_id"]).status_code == 422
     harness.service.seconds = -1
     assert get(harness, "/trajectory/records").status_code == 503
+
+
+def test_trj_query_keyless_references_remain_scoped_and_can_be_refreshed(harness):
+    from management.services.trajectory.primitives import ReferenceStore
+
+    view = snapshot(harness)
+    tool = next(node for node in view["nodes"] if node["kind"] == "tool")
+    content_id = tool["output"]["content_id"]
+    assert len(content_id) == 32 and int(content_id, 16) >= 0
+    prefix = "/trajectory/conversations/123/contents/"
+    assert get(harness, prefix + content_id).status_code == 200
+    for invalid in [content_id + "x", "a" * 32, view["snapshot_id"]]:
+        response = get(harness, prefix + invalid)
+        assert response.status_code == 422
+        assert "text" not in response.json().get("data", {})
+    assert get(harness, prefix + content_id, actor="admin2").status_code == 422
+    assert get(harness, prefix + content_id, actor="user").status_code == 403
+    harness.service.references = ReferenceStore()
+    assert get(harness, prefix + content_id).status_code == 422
+    refreshed = snapshot(harness)
+    new_id = next(node for node in refreshed["nodes"] if node["kind"] == "tool")["output"]["content_id"]
+    assert new_id != content_id
+    assert get(harness, prefix + new_id).status_code == 200
 
 
 @pytest.mark.parametrize("body_bytes", [1024 * 1024, 4 * 1024 * 1024])
@@ -186,9 +239,9 @@ def test_trj_query_large_unicode_content_roundtrip_and_reference_scope(
     assert get(harness, path, actor="admin2").status_code == 422
     assert get(harness, path.replace("/123/", "/124/")).status_code == 404
     assert get(harness, path, limit=1048577).status_code == 422
-    forged = harness.service.signer.verify(content_id, "content")
+    forged = harness.service.references.resolve(content_id, "content")
     forged["field"] = "internal_file"
-    bad = harness.service.signer.sign("content", forged)
+    bad = harness.service.references.issue("content", forged)
     assert (
         get(harness, "/trajectory/conversations/123/contents/" + bad).status_code == 422
     )

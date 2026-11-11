@@ -148,11 +148,10 @@ class TestMonitoringConfig:
 
         assert config.provider == "langsmith"
 
-    def test_zipkin_provider_is_supported(self):
-        """Test Zipkin is a supported OTLP provider profile."""
-        config = MonitoringConfig(provider="zipkin")
-
-        assert config.provider == "zipkin"
+    def test_removed_zipkin_provider_is_rejected(self):
+        """Retired deployment providers must fail configuration."""
+        with pytest.raises(ValueError, match="provider"):
+            MonitoringConfig(provider="zipkin")
 
     def test_langsmith_grpc_protocol_defaults_to_http(self):
         """LangSmith OTLP profile uses HTTP trace ingestion."""

@@ -38,6 +38,26 @@ describe("trajectory HTTP adapter", () => {
     expect(parsed.searchParams.get("query_id")).toBe("signed+/=");
     expect(options).toMatchObject({ signal, cache: "no-store" });
   });
+  it("binds the execution directory to the conversation query and cancellation", async () => {
+    const signal = new AbortController().signal;
+    await trajectoryService.conversation(
+      record,
+      { query_id: "query", cursor: "next-round", limit: 1 },
+      signal
+    );
+    const [url, options] = request.mock.calls[0];
+    const parsed = new URL(String(url), "http://localhost");
+    expect(parsed.pathname).toContain(record.conversation_id);
+    expect(parsed.pathname).not.toContain("snapshot");
+    expect(Object.fromEntries(parsed.searchParams)).toMatchObject({
+      tenant_id: "tenant",
+      target_user_id: "owner",
+      query_id: "query",
+      cursor: "next-round",
+      limit: "1",
+    });
+    expect(options).toMatchObject({ signal, cache: "no-store" });
+  });
   it("binds snapshots to row tenant, owner and execution and keeps cursor separate", async () => {
     await trajectoryService.snapshot(record, {
       cursor: "cursor",

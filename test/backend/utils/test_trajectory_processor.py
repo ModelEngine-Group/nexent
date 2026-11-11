@@ -29,9 +29,8 @@ from opentelemetry.trace import Link, SpanContext, Status, StatusCode, TraceFlag
 
 @pytest.fixture
 def capture(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    store = TrajectoryFileStore(tmp_path, root_id, authorize=lambda _: None)
+    TrajectoryFileStore.provision(tmp_path)
+    store = TrajectoryFileStore(tmp_path, authorize=lambda _: None)
     metadata = SimpleNamespace(tenant_id="tenant", user_id="user", conversation_id=123, agent_id=42, extra_metadata={})
     processor = LocalTrajectoryProcessor(store, lambda: metadata)
     manager = ThreadManager("trajectory-test", {"background-service": LanePolicy("background-service", 1, 0)})
@@ -264,7 +263,7 @@ def test_root_capture_preserves_business_outcome(capture, monkeypatch, business_
 
 
 def test_revoked_capture_releases_writer_and_seals_only_confirmed_content(capture):
-    maintenance = TrajectoryFileStore(capture.store.root, capture.store.storage_root_id, authorize=lambda _: None)
+    maintenance = TrajectoryFileStore(capture.store.root, authorize=lambda _: None)
     capture.processor._maintenance_store = maintenance
     with capture.tracer.start_as_current_span("agent.run") as root:
         root.set_attribute("nexent.local.input.value", "authorized-input")

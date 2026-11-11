@@ -1,19 +1,20 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Safe query errors, bounded work and authenticated opaque references."""
+"""Safe query errors, bounded work and server-side opaque references."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import math
 import re
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
+from uuid import uuid4
 
 from contracts.errors.trajectory import QueryError
+
+from .cache import ByteCache
 
 CURRENT_CANCEL = ContextVar("trajectory_query_cancel", default=None)
 
@@ -22,7 +23,7 @@ CURRENT_CANCEL = ContextVar("trajectory_query_cancel", default=None)
 class Budget:
     max_bytes: int = 256 * 1024 * 1024
     max_nodes: int = 100_000
-    seconds: float = 8
+    seconds: float = 30
     used_bytes: int = 0
     used_nodes: int = 0
     max_retained: int = 32 * 1024 * 1024
@@ -46,39 +47,30 @@ class Budget:
             raise QueryError("query_budget_exceeded", 503, retry_after=2)
 
 
-class TokenSigner:
-    def __init__(self, secret: str, *, clock=time.time, ttl=1800):
-        if len(secret.encode()) < 32:
-            raise ValueError("Trajectory signing key must contain at least 32 bytes")
-        self.key, self.clock, self.ttl = secret.encode(), clock, ttl
+class ReferenceStore:
+    """Keep immutable reference state in a bounded process-local cache."""
 
-    def sign(self, kind, data):
-        raw = json.dumps(
-            {"kind": kind, "exp": int(self.clock()) + self.ttl, **data},
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode()
-        encoded = base64.urlsafe_b64encode(raw).rstrip(b"=")
-        signature = hmac.new(self.key, encoded, hashlib.sha256).digest()
-        return (encoded + b"." + base64.urlsafe_b64encode(signature).rstrip(b"=")).decode()
+    def __init__(self, *, max_bytes=16 * 1024 * 1024, ttl=1800):
+        self.cache = ByteCache(max_bytes=max_bytes, ttl=ttl)
 
-    def verify(self, token, kind, **bindings):
-        try:
-            if not isinstance(token, str) or len(token) > 8192:
-                raise ValueError()
-            encoded, signature = token.encode("ascii").split(b".")
-            expected = base64.urlsafe_b64encode(hmac.new(self.key, encoded, hashlib.sha256).digest()).rstrip(b"=")
-            if not hmac.compare_digest(signature, expected):
-                raise ValueError()
-            data = json.loads(base64.urlsafe_b64decode(encoded + b"=" * (-len(encoded) % 4)))
-            if data["kind"] != kind or data["exp"] <= self.clock():
-                raise ValueError()
-            if any(data.get(key) != value for key, value in bindings.items()):
-                raise ValueError()
-            return data
-        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
-            raise QueryError("invalid_reference") from exc
+    def issue(self, kind, data):
+        raw = json.dumps({"kind": kind, "data": data}, separators=(",", ":"), allow_nan=False)
+        reference = uuid4().hex
+        if not self.cache.put(reference, raw, len(raw.encode("utf-8")) * 4 + 256):
+            raise QueryError("query_budget_exceeded", 503, retry_after=2)
+        return reference
+
+    def resolve(self, reference, kind, **bindings):
+        if not isinstance(reference, str) or re.fullmatch(r"[0-9a-f]{32}", reference) is None:
+            raise QueryError("invalid_reference")
+        raw = self.cache.get(reference)
+        if raw is None:
+            raise QueryError("invalid_reference")
+        entry = json.loads(raw)
+        data = entry["data"]
+        if entry["kind"] != kind or any(data.get(key) != value for key, value in bindings.items()):
+            raise QueryError("invalid_reference")
+        return data
 
 
 def finite_number(value, *, integer=False):

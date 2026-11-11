@@ -1,7 +1,10 @@
 {{- define "nexent-monitoring.provider" -}}
 {{- $globalMonitoring := default dict .Values.global.monitoring -}}
 {{- $provider := default .Values.provider $globalMonitoring.provider | default "otlp" | lower -}}
-{{- if eq $provider "collector" -}}otlp{{- else -}}{{ $provider }}{{- end -}}
+{{- if not (has $provider (list "local_file" "otlp" "phoenix" "langfuse" "langsmith")) -}}
+{{- fail "Unsupported monitoring provider" -}}
+{{- end -}}
+{{ $provider }}
 {{- end -}}
 
 {{- define "nexent-monitoring.collectorConfigFile" -}}
@@ -12,31 +15,17 @@
 {{- if eq $provider "phoenix" -}}otel-collector-phoenix-config.yml
 {{- else if eq $provider "langfuse" -}}otel-collector-langfuse-config.yml
 {{- else if eq $provider "langsmith" -}}otel-collector-langsmith-config.yml
-{{- else if eq $provider "grafana" -}}otel-collector-grafana-config.yml
-{{- else if eq $provider "zipkin" -}}otel-collector-zipkin-config.yml
 {{- else -}}otel-collector-config.yml
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "nexent-monitoring.phoenixEnabled" -}}
-{{- if or .Values.phoenix.enabled (eq (include "nexent-monitoring.provider" .) "phoenix") -}}true{{- end -}}
-{{- end -}}
-
-{{- define "nexent-monitoring.grafanaEnabled" -}}
-{{- if or .Values.grafana.enabled (eq (include "nexent-monitoring.provider" .) "grafana") -}}true{{- end -}}
-{{- end -}}
-
-{{- define "nexent-monitoring.tempoEnabled" -}}
-{{- if or .Values.tempo.enabled .Values.grafana.enabled (eq (include "nexent-monitoring.provider" .) "grafana") -}}true{{- end -}}
-{{- end -}}
-
-{{- define "nexent-monitoring.zipkinEnabled" -}}
-{{- if or .Values.zipkin.enabled (eq (include "nexent-monitoring.provider" .) "zipkin") -}}true{{- end -}}
+{{- if eq (include "nexent-monitoring.provider" .) "phoenix" -}}true{{- end -}}
 {{- end -}}
 
 {{- define "nexent-monitoring.langfuseEnabled" -}}
-{{- if or .Values.langfuse.enabled (eq (include "nexent-monitoring.provider" .) "langfuse") -}}true{{- end -}}
+{{- if eq (include "nexent-monitoring.provider" .) "langfuse" -}}true{{- end -}}
 {{- end -}}
 
 {{- define "nexent-monitoring.claimName" -}}

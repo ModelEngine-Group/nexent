@@ -10,6 +10,7 @@ from uuid import uuid4
 from infrastructure.observability.trajectory_store import parse_time
 
 from .access import authorize
+from .conversation_view import frozen_runs, project
 from .primitives import QueryError, fingerprint, percentiles
 
 
@@ -77,7 +78,13 @@ def _row(service, row, meta, run, nodes, root, coverage, *, publication=None):
         "tenant_name": row.get("tenant_name", row["tenant_id"]),
         "trajectory_id": run["trajectory_id"] if run else None,
         "root_agent_id": run["root_agent_id"] if run else None,
-        "root_agent_name": root_node.get("name"),
+        "root_agent_name": root_node.get("name", (run or {}).get("root_agent_name")),
+        "root_agent_version_no": root_node.get(
+            "agent_version_no", (run or {}).get("root_agent_version_no")
+        ),
+        "root_agent_version_name": root_node.get(
+            "agent_version_name", (run or {}).get("root_agent_version_name")
+        ),
         "models": sorted({node["model"] for node in nodes if node["model"]}),
         "status": "success"
         if business == "completed"
@@ -99,6 +106,7 @@ def records(
     actor,
     filters,
     *,
+    view="execution",
     query_id=None,
     page=1,
     page_size=10,
@@ -107,7 +115,11 @@ def records(
     all_items=False,
 ):
     if (
-        not 1 <= page_size <= 100
+        view not in {"execution", "conversation"}
+        or (
+            view == "execution" and filters.get("status") in {"not_captured", "expired"}
+        )
+        or not 1 <= page_size <= 100
         or page < 1
         or page > 1_000_000
         or sort_by not in {"started_at", "duration_ms", "total_tokens"}
@@ -115,10 +127,10 @@ def records(
     ):
         raise QueryError("invalid_parameters")
     tenants = authorize(service.catalog, actor, filters.get("tenant_id"))
-    budget, filter_hash = service.budget(), fingerprint(filters)
+    budget, filter_hash = service.budget(), fingerprint({"view": view, **filters})
     previous, query_key = None, str(uuid4())
     if query_id:
-        token = service.signer.verify(
+        token = service.references.resolve(
             query_id, "query", actor=actor.binding, filters=filter_hash
         )
         query_key = token["query"]
@@ -136,7 +148,7 @@ def records(
         as_of = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     names = service.catalog.names(tenants)
     result, ttfts, durations, members = [], [], [], []
-    validations = []
+    validations, read_ids, conversation_durations = [], set(), []
     for candidate in candidates:
         budget.check(nodes=1)
         if candidate["tenant_id"] not in tenants:
@@ -165,6 +177,60 @@ def records(
             if previous
             else (meta or {}).get("publication_no", 0)
         )
+        if view == "conversation":
+            runs = frozen_runs(meta, candidate, previous)
+            uncaptured = (
+                candidate["latest_uncaptured"]
+                if previous
+                else (
+                    (meta or {}).get("source_coverage_verified") is True
+                    and (meta or {}).get("latest_source_captured") is False
+                )
+            )
+            item, samples, model_samples, matching, loaded = project(
+                service,
+                actor,
+                row,
+                meta,
+                runs,
+                filters,
+                budget,
+                _row,
+                _matches,
+                latest_uncaptured=uncaptured,
+                latest_execution=candidate.get("latest_execution")
+                if previous
+                else (meta or {}).get("latest_execution"),
+                execution_count=candidate.get("execution_count")
+                if previous
+                else (meta or {}).get("next_turn_no", len(runs) + 1) - 1,
+            )
+            read_ids.update(loaded)
+            if item is not None:
+                result.append(item)
+                durations.extend(samples)
+                ttfts.extend(model_samples)
+                if samples:
+                    conversation_durations.append(sum(samples))
+            members.append(
+                {
+                    **row,
+                    "publication": upper,
+                    "cleanup": (meta or {}).get("cleanup_version", 0),
+                    "runs": [run["trajectory_id"] for run in runs],
+                    "frozen_runs": [dict(run) for run in runs],
+                    "latest_uncaptured": uncaptured,
+                    "matching_runs": matching,
+                    "execution_count": candidate.get("execution_count")
+                    if previous
+                    else (meta or {}).get("next_turn_no", len(runs) + 1) - 1,
+                    "latest_execution": candidate.get("latest_execution")
+                    if previous
+                    else (meta or {}).get("latest_execution"),
+                }
+            )
+            validations.append((row, (meta or {}).get("cleanup_version", 0)))
+            continue
         selected_ids = candidate["runs"] if previous else None
         run_members, visible = [], 0
         for run in (meta or {}).get("runs", []):
@@ -244,7 +310,11 @@ def records(
         validations.append((row, (meta or {}).get("cleanup_version", 0)))
     # Revalidate every owner and expiry before emitting a previously assembled aggregate.
     now = service.archive.store.clock()
-    result_ids = {item["trajectory_id"] for item in result if item["trajectory_id"]}
+    result_ids = (
+        read_ids
+        if view == "conversation"
+        else {item["trajectory_id"] for item in result if item["trajectory_id"]}
+    )
     for row, cleanup in validations:
         service.recheck(actor, row)
         meta = service.archive.manifest(row)
@@ -287,7 +357,7 @@ def records(
     result = known + unknown
     if not previous:
         as_of = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        cached = {"members": members, "as_of": as_of}
+        cached = {"members": members, "as_of": as_of, "view": view}
         if not service.queries.put(
             query_key, cached, len(json.dumps(cached).encode()) * 4
         ):
@@ -300,17 +370,21 @@ def records(
             **percentiles(durations),
             "mean_ms": sum(durations) / len(durations) if durations else None,
         },
+        "conversation_duration": percentiles(conversation_durations),
         "ttft": percentiles(ttfts),
         "complete": True,
         "coverage": {
             "complete": all(r["coverage"]["complete"] for r in result),
-            "execution_count": len([r for r in result if r["trajectory_id"]]),
+            "execution_count": sum(
+                r.get("matching_execution_count", bool(r["trajectory_id"]))
+                for r in result
+            ),
             "scanned_bytes": budget.used_bytes,
             "scanned_nodes": budget.used_nodes,
         },
     }
     response = {
-        "query_id": service.signer.sign(
+        "query_id": service.references.issue(
             "query",
             {"actor": actor.binding, "filters": filter_hash, "query": query_key},
         ),
@@ -345,7 +419,9 @@ def facets(service, actor, filters, facet, *, search="", cursor=None, limit=20):
         "filters": fingerprint(filters),
         "search": search.strip().casefold(),
     }
-    state = service.signer.verify(cursor, "facet", **binding) if cursor else binding
+    state = (
+        service.references.resolve(cursor, "facet", **binding) if cursor else binding
+    )
     if facet == "tenants":
         names = service.catalog.names(tenants)
         options = [
@@ -448,7 +524,7 @@ def facets(service, actor, filters, facet, *, search="", cursor=None, limit=20):
     authorize(service.catalog, actor, filters.get("tenant_id"))
     return {
         "items": options[:limit],
-        "next_cursor": service.signer.sign(
+        "next_cursor": service.references.issue(
             "facet",
             {
                 **binding,

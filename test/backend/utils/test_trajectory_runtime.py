@@ -21,12 +21,13 @@ from infrastructure.observability.trajectory_store import (
 )
 
 
-def configuration(root="", root_id="", **overrides):
+def configuration(root="", **overrides):
     values = {
         "ENABLE_TELEMETRY": False,
-        "MONITORING_TRACE_SINK": "otlp",
+        "MONITORING_PROVIDER": "otlp",
         "TRAJECTORY_ROOT_DIR": str(root),
-        "TRAJECTORY_STORAGE_ROOT_ID": root_id,
+        "TRAJECTORY_READ_ENABLED": bool(root),
+
         "TRAJECTORY_RETENTION_DAYS": 30,
         "TRAJECTORY_FLUSH_INTERVAL_MS": 200,
         "TRAJECTORY_FLUSH_BYTES": 262144,
@@ -45,9 +46,8 @@ def test_default_configuration_has_no_filesystem_side_effects():
 
 def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
+    TrajectoryFileStore.provision(tmp_path)
+    processor = create_local_processor(configuration(tmp_path), lambda: None)
     maintenance = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     now = datetime(2026, 11, 1, tzinfo=UTC)
@@ -75,14 +75,12 @@ def test_cleanup_is_independent_of_telemetry_and_active_capture(tmp_path, caplog
 
 
 def test_startup_recovery_seals_orphan_even_when_cleanup_disabled(tmp_path):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     processor = create_local_processor(
         configuration(
             tmp_path,
-            root_id,
             ENABLE_TELEMETRY=True,
-            MONITORING_TRACE_SINK="local_file",
+            MONITORING_PROVIDER="local_file",
             TRAJECTORY_CLEANUP_ENABLED=False,
         ),
         lambda: None,
@@ -109,15 +107,16 @@ def test_startup_recovery_seals_orphan_even_when_cleanup_disabled(tmp_path):
     ],
 )
 def test_invalid_storage_configuration_fails_before_service_start(tmp_path, overrides):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
+    TrajectoryFileStore.provision(tmp_path)
     with pytest.raises(ValueError):
-        create_local_processor(configuration(tmp_path, root_id, **overrides), lambda: None)
+        create_local_processor(configuration(tmp_path, **overrides), lambda: None)
 
 
-def test_provisioned_mount_is_required(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        create_local_processor(configuration(tmp_path, str(uuid4())), lambda: None)
+def test_read_only_maintenance_initializes_persistent_directory(tmp_path):
+    root = tmp_path / "trajectory"
+    processor = create_local_processor(configuration(root), lambda: None)
+    assert processor.store.root == root
+    assert (root / ".storage-root.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -157,9 +156,8 @@ def test_capture_authorization_requires_active_membership_and_actual_owner(monke
 
 
 def test_deleted_conversation_reclamation_uses_confirmed_pg_result(tmp_path, caplog):
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
+    TrajectoryFileStore.provision(tmp_path)
+    processor = create_local_processor(configuration(tmp_path), lambda: None)
     maintenance = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     with maintenance.start(identity, str(uuid4()), str(uuid4()), core_type="smolagents") as writer:
@@ -185,9 +183,8 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     tmp_path, monkeypatch, caplog, elapsed,
 ):
     caplog.set_level(logging.INFO)
-    root_id = str(uuid4())
-    TrajectoryFileStore.provision(tmp_path, root_id)
-    processor = create_local_processor(configuration(tmp_path, root_id), lambda: None)
+    TrajectoryFileStore.provision(tmp_path)
+    processor = create_local_processor(configuration(tmp_path), lambda: None)
     store = processor._maintenance_store
     identity = CaptureIdentity("tenant", "owner", "1", "42")
     now = datetime(2026, 11, 1, tzinfo=UTC)
@@ -229,3 +226,13 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     assert [event["deleted_runs"] for event in events] == [1, 1, 1]
     assert [event["pending_runs"] for event in events] == [2, 1, 0]
     assert all(event["failed_runs"] == 0 and event["counts_complete"] for event in events)
+
+
+def test_local_provider_keeps_cleanup_when_capture_and_reads_are_disabled(tmp_path):
+    config = configuration(
+        tmp_path, MONITORING_PROVIDER="local_file", TRAJECTORY_READ_ENABLED=False,
+    )
+    assert not config.ENABLE_TELEMETRY
+    assert create_local_processor(config, lambda: None) is not None
+    config.TRAJECTORY_CLEANUP_ENABLED = False
+    assert create_local_processor(config, lambda: None) is None

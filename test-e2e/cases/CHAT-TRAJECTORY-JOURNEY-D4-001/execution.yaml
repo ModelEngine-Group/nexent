@@ -1,0 +1,36 @@
+schema_version: '1.0'
+case_id: CHAT-TRAJECTORY-JOURNEY-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: CHAT-TRAJECTORY-JOURNEY-D4-001
+acceptance_bindings:
+  AC-01:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-02:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-03:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-04:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-05:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-06:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+  AC-07:
+  - CHAT-TRAJECTORY-JOURNEY-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: 'The fixed journey uses the product frontend from the configured base URL and
+  owns its intercepted HTTP routes, cookies and browser context. Deferred cleanup
+  unregisters routes and clears cookies; Playwright releases the context even on failure.
+  It provisions no shared tenant, Agent, model, file or backend resource. Version
+  assertions cover the historical root, child, draft and unknown nodes, plus hiding
+  Agent versions on model/tool selection. This binding records the existing partial
+  journey, not complete acceptance: delayed-response, complete availability, SU/locale/keyboard
+  and resource-volume variants remain pending. The Case stays blocked and formal execution
+  is deferred by the user. Preparation, execution and cleanup receipts have not been
+  verified in this change.'

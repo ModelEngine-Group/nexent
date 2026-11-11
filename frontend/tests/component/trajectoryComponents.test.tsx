@@ -19,6 +19,7 @@ import ObservabilityPage from "@/app/observability/page";
 import { TrajectoryTimeline } from "@/app/observability/components/TrajectoryTimeline";
 import { TrajectoryNodeDetail } from "@/app/observability/components/TrajectoryNodeDetail";
 import { TrajectorySummary } from "@/app/observability/components/TrajectorySummary";
+import { AgentVersion } from "@/app/observability/components/AgentVersion";
 import { TrajectoryBody } from "@/app/observability/components/TrajectoryBody";
 import { DirectoryFilter } from "@/app/observability/components/DirectoryFilter";
 import { TrajectoryDrawer } from "@/app/observability/components/TrajectoryDrawer";
@@ -38,6 +39,7 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 vi.mock("@/services/trajectoryService", () => ({
   trajectoryService: {
     records: vi.fn(),
+    conversation: vi.fn(),
     facets: vi.fn(),
     snapshot: vi.fn(),
     content: vi.fn(),
@@ -56,6 +58,27 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   api.records.mockResolvedValue(recordsPage());
+  api.conversation.mockResolvedValue({
+    snapshot_id: "conversation",
+    conversation_id: record.conversation_id,
+    executions: [
+      {
+        trajectory_id: "execution",
+        round_no: 1,
+        turn_no: 1,
+        root_agent_id: "12",
+        root_agent_version_no: null,
+        root_agent_version_name: null,
+        business_status: "completed",
+        availability: "available",
+        matches_filters: true,
+      },
+    ],
+    next_cursor: null,
+    coverage: { complete: true },
+    availability: "available",
+    active_execution_count: 0,
+  });
   api.facets.mockResolvedValue({ items: [], next_cursor: null });
 });
 
@@ -133,6 +156,63 @@ describe("trajectory timeline", () => {
     expect(screen.getByRole("treeitem", { name: /SearchTool/ })).toBeVisible();
     expect(screen.getByRole("treeitem", { name: /Root Agent/ })).toBeVisible();
   });
+  it("keeps cleaned rounds in execution order and bounds mounted rows while searching", async () => {
+    const nodes = [
+      traceNode({ round_no: 1 }),
+      ...Array.from({ length: 500 }, (_, index) =>
+        traceNode({
+          id: `node-${index}`,
+          parent_id: "root",
+          name: `Call-${index}`,
+          round_no: 1,
+        })
+      ),
+      traceNode({ id: "round-3", name: "Third round", round_no: 3 }),
+    ];
+    const view = render(
+      <TrajectoryTimeline
+        nodes={nodes}
+        complete
+        cache={new BodyCache()}
+        onSelect={vi.fn()}
+        unavailable={[
+          {
+            trajectory_id: "missing-2",
+            round_no: 2,
+            turn_no: 2,
+            availability: "expired",
+            root_agent_id: "7",
+            root_agent_version_no: null,
+            root_agent_version_name: null,
+            business_status: "completed",
+            matches_filters: false,
+          },
+        ]}
+      />
+    );
+    expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
+    const container = view.container.querySelector(".trajectory-timeline")!;
+    fireEvent.scroll(container, { target: { scrollTop: 22000 } });
+    expect(
+      screen.getByText("trajectory.availability.expired")
+    ).toBeInTheDocument();
+    const rendered = [
+      ...view.container.querySelectorAll(".trajectory-timeline-row"),
+    ];
+    const expired = rendered.findIndex((entry) =>
+      entry.textContent?.includes("trajectory.availability.expired")
+    );
+    expect(rendered[expired + 1]).toHaveTextContent("Third round");
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "trajectory.nodeSearch" }),
+      "Call-499"
+    );
+    expect(screen.getByRole("treeitem", { name: /Call-499/ })).toBeVisible();
+    expect(screen.getByRole("treeitem", { name: /Root Agent/ })).toBeVisible();
+    expect(
+      screen.queryByText("trajectory.availability.expired")
+    ).not.toBeInTheDocument();
+  });
   it("keeps parallel spans on the shared root time scale", () => {
     const a = traceNode({
       id: "a",
@@ -165,6 +245,74 @@ describe("trajectory timeline", () => {
 });
 
 describe("node details and bounded body reads", () => {
+  it.each([undefined, -1, Number.NaN, 0.5])(
+    "keeps invalid version %s unknown",
+    (version) => {
+      render(<AgentVersion version={version} name="Untrusted label" />);
+      expect(screen.getByText("trajectory.unknownVersion")).toBeVisible();
+      expect(screen.queryByTitle("Untrusted label")).not.toBeInTheDocument();
+    }
+  );
+  it.each([
+    [3, "V3"],
+    [0, "trajectory.draftVersion"],
+    [null, "trajectory.unknownVersion"],
+  ])("shows the selected Agent version %s", (version, label) => {
+    const props = {
+      conversationId: "1",
+      cache: new BodyCache(),
+      onParent: vi.fn(),
+      onLoaded: vi.fn(),
+    };
+    const view = render(
+      <TrajectoryNodeDetail
+        {...props}
+        node={traceNode({ agent_version_no: version as number | null })}
+      />,
+      { wrapper }
+    );
+    expect(screen.getByText(String(label))).toBeVisible();
+    view.rerender(
+      <TrajectoryNodeDetail
+        {...props}
+        node={traceNode({ id: "model", kind: "model", agent_version_no: 99 })}
+      />
+    );
+    expect(screen.queryByText("V99")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("trajectory.agentVersion")
+    ).not.toBeInTheDocument();
+  });
+  it("shows each Agent version in the tree without assigning one to tools", () => {
+    render(
+      <TrajectoryTimeline
+        nodes={[
+          traceNode({ agent_version_no: 3 }),
+          traceNode({
+            id: "sub",
+            parent_id: "root",
+            name: "Child",
+            agent_version_no: 2,
+          }),
+          traceNode({
+            id: "tool",
+            parent_id: "root",
+            kind: "tool",
+            name: "Tool",
+            agent_version_no: 99,
+          }),
+        ]}
+        complete
+        cache={new BodyCache()}
+        onSelect={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByRole("treeitem", { name: /Root Agent.*V3/ })
+    ).toBeVisible();
+    expect(screen.getByRole("treeitem", { name: /Child.*V2/ })).toBeVisible();
+    expect(screen.queryByText("V99")).not.toBeInTheDocument();
+  });
   it.each(["agent", "tool"])(
     "does not show model-only metrics on %s",
     (kind) => {
@@ -352,7 +500,7 @@ describe("summary, facets and drawer", () => {
       () => new Promise<SnapshotPage>(() => {})
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "trajectory.nextSegment" })
+      screen.getByRole("button", { name: "trajectory.loadMore" })
     );
     await waitFor(() => expect(api.snapshot).toHaveBeenCalledTimes(2));
     expect(api.snapshot.mock.calls[1][1]).toEqual({
@@ -363,7 +511,16 @@ describe("summary, facets and drawer", () => {
     view.unmount();
     expect(signal.aborted).toBe(true);
   });
-  it("never requests a snapshot for an expired placeholder row", () => {
+  it("never requests a snapshot for an expired placeholder row", async () => {
+    api.conversation.mockResolvedValueOnce({
+      snapshot_id: "conversation",
+      conversation_id: record.conversation_id,
+      executions: [],
+      next_cursor: null,
+      coverage: { complete: false },
+      availability: "expired",
+      active_execution_count: 0,
+    });
     render(
       <TrajectoryDrawer
         row={{ ...record, trajectory_id: null, availability: "expired" }}
@@ -371,7 +528,9 @@ describe("summary, facets and drawer", () => {
       />,
       { wrapper }
     );
-    expect(screen.getByText("trajectory.availability.expired")).toBeVisible();
+    expect(
+      await screen.findByText("trajectory.availability.expired")
+    ).toBeVisible();
     expect(api.snapshot).not.toHaveBeenCalled();
   });
   it("drops the viewer and cached bodies when a content reference is invalidated", async () => {
@@ -394,7 +553,7 @@ describe("summary, facets and drawer", () => {
       Object.assign(new Error(), { code: "snapshot_reset" })
     );
     render(<TrajectoryDrawer row={record} onClose={vi.fn()} />, { wrapper });
-    await screen.findByText("private preview");
+    await screen.findAllByText("private preview");
     await userEvent.click(
       screen.getAllByRole("button", { name: "trajectory.expandContent" })[0]
     );
@@ -413,6 +572,13 @@ describe("administrator page and cleanup confirmation", () => {
     role: USER_ROLES.ADMIN,
     tenantId: "tenant",
   };
+  it("shows the historical root version in the execution list", async () => {
+    const result = recordsPage();
+    result.items[0] = { ...record, root_agent_version_no: 3 };
+    api.records.mockResolvedValue(result);
+    render(<ObservabilityCenter user={admin} />, { wrapper });
+    expect(await screen.findByText("V3")).toBeVisible();
+  });
   it("opens with the authenticated tenant and queries on explicit ID submit", async () => {
     render(<ObservabilityCenter user={admin} />, { wrapper });
     await waitFor(() => expect(api.records).toHaveBeenCalledOnce());

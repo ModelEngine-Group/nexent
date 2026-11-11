@@ -94,11 +94,10 @@ class TrajectoryFileStore:
     """Blocking storage boundary, called from a managed I/O worker."""
 
     def __init__(
-        self, root, storage_root_id: str, *, authorize, retention_days: int = 30, clock=None, source_query=None,
+        self, root, *, authorize, retention_days: int = 30, clock=None, source_query=None,
         storage_mode="single_node",
     ):
         self.root = Path(root)
-        self.storage_root_id = uuid_string(storage_root_id)
         self.storage_mode = self._mode(storage_mode)
         self.authorize = authorize
         self.source_query = source_query
@@ -106,8 +105,7 @@ class TrajectoryFileStore:
         self.clock = clock or (lambda: datetime.now(UTC))
         if not callable(authorize):
             raise TypeError("Trusted capture authorization is required")
-        with self._root():
-            pass
+        self.provision(self.root, storage_mode=self.storage_mode)
 
     @staticmethod
     def _days(days):
@@ -116,20 +114,19 @@ class TrajectoryFileStore:
         return days
 
     @classmethod
-    def provision(cls, root, storage_root_id: str, *, storage_mode="single_node"):
-        """Explicitly register a persistent root; normal startup never invents one."""
-        storage_root_id = uuid_string(storage_root_id)
+    def provision(cls, root, *, storage_mode="single_node"):
+        """Initialize the persistent directory and enforce its configured storage mode."""
         storage_mode = cls._mode(storage_mode)
         with Directory.root(Path(root), create=True) as directory, directory.lock(".storage-root.lock"):
             try:
                 marker = directory.read_json(".storage-root.json")
             except FileNotFoundError:
                 directory.atomic_json(".storage-root.json", {
-                    "schema_version": 1, "storage_root_id": storage_root_id, "storage_mode": storage_mode,
+                    "schema_version": 1, "storage_mode": storage_mode,
                 })
             else:
-                if not cls._registered(marker, storage_root_id, storage_mode):
-                    raise TrajectoryConflict("Trajectory storage root identity differs")
+                if not cls._registered(marker, storage_mode):
+                    raise TrajectoryConflict("Trajectory storage mode differs")
 
     @staticmethod
     def _mode(value):
@@ -138,15 +135,15 @@ class TrajectoryFileStore:
         return value
 
     @staticmethod
-    def _registered(marker, root_id, mode):
-        legacy = {"schema_version": 1, "storage_root_id": root_id}
-        return marker == {**legacy, "storage_mode": mode} or (mode == "single_node" and marker == legacy)
+    def _registered(marker, mode):
+        return (isinstance(marker, dict) and marker.get("schema_version") == 1
+                and marker.get("storage_mode", "single_node") == mode)
 
     @contextmanager
     def _root(self):
         with Directory.root(self.root) as directory:
-            if not self._registered(directory.read_json(".storage-root.json"), self.storage_root_id, self.storage_mode):
-                raise TrajectoryConflict("Trajectory storage root identity differs")
+            if not self._registered(directory.read_json(".storage-root.json"), self.storage_mode):
+                raise TrajectoryConflict("Trajectory storage mode differs")
             yield directory
 
     def _locate(self, root, identity):
@@ -200,7 +197,6 @@ class TrajectoryFileStore:
             raise TrajectoryConflict("Trajectory ownership differs from trusted capture identity")
         if (
             meta.get("schema_version") != 1
-            or meta.get("storage_root_id") != self.storage_root_id
             or tenant != component(meta["tenant_id"])
             or agent != (meta.get("storage_agent_id") or "_unknown")
             or meta.get("trace_id") != identity.conversation_id
@@ -248,6 +244,15 @@ class TrajectoryFileStore:
             yield directory
 
     def _save_manifest(self, directory, meta):
+        latest = max(meta["runs"], key=lambda run: run["turn_no"], default=None)
+        if latest and latest["turn_no"] >= (meta.get("latest_execution") or {}).get("turn_no", 0):
+            meta["latest_execution"] = {
+                key: latest.get(key) for key in (
+                    "trajectory_id", "turn_no", "started_at", "finished_at", "expires_at",
+                    "root_agent_id", "root_agent_name", "root_agent_version_no", "root_agent_version_name",
+                    "business_status", "capture_state", "publication_no", "cleanup_reason", "file_deleted_at",
+                )
+            }
         meta["revision"] += 1
         directory.atomic_json("meta.json", meta)
 
@@ -301,7 +306,6 @@ class TrajectoryFileStore:
             except FileNotFoundError:
                 meta = {
                     "schema_version": 1,
-                    "storage_root_id": self.storage_root_id,
                     "tenant_id": identity.tenant_id,
                     "owner_user_id": identity.owner_user_id,
                     "storage_agent_id": identity.root_agent_id,
@@ -594,6 +598,7 @@ class TrajectoryFileStore:
                     if not run["file_deleted_at"] or parse_time(run["file_deleted_at"]) + timedelta(days=7) > now
                 ]
                 if len(retained) != len(meta["runs"]):
+                    meta["cleanup_version"] += 1
                     meta["runs"] = retained
                     self._save_manifest(directory, meta)
         return result
@@ -763,6 +768,30 @@ class RunWriter:
                         "receipt": receipt,
                     },
                 )
+                for request in selected:
+                    for resource in request["resourceSpans"]:
+                        for scope in resource["scopeSpans"]:
+                            for span in scope["spans"]:
+                                attrs = {item["key"]: item["value"] for item in span.get("attributes", [])}
+                                if attrs.get("nexent.trajectory.root", {}).get("boolValue") is not True:
+                                    continue
+                                raw_version = attrs.get("agent.version_no", {}).get("intValue")
+                                valid = (
+                                    type(raw_version) is int
+                                    or isinstance(raw_version, str)
+                                    and re.fullmatch(r"0|[1-9][0-9]{0,18}", raw_version)
+                                )
+                                version = int(raw_version) if valid else None
+                                if version is not None and not 0 <= version <= 2**63 - 1:
+                                    version = None
+                                name = attrs.get("agent.version_name", {}).get("stringValue")
+                                run.update(
+                                    root_agent_version_no=version,
+                                    root_agent_version_name=(
+                                        name if version is not None and isinstance(name, str) else None
+                                    ),
+                                    root_agent_name=attrs.get("agent.name", {}).get("stringValue") or span.get("name"),
+                                )
                 self.store._save_manifest(directory, meta)
             except BaseException:
                 self._hash = original

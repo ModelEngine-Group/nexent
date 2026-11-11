@@ -20,7 +20,7 @@ from infrastructure.observability.trajectory_store import (
 )
 
 
-def scheduled_cleanup(root, root_id, clock, fault):
+def scheduled_cleanup(root, clock, fault):
     from infrastructure.observability.trajectory_runtime import create_local_processor
 
     # Local dotenv files are outside this isolated environment-configuration proof.
@@ -28,7 +28,6 @@ def scheduled_cleanup(root, root_id, clock, fault):
         config = SimpleNamespace(**runpy.run_module("contracts.constants.environment"))
     assert (
         config.TRAJECTORY_ROOT_DIR == root
-        and config.TRAJECTORY_STORAGE_ROOT_ID == root_id
     )
     processor = create_local_processor(config, lambda: None)
     assert processor is not None
@@ -63,12 +62,11 @@ def scheduled_cleanup(root, root_id, clock, fault):
 
 
 def main():
-    root, root_id, encoded_identity, run_id, now, fault = sys.argv[1:]
+    root, encoded_identity, run_id, now, fault = sys.argv[1:]
     identity = CaptureIdentity(**json.loads(encoded_identity))
     clock = parse_time(now)
     store = TrajectoryFileStore(
         root,
-        root_id,
         authorize=lambda _: None,
         clock=lambda: clock,
     )
@@ -83,7 +81,7 @@ def main():
     )
 
     if fault in {"scheduled", "scheduled_slow"}:
-        scheduled_cleanup(root, root_id, clock, fault)
+        scheduled_cleanup(root, clock, fault)
         return
 
     if fault == "hold_cleanup":

@@ -21,15 +21,17 @@ def authorize_capture(identity):
 
 def create_local_processor(config, metadata_provider):
     """Keep environment reads in the backend configuration module."""
-    capturing = config.ENABLE_TELEMETRY and config.MONITORING_TRACE_SINK in {"local_file", "both"}
-    if not capturing and not (config.TRAJECTORY_ROOT_DIR and config.TRAJECTORY_CLEANUP_ENABLED):
+    capturing = config.ENABLE_TELEMETRY and config.MONITORING_PROVIDER == "local_file"
+    maintaining = config.TRAJECTORY_CLEANUP_ENABLED and (
+        config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
+    )
+    if not capturing and not maintaining:
         return None
     from .trajectory_processor import LocalTrajectoryProcessor
     from .trajectory_store import TrajectoryFileStore
 
     store = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
-        config.TRAJECTORY_STORAGE_ROOT_ID,
         authorize=authorize_capture,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
         source_query=capture_sources,
@@ -38,7 +40,6 @@ def create_local_processor(config, metadata_provider):
     # Maintenance identities come only from manifests under the verified storage root.
     maintenance = TrajectoryFileStore(
         config.TRAJECTORY_ROOT_DIR,
-        config.TRAJECTORY_STORAGE_ROOT_ID,
         authorize=lambda identity: None,
         retention_days=config.TRAJECTORY_RETENTION_DAYS,
         storage_mode=getattr(config, "TRAJECTORY_STORAGE_MODE", "single_node"),
@@ -63,23 +64,6 @@ def capture_sources(identity, upper=None):
     return TrajectoryCatalog().source_messages(
         identity.tenant_id, identity.owner_user_id, identity.conversation_id, upper=upper,
     )
-
-
-def main():
-    import argparse
-
-    from .trajectory_store import TrajectoryFileStore
-
-    parser = argparse.ArgumentParser(description="Register a persistent local trajectory root")
-    parser.add_argument("--root", required=True)
-    parser.add_argument("--storage-root-id", required=True)
-    parser.add_argument("--storage-mode", choices=("single_node", "shared_directory"), default="single_node")
-    args = parser.parse_args()
-    TrajectoryFileStore.provision(args.root, args.storage_root_id, storage_mode=args.storage_mode)
-
-
-if __name__ == "__main__":
-    main()
 
 
 def conversation_deleted(identity):

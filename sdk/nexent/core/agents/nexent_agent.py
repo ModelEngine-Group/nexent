@@ -773,7 +773,7 @@ class NexentAgent:
             agent_name=str(agent_name),
             runtime_identity={
                 key: getattr(sub_agent_config, key, None)
-                for key in ("runtime_ref", "version_no", "display_name", "origin")
+                for key in ("runtime_ref", "version_no", "version_name", "display_name", "origin")
             },
             invocation_name=(
                 getattr(sub_agent_config, "invocation_name", None)

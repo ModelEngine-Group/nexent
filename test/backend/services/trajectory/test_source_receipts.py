@@ -109,13 +109,13 @@ def test_failed_save_cannot_leave_a_stale_receipt(agent_request, mocker):
     save.assert_called_once()
 
 
-@pytest.mark.parametrize("sink", ["otlp", "local_file", "both"])
+@pytest.mark.parametrize("sink", ["otlp", "local_file"])
 def test_context_uses_server_receipt_only_for_local_capture(
     agent_request, monkeypatch, sink
 ):
     manager = SimpleNamespace(
         is_enabled=True,
-        _config=SimpleNamespace(trace_sink=sink, export_traces=True),
+        _config=SimpleNamespace(provider=sink, export_traces=True),
         bind_agent_context=lambda value: value,
     )
     monkeypatch.setitem(
