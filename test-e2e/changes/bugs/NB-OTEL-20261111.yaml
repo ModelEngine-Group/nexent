@@ -38,6 +38,7 @@ change:
     test_selectors:
     - test/sdk/monitor/test_http_response_lifecycle.py
     - test/backend/services/test_runtime_proxy_telemetry.py
+    - test/backend/deploy/test_k8s_env_injection.py
     reason: New unit boundaries and deployed D3 provide distinct missing lifecycle
       and ancestry evidence.
   notes: 'SPEC ../nexent-doc/nexent/codeagent-action-history-role/changes/v285-northbound-otel.
@@ -46,4 +47,7 @@ change:
     and NB-CHAT-FINAL-ANSWER-001 were reviewed as unchanged wider business contracts,
     not selected for full execution: relevant normal SSE and new-conversation disconnect
     compatibility are exercised by NB-OTEL-001; existing/exhaustive answer-mode unit
-    suites remain adjacent regression.'
+    suites remain adjacent regression. CI found seven stale Northbound env-injection/precedence
+    expectations in the existing Helm suite; align its monitored-service set, preserving
+    all ordering/platform/credential precedence assertions. Entire owning suite 24
+    tests passed locally.'
