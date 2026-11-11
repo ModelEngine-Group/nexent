@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: OUTPUT-PROTOCOL-HISTORY-20261111
+  change_type: bugfix
+  bug_id: OUTPUT-PROTOCOL-HISTORY-20261111
+  title: Converge output parsing and restore runtime-only read-only history
+  description: Accept HTML reasoning and ordered top-level actions while excluding
+    Markdown examples; replay actual calls/results without model narration.
+  observed_behavior: Generic tag checks reject HTML; raw assistant narration is replayed
+    as history.
+  expected_behavior: Precise protocol scanning and one read-only execution record
+    preserve result deduplication, masking and recall.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing protocol UT enforce old prose rejection and history UT require
+      model replay; strengthen accepted contracts and add actual Agent request regression.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - TPC-001
+    - F-171
+    added: []
+    modified:
+    - TPC-001
+    retired: []
+  affected_cases:
+    existing:
+    - TPC-D3-001
+    - TPC-D4-001
+    - AGENT-HISTORY-D3-001
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Top-level case-insensitive actions with prose and HTML
+    - Markdown examples never execute
+    - Mixed candidate executes once before actual-result confirmation
+    - Runtime-only history preserves masking, false values and recall
+    test_selectors:
+    - test/sdk/core/agents/test_output_protocol_patch.py
+    - test/sdk/core/agents/test_output_protocol.py
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_execution_history_review_regressions.py
+    reason: Existing UT and deployed TPC/history cases cover adjacent behavior; new
+      regression checks actual next model requests, no new formal D1 needed.
+  notes: SPEC ../nexent-doc/nexent/codeagent-action-history-role/changes/v285-protocol-history-patch/.
+    User authorized implementation and push before full VM acceptance. Traditional
+    UT and formal runtime evidence reported separately. Existing formal D3/D4 remain
+    required and must execute against the patch; new input variants verified by patch
+    acceptance script.

@@ -42,22 +42,27 @@ def test_ac_r5_ordinary_legacy_calls_preserve_names_and_arguments(arguments, sin
     original = deepcopy(item.content)
     messages = ContextItemRenderer().render([item])
     texts = [m["content"][0]["text"] for m in messages]
-    assert [json.loads(unescape(t.removeprefix("<TOOL_RECORD>").removesuffix("</TOOL_RECORD>")))
-            for t in texts[:-1]] == calls
+    assert len(texts) == 1
+    assert json.loads(unescape(texts[0].split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == calls
     assert all("<code>" not in t for t in texts)
     assert "<OUTPUT>completed</OUTPUT>" in texts[-1] and "<ERROR>known error</ERROR>" in texts[-1]
     assert item.content == original
 
 
 @pytest.mark.parametrize("arguments", ["print('<sentinel>')", {"code": "print('<sentinel>')"}, ""])
-def test_ac_r5_only_interpreter_source_uses_code_envelope(arguments):
+def test_ac_r5_interpreter_source_is_read_only_data(arguments):
     item = ContextItem.from_input(ContextItemInput(id="legacy", type="current_action", content={
         "tool_calls": {"name": "python_interpreter", "arguments": arguments}, "result": "done",
     }))
     messages = ContextItemRenderer().render([item])
-    source = arguments["code"] if isinstance(arguments, dict) else arguments
-    assert messages[0]["content"][0]["text"] == f"<code>\n{source}\n</code>"
-    assert messages[1]["content"][0]["text"].endswith("<RETURN_VALUE>done</RETURN_VALUE>\n</CODE_EXEC_RESULT>")
+    assert len(messages) == 1
+    text = messages[0]["content"][0]["text"]
+    assert "<code>" not in text
+    assert json.loads(unescape(text.split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == [
+        {"name": "python_interpreter", "arguments": arguments}
+    ]
+    assert "<RETURN_VALUE>done</RETURN_VALUE>" in text
+
 
 
 def test_ac_r5_mixed_legacy_calls_keep_order_and_unknown_records_as_data():
@@ -70,11 +75,9 @@ def test_ac_r5_mixed_legacy_calls_keep_order_and_unknown_records_as_data():
     }))
     original = deepcopy(item.content)
     texts = [m["content"][0]["text"] for m in ContextItemRenderer().render([item])]
-    assert len(texts) == len(calls) + 1
-    assert texts[1] == "<code>\nprint(1)\n</code>"
-    for i in (0, 2, 3, 4, 5):
-        assert texts[i].startswith("<TOOL_RECORD>") and "<code>" not in texts[i]
-        assert json.loads(unescape(texts[i][13:-14])) == calls[i]
+    assert len(texts) == 1
+    assert "<code>" not in texts[0]
+    assert json.loads(unescape(texts[0].split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == calls
     assert item.content == original
 
 
@@ -110,9 +113,13 @@ def test_ac_r5_authoritative_output_is_not_duplicated_by_fallback(passthrough):
         content["messages"] = expected
     item = ContextItem.from_input(ContextItemInput(id="legacy", type="current_action", content=content))
     messages = ContextItemRenderer().render([item])
-    assert messages[:1] == expected
-    assert len(messages) == (1 if passthrough else 2)
-    assert "<TOOL_RECORD>" not in str(messages)
+    assert len(messages) == 1
+    if passthrough:
+        assert messages == expected
+    else:
+        assert "original" not in str(messages)
+        assert "<TOOL_RECORD>" in str(messages)
+        assert "<RETURN_VALUE>done</RETURN_VALUE>" in str(messages)
 
 
 @pytest.mark.parametrize("history_enabled", [False, True])

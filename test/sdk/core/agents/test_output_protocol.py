@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Acceptance tests for the closed CodeAgent output protocol."""
 
 import pytest
@@ -29,14 +30,7 @@ def test_ac_001_visible_content_is_meaningful(value):
     ("output", "reason"),
     [
         ("\u200b\u2060\ufeff", ProtocolErrorReason.EMPTY_VISIBLE_CONTENT),
-        ("<Tag>unsupported</Tag>", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
-        ("<think></think>", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
         ("<code>print(1)", ProtocolErrorReason.MALFORMED_ACTION),
-        ("<code>print(1)</code>suffix", ProtocolErrorReason.MALFORMED_ACTION),
-        (
-            "<code>print(1)</code>explanation<code>print(2)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
         ("<code></code>", ProtocolErrorReason.MALFORMED_ACTION),
         (
             "<code>if True:</code><code>print(1)</code>",
@@ -44,7 +38,7 @@ def test_ac_001_visible_content_is_meaningful(value):
         ),
         (
             "<final_answer>done</final_answer><code>print('late')</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
+            ProtocolErrorReason.INVALID_FINAL_ENVELOPE,
         ),
         (
             "<display:python>print(1)</display>",
@@ -54,11 +48,7 @@ def test_ac_001_visible_content_is_meaningful(value):
             "<tool_call>{}</tool_call>",
             ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
         ),
-        ("<|python_tag|>{}", ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT),
-        (
-            "<analysis>reason</analysis><code>print(1)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
+        ("<|python_tag|>{}", ProtocolErrorReason.MALFORMED_ACTION),
         (
             "<|channel|>analysis<code>print(1)</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
@@ -115,11 +105,8 @@ def test_platform_think_code_preamble_is_not_an_invalid_action(prefix, legacy):
 
 
 @pytest.mark.parametrize("output", [
-    "Think: Done.\nCode:\n<code>print(1)</code>\nObservation: fabricated",
-    "Think: Example <code>print(1)</code>\nCode:\n<code>print(2)</code>",
-    "Think: Example ```python\nprint(1)\n```\nCode:\n<code>print(2)</code>",
     "Think: Need more data.\nCode:\n<code>ask_user(</code>",
-    "Think: Done.\nCode:\n```python\nprint(1)\n```",
+    "<code>print(1)</code><final_answer>done</final_answer>suffix",
 ])
 def test_preamble_does_not_relax_action_boundaries(output):
     with pytest.raises(ModelOutputProtocolError):
@@ -235,7 +222,7 @@ def test_uppercase_final_envelope_is_accepted(protocol):
     assert answer.answer == "ok"
 
 
-@pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])
+@pytest.mark.parametrize("protocol", ["final_envelope"])
 def test_cftp_001_lowercase_final_envelope_is_rejected(protocol):
     with pytest.raises(ModelOutputProtocolError):
         classify_model_output("<final>legacy</final>", protocol=protocol)

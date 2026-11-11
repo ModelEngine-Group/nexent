@@ -2,6 +2,9 @@
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
+import json
+from html import unescape
+
 import pytest
 from nexent.core.agents.context import (
     ContextItemInput,
@@ -208,7 +211,6 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "user",
         "assistant",
-        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -216,7 +218,7 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
-    action_history = _message_text(final.messages[4])
+    action_history = _message_text(final.messages[3])
     assert '<CODE_EXEC_RESULT>' in action_history
     assert "<RETURN_VALUE>work trace</RETURN_VALUE>" in action_history
     assert "Calling tools:" not in action_history
@@ -295,7 +297,8 @@ def test_completed_skill_read_is_available_to_the_next_model_step():
         if '<CODE_EXEC_RESULT>' in _message_text(message)
     )
     assert "read_skill_md" in str(final.messages)
-    assert 'read_skill_md("demo-skill")' in '\n'.join(_message_text(m) for m in final.messages)
+    calls = json.loads(unescape(action_history.split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0]))
+    assert calls[0]["arguments"] == 'skill_content = read_skill_md("demo-skill")'
     assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
     assert "Do not copy this record's format as your next response." not in action_history
 

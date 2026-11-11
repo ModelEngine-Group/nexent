@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Closed output protocol for Nexent CodeAgent runtimes."""
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ class ExecutableAction:
 
     code: str
     legacy_format: bool = False
+    final_answer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,18 +90,15 @@ class ModelOutputProtocolExhaustedError(Exception):
     """Terminal failure after the runtime exhausts protocol repair attempts."""
 
 
-_RUN_RE = re.compile(r"\A```<run>(?P<body>[\s\S]*?)```\Z")
-_ACTION_PREAMBLE_RE = re.compile(
-    r"\A(?P<preamble>(?:(?:[Tt]hink|[Tt]hought|思考)[ \t]*[:：][\s\S]*?\n)?"
-    r"[ \t]*(?:[Cc]ode|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<run>[\s\S]*)\Z",
-)
-_CODE_LABEL_RE = re.compile(r"(?m)^[ \t]*(?:Code|代码)[ \t]*[:：]", re.IGNORECASE)
 _FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
-_TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
-_CODE_MARKER_RE = re.compile(r"</?code>")
-_THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>")
-_THINK_MARKER_RE = re.compile(r"</?think>")
+_CODE_MARKER_RE = re.compile(r"</?code>", re.IGNORECASE)
+_PROTOCOL_MARKER_RE = re.compile(r"</?(?:code|final_answer)>|```<run>", re.IGNORECASE)
+_MARKDOWN_RE = re.compile(
+    r"(?m)^[ \t]{0,3}(?P<fence>`{3,}|~{3,})[^\n]*\n"
+    r"[\s\S]*?(?:^[ \t]{0,3}(?P=fence)[ \t]*(?:\n|$)|\Z)"
+    r"|(?P<ticks>`+)[\s\S]*?(?P=ticks)"
+)
 _CODE_OPEN = "<code>"
 _CODE_CLOSE = "</code>"
 _PYTHON_DATA_TOKEN_TYPES = {
@@ -165,8 +164,9 @@ def protocol_repair_instruction(
 
     return (
         prefix + "Return optional reasoning followed by one or more complete <code>...</code> blocks. "
-        "Prefer one block; if multiple blocks are needed, put only whitespace between them because they execute together as one Python action. "
-        "Put no text after the final block. To finish, return exactly one complete <final_answer>...</final_answer> envelope with no content outside it."
+        "Only top-level protocol blocks execute; Markdown examples are data. Blocks execute together in order. "
+        "To finish, put one complete <final_answer>...</final_answer> envelope at the end. "
+        "When actions precede it, the runtime executes them and requests confirmation using the actual results."
     )
 
 
@@ -225,7 +225,7 @@ def _python_literal_and_comment_spans(value: str) -> list[tuple[int, int]]:
             )
     except (tokenize.TokenError, IndentationError, SyntaxError):
         # Lexically incomplete Python cannot form a complete executable Action.
-        return []
+        return spans
     return spans
 
 
@@ -244,90 +244,21 @@ def _outer_code_markers(action_region: str) -> list[re.Match[str]]:
     return [match for match in matches if not _position_in_spans(match.start(), spans)]
 
 
-def _validate_reasoning_prefix(
-    prefix: str,
-    *,
-    protocol: OutputProtocol,
-    logger: Any,
-) -> None:
-    prefix = strip_protocol_padding(prefix)
-    if not has_meaningful_visible_content(prefix):
-        return
-
-    # Thinking is descriptive prefix data, not an executable envelope. Preserve
-    # accepted complete spans, then tolerate remaining unbalanced/nested markers.
-    # Only inspect the prefix: tags inside Python data must remain untouched.
-    prefix = _THINK_BLOCK_RE.sub("", prefix)
-    prefix = _THINK_MARKER_RE.sub("", prefix)
-    if _TAG_RE.search(prefix) or _MODEL_CONTROL_TOKEN_RE.search(prefix):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+def _markdown_spans(text: str) -> list[tuple[int, int]]:
+    """Identify quoted examples before interpreting protocol markers."""
+    return [(match.start(), match.end()) for match in _MARKDOWN_RE.finditer(text)
+            if not match.group(0).lower().startswith("```<run>")]
 
 
 def is_raw_final_answer_candidate(output: Any) -> bool:
-    """Exclude failed protocol-marked output from the exhaustion-only fallback."""
-
+    """Keep reserved protocol records out of the exhaustion-only fallback."""
     text = strip_protocol_padding(output)
     return (
         has_meaningful_visible_content(text)
-        and not _TAG_RE.search(text)
+        and not _PROTOCOL_MARKER_RE.search(text)
         and not _MODEL_CONTROL_TOKEN_RE.search(text)
-        and not any(
-            marker in text.lower()
-            for marker in ("<think", "</think", "<code", "</code", "<final_answer", "</final_answer", "```<run")
-        )
+        and not re.search(r"</?(?:think|tool_call|code_exec_result|summaried_result|output_ref)\b", text, re.I)
     )
-
-
-def _parse_code_action(
-    text: str,
-    *,
-    protocol: OutputProtocol,
-    logger: Any,
-) -> ExecutableAction | None:
-    first_open = text.find(_CODE_OPEN)
-    if first_open < 0:
-        return None
-
-    prefix = text[:first_open]
-    _validate_reasoning_prefix(prefix, protocol=protocol, logger=logger)
-    action_region = text[first_open:]
-    markers = _outer_code_markers(action_region)
-    if not markers or markers[0].start() != 0:
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-
-    bodies: list[str] = []
-    expected_open = True
-    previous_end = 0
-    body_start = 0
-    for marker in markers:
-        marker_text = marker.group(0)
-        if expected_open:
-            if marker_text != _CODE_OPEN:
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            if bodies and has_meaningful_visible_content(action_region[previous_end : marker.start()]):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            body_start = marker.end()
-        else:
-            if marker_text != _CODE_CLOSE:
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            body = strip_protocol_padding(action_region[body_start : marker.start()])
-            if not has_meaningful_visible_content(body):
-                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-            bodies.append(body)
-            previous_end = marker.end()
-        expected_open = not expected_open
-
-    if not expected_open or not bodies:
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    if has_meaningful_visible_content(action_region[previous_end:]):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-
-    code = "\n\n".join(bodies)
-    try:
-        ast.parse(code)
-    except (SyntaxError, ValueError, TypeError):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    return ExecutableAction(code=code)
 
 
 def _classify_code_action(
@@ -335,33 +266,56 @@ def _classify_code_action(
     *,
     protocol: OutputProtocol,
     logger: Any,
-) -> ExecutableAction | NonterminalThought:
-    code_action = _parse_code_action(text, protocol=protocol, logger=logger)
-    if code_action is not None:
-        return code_action
-
-    run_start = text.find("```<run>")
-    if run_start >= 0:
-        _validate_reasoning_prefix(text[:run_start], protocol=protocol, logger=logger)
-    run_match = _RUN_RE.fullmatch(text[run_start:]) if run_start >= 0 else None
-    if run_match and text.count("```<run>") == 1:
-        return _parse_executable_action(
-            run_match.group("body"),
-            protocol=protocol,
-            logger=logger,
-            legacy_format=True,
-        )
-
-    if any(marker in text for marker in ("<code>", "</code>", "```<run>")):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    if _CODE_LABEL_RE.search(text):
-        _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-    if _TAG_RE.search(text) or _MODEL_CONTROL_TOKEN_RE.search(text):
-        _raise_protocol_error(
-            ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT,
-            protocol,
-            logger,
-        )
+) -> ExecutableAction | ExplicitFinalAnswer | NonterminalThought:
+    bodies: list[str] = []
+    position = 0
+    legacy = False
+    final_answer = None
+    while True:
+        remaining = text[position:]
+        examples = _markdown_spans(remaining)
+        marker = next((candidate for candidate in _PROTOCOL_MARKER_RE.finditer(remaining)
+                       if not _position_in_spans(candidate.start(), examples)), None)
+        prefix_end = marker.start() if marker else len(remaining)
+        if any(not _position_in_spans(token.start(), examples)
+               for token in _MODEL_CONTROL_TOKEN_RE.finditer(remaining[:prefix_end])):
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        if marker is None:
+            break
+        start = position + marker.start()
+        end = position + marker.end()
+        tag = marker.group().lower()
+        if tag == "<final_answer>":
+            final = _classify_final_envelope(text[start:], protocol=protocol, logger=logger)
+            final_answer = final.answer
+            break
+        if tag == "```<run>":
+            close = text.find("```", end)
+            if close < 0:
+                _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+            bodies.append(strip_protocol_padding(text[end:close]))
+            position = close + 3
+            legacy = True
+            continue
+        if tag != _CODE_OPEN:
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        region = text[start:]
+        markers = _outer_code_markers(region)
+        if len(markers) < 2 or markers[1].group().lower() != _CODE_CLOSE:
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        body = strip_protocol_padding(region[markers[0].end():markers[1].start()])
+        if not has_meaningful_visible_content(body):
+            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+        bodies.append(body)
+        position = start + markers[1].end()
+    if bodies:
+        action = _parse_executable_action("\n\n".join(bodies), protocol=protocol, logger=logger,
+                                          legacy_format=legacy)
+        return ExecutableAction(action.code, action.legacy_format, final_answer)
+    if final_answer is not None:
+        return ExplicitFinalAnswer(final_answer)
+    if re.search(r"</?(?:think|tool_call|display:python)\b", text, re.I):
+        _raise_protocol_error(ProtocolErrorReason.UNSUPPORTED_OR_TAG_ONLY_OUTPUT, protocol, logger)
     return NonterminalThought()
 
 
@@ -403,26 +357,8 @@ def classify_model_output(
 
     if protocol == "final_envelope":
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
-    if "<code>" not in text and (
-        "<final_answer>" in text.lower()
-        or "</final_answer>" in text.lower()
-    ):
-        final_start = text.lower().find("<final_answer>")
-        if final_start >= 0:
-            _validate_reasoning_prefix(text[:final_start], protocol=protocol, logger=logger)
-            text = text[final_start:]
-        return _classify_final_envelope(text, protocol=protocol, logger=logger)
-
-    # The platform prompt explicitly requests Think:/Code: (or 思考：/代码：).
-    # Preserve labeled legacy RUN actions and reject embedded examples before
-    # validating the remaining action with the shared parser.
-    preamble_match = _ACTION_PREAMBLE_RE.fullmatch(text)
-    if preamble_match:
-        preamble = preamble_match.group("preamble")
-        if any(marker in preamble for marker in ("<code>", "</code>", "```")):
-            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-        text = preamble_match.group("action")
     return _classify_code_action(text, protocol=protocol, logger=logger)
+
 
 
 def extract_clarification_form(code: str, tool_name: str) -> ClarificationForm | None:

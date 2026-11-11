@@ -377,7 +377,7 @@ def test_fault_injected_model_outputs_silently_repair_then_execute_explicit_fina
     rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "solve this")])
     responses = []
-    for content in ("<UNKNOWN/>", "bare answer", "<final_answer>42</final_answer>"):
+    for content in ("<tool_call>{}</tool_call>", "bare answer", "<final_answer>42</final_answer>"):
         response = MagicMock()
         response.content = content
         response.token_usage = None

@@ -91,28 +91,15 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
-def _render_legacy_tool_call(call: Any) -> str:
-    """Keep ordinary calls as evidence; only interpreter source is code."""
-    if isinstance(call, dict) and call.get("name") == "python_interpreter":
-        source = call.get("arguments")
-        if isinstance(source, dict) and set(source) == {"code"}:
-            source = source["code"]
-        if isinstance(source, str):
-            return f"<code>\n{source}\n</code>"
-    record = escape(json.dumps(call, ensure_ascii=False, default=str))
-    return f"<TOOL_RECORD>{record}</TOOL_RECORD>"
-
-
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
     from .execution_history import result_text
 
     c = item.content
-    messages = []
-    original = c.get("assistant_output")
-    if original:
-        messages.append(_text_message("assistant", original))
+    calls = c.get("tool_calls") or []
+    calls = calls if isinstance(calls, list) else [calls]
+    action = escape(json.dumps(calls, ensure_ascii=False, default=str))
     fields = c.get("execution_fields")
     if fields is None:
         # Compatibility for externally supplied ContextItems, without duplicating result text.
@@ -124,10 +111,6 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
             fields["RETURN_VALUE"] = str(result)
         if c.get("error"):
             fields["ERROR"] = str(c["error"])
-    if not original and c.get("tool_calls"):
-        calls = c["tool_calls"]
-        calls = calls if isinstance(calls, list) else [calls]
-        messages.extend(_text_message("assistant", _render_legacy_tool_call(call)) for call in calls)
     if not fields:
         fields = {"STDOUT": ""}
     if c.get("summary"):
@@ -140,8 +123,13 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
         body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
     if c.get("output_ref"):
         body += "\n<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>"
-    messages.append(_text_message("assistant", "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>"))
-    return messages
+    record = (
+        '<completed_action_history read_only="true">\n'
+        + "<TOOL_RECORD>" + action + "</TOOL_RECORD>\n"
+        + "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>\n"
+        + "</completed_action_history>"
+    )
+    return [_text_message("assistant", record)]
 
 
 class ContextItemRenderer:

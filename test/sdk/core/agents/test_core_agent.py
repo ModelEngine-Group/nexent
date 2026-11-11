@@ -2569,8 +2569,8 @@ class TestRunStreamRealExecution:
         assert "Do not repeat any completed action" in continuation
         assert "<final_answer>" in continuation
 
-    def test_step_stream_rolls_back_interstitial_text_before_protocol_repair(self):
-        """Text between executable blocks is rolled back before protocol repair."""
+    def test_step_stream_rolls_back_malformed_code_before_protocol_repair(self):
+        """Invalid Python is rolled back before protocol repair."""
         module = core_agent_module
         agent = object.__new__(module.CoreAgent)
         agent.enable_protocol_repair_retry = True
@@ -2592,7 +2592,7 @@ class TestRunStreamRealExecution:
         agent.verification_controller = None
 
         response = SimpleNamespace(
-            content='<code>print("first")</code>explanation<code>print("ok")</code>',
+            content='<code>print("first")</code>explanation<code>print("ok"</code>',
             token_usage=None,
             model_attempt_id="semantic-attempt",
             model_attempt_number=1,

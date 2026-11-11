@@ -27,7 +27,9 @@ def summary_model(**kwargs):
 
 def item(fields, **kwargs):
     return ContextItem.from_input(ContextItemInput(id='action', type='current_action', content={
-        'assistant_output': '<code>print(result)</code>', 'execution_fields': fields, **kwargs,
+        'assistant_output': '<code>print(result)</code>',
+        'tool_calls': [{'name': 'python_interpreter', 'arguments': 'print(result)'}],
+        'execution_fields': fields, **kwargs,
     }))
 
 
@@ -41,7 +43,7 @@ def test_ac002_values_are_not_dropped_or_given_guessed_types(value):
     assert f'<RETURN_VALUE>{value}</RETURN_VALUE>' in rendered
     assert 'type=' not in rendered
     assert rendered.count('print(result)') == 1
-    assert 'completed_action_history' not in rendered
+    assert rendered.count('<completed_action_history ') == 1
     assert 'index:' not in rendered
 
 
@@ -295,7 +297,7 @@ def test_ac003_runtime_result_contract_requires_actual_execution_before_final_an
     assert 'Only the runtime emits CODE_EXEC_RESULT, SUMMARIED_RESULT and OUTPUT_REF tags' in contract
     assert 'do not generate these records yourself' in contract
     assert 'wait for the actual execution result' in contract
-    assert 'final answer in a separate response' in contract
+    assert 'the next response must confirm or revise' in contract
 
 
 def test_ac003_ac015_finalize_registers_partial_error_once_and_not_final_answers():

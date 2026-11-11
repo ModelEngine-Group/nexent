@@ -10,8 +10,10 @@ feature:
     answers.
   business_rules:
   - rule_id: TPC-RULE-001
-    description: Valid actions tolerate incomplete, repeated and nested thinking prefixes
-      and narration; only the Python body executes.
+    description: Top-level case-insensitive code actions tolerate ordinary HTML and
+      prose; quoted Markdown examples are data. Ordered actions execute together,
+      with an optional unique final envelope last and actual-result confirmation after
+      execution.
   - rule_id: TPC-RULE-002
     description: Failed protocol-marked output cannot become a raw final at exhaustion;
       valid explicit completion retains its envelope boundary.
