@@ -29,7 +29,12 @@ from local_auth import disposable_database
 
 def availability_sql():
     directory = ROOT / "deploy/sql/migrations"
-    return (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8") + "\n" + (directory / "v2.9.0_010_account_user_roles.sql").read_text(encoding="utf-8")
+    account_sql = (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    roles_sql = (directory / "v2.9.0_010_account_and_ops_roles.sql").read_text(encoding="utf-8")
+    return (
+        account_sql + "\nSET LOCAL nexent.account_import = 'on';\n" + roles_sql
+        + "\nSET LOCAL nexent.account_import = 'off';\n"
+    )
 
 
 def initialize_legacy(dsn):

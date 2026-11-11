@@ -73,9 +73,11 @@ acceptance completes.
 The host needs Bash and Docker CLI, or Bash and kubectl with access to the original
 namespace. **No host Python, pip, PostgreSQL driver or jq is required.** The selected
 `NEXENT_IMAGE` must package the current Python worker, its existing psycopg2
-runtime, `v2.9.0_001_local_user_accounts.sql`, and `v2.9.0_010_account_user_roles.sql`. Standard deployment selects that
-image automatically; preload it for offline deployment. The independent gateway
-image is not the migration image.
+runtime, `v2.9.0_001_local_user_accounts.sql`, and
+`v2.9.0_010_account_and_ops_roles.sql`. The worker applies the account schema changes
+inside the credential transaction. The startup SQL runner also applies invitation
+roles and operations grants. Standard deployment selects the image automatically.
+Preload it for offline deployment. The migration worker uses the main backend image.
 
 `migrate.sh` is the host entry point for both Docker and Kubernetes.
 `migrate_docker.py` runs inside the worker container or Job. Recovery defaults
