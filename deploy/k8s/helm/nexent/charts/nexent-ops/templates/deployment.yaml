@@ -56,6 +56,19 @@ spec:
                   key: {{ . }}
                   optional: true
             {{- end }}
+            {{- range list "POSTGRES_HOST" "POSTGRES_USER" "POSTGRES_DB" "POSTGRES_PORT" "NEXENT_POSTGRES_PASSWORD" "REDIS_URL" "JWT_SECRET" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-env
+                  key: {{ . }}
+            {{- end }}
+            - name: JWT_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-env
+                  key: JWT_ISSUER
+                  optional: true
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: PYTHON_DOTENV_DISABLED

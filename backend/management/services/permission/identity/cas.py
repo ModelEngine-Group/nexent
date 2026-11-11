@@ -31,7 +31,7 @@ from gateway.authentication.auth import calculate_expires_at, generate_session_j
 logger = logging.getLogger(__name__)
 
 CAS_PROVIDER = "cas"
-VALID_ROLES = {"SU", "ADMIN", "DEV", "USER"}
+VALID_ROLES = {"SU", "ADMIN", "DEV", "USER", "OPS_ADMIN"}
 
 
 class CasAuthenticationError(Exception):

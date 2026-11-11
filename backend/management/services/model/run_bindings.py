@@ -5,7 +5,8 @@
 import logging
 from typing import Any, Dict, Optional
 
-from contracts.constants.environment import LLM_INCLUDE_LOGPROBS, MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
+from contracts.constants.environment import MODEL_RESPONSE_DIAGNOSTIC_CHUNKS
+from configuration.runtime import get_config_snapshot
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -101,7 +102,7 @@ def create_model_config_from_record(record):
 async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = [create_model_config_from_record(record) for record in records if record.get("model_id") is None or record.get("profile_schema_version") is not None]
-    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
+    extra_body = {"logprobs": True} if get_config_snapshot().get("LLM_INCLUDE_LOGPROBS") else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)

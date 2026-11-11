@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import time
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, build_opener
 
 import pytest
@@ -42,9 +42,9 @@ import sys
 
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {
-            'management', 'runtime', 'nexent', 'redis',
-            'elasticsearch', 'minio', 'supabase', 'sqlalchemy', 'psycopg2',
+        allowed_base_imports = {'management', 'management.db', 'management.db.base'}
+        if fullname not in allowed_base_imports and fullname.split('.')[0] in {
+            'management', 'runtime', 'nexent', 'elasticsearch', 'minio', 'supabase',
         }:
             raise RuntimeError('Forbidden business import: ' + fullname)
         if fullname.startswith('infrastructure.') and fullname != 'infrastructure.logging':
@@ -96,7 +96,14 @@ runpy.run_path('ops_service.py', run_name='__main__')
                     assert response.status == 200
                     schema = json.load(response)
                     assert schema['info']['title'] == 'Nexent Operations API'
-                    assert schema['paths'] == {}
+                    assert set(schema['paths']) == {
+                        '/system_configurations', '/system_configurations/recommendations',
+                    }
+                try:
+                    opener.open(f'http://127.0.0.1:{port}/system_configurations', timeout=2)
+                    raise AssertionError('Anonymous configuration query must be rejected')
+                except HTTPError as error:
+                    assert error.code == 401
             finally:
                 process.terminate()
                 try:

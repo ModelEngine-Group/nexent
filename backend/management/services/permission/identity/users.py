@@ -139,7 +139,7 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
     try:
         # Validate role if provided
         if "role" in update_data:
-            valid_roles = ["ADMIN", "DEV", "USER"]
+            valid_roles = ["ADMIN", "DEV", "USER", "OPS_ADMIN"]
             if update_data["role"] not in valid_roles:
                 raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
 

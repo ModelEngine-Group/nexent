@@ -31,6 +31,7 @@ import {
   Sparkles,
   FolderCog,
   Settings,
+  SlidersHorizontal,
   Zap,
 } from "lucide-react";
 
@@ -175,6 +176,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     Icon: Building2,
     labelKey: "sidebar.ownerManage",
     order: 14,
+    parentKey: null,
+  },
+  {
+    path: "/system-config",
+    Icon: SlidersHorizontal,
+    labelKey: "sidebar.systemConfig",
+    order: 15,
     parentKey: null,
   },
 ];

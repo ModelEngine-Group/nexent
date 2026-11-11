@@ -17,7 +17,7 @@ from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.client import get_db_session
 from management.utils.orm import filter_property, as_dict
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
-from contracts.constants.environment import MAX_SKILLS_PER_TENANT
+from configuration.runtime import get_config_snapshot
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db
@@ -59,14 +59,15 @@ def _raise_if_skill_limit_reached(session, tenant_id: str, additional_count: int
     )
     # Lightweight test doubles may not implement count(); production SQLAlchemy
     # sessions always return an integer.
-    if isinstance(current_count, int) and current_count + additional_count > MAX_SKILLS_PER_TENANT:
+    limit = get_config_snapshot().get("MAX_SKILLS_PER_TENANT")
+    if isinstance(current_count, int) and current_count + additional_count > limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Tenant skill limit reached: maximum {MAX_SKILLS_PER_TENANT} skills per tenant",
+            f"Tenant skill limit reached: maximum {limit} skills per tenant",
             details={
                 "resource": "skills",
                 "scope": "tenant",
-                "limit": MAX_SKILLS_PER_TENANT,
+                "limit": limit,
                 "current_count": current_count,
             },
         )

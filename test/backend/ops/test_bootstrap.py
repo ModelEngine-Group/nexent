@@ -29,7 +29,9 @@ def test_health_follows_application_lifetime():
         assert client.get('/health/live').status_code == 200
         assert client.get('/health/ready').status_code == 200
         assert client.get('/health/ready').json() == {'status': 'ready'}
-        assert client.get('/openapi.json').json()['paths'] == {}
+        assert set(client.get('/openapi.json').json()['paths']) == {
+            '/system_configurations', '/system_configurations/recommendations',
+        }
         assert client.get('/docs').status_code == 200
 
     assert app.state.ready is False

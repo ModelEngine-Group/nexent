@@ -230,16 +230,16 @@ export function useAuthorization(): AuthorizationContextType {
         pathname: cleanPath,
         accessibleRoutes,
       });
-      if (user) {
-        openAuthzPromptModal();
-      }
       setTimeout(() => {
+        if (user) {
+          openAuthzPromptModal();
+        }
         router.replace("/");
       }, 0);
       return;
     }
 
-    setLastCheckedPath(pathname);
+    setTimeout(() => setLastCheckedPath(pathname), 0);
   }, [
     pathname,
     isLoading,

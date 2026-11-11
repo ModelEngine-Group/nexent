@@ -61,6 +61,7 @@ from nexent.core.concurrency import (
 )
 from contracts.constants.constants import CONFIG_SERVICE_NAME
 from infrastructure.concurrency import config_thread_manager
+from configuration.runtime import start_system_configuration, stop_system_configuration
 
 logger = logging.getLogger("base_app")
 
@@ -109,6 +110,15 @@ async def config_lifespan(_app):
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
     try:
+        async def run_configuration_io(fn):
+            return await run_blocking(
+                "system-configuration-refresh",
+                fn,
+                lane="control-io",
+                owner="configuration.runtime",
+            )
+
+        await start_system_configuration(run_configuration_io)
         from management.services.model.outlet_migration import migrate_legacy_outlets
 
         migration = await run_blocking("model-outlet-upgrade", migrate_legacy_outlets)
@@ -125,6 +135,7 @@ async def config_lifespan(_app):
 
         stop_eval_maintenance()
         try:
+            await stop_system_configuration()
             await config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
         finally:
             clear_default_thread_manager(config_thread_manager)

@@ -95,6 +95,8 @@ export function AvatarDropdown({
         return t("auth.dev");
       case USER_ROLES.ASSET_OWNER:
         return t("auth.assetOwner");
+      case USER_ROLES.OPS_ADMIN:
+        return t("auth.opsAdmin");
       default:
         return t("auth.user");
     }

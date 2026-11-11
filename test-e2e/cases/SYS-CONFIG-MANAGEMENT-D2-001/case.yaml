@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D2
+module: SYSTEM-CONFIG
+case:
+  case_id: SYS-CONFIG-MANAGEMENT-D2-001
+  feature_id: SYSTEM-CONFIGURATION
+  requirement_ids: [SYSTEM-CONFIGURATION-20261110]
+  business_rule_ids: [SYS-CONFIG-RULE-01, SYS-CONFIG-RULE-02, SYS-CONFIG-RULE-05, SYS-CONFIG-RULE-06]
+  title: Ops configuration API enforces catalog, authorization and honest save contracts
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Exercise the actual ops HTTP application with controlled persistence and notification boundaries.
+  preconditions: [Python backend dependencies and isolated test doubles for PostgreSQL and Redis are available.]
+  test_data:
+    actors: [OPS_ADMIN, SU, ADMIN, USER, anonymous]
+    batches: [valid changed keys, unknown key, wrong type, nonpositive value, malformed body]
+  steps:
+  - order: 1
+    action: Query the catalog with each actor and with the database unavailable.
+    expected: Only explicit operations authorization returns exactly nineteen entries; unauthorized actors receive 401/403 and dependency failure returns a safe 503.
+  - order: 2
+    action: Save valid, unknown, wrong-type, nonpositive and malformed batches, including a notification failure after commit.
+    expected: Valid changes return saved database values without revision or consumer status; invalid batches are atomic and safe; notification failure still reports saved with degradation.
+  - order: 3
+    action: Request a recommendation for every current numeric parameter and an unknown key.
+    expected: Each managed parameter returns an explicit unavailable reason and no value or draft mutation; unknown keys are rejected.
+  expected_results:
+  - The actual ops routes enforce explicit authorization and safe error mappings without exposing secrets.
+  - Only changed valid keys are saved atomically; responses contain no revision, history, consumer application state or immediate-effect claim.
+  - Current parameters have no executable automatic recommendation.
+  forbidden_side_effects:
+  - No partial writes, implicit SU bypass, secret disclosure or consumer status fabrication.
+  contract:
+    protocol: HTTP JSON through the actual FastAPI ops application
+    method: GET, PATCH, POST
+    endpoint: /system_configurations and /system_configurations/recommendations
+    request_expectations: [Explicit operations authorization and typed changed-key batches]
+    response_expectations: [200 saved/catalog, 400 business validation, 401 anonymous, 403 denied, 422 malformed and 503 dependency failure]
+  acceptance:
+  - id: AC-01
+    description: Catalog and authorization contracts are enforced at the real HTTP boundary.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Validated atomic save and notification degradation preserve honest feedback.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Current recommendation requests return an explicit unavailable contract.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

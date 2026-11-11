@@ -21,6 +21,7 @@ const {createRequire} = require('node:module');
 const load = createRequire(process.argv[1]);
 (async () => {
   const options = {headless:true};
+  if (process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH) options.executablePath = process.env.NEXENT_TEST_BROWSER_EXECUTABLE_PATH;
   if (process.argv[2]) options.channel = process.argv[2];
   const browser = await load('playwright').chromium.launch(options);
   try { const page = await browser.newPage(); await page.setContent('<p>runtime probe</p>'); }

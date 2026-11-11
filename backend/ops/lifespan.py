@@ -4,6 +4,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from configuration.database import configuration_database
 from fastapi import FastAPI
 
 
@@ -15,3 +16,4 @@ async def ops_lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         app.state.ready = False
+        configuration_database.dispose()

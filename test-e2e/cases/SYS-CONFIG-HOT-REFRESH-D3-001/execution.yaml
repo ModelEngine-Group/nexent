@@ -1,0 +1,23 @@
+schema_version: '1.0'
+case_id: SYS-CONFIG-HOT-REFRESH-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_
+timeout_seconds: 120
+acceptance_bindings:
+  AC-01: [test_repeat_and_concurrent_migration_preserve_user_values]
+  AC-02: [test_locked_batch_writes_and_read_only_consumer_role]
+  AC-03: [test_independent_consumers_reconcile_duplicate_and_invalid_notifications]
+  AC-04: [test_subsequent_business_checks_use_refreshed_snapshot]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Uses an isolated PostgreSQL database and Redis instance supplied through
+  NEXENT_SYSTEM_CONFIG_TEST_DATABASE_URL and NEXENT_SYSTEM_CONFIG_TEST_REDIS_URL.
+  The test starts and reaps three owned consumer processes, restores managed
+  values and reader grants after each case, and does not own or remove the
+  infrastructure containers. No shared assets are retained.

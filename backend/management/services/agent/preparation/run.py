@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
-    MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -17,9 +16,9 @@ from contracts.constants.environment import (
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     TOKEN,
 )
+from configuration.runtime import get_config_snapshot
 from contracts.tool import ToolParamsRequest
 from infrastructure.http.client import create_httpx_client
 from infrastructure.redis import get_redis_client
@@ -411,15 +410,16 @@ async def create_agent_run_info(
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
+    configuration = get_config_snapshot()
     agent_run_info = build_run_info(
         query=final_query,
         model_config_list=model_list,
         language=language,
         agent_config=agent_config,
         mcp_host=mcp_host,
-        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        mcp_request_timeout_seconds=configuration.get("MCP_REQUEST_TIMEOUT_SECONDS"),
         history=converted_history,
-        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_tool_timeout_seconds=configuration.get("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS"),
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         context_budget_snapshot=getattr(

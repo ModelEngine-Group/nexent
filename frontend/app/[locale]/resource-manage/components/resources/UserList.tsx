@@ -353,6 +353,7 @@ export default function UserList({
             { label: t("user.role.dev"), value: "DEV" },
             { label: t("user.role.user"), value: "USER" },
             { label: t("user.role.assetOwner"), value: "ASSET_OWNER" },
+            { label: t("user.role.opsAdmin"), value: "OPS_ADMIN" },
           ]}
           placeholder={t("tenantResources.users.filterRole")}
           className="w-40"
@@ -420,6 +421,7 @@ export default function UserList({
                 { label: t("user.role.admin"), value: "ADMIN" },
                 { label: t("user.role.dev"), value: "DEV" },
                 { label: t("user.role.user"), value: "USER" },
+                { label: t("user.role.opsAdmin"), value: "OPS_ADMIN" },
               ]}
             />
           </Form.Item>

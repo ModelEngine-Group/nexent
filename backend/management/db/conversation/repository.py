@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from contracts.constants.environment import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
+from configuration.runtime import get_config_snapshot
 from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
@@ -136,14 +136,15 @@ def _enforce_user_conversation_limit(session, user_id: Optional[str]) -> None:
         ConversationRecord.delete_flag == "N",
     )
     conversation_count = int(session.scalar(statement) or 0)
-    if conversation_count >= MAX_CONVERSATIONS_PER_USER:
+    limit = get_config_snapshot().get("MAX_CONVERSATIONS_PER_USER")
+    if conversation_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation history limit reached: maximum {MAX_CONVERSATIONS_PER_USER} conversations per user",
+            f"Conversation history limit reached: maximum {limit} conversations per user",
             details={
                 "resource": "conversations",
                 "scope": "user",
-                "limit": MAX_CONVERSATIONS_PER_USER,
+                "limit": limit,
                 "current_count": conversation_count,
             },
         )
@@ -168,14 +169,15 @@ def _enforce_conversation_turn_limit(
         ConversationMessage.delete_flag == "N",
     )
     turn_count = int(session.scalar(statement) or 0)
-    if turn_count >= MAX_CONVERSATION_TURNS:
+    limit = get_config_snapshot().get("MAX_CONVERSATION_TURNS")
+    if turn_count >= limit:
         raise AppException(
             ErrorCode.TENANT_RESOURCE_EXCEEDED,
-            f"Conversation turn limit reached: maximum {MAX_CONVERSATION_TURNS} turns per conversation",
+            f"Conversation turn limit reached: maximum {limit} turns per conversation",
             details={
                 "resource": "conversation_turns",
                 "scope": "conversation",
-                "limit": MAX_CONVERSATION_TURNS,
+                "limit": limit,
                 "current_count": turn_count,
             },
         )

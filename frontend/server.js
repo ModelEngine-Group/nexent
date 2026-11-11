@@ -66,6 +66,7 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+const OPS_HTTP_BACKEND = process.env.OPS_HTTP_BACKEND || "http://localhost:5016";
 // Reuse the existing northbound service address, which conventionally ends with /api.
 const NORTHBOUND_HTTP_BACKEND = (
   process.env.NORTHBOUND_API_SERVER || "http://localhost:5013"
@@ -816,6 +817,17 @@ function handleNorthboundProxy(pathname, req, res) {
  */
 function handleAllApiProxy(pathname, req, res) {
   if (!pathname.startsWith("/api/")) return false;
+
+  if (pathname === "/api/system_configurations" || pathname.startsWith("/api/system_configurations/")) {
+    req.url = req.url.replace(/^\/api(?=\/system_configurations)/, "");
+    proxy.web(req, res, {
+      target: OPS_HTTP_BACKEND,
+      changeOrigin: true,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      timeout: PROXY_TIMEOUT_MS,
+    });
+    return true;
+  }
 
   // 1. 认证接口单独处理
   if (AUTH_INTERCEPT_ENDPOINTS.has(pathname)) {

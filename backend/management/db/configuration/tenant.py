@@ -11,7 +11,7 @@ from management.db.client import get_db_session
 from management.db.models import TenantConfig, TenantGroupInfo
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
-from contracts.constants.environment import MAX_TENANT_COUNT
+from configuration.runtime import get_config_snapshot
 from contracts.errors.exceptions import TenantResourceLimitError
 
 
@@ -131,11 +131,12 @@ def insert_config(insert_data: Dict[str, Any]):
                     {"lock_key": "tenant-count-limit"},
                 )
                 tenant_count = _count_real_tenants(session)
-                if tenant_count >= MAX_TENANT_COUNT:
-                    error = TenantResourceLimitError(f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants")
+                limit = get_config_snapshot().get("MAX_TENANT_COUNT")
+                if tenant_count >= limit:
+                    error = TenantResourceLimitError(f"Tenant limit reached: maximum {limit} tenants")
                     error.resource = "tenants"
                     error.scope = "platform"
-                    error.limit = MAX_TENANT_COUNT
+                    error.limit = limit
                     error.current_count = tenant_count
                     raise error
             session.add(TenantConfig(**insert_data))
@@ -159,11 +160,12 @@ def create_tenant_with_default_group(
             {"lock_key": "tenant-count-limit"},
         )
         tenant_count = _count_real_tenants(session)
-        if tenant_count >= MAX_TENANT_COUNT:
-            error = TenantResourceLimitError(f"Tenant limit reached: maximum {MAX_TENANT_COUNT} tenants")
+        limit = get_config_snapshot().get("MAX_TENANT_COUNT")
+        if tenant_count >= limit:
+            error = TenantResourceLimitError(f"Tenant limit reached: maximum {limit} tenants")
             error.resource = "tenants"
             error.scope = "platform"
-            error.limit = MAX_TENANT_COUNT
+            error.limit = limit
             error.current_count = tenant_count
             raise error
 
