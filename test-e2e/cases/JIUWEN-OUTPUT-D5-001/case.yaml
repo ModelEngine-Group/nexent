@@ -6,6 +6,7 @@ case:
   feature_id: JIUWEN-OUTPUT
   requirement_ids:
   - JIUWEN-M5-20261016
+  - JIUWEN-BACKEND-OUTPUT-20261111
   business_rule_ids:
   - JIUWEN-OUTPUT-RULE-001
   - JIUWEN-OUTPUT-RULE-002
@@ -35,7 +36,10 @@ case:
       is invented, previous tools are not replayed and owned resources drain.
   expected_results:
   - At most one terminal is emitted, missing/duplicate terminal is failed, partial
-    is retained and failed/stopped cannot become successful after later content.
+    is retained and failed/stopped cannot become successful after later content. Backend
+    SSE and history APIs expose model_output_thinking, execution_logs, token_count
+    and final_answer instead of native model_output/tool_result/step_observation/run_terminal;
+    exact identities and terminal validation are retained.
   - Stored and displayed terminal state match SDK outcome, no final answer is invented,
     previous tools are not replayed and owned resources drain.
   forbidden_side_effects:

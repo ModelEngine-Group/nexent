@@ -41,7 +41,11 @@ def test_output_failure_preserves_facts(monkeypatch,tmp_path,fault):
         assert len(terminal)==1 and terminal[0]["status"]==expected
         assert not terminal[0]["final_content"] and not terminal[0]["final_block_ids"]
         if fault in {"broken_stream","cancel"}:assert any(e["type"]=="model_output" and e["content"] for e in output)
-        assistant,saved,_=asyncio.run(persist_output(monkeypatch,info,output))
+        assistant,saved,wire=asyncio.run(persist_output(monkeypatch,info,output))
+        public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines() if line.startswith("data:")]
+        assert not any(e.get("type") in {"model_output", "tool_result", "step_observation", "run_terminal", "final_answer"} for e in public)
+        if expected == "failed":
+            assert any(e.get("type") == "error" for e in public)
         assert assistant["status"]==expected and not assistant["message_content"]
         assert any(e["type"]=="run_terminal" and e["status"]==expected for e in saved)
     monkeypatch.setattr(Runner,"run_agent_streaming",original)

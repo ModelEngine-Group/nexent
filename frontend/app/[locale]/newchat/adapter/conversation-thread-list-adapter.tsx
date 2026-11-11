@@ -3,7 +3,7 @@
 "use client";
 
 import { formatNl2AgentActionSummary } from "../ui/nl2agent-action-summary";
-import { normalizeNexentHistory } from "@/lib/nexentOutputAdapter";
+import { outputStatus } from "@/lib/nexentOutputStatus";
 import type { NexentOutputStatus } from "@/types/nexentOutput";
 
 import { getCreatorMode } from "@/lib/creatorConversation";
@@ -425,8 +425,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
-      const normalized = normalizeNexentHistory(sourceParts, msg.status);
-      const messageParts = normalized.events;
+      const messageParts = sourceParts;
       const runHasFinalAnswer = messageParts.some(
         (part) => part.type === "final_answer"
       );
@@ -705,8 +704,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           return appendedImages;
         };
 
-        restoredRuntimeStatus = normalized.status;
-        for (const [partIndex, part] of normalized.events.entries()) {
+        restoredRuntimeStatus = outputStatus(msg.status);
+        for (const [partIndex, part] of messageParts.entries()) {
           if (
             part.type === "model_attempt_control" &&
             getCreatorMode(detail) === "skill_create"

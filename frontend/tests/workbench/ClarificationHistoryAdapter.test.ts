@@ -83,12 +83,6 @@ it("does not share answers across history loads or infer submission for legacy c
 });
 
 it("restores a Jiuwen terminal form through the same history parser and saved response identity", async () => {
-  const envelope = {
-    schema_version: 1,
-    runtime_mode: "native_agent",
-    agent_core: "jiuwen",
-    turn_id: "clarification-turn",
-  };
   const history = await restore([
     {
       role: "assistant",
@@ -98,26 +92,7 @@ it("restores a Jiuwen terminal form through the same history parser and saved re
         {
           type: "human_interaction",
           unit_index: 7,
-          content: JSON.stringify({
-            ...envelope,
-            type: "human_interaction",
-            sequence: 1,
-            content: JSON.stringify(form),
-          }),
-        },
-        {
-          type: "run_terminal",
-          unit_index: 8,
-          content: JSON.stringify({
-            ...envelope,
-            type: "run_terminal",
-            sequence: 2,
-            content: "",
-            status: "completed",
-            end_reason: "awaiting_input",
-            final_content: "",
-            final_block_ids: [],
-          }),
+          content: JSON.stringify(form),
         },
       ],
     },

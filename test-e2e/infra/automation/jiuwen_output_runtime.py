@@ -42,6 +42,7 @@ async def persist_output(monkeypatch, info, output):
     channel = SimpleNamespace(publish=AsyncMock())
     wire = [chunk async for chunk in application._stream_agent_chunks(request,"owner","spike-tenant",info,None,
                                                                     channel=channel)]
+    assert [call.args[0] for call in channel.publish.await_args_list] == wire, "Subscriber cache differs from public SSE"
     await asyncio.sleep(0)
     history = get_conversation_history(conversation,"owner")
     assistant = next(m for m in history["message_records"] if m["role"]=="assistant")

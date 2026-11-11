@@ -34,6 +34,7 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
 from infrastructure.runtime_output import is_runtime_event, project_runtime_history
+from infrastructure.nexent_output import normalize_nexent_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -767,7 +768,12 @@ def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[
     """
     for msg in reversed(message_records):
         if msg.get('status') == 'streaming' and msg.get('role') == MESSAGE_ROLE["ASSISTANT"]:
-            units = msg.get('units') or []
+            raw_units = msg.get('units') or []
+            units, _ = normalize_nexent_history([
+                {**u, "type": u.get("unit_type"), "content": u.get("unit_content", "")}
+                for u in raw_units
+            ], "streaming")
+            units = [{**u, "unit_type": u["type"], "unit_content": u["content"]} for u in units]
             last_unit = units[-1] if units else None
             return {
                 'message_id': msg['message_id'],
@@ -971,6 +977,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                         'type': 'final_answer',
                         'content': message_content
                     })
+
+                processed_units, public_status = normalize_nexent_history(processed_units, msg.get("status"))
+                if public_status == "failed":
+                    invalid_runtime_answer = True
 
                 message_item = {
                     'role': role,

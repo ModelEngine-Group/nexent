@@ -23,23 +23,10 @@ const completion = (agentId = 42) => ({
     agent_id: agentId,
   }),
 });
-const finish = (core: string, text = "") =>
-  core === "jiuwen"
-    ? {
-        type: "run_terminal",
-        content: "",
-        schema_version: 1,
-        runtime_mode: "native_agent",
-        agent_core: "jiuwen",
-        turn_id: "creator-turn",
-        sequence: 1,
-        status: "completed",
-        end_reason: "awaiting_input",
-        final_content: text,
-        final_block_ids: [],
-        error: null,
-      }
-    : { type: "final_answer", content: text };
+const finish = (_core: string, text = "") =>
+  text
+    ? { type: "final_answer", content: text }
+    : { type: "done", content: "" };
 
 async function render(events: unknown[]) {
   runAgent.mockResolvedValueOnce(
@@ -78,7 +65,9 @@ async function render(events: unknown[]) {
   if (Symbol.asyncIterator in result)
     for await (const frame of result) frames.push(frame);
   else frames.push(await result);
-  return (frames.at(-1)?.content ?? []).filter((part: any) => part.type === "data" && part.name === "nl2agent-created");
+  return (frames.at(-1)?.content ?? []).filter(
+    (part: any) => part.type === "data" && part.name === "nl2agent-created"
+  );
 }
 
 it.each(["smolagents", "jiuwen"])(

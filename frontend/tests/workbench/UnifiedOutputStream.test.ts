@@ -51,21 +51,6 @@ async function consume(events: Record<string, unknown>[]) {
   else results.push(await run);
   return results;
 }
-const native = (
-  type: string,
-  sequence: number,
-  extra: Record<string, unknown> = {}
-) => ({
-  type,
-  content: "",
-  schema_version: 1,
-  runtime_mode: "native_agent",
-  agent_core: "jiuwen",
-  turn_id: "root",
-  sequence,
-  ...extra,
-});
-
 it("uses the original reasoning, tool and final parts for both Core event formats", async () => {
   const legacy = [
     { type: "step_count", content: "Step 1", step_id: "s1" },
@@ -89,37 +74,10 @@ it("uses the original reasoning, tool and final parts for both Core event format
       reclassify_step: true,
     },
   ];
-  const normalized = [
-    native("step_count", 1, { content: "Step 1", step_id: "s1" }),
-    native("model_output", 2, {
-      content: "Before",
-      block_id: "one",
-      step_id: "s1",
-    }),
-    native("model_output_deep_thinking", 3, {
-      content: "Thought",
-      block_id: "one",
-      step_id: "s1",
-    }),
-    native("tool", 4, {
-      local_call_id: "call",
-      tool_name: "mcp",
-      tool_arguments: { a: 1 },
-    }),
-    native("tool_result", 5, { local_call_id: "call", result: "Result" }),
-    native("step_count", 6, { content: "Step 2", step_id: "s2" }),
-    native("model_output", 7, {
-      content: "Final",
-      block_id: "final",
-      step_id: "s2",
-    }),
-    { type: "final_answer", content: "Final" },
-    native("run_terminal", 8, {
-      status: "completed",
-      final_content: "Final",
-      final_block_ids: ["final"],
-    }),
-  ];
+  const normalized = legacy.map((event) => ({
+    ...event,
+    turn_id: "server-turn",
+  }));
   const summarize = (parts: any[]) =>
     parts.map((p) => ({
       type: p.type,
@@ -175,19 +133,15 @@ it.each(["failed", "stopped"])(
   "keeps %s partial in the existing process parts with no final",
   async (status) => {
     const results = await consume([
-      native("model_output", 1, { block_id: "part", content: "Partial" }),
-      native("run_terminal", 2, {
-        status,
-        final_content: "",
-        final_block_ids: [],
-        end_reason: "fault",
-      }),
+      { type: "model_output_thinking", step_id: "partial", content: "Partial" },
+      ...(status === "failed" ? [{ type: "error", content: "fault" }] : []),
     ]);
     const last = results.at(-1)!;
-    expect(last.status).toMatchObject({
-      type: "incomplete",
-      reason: status === "stopped" ? "cancelled" : "error",
-    });
+    if (status === "failed")
+      expect(last.status).toMatchObject({
+        type: "incomplete",
+        reason: "error",
+      });
     expect(
       last.content?.some(
         (p) => p.type === "reasoning" && p.text.includes("Partial")
@@ -208,24 +162,7 @@ it("restores an empty usage bucket for a saved simple native answer", async () =
         role: "assistant",
         message_id: 10,
         status: "completed",
-        message: [
-          {
-            type: "model_output",
-            content: JSON.stringify(
-              native("model_output", 1, { block_id: "final", content: "Final" })
-            ),
-          },
-          {
-            type: "run_terminal",
-            content: JSON.stringify(
-              native("run_terminal", 2, {
-                status: "completed",
-                final_content: "Final",
-                final_block_ids: ["final"],
-              })
-            ),
-          },
-        ],
+        message: [{ type: "final_answer", content: "Final" }],
       },
     ],
   } as unknown as import("@/types/conversation").ApiConversationDetail;

@@ -7,6 +7,7 @@ case:
   requirement_ids:
   - JIUWEN-M5-20261016
   - JIUWEN-UNIFIED-OUTPUT-20261016
+  - JIUWEN-BACKEND-OUTPUT-20261111
   business_rule_ids:
   - JIUWEN-OUTPUT-RULE-001
   - JIUWEN-OUTPUT-RULE-002
@@ -42,7 +43,10 @@ case:
   expected_results: &id001
   - Execution process shows same-level ordered content and tool cards, child/A2A results
     and one final answer outside the process. All Core output uses the existing reasoning,
-    tool, final and child components; no runtime-output renderer.
+    tool, final and child components; no runtime-output renderer. Backend SSE and
+    history APIs expose model_output_thinking, execution_logs, token_count and final_answer
+    instead of native model_output/tool_result/step_observation/run_terminal; exact
+    identities and terminal validation are retained.
   - Saved and live projections agree; partial/error remains visible with failed/stopped
     status, unknown usage is not zero and legacy messages still render.
   forbidden_side_effects:

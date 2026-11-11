@@ -2,7 +2,29 @@
 
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { baseUrl, installEditor } from "../../infra/automation/d4/fixtures/agent-editor-workflows";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { spawnSync } from "node:child_process";
+
+function project(events: unknown[], history = false, status = "completed") {
+  const script = `import json,sys
+from infrastructure.nexent_output import NexentOutputAdapter,normalize_nexent_history
+d=json.load(sys.stdin)
+if d["history"]:
+    output=normalize_nexent_history(d["events"],d["status"])[0]
+else:
+    adapter=NexentOutputAdapter()
+    output=[item for event in d["events"] for item in adapter.push(event)]
+    output.extend(adapter.close())
+print(json.dumps(output,ensure_ascii=False))`;
+  const result = spawnSync(process.env.FIXED_TEST_PYTHON!, ["-c", script], {
+    input: JSON.stringify({events,history,status}), encoding: "utf8", timeout: 30000,
+    env: {...process.env, PYTHONIOENCODING: "utf-8", PYTHONPATH: [
+      join(process.env.NEXENT_REPO!, "backend"), join(process.env.NEXENT_REPO!, "sdk"),
+    ].join(delimiter)},
+  });
+  if (result.status !== 0) throw new Error("Backend fixture projection failed: " + result.stderr);
+  return JSON.parse(result.stdout);
+}
 
 journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
   const fixture=await installEditor(page);
@@ -51,12 +73,12 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
     const respond=(data:unknown)=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(data)});
     if(path==="/memory/config/load")return respond({MEMORY_SWITCH:"N"});
     if(path==="/conversation/list")return respond({code:0,data:{items:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,create_time:Date.now(),update_time:Date.now()}],metadata:{total:1,today:1,last_7_days:0,older:0}}});
-    if(path==="/conversation/101")return respond({code:0,data:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,chat_mode:"execution",create_time:Date.now(),runtime_metadata:{},runtime_metadata_version:0,message:messages}]});
+    if(path==="/conversation/101")return respond({code:0,data:[{conversation_id:101,conversation_title:"Output contract",agent_id:42,chat_mode:"execution",create_time:Date.now(),runtime_metadata:{},runtime_metadata_version:0,message:messages.map(message=>message.role==="assistant"?{...message,message:project(message.message,true,message.status)}:message)}]});
     if(path==="/agent/run"){
       runs++;
       messages.push({role:"user",message_id:3,message_index:3,status:"completed",message:"Current task"});
       messages.push({role:"assistant",message_id:4,message_index:4,status:"completed",message:events.map((event,index)=>({...event,unit_index:index,content:event.runtime_mode?JSON.stringify(event):event.content}))});
-      return route.fulfill({status:200,contentType:"text/event-stream",headers:{conversation_id:"101"},body:events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join("")});
+      return route.fulfill({status:200,contentType:"text/event-stream",headers:{conversation_id:"101"},body:project(events).map((event:unknown)=>`data: ${JSON.stringify(event)}\n\n`).join("")});
     }
     return route.fallback();
   });
@@ -125,7 +147,7 @@ journey("JIUWEN-OUTPUT-D4-001", async ({page,contract,expect})=>{
     const noUsage={schema_version:1,runtime_mode:"native_agent",agent_core:"jiuwen",turn_id:"no-usage"};
     messages.push({role:"assistant",message_id:messages.length+1,message_index:messages.length+1,status:"completed",message:[
       {type:"model_output",content:JSON.stringify({...noUsage,type:"model_output",sequence:1,block_id:"no-usage",content:"NO_USAGE_FINAL"})},
-      {type:"run_terminal",content:JSON.stringify({...noUsage,type:"run_terminal",sequence:2,status:"completed",final_content:"NO_USAGE_FINAL",final_block_ids:["no-usage"],content:""})},
+      {type:"run_terminal",content:JSON.stringify({...noUsage,type:"run_terminal",sequence:2,status:"completed",end_reason:"runner_answer",final_content:"NO_USAGE_FINAL",final_block_ids:["no-usage"],content:""})},
     ]});
     messages.push({role:"user",message_id:messages.length+1,message_index:messages.length+1,status:"completed",message:"Mixed Core task"});
     const childEnvelope={schema_version:1,runtime_mode:"native_agent",agent_core:"jiuwen",turn_id:"mixed-child",invocation_id:"mixed-child"};

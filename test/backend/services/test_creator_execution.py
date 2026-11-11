@@ -2,13 +2,49 @@
 
 """Creator executor identity, target authorization and single-write history contracts."""
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
-
 from contracts.agent import NL2AgentRunRequest, NL2SkillRunRequest, SystemAgentRef
-from management.services.conversation import creator_execution as execution
 from management.services.conversation import creation_history, creator_targets
+from management.services.conversation import creator_execution as execution
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["agent", "skill"])
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_creator_normalizes_native_wire_but_keeps_saved_execution_facts(mocker, kind, waiting):
+    ref = SystemAgentRef("shared", f"nl2{kind}_main", 77, 0)
+    mocker.patch.object(execution.system_agent_provider, "get_creator_ref", return_value=ref)
+    mocker.patch.object(execution, "authorize_target", side_effect=lambda target, *_: target)
+    mocker.patch.object(creation_history, "create_new_conversation", return_value={"conversation_id": 9})
+    mocker.patch.object(creation_history, "save_message", side_effect=[10, 11])
+    save_unit = mocker.patch.object(creation_history, "save_message_unit")
+    request = (NL2AgentRunRequest if kind == "agent" else NL2SkillRunRequest)(
+        query="build", target={"type": kind, "id": 201},
+    )
+    base = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen", "turn_id": "creator"}
+    facts = [
+        {**base, "type": "model_output", "sequence": 1, "block_id": "body", "content": "Preparing"},
+        {**base, "type": "run_terminal", "sequence": 2, "content": "", "status": "completed",
+         "end_reason": "awaiting_input" if waiting else "runner_answer",
+         "final_content": "" if waiting else "Preparing", "final_block_ids": [] if waiting else ["body"]},
+    ]
+
+    async def raw():
+        for fact in facts:
+            yield "data: " + json.dumps(fact) + "\n\n"
+
+    stream, _ = await execution.start_creation_turn(
+        request, kind=kind, user_id="user", tenant_id="tenant", stream_factory=AsyncMock(return_value=raw()),
+    )
+    wire = [json.loads(frame[5:]) async for frame in stream]
+    assert any(event["type"] == "model_output_thinking" for event in wire)
+    assert not any(event["type"] in {"model_output", "run_terminal"} for event in wire)
+    assert sum(event["type"] == "final_answer" for event in wire) == (0 if waiting else 1)
+    assert [call.kwargs["unit_type"] for call in save_unit.call_args_list] == ["model_output", "run_terminal"]
+    assert json.loads(save_unit.call_args_list[-1].kwargs["unit_content"])["end_reason"] == facts[-1]["end_reason"]
 
 
 @pytest.mark.asyncio

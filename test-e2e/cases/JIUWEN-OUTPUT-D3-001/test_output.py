@@ -62,6 +62,20 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
             assert result["result"]
         if protocol=="native":assert any(e["provider_call_id"] for e in tools)
         assistant,saved,wire=asyncio.run(persist_output(monkeypatch,info,output))
+        public = [json.loads(line[5:]) for frame in wire for line in frame.splitlines()
+                  if line.startswith("data:")]
+        forbidden = {"model_output", "tool_result", "step_observation", "run_terminal"}
+        assert not any(e.get("type") in forbidden for e in public)
+        assert not any(e.get("runtime_mode") == "native_agent" for e in public)
+        assert any(e.get("type") == "token_count" for e in public)
+        assert sum(e.get("type") == "final_answer" and not e.get("invocation_id") for e in public) == 1
+        public_tools = {e["tool_call_id"] for e in public if e.get("type") == "tool"}
+        assert all(e["tool_call_id"] in public_tools for e in public if e.get("type") == "execution_logs" and e.get("local_call_id"))
+        from management.services.conversation.service import get_conversation_history_service
+        history = get_conversation_history_service(info.conversation_id, "owner")[0]
+        public_history = next(m for m in history["message"] if m["role"] == "assistant")["message"]
+        assert not any(e.get("type") in forbidden for e in public_history)
+        assert sum(e.get("type") == "final_answer" and not e.get("invocation_id") for e in public_history) == 1
         for restored in saved:
             if restored["type"] not in {
                 "step_count", "tool", "tool_result", "step_observation", "run_terminal"
@@ -124,11 +138,12 @@ def test_clarification_terminal_history_before_and_after_submission(monkeypatch,
             public = get_conversation_history_service(info.conversation_id, "owner")[0]
             restored = next(r for r in public["message"] if r["role"] == "assistant")
             assert restored["status"] == "completed"
-            terminal = next(json.loads(u["content"]) for u in restored["message"] if u["type"] == "run_terminal")
-            assert terminal["status"] == "completed" and terminal["end_reason"] == "awaiting_input"
-            assert terminal["final_content"] == "" and terminal["final_block_ids"] == []
-            assert terminal["error"] is None and "JIUWEN_FINAL_OUTPUT_INVALID" not in json.dumps(public)
-            assert json.loads(terminal["content"])["status"] == "completed"
+            assert any(u["type"] == "human_interaction" for u in restored["message"])
+            assert not any(u["type"] in {"run_terminal", "model_output", "tool_result", "step_observation"}
+                           for u in restored["message"])
+            assert not any(u["type"] == "final_answer" and u["content"] for u in restored["message"])
+            assert "JIUWEN_FINAL_OUTPUT_INVALID" not in json.dumps(public)
+
 
         check_public_history()
         card = next(u for u in assistant["units"] if u["unit_type"] == "human_interaction")

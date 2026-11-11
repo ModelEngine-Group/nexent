@@ -7,6 +7,7 @@ case:
   requirement_ids:
   - JIUWEN-M5-20261016
   - JIUWEN-HITL-HISTORY-20261106
+  - JIUWEN-BACKEND-OUTPUT-20261111
   business_rule_ids:
   - JIUWEN-OUTPUT-RULE-001
   - JIUWEN-OUTPUT-RULE-002
@@ -39,21 +40,23 @@ case:
       linked. Internal history echoes and final envelope tags are absent from public
       deltas, terminal content and reloaded answers; exact structured tool results
       remain unchanged. Non-mergeable step, tool, observation and terminal content
-      matches the live event after decoding exactly one stored envelope.
-      Preserve meaningful reasoning/action step labels while retaining the existing
-      omission of empty answer-only step markers.
-      Native/text ask_user waiting terminals retain completed/awaiting_input with empty
-      final content/blocks and no error after reload, before and after a saved clarification response.
+      matches the live event after decoding exactly one stored envelope. Preserve
+      meaningful reasoning/action step labels while retaining the existing omission
+      of empty answer-only step markers. Native/text ask_user waiting terminals retain
+      completed/awaiting_input with empty final content/blocks and no error after
+      reload, before and after a saved clarification response.
   expected_results:
   - Observations retain ordered content/reasoning blocks, exact tool results, full
     provider IDs, unique local IDs and invocation grouping; usage absent is unknown.
     Public step capacity and processing mode agree with the actual Nexent ContextManager
-    configuration and survive persistence.
+    configuration and survive persistence. Backend SSE and history APIs expose model_output_thinking,
+    execution_logs, token_count and final_answer instead of native model_output/tool_result/step_observation/run_terminal;
+    exact identities and terminal validation are retained.
   - Exactly one explicit RunResult determines status and final content; JSON envelopes
     and original results survive storage, with final blocks unambiguously linked.
     Internal context and final protocol envelopes cannot leak into public answers
-    or saved display. Step labels and other non-mergeable content survive exactly one
-    envelope rather than acquiring a second serialized event inside their content.
+    or saved display. Step labels and other non-mergeable content survive exactly
+    one envelope rather than acquiring a second serialized event inside their content.
     A valid empty awaiting_input terminal is not treated as an invalid final answer;
     source records remain unchanged by history projection.
   forbidden_side_effects:

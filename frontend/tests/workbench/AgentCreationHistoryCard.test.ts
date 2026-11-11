@@ -116,26 +116,7 @@ it("rejects a mismatched completion and deduplicates matching events", async () 
 it.each(["smolagents", "jiuwen"])(
   "%s history waits for an explicit completion event",
   async (core) => {
-    const ending =
-      core === "jiuwen"
-        ? {
-            type: "run_terminal",
-            content: JSON.stringify({
-              type: "run_terminal",
-              schema_version: 1,
-              runtime_mode: "native_agent",
-              agent_core: "jiuwen",
-              turn_id: "history-turn",
-              sequence: 1,
-              content: "",
-              status: "completed",
-              end_reason: "awaiting_input",
-              final_content: "",
-              final_block_ids: [],
-              error: null,
-            }),
-          }
-        : { type: "final_answer", content: "" };
+    const ending = { type: "done", content: "" };
     for (const completed of [false, true]) {
       const history = await restore([
         ...(completed

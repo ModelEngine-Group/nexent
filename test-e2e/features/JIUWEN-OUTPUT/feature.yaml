@@ -19,9 +19,9 @@ feature:
     description: Realtime and persisted history use the same envelope projection for
       tools, MCP, Skills, children and A2A; legacy Code display remains compatible.
   - rule_id: JIUWEN-OUTPUT-RULE-004
-    description: All Core outputs normalize at a shared protocol adapter into the
-      existing Nexent message types; live and saved messages use the same parser and
-      UI components without Core-specific rendering.
+    description: All Core outputs normalize on the backend before SSE publishing and
+      history responses into established Nexent types and payloads. Northbound clients
+      and the web UI share the same existing protocol without client-side engine conversion.
   - rule_id: JIUWEN-OUTPUT-RULE-005
     description: All Core usage output takes context capacity and CM limits from the
       same resolved Nexent configuration, even in passthrough mode; absent capacity

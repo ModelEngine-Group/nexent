@@ -105,6 +105,7 @@ from management.services.configuration.tenant.settings import (
 )
 
 from infrastructure.runtime_output import RuntimeOutputState, is_runtime_event
+from infrastructure.nexent_output import NexentSSEAdapter
 
 logger = logging.getLogger(__name__)
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
@@ -361,6 +362,14 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
 
+    public_output = NexentSSEAdapter()
+
+    async def publish_public(frame):
+        frames = public_output.push(frame)
+        for public_frame in frames:
+            await channel.publish(public_frame)
+        return frames
+
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
     workspace_file_uploads: dict[str, dict] = {}
@@ -467,15 +476,10 @@ async def _stream_agent_chunks(
 
     # In resume mode, emit a status event first
     if is_resume_mode:
-        await channel.publish(STREAM_STATUS_EVENT)
-        await channel.publish(
-            f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
-        )
-        yield STREAM_STATUS_EVENT
-        yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
-
-    if streaming_message_id is not None:
-        agent_run_info.observer.execution_history = execution_history
+        for frame in (STREAM_STATUS_EVENT,
+                      f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'):
+            for public_frame in await publish_public(frame):
+                yield public_frame
 
     async def _iter_run_chunks():
         for event in getattr(
@@ -515,8 +519,8 @@ async def _stream_agent_chunks(
                         current_unit = None
                     if not has_body:
                         if final_answer_mode == "delta":
-                            await channel.publish(f"data: {chunk}\n\n")
-                            yield f"data: {chunk}\n\n"
+                            for public_frame in await publish_public(f"data: {chunk}\n\n"):
+                                yield public_frame
                         continue
 
                 # Use the current unit index for continuations and the next index
@@ -538,8 +542,8 @@ async def _stream_agent_chunks(
                     )
             except Exception:
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
-                await channel.publish(f"data: {chunk}\n\n")
-                yield f"data: {chunk}\n\n"
+                for public_frame in await publish_public(f"data: {chunk}\n\n"):
+                    yield public_frame
                 continue
 
             if chunk_type == "execution_result":
@@ -562,8 +566,8 @@ async def _stream_agent_chunks(
                     _rollback_model_attempt_units(buffered_units, attempt_id)
                     if complete_answer_event and complete_answer_event.get("attempt_id") == attempt_id:
                         complete_answer_event = None
-                await channel.publish(f"data: {chunk}\n\n")
-                yield f"data: {chunk}\n\n"
+                for public_frame in await publish_public(f"data: {chunk}\n\n"):
+                    yield public_frame
                 continue
 
             if chunk_type == ProcessType.SKILL_ARTIFACT.value:
@@ -773,8 +777,8 @@ async def _stream_agent_chunks(
                             )
                         current_unit = None
                         next_unit_index += 1
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
+                        for public_frame in await publish_public(f"data: {chunk}\n\n"):
+                            yield public_frame
                         continue
 
                     # history_summary is already persisted once by the canonical
@@ -834,8 +838,8 @@ async def _stream_agent_chunks(
             # Complete mode suppresses incremental final_answer events; the
             # single reconstructed root answer is emitted at finalization.
             if chunk_type != "final_answer" or final_answer_mode == "delta":
-                await channel.publish(f"data: {chunk}\n\n")
-                yield f"data: {chunk}\n\n"
+                for public_frame in await publish_public(f"data: {chunk}\n\n"):
+                    yield public_frame
         stream_completed_normally = True
     except (asyncio.CancelledError, GeneratorExit):
         stream_closing = True
@@ -846,8 +850,8 @@ async def _stream_agent_chunks(
         if execution_state is not None:
             execution_state.fail("AUTOMATION_EXECUTION_FAILED", "Agent generation failed.")
         logger.error("Agent run error: %r", run_exc, exc_info=True)
-        await channel.publish(_safe_agent_stream_error_chunk(run_exc))
-        yield _safe_agent_stream_error_chunk(run_exc)
+        for public_frame in await publish_public(_safe_agent_stream_error_chunk(run_exc)):
+            yield public_frame
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
@@ -918,8 +922,8 @@ async def _stream_agent_chunks(
                             + "\n\n"
                         )
                         try:
-                            await channel.publish(files_chunk)
-                            yield files_chunk
+                            for public_frame in await publish_public(files_chunk):
+                                yield public_frame
                         except RuntimeError:
                             # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
                             pass
@@ -952,8 +956,8 @@ async def _stream_agent_chunks(
                     + "\n\n"
                 )
                 try:
-                    await channel.publish(files_chunk)
-                    yield files_chunk
+                    for public_frame in await publish_public(files_chunk):
+                        yield public_frame
                 except RuntimeError:
                     pass
                 frontend_skill_files.extend(
@@ -1052,9 +1056,10 @@ async def _stream_agent_chunks(
                 execution_state.error_message = None
         if persistence_failed and channel is not None and not stream_closing:
             persistence_error_chunk = _safe_agent_stream_error_chunk()
-            await channel.publish(persistence_error_chunk)
+            error_frames = await publish_public(persistence_error_chunk)
             try:
-                yield persistence_error_chunk
+                for public_frame in error_frames:
+                    yield public_frame
             except RuntimeError:
                 pass
 
@@ -1077,8 +1082,13 @@ async def _stream_agent_chunks(
                 {**complete_answer_event, "content": complete_answer_content, "answer_phase": "complete"},
                 ensure_ascii=False,
             ) + "\n\n"
-            await channel.publish(final_chunk)
-            yield final_chunk
+            for public_frame in await publish_public(final_chunk):
+                yield public_frame
+
+        if not stream_closing:
+            for public_frame in public_output.close(terminal_status):
+                await channel.publish(public_frame)
+                yield public_frame
 
         if channel is not None:
             await streaming_channel_manager.complete_channel(

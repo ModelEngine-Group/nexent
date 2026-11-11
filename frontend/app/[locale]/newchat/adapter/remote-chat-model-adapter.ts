@@ -25,7 +25,6 @@ import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { acknowledgeConversationUser } from "@/lib/conversationRetry";
-import { adaptNexentOutputStream } from "@/lib/nexentOutputAdapter";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
 import { getSourceAttributes } from "@/lib/source";
@@ -1808,8 +1807,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       return;
     }
 
-    const output = adaptNexentOutputStream(agentResponse);
-    const reader = output.reader;
+    const reader = agentResponse;
     const decoder = new TextDecoder();
     let buffer = "";
 
@@ -2342,7 +2340,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let streamFinished = false;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
+      status: userAborted
+        ? { type: "incomplete", reason: "cancelled" }
+        : content.some((part) => part.isError)
+          ? { type: "incomplete", reason: "error" }
+          : streamFinished
+            ? { type: "complete", reason: "stop" }
+            : { type: "running" },
       content: collapseSubAgentParts(
         content.map((part) =>
           part.type === "data" &&
@@ -2352,7 +2358,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : part
         )
       ),
-      ...(output.adapter.status ? { status: output.adapter.status } : {}),
+
       metadata: {
         custom: {
           ...(nl2a ? { nl2a } : {}),
@@ -3392,7 +3398,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
-      output.adapter.close(userAborted ? "stopped" : undefined);
+      streamFinished = true;
       const finalResult = buildStreamResult(
         collapseSubAgentParts(contentParts)
       );
