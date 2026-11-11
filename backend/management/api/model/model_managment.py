@@ -113,6 +113,7 @@ from management.services.monitor.audit import record_security_event
 from management.utils.app_factory import ModelCredentialRoute
 from nexent.core.concurrency import run_blocking
 from permissions.depends import require
+from permissions.operations import operations_scope, resource_read_tenant
 from permissions.models import CurrentUser
 
 # Permission strings normalized by backend RBAC cache (lower-case type:subtype).
@@ -422,7 +423,7 @@ async def suggest_model_capacity(
 
 @router.get("/capacity-coverage")
 async def get_model_capacity_coverage(
-    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative="resource.inventory:read")),
 ):
     """Return bare-capacity LLM/VLM coverage for the current tenant.
 
@@ -857,7 +858,8 @@ async def check_temporary_model_health(
 @router.post("/manage/healthcheck")
 async def manage_check_model_health(
     request: ManageTenantModelHealthcheckRequest,
-    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION, alternative="resource.inventory:read")),
+    http_request: Request = None,
 ):
     """Check and update model connectivity for a specified tenant (admin/manage operation).
 
@@ -869,14 +871,23 @@ async def manage_check_model_health(
     Returns:
         Connectivity check result with updated status.
     """
-    _require_manage_scope(current_user, request.tenant_id)
+    read_only = resource_read_tenant(http_request) is not None
+    if read_only:
+        operations_scope(current_user, request.tenant_id, "resource.inventory:read")
+    else:
+        _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to check model connectivity for tenant, user_id: {current_user.user_id}, "
             f"target_tenant_id: {request.tenant_id}, display_name: {request.display_name}"
         )
 
-        result = await check_model_connectivity(request.display_name, request.tenant_id, request.model_type)
+        result = await check_model_connectivity(
+            request.display_name, request.tenant_id, request.model_type,
+            **({"persist_status": False} if read_only else {}),
+        )
+        if read_only and not result.get("connectivity"):
+            result["error"] = "Model connectivity check failed"
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Successfully checked model connectivity", "data": result}
         )
@@ -1137,7 +1148,7 @@ async def manage_batch_create_models(
 @router.post("/manage/list", response_model=ManageTenantModelListResponse)
 async def manage_list_models(
     request: ManageTenantModelListRequest,
-    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative="resource.inventory:read")),
 ):
     """List models for a specified tenant (admin/manage operation).
 
@@ -1149,7 +1160,12 @@ async def manage_list_models(
     Returns:
         Paginated model list for the specified tenant.
     """
-    _require_manage_scope(current_user, request.tenant_id)
+    if has_any_role(current_user.effective_roles, {"OPS"}) and not has_any_role(
+        current_user.effective_roles, _MANAGE_ALLOWED_ROLES
+    ):
+        operations_scope(current_user, request.tenant_id, "resource.inventory:read")
+    else:
+        _require_manage_scope(current_user, request.tenant_id)
     try:
         logger.debug(
             f"Start to list models for tenant, user_id: {current_user.user_id}, target_tenant_id: {request.tenant_id}, "

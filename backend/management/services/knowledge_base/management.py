@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, Path, Query
 
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE, PERMISSION_READ
 from contracts.errors.exceptions import AppException, DuplicateError
 from contracts.roles import has_any_role, roles_from_record
 from management.db.agent.repository import query_knowledge_binding_agents
@@ -739,6 +739,8 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         keyword: str | None = None,
         sources: List[str] | None = None,
         models: List[str] | None = None,
+        *,
+        inventory_read: bool = False,
     ):
         """
         List all indices that the current user has permissions to access based on role and group permissions.
@@ -774,7 +776,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         user_role = roles_from_record(user_tenant)
         user_tenant_id = str(user_tenant.get("tenant_id") or target_tenant_id or "")
         # Get user group IDs from tenant_group_user_t table
-        user_group_ids = query_group_ids_by_user(user_id)
+        user_group_ids = [] if inventory_read else query_group_ids_by_user(user_id)
 
         # Get all indices from Elasticsearch
         es_indices_list = vdb_core.get_user_indices(pattern)
@@ -804,23 +806,26 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             effective_user_tenant_id = user_tenant_id
             if has_any_role(user_role, {"SU"}):
                 effective_user_tenant_id = target_tenant_id
-            access = ResourceAccessControl.check(
-                Resource(
-                    resource_type="knowledge_base",
-                    resource_id=index_name,
-                    tenant_id=record.get("tenant_id"),
-                    created_by=record.get("created_by"),
-                    ingroup_permission=record.get("ingroup_permission"),
-                    group_ids=record.get("group_ids"),
-                    knowledge_sources=record.get("knowledge_sources"),
-                ),
-                user_id=user_id,
-                role=effective_user_role,
-                user_groups=user_group_ids,
-                user_tenant_id=effective_user_tenant_id,
-                asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
-            )
-            permission = access.permission_label
+            if inventory_read:
+                permission = PERMISSION_READ
+            else:
+                access = ResourceAccessControl.check(
+                    Resource(
+                        resource_type="knowledge_base",
+                        resource_id=index_name,
+                        tenant_id=record.get("tenant_id"),
+                        created_by=record.get("created_by"),
+                        ingroup_permission=record.get("ingroup_permission"),
+                        group_ids=record.get("group_ids"),
+                        knowledge_sources=record.get("knowledge_sources"),
+                    ),
+                    user_id=user_id,
+                    role=effective_user_role,
+                    user_groups=user_group_ids,
+                    user_tenant_id=effective_user_tenant_id,
+                    asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+                )
+                permission = access.permission_label
 
             # Add to visible list if permission is granted
             if permission:
@@ -943,7 +948,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
                     )
 
                     # Update model name if missing
-                    if index_name in model_name_is_none_list:
+                    if not inventory_read and index_name in model_name_is_none_list:
                         update_model_name_by_index_name(
                             index_name,
                             index_stats.get("base_info", {}).get("embedding_model", ""),

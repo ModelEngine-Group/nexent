@@ -444,7 +444,7 @@ def remove_user_from_single_group(group_id: int, user_id: str, current_user_id: 
     return success
 
 
-def get_group_users(group_id: int) -> List[Dict[str, Any]]:
+def get_group_users(group_id: int, *, tenant_id: str | None = None) -> List[Dict[str, Any]]:
     """
     Get all users in a group with their details.
 
@@ -459,7 +459,7 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
     """
     # Check if group exists
     group = query_groups(group_id)
-    if not group:
+    if not group or (tenant_id is not None and group.get('tenant_id') != tenant_id):
         raise NotFoundException(f"Group {group_id} not found")
 
     # Get group membership records
@@ -471,7 +471,7 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
         if user_id:
             # Get user details from user_tenant table
             user_info = get_user_tenant_by_user_id(user_id)
-            if user_info:
+            if user_info and (tenant_id is None or user_info.get('tenant_id') == tenant_id):
                 filtered_users.append({
                     "id": user_id,  # Keep user_id as string
                     "username": user_info.get("user_email", ""),

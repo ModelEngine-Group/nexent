@@ -539,7 +539,7 @@ def get_personal_self_capacity(
 
 @personal_quota_router.get("/users")
 def list_personal_capacity_users(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
@@ -593,7 +593,7 @@ def list_personal_capacity_users(
 @personal_quota_router.get("/users/{user_id}/kbs")
 def get_personal_capacity_kbs(
     user_id: str = Path(..., description="User ID"),
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
@@ -622,7 +622,7 @@ def get_personal_capacity_kbs(
 
 @personal_quota_router.get("/summary")
 def get_personal_capacity_summary(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Return aggregate personal KB capacity stats for a tenant."""
@@ -683,7 +683,7 @@ def set_personal_user_quota(
 
 @personal_quota_router.get("/default-quota")
 def get_personal_default_quota(
-    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION, alternative="resource.inventory:read")),
     tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
 ):
     """Get the tenant default personal KB quota."""

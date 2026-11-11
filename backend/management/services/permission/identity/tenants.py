@@ -76,7 +76,7 @@ def _is_displayable_tenant_id(tenant_id: Optional[str]) -> bool:
     return normalized_tenant_id not in {"", DEFAULT_TENANT_ID, ASSET_OWNER_TENANT_ID}
 
 
-def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
+def get_tenant_info(tenant_id: str, *, initialize_name: bool = True) -> Dict[str, Any]:
     """
     Get tenant information by tenant ID
 
@@ -93,7 +93,7 @@ def get_tenant_info(tenant_id: str) -> Dict[str, Any]:
 
     # Get tenant name
     name_config = get_single_config_info(tenant_id, TENANT_NAME)
-    if not name_config:
+    if not name_config and initialize_name:
         logger.warning(
             f"The name of tenant {tenant_id} not found, creating default config.")
         # Auto-create TENANT_NAME config with default name
@@ -123,6 +123,8 @@ def get_tenant_info_for_user(
 
     if not has_any_role(role, {'SU'}) and tenant_id != requester_tenant_id:
         raise ForbiddenError("Not authorized to access this tenant")
+    if has_any_role(role, {"OPS"}) and not has_any_role(role, {"ADMIN", "SU"}):
+        return get_tenant_info(tenant_id, initialize_name=False)
     return get_tenant_info(tenant_id)
 
 

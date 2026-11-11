@@ -133,11 +133,14 @@ consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 permissions_mock = types.ModuleType("permissions")
 permissions_depends_mock = types.ModuleType("permissions.depends")
 permissions_models_mock = types.ModuleType("permissions.models")
+permissions_operations_mock = types.ModuleType("permissions.operations")
+permissions_operations_mock.resource_read_tenant = lambda request: None
 permissions_depends_mock.require = lambda _permission: (lambda: None)
 permissions_models_mock.CurrentUser = object
 sys.modules["permissions"] = permissions_mock
 sys.modules["permissions.depends"] = permissions_depends_mock
 sys.modules["permissions.models"] = permissions_models_mock
+sys.modules["permissions.operations"] = permissions_operations_mock
 
 class SkillException(Exception):
     pass
@@ -375,6 +378,21 @@ class TestListSkillsEndpoint:
                 data = response.json()
                 assert "skills" in data
                 assert len(data["skills"]) == 2
+
+    def test_operations_list_exposes_skill_metadata_without_config(self, mocker):
+        mocker.patch.object(skill_app, "get_current_user_id", return_value=("actor", "tenant"))
+        mocker.patch.object(skill_app, "resource_read_tenant", return_value="tenant")
+        service = mocker.patch.object(skill_app, "SkillService").return_value
+        service.list_skills.return_value = [{"skill_id": 1, "name": "Example", "config_values": {"key": "hidden"}}]
+        app = FastAPI()
+        app.include_router(skill_app.router)
+
+        response = TestClient(app).get("/skills", params={"tenant_id": "tenant"})
+
+        assert response.status_code == 200
+        item = response.json()["skills"][0]
+        assert item["name"] == "Example" and "config_values" not in item
+        service.list_visible_skills.assert_not_called()
 
     def test_list_skills_empty(self, mocker):
         """Test listing skills when none exist."""

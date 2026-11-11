@@ -46,6 +46,8 @@ change:
     - Reject retired SPEED inputs and remove missing-credential/implicit-admin fallbacks;
       migration prechecks protect active SPEED-only subjects and ASSET_OWNER remains
       unchanged.
+    - Reuse the resource page for OPS with tenant-scoped reads, hidden write controls,
+      redacted credentials and diagnostics that do not persist resource changes.
     reason: Existing RBAC and DAC UT prove single-role cases; user UT covers own-tenant
       ADMIN and cross-tenant/SU rejection; invitation UT has old admin-invite restriction
       that must change. Strengthen those units rather than duplicate them as formal
@@ -62,6 +64,7 @@ change:
     - test/backend/permissions/test_dac.py
     - test/backend/permissions/test_operations.py
     - test/backend/permissions/test_operations_boundary.py
+    - test/backend/services/test_model_health_outlet_routing.py
     - test/backend/management/test_identity_import_architecture.py
     - test/backend/services/test_role_assignment.py
     - test/backend/services/test_invitation_roles.py
@@ -93,6 +96,7 @@ change:
     - test/backend/app/test_user_management_app.py
     - test/backend/app/test_vectordatabase_app.py
     - test/backend/app/test_quota_app.py
+    - test/backend/app/test_skill_app.py
   notes: Implemented OPS permissions with supporting role-array refactor, fixed invitation
     grants, atomic local registration and administrator invariants. AUTH-LOCAL-D2-001
     fixture setup now uses authoritative arrays; its original identity/API-key assertions
@@ -105,4 +109,5 @@ change:
     does not add a maintained operations migration Case. Existing AUTH-LOCAL-D5-001 is strengthened only for its account-import and deployment responsibilities, including user_roles and scalar-column removal.
     Coverage backfill adds isolated assertions for locked invitation updates and redemption, registration rollback,
     user endpoint error mapping, and the inventory query projection and pagination. Existing D2 and D3 retain
-    live tenant authorization and registration concurrency proof.
+    live tenant authorization and registration concurrency proof. D2 and D4 also exercise
+    shared resource tabs, scoped lists and details, and the absence of write controls.

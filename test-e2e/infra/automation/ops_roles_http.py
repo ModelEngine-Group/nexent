@@ -112,7 +112,7 @@ def isolated_runtime():
                 raise RuntimeError("Expected the versioned operations-role migration")
             connection.connection.cursor().execute(upgrades[0].read_text(encoding="utf-8"))
         from management.services.permission.identity import authentication as auth
-        from management.api.identity import user_management, user, invitation, group, tenant
+        from management.api.identity import api_key, user_management, user, invitation, group, tenant
         from management.api.configuration import tenant_config
         from management.api.model import model_managment
         from gateway.authentication import auth as helpers
@@ -124,7 +124,7 @@ def isolated_runtime():
         for routes in (user_management, user, invitation):
             patch.setattr(routes, "record_security_event", lambda *args, **kwargs: None)
         app = create_app(enable_monitoring=False)
-        for module in (user_management, user, invitation, group, tenant, tenant_config, model_managment, access):
+        for module in (user_management, user, invitation, group, tenant, api_key, tenant_config, model_managment, access):
             app.include_router(module.router if hasattr(module, "router") else module.model_manager_router)
         from permissions import rbac
 
@@ -178,6 +178,8 @@ class Runtime:
                 session.flush()
                 if tenant == "a":
                     self.group = group.group_id
+                else:
+                    self.foreign_group = group.group_id
                 for key, value in (("TENANT_NAME", "Owned " + tenant), ("DEFAULT_GROUP_ID", str(group.group_id))):
                     session.add(
                         self.models.TenantConfig(tenant_id=tenant, config_key=key, config_value=value, delete_flag="N")

@@ -2,7 +2,7 @@
 """Operations-only HTTP isolation covers every method without weakening other roles."""
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from permissions.operations_boundary import install_operations_boundary
@@ -49,3 +49,31 @@ def test_allowed_paths_keep_endpoint_authorization(mocker, path, method):
     app.add_api_route(path, lambda: {"ok": True}, methods=[method])
     with TestClient(app) as client:
         assert client.request(method, path, headers={"Authorization": "Bearer owned"}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "method,path,permission,status",
+    [
+        ("POST", "/model/manage/list", True, 200),
+        ("GET", "/agent/list?tenant_id=a", True, 200),
+        ("GET", "/agent/list?tenant_id=b&tenant_id=a", True, 403),
+        ("GET", "/agent/list", False, 403),
+        ("DELETE", "/agent/list", True, 403),
+        ("GET", "/mcp/record/1", True, 403),
+    ],
+)
+def test_resource_reads_bind_the_authenticated_tenant(mocker, method, path, permission, status):
+    mocker.patch("permissions.operations_boundary.get_current_user_context", return_value=("actor", "a", ("OPS",)))
+    mocker.patch("permissions.operations_boundary.has_permission", return_value=permission)
+    app = FastAPI()
+    install_operations_boundary(app)
+
+    def read(request: Request):
+        return {"tenant": request.state.resource_read_tenant}
+
+    app.add_api_route(path.split("?", 1)[0], read, methods=[method])
+    with TestClient(app) as client:
+        response = client.request(method, path, headers={"Authorization": "Bearer owned"})
+    assert response.status_code == status
+    if status == 200:
+        assert response.json() == {"tenant": "a"}

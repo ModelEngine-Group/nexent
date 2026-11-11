@@ -21,7 +21,6 @@ export const API_BASE_URL = withBasePath("/api");
 export const API_ENDPOINTS = {
   operations: {
     authorization: `${API_BASE_URL}/ops/authorization`,
-    resources: `${API_BASE_URL}/ops/resources`,
     scope: `${API_BASE_URL}/ops/scope`,
   },
   skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,

@@ -63,6 +63,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
+from permissions.operations import resource_read_tenant
 from gateway.authentication.auth import get_current_user_info, get_current_user_id
 
 agent_config_router = APIRouter(prefix="/agent")
@@ -170,6 +171,7 @@ async def search_agent_info_api(
     version_no: int = Body(0),
     tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
 ):
     """
     Search agent info by agent_id and version_no
@@ -181,6 +183,12 @@ async def search_agent_info_api(
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
+        if resource_read_tenant(request):
+            if agent_info.get("tenant_id") != auth_tenant_id:
+                raise AgentNotFoundError("Agent not found")
+            agent_info = {
+                key: agent_info.get(key) for key in ("display_name", "description", "prompt", "group_ids")
+            }
         return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found.") from e
@@ -602,6 +610,11 @@ async def list_all_agent_info_api(
     """
     try:
         user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+
+        if authorized_tenant := resource_read_tenant(request):
+            return await list_all_agent_info_impl(
+                tenant_id=authorized_tenant, user_id=user_id, inventory_read=True,
+            )
 
         if tenant_id is None:
             agent_list = await list_all_agent_info_impl(tenant_id=auth_tenant_id, user_id=user_id)

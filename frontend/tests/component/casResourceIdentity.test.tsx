@@ -138,6 +138,15 @@ function groupView() {
   );
 }
 describe("resource identity operations", () => {
+  it("keeps user search and rows visible in read-only mode", () => {
+    render(<UserList tenantId="tenant" readOnly />);
+
+    expect(screen.getByPlaceholderText("tenantResources.users.searchUsernameOrEmail")).toBeVisible();
+    expect(screen.getAllByText("同名用户")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "tenantResources.users.editUser" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "tenantResources.users.deleteUser" })).toBeNull();
+  });
+
   it("keeps the editor open and does not refresh identity when saving roles fails", async () => {
     fixtures.viewerId = "a";
     const detail = "Cannot remove the last active tenant administrator";

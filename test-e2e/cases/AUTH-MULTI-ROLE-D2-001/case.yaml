@@ -40,9 +40,9 @@ case:
       contain both grants without duplicate entries.
   - order: 2
     action: Assign OPS only, ADMIN plus OPS, and SU fixtures in turn; read permission metadata and use resource
-      read/write routes such as GET /ops/resources and POST /model/create with valid owned fixture payloads.
-    expected: Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business
-      writes return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is
+      read/write routes including the shared resource page lists, group members and model creation.
+    expected: Pure OPS receives exactly the three approved entry grants and credential-free tenant resource responses. Foreign tenant reads and business
+      writes are denied; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is
       own tenant.
   - order: 3
     action: Submit old role-only update for a single ordinary-role target, then repeat against a multi-role target

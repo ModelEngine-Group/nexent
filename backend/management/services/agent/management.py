@@ -14,6 +14,7 @@ from typing import (
 from contracts.constants.constants import (
     CAN_EDIT_ALL_USER_ROLES,
     PERMISSION_PRIVATE,
+    PERMISSION_READ,
     STATUS_PENDING_REVIEW,
     STATUS_REJECTED,
     STATUS_SHARED,
@@ -180,7 +181,7 @@ def _order_agents_by_publish_time(
 
 
 async def list_all_agent_info_impl(
-    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None
+    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None, *, inventory_read: bool = False
 ) -> list[dict]:
     """
     list all agent info
@@ -203,7 +204,7 @@ async def list_all_agent_info_impl(
 
         # For DEV/USER, restrict visible agents to those whose group_ids overlap user's groups.
         user_group_ids: set[int] = set()
-        if not can_edit_all:
+        if not (can_edit_all or inventory_read):
             try:
                 user_group_ids = set(query_group_ids_by_user(user_id) or [])
             except Exception as e:
@@ -231,7 +232,7 @@ async def list_all_agent_info_impl(
                 continue
 
             # Apply visibility filter for DEV/USER based on group overlap
-            if not can_edit_all:
+            if not (can_edit_all or inventory_read):
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
@@ -304,7 +305,7 @@ async def list_all_agent_info_impl(
             first_model_name = agent["model_name"]
 
             # Permission logic (ASSET_OWNER-scoped + non-ASSET_OWNER role => READ_ONLY first):
-            permission = resolve_agent_list_permission(
+            permission = PERMISSION_READ if inventory_read else resolve_agent_list_permission(
                 user_role=user_role,
                 agent=agent,
                 user_id=user_id,

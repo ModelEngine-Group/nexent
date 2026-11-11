@@ -22,6 +22,7 @@ from management.services.permission.identity.groups import (
     get_groups_by_tenant, update_group_members
 )
 from management.services.permission.identity.tenants import get_tenant_info
+from permissions.operations import resource_read_tenant
 from gateway.authentication.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ async def get_group_endpoint(group_id: int) -> JSONResponse:
 @router.post("/list")
 async def get_groups_endpoint(
     request: GroupListRequest,
+    http_request: Request = None,
 ) -> JSONResponse:
     """
     Search groups for a specific tenant with pagination
@@ -129,9 +131,13 @@ async def get_groups_endpoint(
     Returns:
         JSONResponse: List of groups for the tenant (paginated or all)
     """
+    authorized_tenant = resource_read_tenant(http_request)
+    if authorized_tenant and request.tenant_id != authorized_tenant:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Cannot list groups for another tenant")
     try:
         # Validate tenant exists
-        get_tenant_info(request.tenant_id)
+        if not authorized_tenant:
+            get_tenant_info(request.tenant_id)
         # Get groups under given tenant with pagination and sorting
         group_kwargs = {
             "tenant_id": request.tenant_id,
@@ -379,7 +385,7 @@ async def remove_user_from_group_endpoint(
 
 
 @router.get("/{group_id}/members")
-async def get_group_users_endpoint(group_id: int) -> JSONResponse:
+async def get_group_users_endpoint(group_id: int, http_request: Request = None) -> JSONResponse:
     """
     Get all users in a group
 
@@ -391,8 +397,11 @@ async def get_group_users_endpoint(group_id: int) -> JSONResponse:
         JSONResponse: List of group users
     """
     try:
-        # Get group users
-        users = get_group_users(group_id)
+        authorized_tenant = resource_read_tenant(http_request)
+        users = (
+            get_group_users(group_id, tenant_id=authorized_tenant)
+            if authorized_tenant else get_group_users(group_id)
+        )
 
         return JSONResponse(
             status_code=HTTPStatus.OK, content={"message": "Group users retrieved successfully", "data": users}

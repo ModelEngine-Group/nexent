@@ -6758,5 +6758,5 @@
   "ops.noPermission": "Access denied",
   "ops.loadError": "Failed to load. Please retry.",
   "ops.empty": "No data yet",
-  "ops.readOnly": "Read-only resource inventory"
+  "ops.readOnly": "Read-only mode"
 }

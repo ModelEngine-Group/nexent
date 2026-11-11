@@ -1,26 +1,10 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
-import type {
-  OperationsAuthorization,
-  ResourceInventory,
-} from "@/types/operations";
+import type { OperationsAuthorization } from "@/types/operations";
 
 export async function getOperationsAuthorization(): Promise<OperationsAuthorization> {
   const response = await fetchWithAuth(API_ENDPOINTS.operations.authorization);
-  return (await response.json()).data;
-}
-export async function getResourceInventory(
-  page: number,
-  pageSize: number
-): Promise<ResourceInventory> {
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(pageSize),
-  });
-  const response = await fetchWithAuth(
-    `${API_ENDPOINTS.operations.resources}?${params}`
-  );
   return (await response.json()).data;
 }
 export async function checkOperationsScope(

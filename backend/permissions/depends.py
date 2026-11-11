@@ -10,11 +10,12 @@ from permissions.models import CurrentUser
 from permissions.rbac import has_permission
 
 
-def require(permission: str) -> Callable[[CurrentUser], CurrentUser]:
+def require(permission: str, *, alternative: str | None = None) -> Callable[[CurrentUser], CurrentUser]:
     """Return a dependency that requires the given permission string."""
 
     def dependency(current_user: CurrentUser = Depends(authenticate)) -> CurrentUser:
-        if not has_permission(current_user.effective_roles, permission):
+        roles = current_user.effective_roles
+        if not has_permission(roles, permission) and not (alternative and has_permission(roles, alternative)):
             raise HTTPException(
                 status_code=403,
                 detail=f"Missing required permission: {permission}",

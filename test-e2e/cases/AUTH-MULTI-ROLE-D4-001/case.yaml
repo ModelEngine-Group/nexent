@@ -41,7 +41,7 @@ case:
     action: Create an ADMIN plus OPS invitation, inspect its fixed role labels, then login with an owned pure OPS
       fixture.
     expected: Invitation has both roles and no role-edit control; pure OPS sees only operations dashboard, system
-      configuration and read-only resource management with business mutation controls absent.
+      configuration and the shared resource page. User search and model browsing work, with business mutation controls absent.
   - order: 3
     action: Use owned DEV plus OPS and SU sessions to inspect entries and tenant scope, then remove OPS from the
       active target in a second admin session and refresh its authorization. The ADMIN viewer then adds OPS to
@@ -52,7 +52,7 @@ case:
   expected_results:
   - Two role labels are displayed, the target appears once, and the saved selection survives reopening.
   - Invitation has both roles and no role-edit control; pure OPS sees only operations dashboard, system configuration
-    and read-only resource management with business mutation controls absent.
+    and the shared resource page with working user search and model browsing. Business mutation controls are absent.
   - Combined roles retain development entries; SU has cross-tenant operations selection; the revoked target loses
     OPS entries and direct protected navigation is denied or redirected without executing a business write. Saving
     the viewer's own roles refreshes navigation immediately while retaining ADMIN.
@@ -68,7 +68,7 @@ case:
     - 1
   - id: AC-02
     description: Invitation has both roles and no role-edit control; pure OPS sees only operations dashboard, system
-      configuration and read-only resource management with business mutation controls absent.
+      configuration and the shared resource page with working user search and model browsing. Business mutation controls are absent.
     steps:
     - 2
     expected_results:

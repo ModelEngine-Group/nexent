@@ -25,7 +25,19 @@ def test_roles_union_compatibility_and_operations_boundary(role_runtime):
     assert inventory.status_code == 200
     assert {row["tenant_id"] for row in inventory.json()["data"]["items"]} == {"a"}
     assert "MUST-NOT-LEAK" not in inventory.text and "api_key" not in inventory.text
-    assert r.client.post("/model/create", headers=r.headers("user"), json={}).status_code == 403
+    ops_headers = r.headers("user")
+    users = r.client.post("/users/list", headers=ops_headers, json={"tenant_id": "a", "page": 1, "page_size": 1})
+    assert users.status_code == 200 and len(users.json()["data"]) == 1
+    models = r.client.post("/model/manage/list", headers=ops_headers, json={"tenant_id": "a"})
+    assert models.status_code == 200 and "Owned model" in models.text
+    assert "MUST-NOT-LEAK" not in models.text and "Foreign model" not in models.text
+    for path in ("/users/list", "/groups/list", "/model/manage/list", "/invitations/list"):
+        assert r.client.post(path, headers=ops_headers, json={"tenant_id": "b"}).status_code == 403
+    assert r.client.get(f"/groups/{r.group}/members", headers=ops_headers).status_code == 200
+    assert r.client.get(f"/groups/{r.foreign_group}/members", headers=ops_headers).status_code == 404
+    assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "a"}).status_code == 200
+    assert r.client.get("/api-keys", headers=ops_headers, params={"tenant_id": "b"}).status_code == 403
+    assert r.client.post("/model/create", headers=ops_headers, json={}).status_code == 403
     # Legacy bare JWTs must obey the same operations-only boundary as Bearer JWTs.
     bare_token = r.headers("user")["Authorization"].split()[1]
     assert r.client.get(

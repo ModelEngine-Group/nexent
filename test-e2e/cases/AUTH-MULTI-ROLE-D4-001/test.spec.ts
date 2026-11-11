@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-import { expect, type BrowserContext } from "playwright/test";
+import { expect, type BrowserContext, type Page } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 
 /** Uses the current-source isolated identity fixture; never shared tenant accounts. */
@@ -29,6 +29,14 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
       context,
       page: actor === "admin1" ? page : await context.newPage(),
     };
+  }
+  async function chooseRole(page: Page, role: RegExp) {
+    const dropdown = page.locator(".ant-select-dropdown:visible");
+    await expect(dropdown).toHaveCount(1);
+    await dropdown
+      .locator(".ant-select-item-option-content")
+      .filter({ hasText: role })
+      .click();
   }
   const admin = await login("admin1");
   let invitationCode: string | undefined;
@@ -93,15 +101,9 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     await modal.locator(".ant-select-selection-item-remove").first().click();
     const roles = modal.locator("#roles");
     await roles.click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Developer$/ })
-      .click();
+    await chooseRole(admin.page, /^Developer$/);
     await roles.click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Operations$/ })
-      .click();
+    await chooseRole(admin.page, /^Operations$/);
     await admin.page.keyboard.press("Escape");
     await modal.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(row.getByText("Developer", { exact: true })).toBeVisible();
@@ -116,10 +118,7 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
         response.request().postDataJSON()?.roles?.includes("OPS"),
     );
     await admin.page.getByRole("combobox").first().click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Operations$/ })
-      .click();
+    await chooseRole(admin.page, /^Operations$/);
     filteredIds = (await (await filtered).json()).data.map(
       (record: { id: string }) => record.id,
     );
@@ -138,15 +137,9 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     modal = admin.page.getByRole("dialog");
     await modal.locator(".ant-select-selection-item-remove").first().click();
     await modal.locator("#roles").click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Admin$/ })
-      .click();
+    await chooseRole(admin.page, /^Admin$/);
     await modal.locator("#roles").click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Operations$/ })
-      .click();
+    await chooseRole(admin.page, /^Operations$/);
     await admin.page.keyboard.press("Escape");
     const savedInvitation = admin.page.waitForResponse(
       (response) =>
@@ -201,14 +194,17 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
     ).toBeVisible();
     await ops.page.goto(`${baseURL}/en/resource-manage`);
     await expect(
-      ops.page.getByText("Read-only resource inventory"),
-    ).toBeVisible();
-    await expect(
-      ops.page.getByText("Owned model", { exact: true }),
+      ops.page.getByText("Read-only mode", { exact: true }),
     ).toBeVisible();
     await expect(
       ops.page.getByRole("tab", { name: "Users", exact: true }),
-    ).toHaveCount(0);
+    ).toBeVisible();
+    const search = ops.page.getByPlaceholder("Search email");
+    await search.fill(fixture.emails.user);
+    await expect(ops.page.getByRole("row").filter({ hasText: fixture.emails.user })).toBeVisible();
+    await expect(ops.page.getByRole("row").filter({ hasText: fixture.emails.admin1 })).toHaveCount(0);
+    await ops.page.getByRole("tab", { name: "Models", exact: true }).click();
+    await expect(ops.page.getByText("Owned model", { exact: true })).toBeVisible();
     await expect(
       ops.page.getByRole("button", { name: /Edit|Delete|Create/ }),
     ).toHaveCount(0);
@@ -275,10 +271,7 @@ journey("AUTH-MULTI-ROLE-D4-001", async ({ page, contract }) => {
       .click();
     const selfDialog = admin.page.getByRole("dialog");
     await selfDialog.locator("#roles").click();
-    await admin.page
-      .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
-      .filter({ hasText: /^Operations$/ })
-      .click();
+    await chooseRole(admin.page, /^Operations$/);
     await admin.page.keyboard.press("Escape");
     await selfDialog
       .getByRole("button", { name: "Confirm", exact: true })

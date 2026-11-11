@@ -66,9 +66,11 @@ const ROLE_CONFLICT_KEYS = new Map([
 
 export default function UserList({
   tenantId,
+  readOnly = false,
   refreshKey,
 }: {
   tenantId: string | null;
+  readOnly?: boolean;
   refreshKey?: number;
 }) {
   const { confirm } = useConfirmModal();
@@ -358,6 +360,9 @@ export default function UserList({
     ],
     [displayName, t, user?.id]
   );
+  const visibleColumns = readOnly
+    ? columns.filter((column) => column.key !== "actions")
+    : columns;
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
     setPage(newPage);
@@ -428,7 +433,7 @@ export default function UserList({
       </div>
       <Table
         dataSource={users}
-        columns={columns}
+        columns={visibleColumns}
         rowKey={(r) => String(r.id)}
         loading={isLoading}
         pagination={{

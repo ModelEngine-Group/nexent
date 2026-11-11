@@ -29,3 +29,8 @@ def authorization_metadata(user):
             for module in ("dashboard", "configuration")
         },
     }
+
+
+def resource_read_tenant(request) -> str | None:
+    """Return the tenant authorized for an operations resource read."""
+    return getattr(request.state, "resource_read_tenant", None) if request is not None else None

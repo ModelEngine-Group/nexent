@@ -184,6 +184,17 @@ def test_list_tenant_api_keys_allows_superuser_and_forwards_pagination(mock_list
     mock_list.assert_called_once_with("tenant-a", 2, 10, "asc")
 
 
+@patch("management.services.permission.api_keys.list_active_tokens_by_tenant")
+def test_operations_api_key_list_keeps_metadata_without_the_key(mock_list):
+    mock_list.return_value = {"items": [{"token_id": 1, "access_key": "secret", "total_usage_count": 5}], "total": 1}
+
+    result = api_key_service.list_tenant_api_keys(
+        actor_tenant_id="tenant-a", actor_role=("OPS",), tenant_id="tenant-a"
+    )
+
+    assert result == {"items": [{"token_id": 1, "total_usage_count": 5}], "total": 1}
+
+
 def test_list_tenant_api_keys_rejects_other_tenant():
     with pytest.raises(NotFoundException, match="Tenant not found"):
         api_key_service.list_tenant_api_keys(

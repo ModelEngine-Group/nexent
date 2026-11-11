@@ -65,7 +65,13 @@ type AgentListRow = Pick<
   current_version_no?: number;
 };
 
-export default function AgentList({ tenantId }: { tenantId: string | null }) {
+export default function AgentList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -505,25 +511,27 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Tooltip title={t("common.delete")}>
-            <Button
-              type="text"
-              danger
-              icon={<Trash2 className="h-4 w-4" />}
-              size="small"
-              onClick={() =>
-                confirm({
-                  title: t("businessLogic.config.modal.deleteTitle"),
-                  content: t("businessLogic.config.modal.deleteContent", {
-                    name: record.display_name,
-                  }),
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record),
-                })
-              }
-            />
-          </Tooltip>
+          {!readOnly && (
+            <Tooltip title={t("common.delete")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() =>
+                  confirm({
+                    title: t("businessLogic.config.modal.deleteTitle"),
+                    content: t("businessLogic.config.modal.deleteContent", {
+                      name: record.display_name,
+                    }),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record),
+                  })
+                }
+              />
+            </Tooltip>
+          )}
         </div>
       ),
     },

@@ -64,8 +64,10 @@ function getProgressColor(
 
 export default function KnowledgeList({
   tenantId,
+  readOnly = false,
 }: {
   tenantId: string | null;
+  readOnly?: boolean;
 }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
@@ -538,14 +540,16 @@ export default function KnowledgeList({
         }
         return (
           <div className="flex items-center space-x-2">
-            <Tooltip title={t("common.edit")}>
-              <Button
-                type="text"
-                icon={<Edit className="h-4 w-4" />}
-                onClick={() => openEdit(record)}
-                size="small"
-              />
-            </Tooltip>
+            {!readOnly && (
+              <Tooltip title={t("common.edit")}>
+                <Button
+                  type="text"
+                  icon={<Edit className="h-4 w-4" />}
+                  onClick={() => openEdit(record)}
+                  size="small"
+                />
+              </Tooltip>
+            )}
             <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
               <Button
                 type="text"
@@ -554,46 +558,48 @@ export default function KnowledgeList({
                 size="small"
               />
             </Tooltip>
-            <Tooltip title={t("common.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                loading={previewingKnowledgeId === record.id}
-                disabled={previewingKnowledgeId !== null}
-                onClick={async () => {
-                  // Deletion cascades: the dialog lists the agents that lose
-                  // their binding, plus a fixed notice for conversations.
-                  setPreviewingKnowledgeId(record.id);
-                  try {
-                    const preview =
-                      await knowledgeBaseService.previewBoundAgents(
-                        record.id,
-                        tenantId
-                      );
-                    confirm({
-                      title: t("knowledgeBase.modal.deleteConfirm.title", {
-                        name: record.name,
-                      }),
-                      content: (
-                        <div>
+            {!readOnly && (
+              <Tooltip title={t("common.delete")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                  loading={previewingKnowledgeId === record.id}
+                  disabled={previewingKnowledgeId !== null}
+                  onClick={async () => {
+                    // Deletion cascades: the dialog lists the agents that lose
+                    // their binding, plus a fixed notice for conversations.
+                    setPreviewingKnowledgeId(record.id);
+                    try {
+                      const preview =
+                        await knowledgeBaseService.previewBoundAgents(
+                          record.id,
+                          tenantId
+                        );
+                      confirm({
+                        title: t("knowledgeBase.modal.deleteConfirm.title", {
+                          name: record.name,
+                        }),
+                        content: (
                           <div>
-                            {t("knowledgeBase.modal.deleteConfirm.content")}
+                            <div>
+                              {t("knowledgeBase.modal.deleteConfirm.content")}
+                            </div>
+                            <KnowledgeBaseDeleteNotice preview={preview} />
                           </div>
-                          <KnowledgeBaseDeleteNotice preview={preview} />
-                        </div>
-                      ),
-                      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
-                      cancelText: t("common.cancel"),
-                      onOk: () => handleDelete(record.id),
-                    });
-                  } finally {
-                    setPreviewingKnowledgeId(null);
-                  }
-                }}
-              />
-            </Tooltip>
+                        ),
+                        okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
+                        cancelText: t("common.cancel"),
+                        onOk: () => handleDelete(record.id),
+                      });
+                    } finally {
+                      setPreviewingKnowledgeId(null);
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
           </div>
         );
       },

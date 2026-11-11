@@ -122,7 +122,7 @@ def get_users_for_requester(
 
     if has_any_role(role, {'SU'}):
         pass
-    elif has_any_role(role, {'ADMIN'}) and tenant_id == requester_tenant_id:
+    elif has_any_role(role, {'ADMIN', 'OPS'}) and tenant_id == requester_tenant_id:
         pass
     else:
         raise ForbiddenError("Not authorized to list users for this tenant")

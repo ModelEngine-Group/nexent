@@ -33,6 +33,7 @@ from contracts.knowledge import (
     IndexingResponse,
 )
 from contracts.roles import has_any_role
+from permissions.operations import resource_read_tenant
 from gateway.authentication.auth import get_current_user_context, get_current_user_id
 from management.db.knowledge_base.file_lifecycle import get_file_record
 from management.db.knowledge_base.repository import (
@@ -500,6 +501,7 @@ def get_list_indices(
     models: Optional[List[str]] = Query(None, description="Embedding model names to include"),
     vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
 ):
     """List all user indices with optional stats"""
     try:
@@ -515,6 +517,11 @@ def get_list_indices(
                 "sources": sources,
                 "models": models,
             }
+        if authorized_tenant := resource_read_tenant(request):
+            return ElasticSearchService.list_indices(
+                pattern, include_stats, authorized_tenant, user_id, vdb_core,
+                inventory_read=True, **pagination_args,
+            )
         if tenant_id is None:
             if limit is not None and auth_tenant_id != ASSET_OWNER_TENANT_ID:
                 prefix_limit = offset + limit

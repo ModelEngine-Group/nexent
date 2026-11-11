@@ -520,6 +520,8 @@ def get_invitations_list(
 
     user_role = roles_from_record(user_info)
 
+    read_only = has_any_role(user_role, {"OPS"}) and not has_any_role(user_role, {"SU", "ADMIN"})
+
     # Permission logic:
     # - If tenant_id is provided: ADMIN or SU can view that tenant's invitations
     # - If tenant_id is not provided: Only SU can view all invitations
@@ -528,7 +530,7 @@ def get_invitations_list(
         if tenant_id == ASSET_OWNER_TENANT_ID:
             if not has_any_role(user_role, {"SU"}):
                 raise UnauthorizedError(f"User role {user_role} not authorized to view asset owner invitations")
-        elif not has_any_role(user_role, {"SU", "ADMIN"}):
+        elif not has_any_role(user_role, {"SU", "ADMIN", "OPS"}):
             raise UnauthorizedError(f"User role {user_role} not authorized to view invitation lists")
     else:
         # If no tenant_id specified, only SU can view all invitations
@@ -550,6 +552,9 @@ def get_invitations_list(
     # Normalize each invitation item in the list
     if result and "items" in result:
         result["items"] = [_normalize_invitation_data(item) for item in result["items"]]
+        if read_only:
+            for item in result["items"]:
+                item["invitation_code"] = ""
 
     return result
 

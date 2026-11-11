@@ -19,6 +19,7 @@ from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingErro
 from management.services.agent.authorization import require_agent_draft_edit
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from permissions.operations import resource_read_tenant
 from gateway.authentication.auth import get_current_user_id
 
 
@@ -60,6 +61,7 @@ def _build_skill_update_data(request: SkillUpdateRequest) -> Dict[str, Any]:
 async def list_skills(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None),
+    request: Request = None,
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
@@ -67,6 +69,10 @@ async def list_skills(
         # Super admin can query a specific tenant's skills; otherwise use current user's tenant
         effective_tenant_id = tenant_id if tenant_id else current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
+        if resource_read_tenant(request):
+            fields = ("skill_id", "name", "description", "source", "tags", "update_time")
+            skills = [{field: skill.get(field) for field in fields} for skill in service.list_skills()]
+            return JSONResponse(content={"skills": skills})
         skills = service.list_visible_skills(
             tenant_id=effective_tenant_id,
             user_id=user_id,

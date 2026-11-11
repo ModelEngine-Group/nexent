@@ -61,9 +61,11 @@ const { Panel } = Collapse;
 
 export default function InvitationList({
   tenantId,
+  readOnly = false,
   refreshKey,
 }: {
   tenantId: string | null;
+  readOnly?: boolean;
   refreshKey?: number;
 }) {
   const { confirm } = useConfirmModal();
@@ -257,7 +259,7 @@ export default function InvitationList({
         dataIndex: "invitation_code",
         key: "invitation_code",
         width: 80,
-        render: (code: string) => (
+        render: (code: string) => readOnly ? "—" : (
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono font-medium">{code}</span>
             <Tooltip title={t("common.copy")}>
@@ -445,8 +447,11 @@ export default function InvitationList({
         ),
       },
     ],
-    [groupNameMap, t]
+    [groupNameMap, readOnly, t]
   );
+  const visibleColumns = readOnly
+    ? columns.filter((column) => column.key !== "actions")
+    : columns;
 
   // Group invitations by tenant for collapse view
   const groupedInvitations = useMemo(() => {
@@ -468,20 +473,22 @@ export default function InvitationList({
       <div className="mb-4 flex justify-between items-center flex-shrink-0">
         <div />
         <div>
-          <Button
-            type="primary"
-            onClick={openCreate}
-            icon={<Plus className="h-4 w-4" />}
-          >
-            {t("tenantResources.invitation.createInvitation")}
-          </Button>
+          {!readOnly && (
+            <Button
+              type="primary"
+              onClick={openCreate}
+              icon={<Plus className="h-4 w-4" />}
+            >
+              {t("tenantResources.invitation.createInvitation")}
+            </Button>
+          )}
         </div>
       </div>
 
       {tenantId ? (
         // Single tenant view with pagination
         <Table
-          columns={columns}
+          columns={visibleColumns}
           dataSource={invitations}
           loading={isLoading}
           rowKey="invitation_id"
@@ -516,7 +523,7 @@ export default function InvitationList({
                 key={tenantId}
               >
                 <Table
-                  columns={columns}
+                  columns={visibleColumns}
                   dataSource={tenantInvitations}
                   loading={isLoading}
                   rowKey="invitation_id"

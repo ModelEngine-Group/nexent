@@ -6756,5 +6756,5 @@
   "ops.noPermission": "暂无访问权限",
   "ops.loadError": "加载失败，请重试",
   "ops.empty": "暂无数据",
-  "ops.readOnly": "当前为只读资源目录"
+  "ops.readOnly": "当前为只读模式"
 }
