@@ -58,7 +58,8 @@ def test_existing_conversation_cannot_omit_a_user(database):
 
 
 @pytest.mark.parametrize("changed", [None, "agent", "tenant", "assistant", "lease"])
-def test_memory_source_survives_projection_close_without_a_user_message(database, mocker, changed):
+@pytest.mark.parametrize("background", [False, True])
+def test_memory_source_survives_projection_close_without_a_user_message(database, mocker, changed, background):
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import JSON, MetaData
     from sqlalchemy.dialects.postgresql import JSONB
@@ -66,8 +67,14 @@ def test_memory_source_survives_projection_close_without_a_user_message(database
     from management.db.conversation import memory_completion as queue
     from management.db.conversation.projection_receipt import ConversationProjectionReceipt
 
-    empty_conversation(database, mocker)
-    confirmed = store.confirm_turn(stage(initial_title="Conversation", memory=True))
+    if background:
+        turn = store.stage_turn("scope", AgentRunReference(conversation_id=42, run_id="a" * 32), "actor", "tenant", 8,
+                                {"query": "hello", "minio_files": None, "agent_id": 7, "chat_mode": "execution",
+                                 "memory_agent_id": 7}, omitted_user=True, background_run=True)
+    else:
+        empty_conversation(database, mocker)
+        turn = stage(initial_title="Conversation", memory=True)
+    confirmed = store.confirm_turn(turn)
     store.close_turn(confirmed)
     metadata = MetaData()
     for model in (queue.MemoryCompletion, ConversationProjectionReceipt):

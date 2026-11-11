@@ -185,13 +185,16 @@ case:
     expected: The actual Management compiler and Runtime materializer retain the original effective model configurations. Nonempty generation settings export a root-only binding; legacy reasoning-only requests preserve the shared alias. A loopback provider receives identical JSON requests from the old effective profile and the restored profile, and credentials never enter the AgentOS payload.
   - order: 53
     action: Send a fixed-ID background request whose old RUNNING automation record lacks source metadata, retry it and race the source write with another pin.
-    expected: Management confirms an owned existing automation message and matching submitted history and conditionally pins its prompt and ID before compilation, then starts the original run once and resumes its projection on retry. Losing the source comparison returns 409 without compilation, projection or execution and preserves the competing values. Unprovable old sources, including a same-text head with different history, retain one explicit compatibility fallback without pinning a different turn.
+    expected: Management confirms an owned existing automation message and matching submitted history and conditionally pins its prompt and ID before compilation, then starts the original run once and resumes its projection on retry. Losing the source comparison returns 409 without compilation, projection or execution and preserves the competing values. Unprovable sources never pin a different turn; only snapshots unavailable to the compatibility preparer retain one explicit legacy fallback.
   - order: 54
     action: Send an original non-debug internal request without a conversation through signed Management and Runtime endpoints with zero and four prior user turns.
     expected: Management admits a new conversation with an assistant-only marker at the original history-derived position, executes standard AgentOS once and projects its answer. It preserves the created event, hidden journal controls and original default language; a foreign tenant cannot stage or execute.
   - order: 55
     action: Export knowledge search with null and string top_k values, cross signed AgentOS and execute the actual SDK tool alongside the legacy effective SDK configuration.
     expected: Both SDK tools issue the same authorized vector query and return the same document-filtered result. The portable compiler retains the original valid-value conversion, keeps credentials local and cannot expand knowledge permissions.
+  - order: 56
+    action: Send an owned fixed-ID background request with no automation record or no provable source through both signed services, retry it, change its payload and disconnect another admitted request during projection.
+    expected: Management stages an assistant-only AUTOMATION marker at the original history index before standard Agent.run, projects once without finishing a schedule and retries from the same receipt. A changed request conflicts without another start, foreign tenants are refused and disconnect stops the same run while retaining recovery metadata. The old SDK execution handler cannot run.
   expected_results:
   - Authorized operations preserve principal, body, stream events and stop JSON.
   - Invalid credentials, modified requests and unknown versions do not dispatch.
@@ -249,6 +252,7 @@ case:
   - Old automation records recover the existing source before standard AgentOS execution without appending a user, overwriting a competing source or finalizing the caller's schedule.
   - Original internal new conversations keep their assistant-only persistence and history-derived index while executing through standard AgentOS.
   - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
+  - Background execution needs no automation record or inferred user source when Management owns its fixed-ID admission and assistant-only projection.
   forbidden_side_effects:
   - Rejected calls must not invoke any execution handler.
   - Verification must release temporary loopback servers.
@@ -591,4 +595,9 @@ case:
     description: SDK-valid legacy knowledge top_k values export through AgentOS and retain the actual query and result while preserving knowledge authorization.
     steps: [55]
     expected_results: [56]
+    forbidden_side_effects: [1, 2]
+  - id: AC-65
+    description: A signed background request without an automation record or provable source uses one standard AgentOS run and an owned AUTOMATION assistant projection, retaining fixed-ID recovery, cancellation and task ownership.
+    steps: [56]
+    expected_results: [57]
     forbidden_side_effects: [1, 2]

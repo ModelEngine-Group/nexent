@@ -24,6 +24,7 @@ PAYLOAD = BackgroundRun(run_id=REFERENCE.run_id, request={
 
 @pytest.fixture
 def dispatch(mocker):
+    mocker.patch.object(background, "run_compatible_background", return_value=None)
     record = {
         "run_id": 5, "runtime_run_id": REFERENCE.run_id, "conversation_id": 42, "user_id": "actor",
         "tenant_id": "tenant", "status": "RUNNING", "user_message_id": 23, "generated_prompt": "hello",
@@ -85,6 +86,16 @@ async def test_background_pins_source_configuration_and_projection_before_agent_
     dispatch.project.assert_awaited_once_with(dispatch.client, REFERENCE, dispatch.record)
     dispatch.client.run_tracked_background.assert_not_awaited()
     assert dispatch.record["status"] == "RUNNING"
+    dispatch.finish_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unknown_background_uses_management_compatibility_before_legacy_runtime(dispatch):
+    dispatch.lookup.side_effect = lambda *_args, **_kwargs: None
+    background.run_compatible_background.return_value = dispatch.result
+    assert await background.dispatch_background(PAYLOAD, ACTOR) == dispatch.result
+    background.run_compatible_background.assert_awaited_once_with(dispatch.client, PAYLOAD, ACTOR)
+    dispatch.client.run_tracked_background.assert_not_awaited()
     dispatch.finish_task.assert_not_called()
 
 

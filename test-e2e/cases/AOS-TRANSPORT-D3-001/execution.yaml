@@ -7,6 +7,8 @@ implementations:
   profiles:
   - mock
 acceptance_bindings:
+  AC-65:
+  - test_background_without_automation_record_over_signed_agentos
   AC-64:
   - test_knowledge_legacy_top_k_over_signed_agentos
   AC-63:

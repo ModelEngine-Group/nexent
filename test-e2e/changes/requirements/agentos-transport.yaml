@@ -23,6 +23,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Legacy background calls without an automation source claim the original run ID and request fingerprint, stage only the AUTOMATION assistant and recover an unknown admission or completed receipt without starting twice or finishing a scheduler task.
     - Knowledge search preserves legacy SDK top_k conversion for null, numeric strings, floats and booleans before strict AgentOS serialization without constructing legacy clients; invalid SDK values retain their error behavior.
     - Internal new conversations admit and confirm only the assistant at the original history-derived index; restart recovery retains the omission marker and rejects a competing message before writing.
     - Assistant-only Memory completion retains the original query in its owned admission record after projection closes and checks run, assistant, Agent, tenant and lease before extraction.
@@ -153,6 +154,8 @@ change:
     - test/backend/services/test_agentos_raw_preparation.py
     - test/backend/services/test_prepared_raw_new_conversation.py
     - test/backend/database/test_prepared_omitted_user.py
+    - test/backend/database/test_prepared_background_turn.py
+    - test/backend/services/test_agentos_compatibility_background.py
     - test/backend/services/test_agentos_raw_resources.py
     - test/backend/services/test_agentos_raw_model_profile.py
     - test/backend/services/test_agentos_background_dispatch.py

@@ -20,12 +20,12 @@ class ConversationRunAdmission(TableBase):
 
     scope_sha256 = Column(String(64), primary_key=True, doc="Digest of the actor scope and idempotency key.")
     tenant_id = Column(String(100), nullable=False, doc="Tenant that owns this submission.")
-    run_id = Column(String(32), nullable=False, doc="Server-assigned run identifier.")
+    run_id = Column(String(32), nullable=False, doc="Server-issued run identifier, retained for authenticated legacy background calls.")
     request_sha256 = Column(String(64), nullable=False, doc="Digest of the normalized submitted request.")
     status = Column(String(30), nullable=False, server_default=text("'pending'"), doc="Admission outcome.")
     conversation_id = Column(Integer, doc="Conversation bound to the admitted run.")
     journal_available = Column(Boolean, nullable=False, server_default=text("false"), doc="Run output journal opened.")
-    prepared_user_turn = Column(JSONB(none_as_null=True), doc="Uncommitted user message and settings until Runtime admission.")
+    prepared_user_turn = Column(JSONB(none_as_null=True), doc="Pending turn settings and retained prompt scope for assistant-only Memory work.")
     prepared_message_index = Column(Integer, doc="Assistant message index while Management projection is outstanding.")
     prepared_assistant_id = Column(Integer, doc="Assistant message reserved by Management for the admitted run.")
     prepared_automation_context = Column(JSONB(none_as_null=True), doc="Authorized proposal settings for the pending run.")
@@ -61,14 +61,16 @@ def conversation_request_fingerprint(request: dict) -> str:
     return _digest(request)
 
 
-def claim_conversation_run(scope: str, fingerprint: str, user_id: str, tenant_id: str) -> AdmissionClaim:
+def claim_conversation_run(
+    scope: str, fingerprint: str, user_id: str, tenant_id: str, *, requested_run_id: str | None = None,
+) -> AdmissionClaim:
     admission = ConversationRunAdmission
     with get_db_session() as session:
         if not tenant_membership_matches(session, user_id, tenant_id):
             raise AdmissionScopeError
         run_id = session.scalar(
             insert(admission).values(
-                scope_sha256=scope, tenant_id=tenant_id, run_id=uuid4().hex, request_sha256=fingerprint,
+                scope_sha256=scope, tenant_id=tenant_id, run_id=requested_run_id or uuid4().hex, request_sha256=fingerprint,
                 created_by=user_id, updated_by=user_id, delete_flag="N",
             ).on_conflict_do_nothing(index_elements=[admission.scope_sha256]).returning(admission.run_id)
         )
@@ -81,7 +83,7 @@ def claim_conversation_run(scope: str, fingerprint: str, user_id: str, tenant_id
             or existing.tenant_id != tenant_id or existing.created_by != user_id
         ):
             raise AdmissionScopeError
-        if existing.request_sha256 != fingerprint:
+        if existing.request_sha256 != fingerprint or (requested_run_id is not None and existing.run_id != requested_run_id):
             raise AdmissionRequestConflict
         status = "pending" if existing.status == "dispatching" else existing.status
         return AdmissionClaim(existing.run_id, status, existing.conversation_id, existing.journal_available, False)

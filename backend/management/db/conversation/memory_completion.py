@@ -103,6 +103,24 @@ def _leased(job):
     )
 
 
+def read_omitted_memory_query(session, run_id, conversation_id, assistant_id, user_id, tenant_id, agent_id, source):
+    """Read only the prompt bound to this admitted assistant and Memory Agent."""
+    admission = ConversationRunAdmission
+    context = session.scalar(select(admission.prepared_user_turn).where(
+        admission.run_id == run_id, admission.conversation_id == conversation_id,
+        admission.prepared_assistant_id == assistant_id, admission.created_by == user_id,
+        admission.tenant_id == tenant_id, admission.status == "admitted", admission.delete_flag == "N",
+    ).limit(1))
+    if (not isinstance(context, dict) or context.get("memory_agent_id") != agent_id
+            or type(context.get("omitted_user_query")) is not str):
+        return None
+    if source == MessageSource.AUTOMATION.value and (
+        context.get("background_run") is not True or context.get("source_user_message_source") != source
+    ):
+        return None
+    return context["omitted_user_query"]
+
+
 def read_source(job: MemoryJob) -> MemorySource | None:
     receipt = ConversationProjectionReceipt
     message = ConversationMessage
@@ -123,27 +141,20 @@ def read_source(job: MemoryJob) -> MemorySource | None:
         assistant = row[2]
         if job.job_type == TURN_COMPLETED and assistant.status != "completed":
             return None
+        omitted_query = read_omitted_memory_query(
+            session, job.run_id, assistant.conversation_id, assistant.message_id,
+            row.created_by, row.tenant_id, job.agent_id, assistant.message_source,
+        )
         prompt = select(message.message_content).where(
             message.conversation_id == assistant.conversation_id, message.created_by == row.created_by,
             message.message_index == assistant.message_index - 1, message.delete_flag == "N",
             message.message_role == "user", message.message_source == assistant.message_source,
         )
         if assistant.message_source == MessageSource.AUTOMATION.value:
-            if job.source_message_id is None:
+            if job.source_message_id is None and omitted_query is None:
                 return None
             prompt = prompt.where(message.message_id == job.source_message_id)
-        query = session.scalar(prompt.limit(1))
-        if assistant.message_source == MessageSource.CHAT.value:
-            admission = ConversationRunAdmission
-            context = session.scalar(select(admission.prepared_user_turn).where(
-                admission.run_id == job.run_id, admission.conversation_id == assistant.conversation_id,
-                admission.prepared_assistant_id == assistant.message_id, admission.created_by == row.created_by,
-                admission.tenant_id == row.tenant_id, admission.status == "admitted", admission.delete_flag == "N",
-            ).limit(1))
-            if isinstance(context, dict) and "omitted_user_query" in context:
-                if context.get("memory_agent_id") != job.agent_id or type(context["omitted_user_query"]) is not str:
-                    return None
-                query = context["omitted_user_query"]
+        query = omitted_query if omitted_query is not None else session.scalar(prompt.limit(1))
         if query is None:
             return None
         return MemorySource(

@@ -536,9 +536,11 @@ def persist_prepared_assistant_projection(
             projection_run_id=projection_run_id, db_session=session, **batch,
         )
         if memory_agent_id is not None:
-            from management.db.conversation.memory_completion import enqueue
+            from management.db.conversation.memory_completion import enqueue, read_omitted_memory_query
 
-            if source == MessageSource.AUTOMATION.value and memory_source_message_id is None:
+            if (source == MessageSource.AUTOMATION.value and memory_source_message_id is None
+                    and read_omitted_memory_query(session, projection_run_id, conversation_id, message_id,
+                                                 user_id, tenant_id, memory_agent_id, source) is None):
                 raise ValueError("Automation Memory completion requires its original prompt message")
             enqueue(session, projection_run_id, memory_agent_id, user_id,
                     batch["terminal_status"], batch["message_content"] or "", source_message_id=memory_source_message_id)

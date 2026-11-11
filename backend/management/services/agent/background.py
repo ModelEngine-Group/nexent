@@ -16,6 +16,7 @@ from infrastructure.rdb.conversation_state import conversation_belongs_to
 from management.db.automation import repository as runs
 from management.db.conversation import prepared_turn as turns
 from management.services.agent.context import strip_current_time_prefix
+from management.services.agent.background_compatibility import run_background as run_compatible_background
 from management.services.agent.preparation.evaluation_snapshot import prepare_conversation_snapshot
 from management.services.automation.conversation import automation_conversation_adapter
 from nexent.core.concurrency import run_blocking
@@ -39,6 +40,9 @@ async def _project(client, reference, record):
 
 
 async def _legacy_background(client, payload, actor):
+    prepared = await run_compatible_background(client, payload, actor)
+    if prepared is not None:
+        return prepared
     return await client.run_tracked_background(
         payload.model_copy(update={"preparation": "legacy"}), actor.user_id, actor.tenant_id,
     )

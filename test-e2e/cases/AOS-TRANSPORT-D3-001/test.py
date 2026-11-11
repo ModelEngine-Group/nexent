@@ -3913,6 +3913,10 @@ async def test_background_management_handoff_over_signed_http(monkeypatch, mode)
 
     monkeypatch.setattr(background.automation_conversation_adapter, "load_run_prompt", source_history)
     monkeypatch.setattr(background, "prepare_conversation_snapshot", compile_snapshot)
+    async def unsupported_background(*_args):
+        return None
+
+    monkeypatch.setattr(background, "run_compatible_background", unsupported_background)
     monkeypatch.setattr(background, "_project", project)
     monkeypatch.setattr(execution, "run_blocking", control)
     monkeypatch.setattr(execution, "run_agent_stream", legacy_stream)
@@ -4367,3 +4371,173 @@ async def test_raw_model_profile_reaches_sdk_provider_over_signed_http(monkeypat
     assert requests[1]["temperature"] == (0.3 if sampling else 0.8)
     assert requests[3]["temperature"] == 0.8
     assert requests[1]["reasoning_effort"] == "high" and requests[3]["reasoning_effort"] == ("low" if sampling else "high")
+
+
+@pytest.mark.stage("D3")
+@pytest.mark.case_id("AOS-TRANSPORT-D3-001")
+@pytest.mark.parametrize("disconnect", [False, True])
+@pytest.mark.parametrize("source_record", [False, True])
+@pytest.mark.asyncio
+async def test_background_without_automation_record_over_signed_agentos(monkeypatch, disconnect, source_record):
+    from backend.http.server.app_factory import create_app
+    from contracts.agentos import BODY_KEY, PRINCIPAL_KEY
+    from infrastructure.rdb.agent_admission import AdmissionClaim, AdmissionRequestConflict
+    from management.api.agent import compatibility_dispatch
+    from management.services.agent import background, background_compatibility as compatible, prepared_projection, runtime_client
+    from runtime.agentos import management_dispatch, prepared_run
+    from runtime.api.agent import execution
+
+    actor = ServicePrincipal("compat-user", "compat-tenant")
+    reference = AgentRunReference(conversation_id=42, run_id="7" * 32)
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-compat-background-key")
+    snapshot = PreparedAgentRun.model_validate({
+        **reference.model_dump(), "mode": "nexent", "input": {"query": "hello"},
+        "resource": {"agent_id": 7, "version_no": 2, "name": "agent", "description": "fixture",
+                     "prompt_templates": {"system_prompt": "Answer"}, "tools": []},
+        "models": {"llm": {"model_id": 11, "alias": "llm", "revision": "fixture"}},
+    })
+    staged = SimpleNamespace(reference=reference, user_id=actor.user_id, tenant_id=actor.tenant_id,
+                             message_index=9, assistant_message_id=None, memory_agent_id=None)
+    confirmed = SimpleNamespace(**{**vars(staged), "assistant_message_id": 61})
+    state, calls, receipts = {}, [], {}
+    reading, stopped = threading.Event(), threading.Event()
+
+    async def inline(_task, function, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return function(*args, **kwargs)
+
+    def owned(conversation, *, user_id, tenant_id):
+        return (conversation, user_id, tenant_id) == (42, actor.user_id, actor.tenant_id)
+
+    def claim(scope, fingerprint, user, tenant, *, requested_run_id):
+        assert (user, tenant, requested_run_id) == (actor.user_id, actor.tenant_id, reference.run_id)
+        if state:
+            if fingerprint != state["fingerprint"]:
+                raise AdmissionRequestConflict
+            return AdmissionClaim(reference.run_id, "admitted", 42, True, False)
+        state.update(fingerprint=fingerprint)
+        return AdmissionClaim(reference.run_id, "pending", None, False, True)
+
+    def stage(scope, ref, user, tenant, index, turn, **options):
+        assert (ref, user, tenant, index) == (reference, actor.user_id, actor.tenant_id, 8)
+        assert options == {"omitted_user": True, "background_run": True}
+        assert turn["query"] == "hello" and turn["automation"] is None
+        calls.append("stage")
+        return staged
+
+    def confirm(turn):
+        assert turn is staged and calls == ["stage", "start"]
+        calls.append("confirm")
+        return confirmed
+
+    async def compile_run(request, ref, user, tenant, **options):
+        assert request.model_id == 11 and request.enable_automation_tool is False
+        assert options["preserve_shared_reasoning"] is True
+        assert (ref, user, tenant) == (reference, actor.user_id, actor.tenant_id)
+        return snapshot
+
+    async def start(payload, principal):
+        assert payload == snapshot and principal == actor and calls == ["stage"]
+        calls.append("start")
+        return reference
+
+    def persist(**fields):
+        assert fields["assistant_message_id"] == 61 and fields["message_source"] == "AUTOMATION"
+        assert fields["message_index"] == 9 and fields["message_content"] == "answer"
+        receipts[reference.run_id] = (61, "completed")
+        calls.append("project")
+        return 61
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("old SDK execution or schedule finalization")
+
+    for module in (background, compatible):
+        monkeypatch.setattr(module, "_io", inline)
+    monkeypatch.setattr(background, "conversation_belongs_to", owned)
+    record = {"run_id": 5, "runtime_run_id": reference.run_id, "conversation_id": 42, "status": "RUNNING",
+              "generated_prompt": None, "user_message_id": None} if source_record else None
+    monkeypatch.setattr(background.runs, "get_run_by_runtime_id", lambda *_args, **_kw: record.copy() if record else None)
+    def unproven_source(*_args):
+        raise compatible.store.PreparedTurnConflict
+
+    monkeypatch.setattr(background.turns, "read_saved_user_turn_head", unproven_source)
+    monkeypatch.setattr(background.runs, "update_run", forbidden)
+    monkeypatch.setattr(background.runs, "update_task", forbidden)
+    monkeypatch.setattr(compatible, "get_conversation", lambda *_args, **_kw: {})
+    monkeypatch.setattr(compatible, "get_current_run_user_message_id", lambda *_args: None)
+    monkeypatch.setattr(compatible, "prepare_conversation_snapshot", compile_run)
+    monkeypatch.setattr(compatible, "claim_conversation_run", claim)
+    monkeypatch.setattr(compatible.store, "stage_turn", stage)
+    monkeypatch.setattr(compatible.store, "confirm_turn", confirm)
+    monkeypatch.setattr(compatible.store, "read_background_turn", lambda *_args: confirmed)
+    monkeypatch.setattr(compatible.store, "close_turn", lambda *_args: calls.append("close"))
+    monkeypatch.setattr(compatible, "get_prepared_projection_receipt", lambda **_kw: receipts.get(reference.run_id))
+    monkeypatch.setattr(prepared_projection, "run_blocking", inline)
+    monkeypatch.setattr(prepared_projection, "persist_prepared_assistant_projection", persist)
+    monkeypatch.setattr(execution, "run_blocking", inline)
+    monkeypatch.setattr(execution, "run_legacy_agent_stream", forbidden)
+    monkeypatch.setattr("infrastructure.rdb.conversation_state.conversation_belongs_to", owned)
+    monkeypatch.setattr(prepared_run, "start_prepared_run", start)
+    runtime = create_app(enable_monitoring=False)
+    runtime.add_middleware(AgentOSMiddleware)
+    runtime.include_router(create_background_router(execution.run_agentos_tracked_background))
+    runtime.include_router(prepared_run.create_prepared_run_router())
+
+    @runtime.post(AgentOperation.RESUME.value)
+    async def resume(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        call = AgentResume.model_validate_json(request.scope[BODY_KEY])
+        assert call == AgentResume(**reference.model_dump())
+
+        async def frames():
+            reading.set()
+            yield f'id: {reference.run_id}:1\nevent: agentos_observer\ndata: {{"type":"final_answer","content":"answer"}}\n\n'
+            if disconnect:
+                await asyncio.Future()
+            yield f'id: {reference.run_id}:2\nevent: agentos_terminal\ndata: {{"status":"completed"}}\n\n'
+
+        return StreamingResponse(frames())
+
+    @runtime.post(AgentOperation.STOP.value)
+    async def stop(request: Request):
+        assert request.scope[PRINCIPAL_KEY] == actor
+        assert AgentStop.model_validate_json(request.scope[BODY_KEY]) == AgentStop(**reference.model_dump(), prevent_start=True)
+        stopped.set()
+        return {**reference.model_dump(), "status": "stopped", "latest_event_id": None, "cancellation_requested": True}
+
+    manager = create_app(enable_monitoring=False)
+    manager.include_router(compatibility_dispatch.router)
+    with serve(runtime) as runtime_url, serve(manager) as manager_url:
+        factory = lambda **kw: httpx.AsyncClient(trust_env=False, **kw)
+        client, manager_client = AgentOSClient(runtime_url, factory), AgentOSClient(manager_url, factory)
+        monkeypatch.setattr(runtime_client, "_agentos_client", lambda: client)
+        monkeypatch.setattr(management_dispatch, "management_client", lambda: manager_client)
+        payload = BackgroundRun(run_id=reference.run_id, request={
+            "query": "hello", "agent_id": 7, "conversation_id": 42, "model_id": 11,
+            "history": [{"role": "user", "content": "earlier"} for _ in range(4)],
+        })
+        if disconnect:
+            task = asyncio.create_task(client.run_tracked_background(payload, actor.user_id, actor.tenant_id))
+            try:
+                assert await asyncio.to_thread(reading.wait, 5)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            assert await asyncio.to_thread(stopped.wait, 5)
+            assert calls == ["stage", "start", "confirm"]
+        else:
+            result = await client.run_tracked_background(payload, actor.user_id, actor.tenant_id)
+            retry = await client.run_tracked_background(payload, actor.user_id, actor.tenant_id)
+            assert result.assistant_message_id == retry.assistant_message_id == 61 and retry.chunks == 0
+            changed = payload.model_copy(update={"request": {**payload.request, "query": "changed"}})
+            with pytest.raises(RuntimeUpstreamError) as conflict:
+                await client.run_tracked_background(changed, actor.user_id, actor.tenant_id)
+            assert conflict.value.status_code == 409
+            assert calls.count("start") == calls.count("project") == 1
+        with pytest.raises(RuntimeUpstreamError) as foreign:
+            await client.run_tracked_background(payload, actor.user_id, "foreign")
+        assert foreign.value.status_code == 404
+    if record is not None:
+        assert record["status"] == "RUNNING" and record["user_message_id"] is None and record["generated_prompt"] is None

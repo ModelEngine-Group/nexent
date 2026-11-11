@@ -11,7 +11,7 @@ from starlette.responses import Response
 from backend.http.server.agentos_lifecycle import run_until_disconnect
 from contracts.agentos import MAX_REQUEST_BYTES, BackgroundRun, CompatibilityConversationRun, ManagementOperation
 from contracts.errors.exceptions import (
-    AppException, ForbiddenError, RunModelControlsError, RuntimeServiceTimeoutError,
+    AgentBackgroundError, AppException, ForbiddenError, RunModelControlsError, RuntimeServiceTimeoutError,
     RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ValidationError,
 )
 from management.api.agentos_request import read_agentos_callback
@@ -70,6 +70,8 @@ async def dispatch_background(request: Request):
     try:
         result = await run_until_disconnect(request, execute_background(payload, actor))
         return result.model_dump() if hasattr(result, "model_dump") else result
+    except AgentBackgroundError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
     except RuntimeUpstreamError as exc:
         return Response(content=exc.content, status_code=exc.status_code, headers=exc.headers)
     except RuntimeServiceTimeoutError as exc:
