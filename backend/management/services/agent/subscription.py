@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Agent SSE subscriptions, replay and conversation preparation."""
+"""Compatibility launch and conversation preparation."""
 
 import asyncio
 import json
@@ -9,13 +9,6 @@ import logging
 import uuid
 from copy import (
     deepcopy,
-)
-from http import (
-    HTTPStatus,
-)
-from typing import (
-    Any,
-    Dict,
 )
 
 from management.services.agent.agentos_events import active_run_error_response, knowledge_scope_event_content
@@ -45,7 +38,6 @@ from fastapi import (
     Request,
 )
 from fastapi.responses import (
-    JSONResponse,
     StreamingResponse,
 )
 from management.services.agent.context import (
@@ -74,25 +66,15 @@ from nexent.monitor import (
 from management.services.conversation.service import (
     create_new_conversation,
     get_conversation_service,
-    get_last_unit_for_message,
-    get_latest_assistant_message,
     update_conversation_agent_id_service,
     update_conversation_chat_mode_service,
     update_conversation_knowledge_scope_service,
     update_conversation_workbench_and_metadata_service,
     update_conversation_workbench_config_service,
-    update_message_status,
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
-)
-from infrastructure.legacy_stream_replay import replay_legacy_stream
-from infrastructure.redis.run_state import (
-    runtime_state_service,
-)
-from infrastructure.agent_stream_channels import (
-    streaming_channel_manager,
 )
 from management.utils.request_context import get_user_language
 from contracts.runtime_metadata import (
@@ -113,97 +95,20 @@ def _resolve_user_tenant_language(
     return user_id, tenant_id, get_user_language(http_request)
 
 
-def _detect_resume_position(
-    conversation_id: int,
-    user_id: str,
-) -> Dict[str, Any]:
-    """
-    Determine the position to resume streaming from.
-
-    This function queries the database to check if there's an in-progress
-    streaming message for the given conversation. Used when frontend reconnects
-    after tab switch.
-
-    Returns:
-        Dict containing:
-            - should_resume: bool - whether we should resume streaming
-            - message_id: int - the assistant message ID
-            - message_status: str - current status (streaming/completed/failed/stopped)
-            - resume_from_unit_index: int - the unit index to resume from
-            - reason: str - explanation of the decision
-    """
-    latest_msg = get_latest_assistant_message(conversation_id, user_id)
-
-    if latest_msg is None:
-        return {
-            "should_resume": False,
-            "message_id": None,
-            "message_status": None,
-            "resume_from_unit_index": None,
-            "reason": "no_assistant_message",
-        }
-
-    message_status = latest_msg.get("status")
-    message_id = latest_msg["message_id"]
-
-    # Check if channel exists and is still active
-    channel = streaming_channel_manager.get_channel(conversation_id, user_id)
-    channel_active = channel is not None and not channel.is_completed
-
-    if message_status == "streaming":
-        # Backend still running - get last unit position
-        last_unit = get_last_unit_for_message(message_id)
-        resume_from = last_unit["unit_index"] + 1 if last_unit else 0
-        return {
-            "should_resume": True,
-            "message_id": message_id,
-            "message_status": message_status,
-            "resume_from_unit_index": resume_from,
-            "resume_message_id": message_id,
-            "reason": "backend_streaming",
-        }
-    elif channel_active:
-        # Message shows completed but channel is still active - resume to get remaining chunks
-        # This handles edge case where message status was updated but channel not yet cleaned up
-        last_unit = get_last_unit_for_message(message_id)
-        resume_from = last_unit["unit_index"] + 1 if last_unit else 0
-        return {
-            "should_resume": True,
-            "message_id": message_id,
-            "message_status": message_status,
-            "resume_from_unit_index": resume_from,
-            "resume_message_id": message_id,
-            "reason": "channel_active",
-        }
-    else:
-        # Backend finished - no more chunks to stream
-        return {
-            "should_resume": False,
-            "message_id": message_id,
-            "message_status": message_status,
-            "resume_from_unit_index": None,
-            "resume_message_id": None,
-            "reason": f"backend_{message_status}",
-        }
-
-
 async def _prepare_legacy_conversation(
     agent_request: AgentRequest,
     resolved_user_id: str,
     resolved_tenant_id: str,
     language: str,
     timezone: str | None,
-    *,
-    resume: bool,
 ) -> tuple[bool, WorkbenchSessionConfig | None]:
     """Apply the compatibility request's conversation and authorization rules."""
-    if not resume:
-        from management.services.model import run_controls
+    from management.services.model import run_controls
 
-        run_controls.validate_agent_model_selection(
-            agent_request, resolved_tenant_id, search_agent_info_by_agent_id
-        )
-    if agent_request.is_debug and not resume:
+    run_controls.validate_agent_model_selection(
+        agent_request, resolved_tenant_id, search_agent_info_by_agent_id
+    )
+    if agent_request.is_debug:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
         agent_request.__dict__["_debug_run_id"] = f"debug-{uuid.uuid4().hex}"
@@ -231,17 +136,16 @@ async def _prepare_legacy_conversation(
             )
         if not ENABLE_AGENT_WORKBENCH and conversation.get("workbench_config"):
             raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
-        if not resume:
-            is_workbench_conversation = isinstance(
-                conversation.get("workbench_config"), dict
+        is_workbench_conversation = isinstance(
+            conversation.get("workbench_config"), dict
+        )
+        if is_workbench_conversation != (agent_request.entrypoint == "workbench"):
+            raise ForbiddenError(
+                "Conversation belongs to a different chat entrypoint"
             )
-            if is_workbench_conversation != (agent_request.entrypoint == "workbench"):
-                raise ForbiddenError(
-                    "Conversation belongs to a different chat entrypoint"
-                )
 
     canonical_workbench = None
-    if agent_request.entrypoint == "workbench" and not resume:
+    if agent_request.entrypoint == "workbench":
         from management.services.agent.workbench import (
             assert_workbench_version,
             resolve_workbench_config,
@@ -287,10 +191,9 @@ async def _prepare_legacy_conversation(
                 agent_request.expected_workbench_config_version,
             )
 
-    if not resume:
-        run_controls.preflight_agent_turn_controls(
-            agent_request, resolved_tenant_id, search_agent_info_by_agent_id
-        )
+    run_controls.preflight_agent_turn_controls(
+        agent_request, resolved_tenant_id, search_agent_info_by_agent_id
+    )
 
     metadata_supplied = "metadata" in agent_request.model_fields_set
     metadata_update_requested = metadata_supplied and agent_request.metadata is not None
@@ -319,9 +222,7 @@ async def _prepare_legacy_conversation(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
+    raw_request_scope = getattr(agent_request, "knowledge_scope", None)
     if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
         request_scope = raw_request_scope
     elif isinstance(raw_request_scope, dict):
@@ -338,11 +239,11 @@ async def _prepare_legacy_conversation(
     if not isinstance(stored_scope, dict):
         stored_scope = None
     source_scope = request_scope
-    if source_scope is None and stored_scope is not None and not resume:
+    if source_scope is None and stored_scope is not None:
         source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
 
     resolved_scope = None
-    if source_scope is not None and not resume:
+    if source_scope is not None:
         if agent_request.agent_id is None:
             raise ValueError("agent_id is required when knowledge_scope is set")
         runtime_knowledge_tree = [
@@ -418,102 +319,101 @@ async def _prepare_legacy_conversation(
             resolved_user_id,
         )
 
-    if not resume:
-        joint_runtime_state = None
-        if (
-            canonical_workbench is not None
-            and not is_new_conversation
-            and metadata_update_requested
-            and not agent_request.is_debug
-        ):
-            try:
-                joint_runtime_state = update_conversation_workbench_and_metadata_service(
-                    conversation_id=agent_request.conversation_id,
-                    user_id=resolved_user_id,
-                    config=canonical_workbench.model_dump(mode="json"),
-                    expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=agent_request.metadata or {},
-                    expected_metadata_version=agent_request.expected_metadata_version,
-                )
-            except RuntimeMetadataVersionConflict as exc:
-                raise AppException(
-                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
-                    details={"current_version": exc.current_version},
-                ) from exc
-            conversation = {**(conversation or {}), **joint_runtime_state}
-        elif (
-            canonical_workbench is not None
-            and not is_new_conversation
-            and not agent_request.is_debug
-        ):
-            updated = update_conversation_workbench_config_service(
+    joint_runtime_state = None
+    if (
+        canonical_workbench is not None
+        and not is_new_conversation
+        and metadata_update_requested
+        and not agent_request.is_debug
+    ):
+        try:
+            joint_runtime_state = update_conversation_workbench_and_metadata_service(
                 conversation_id=agent_request.conversation_id,
                 user_id=resolved_user_id,
                 config=canonical_workbench.model_dump(mode="json"),
-                expected_version=agent_request.expected_workbench_config_version,
-                only_if_changed=True,
+                expected_config_version=agent_request.expected_workbench_config_version,
+                metadata=agent_request.metadata or {},
+                expected_metadata_version=agent_request.expected_metadata_version,
             )
-            conversation = {**(conversation or {}), **updated}
+        except RuntimeMetadataVersionConflict as exc:
+            raise AppException(
+                ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                details={"current_version": exc.current_version},
+            ) from exc
+        conversation = {**(conversation or {}), **joint_runtime_state}
+    elif (
+        canonical_workbench is not None
+        and not is_new_conversation
+        and not agent_request.is_debug
+    ):
+        updated = update_conversation_workbench_config_service(
+            conversation_id=agent_request.conversation_id,
+            user_id=resolved_user_id,
+            config=canonical_workbench.model_dump(mode="json"),
+            expected_version=agent_request.expected_workbench_config_version,
+            only_if_changed=True,
+        )
+        conversation = {**(conversation or {}), **updated}
 
-        if canonical_workbench is not None and not agent_request.is_debug:
-            workbench_state = (
-                conversation_data if is_new_conversation else (conversation or {})
-            )
-            agent_request.__dict__["_workbench_config_version"] = int(
-                workbench_state.get("workbench_config_version") or 0
-            )
+    if canonical_workbench is not None and not agent_request.is_debug:
+        workbench_state = (
+            conversation_data if is_new_conversation else (conversation or {})
+        )
+        agent_request.__dict__["_workbench_config_version"] = int(
+            workbench_state.get("workbench_config_version") or 0
+        )
 
-        if agent_request.is_debug:
-            metadata_snapshot = (
-                dict(agent_request.metadata or {}) if metadata_update_requested else {}
+    if agent_request.is_debug:
+        metadata_snapshot = (
+            dict(agent_request.metadata or {}) if metadata_update_requested else {}
+        )
+        metadata_version = None
+    elif is_new_conversation:
+        metadata_snapshot = dict(
+            conversation_data.get(
+                "runtime_metadata",
+                agent_request.metadata if metadata_update_requested else {},
             )
-            metadata_version = None
-        elif is_new_conversation:
-            metadata_snapshot = dict(
-                conversation_data.get(
-                    "runtime_metadata",
-                    agent_request.metadata if metadata_update_requested else {},
-                )
-                or {}
+            or {}
+        )
+        metadata_version = int(
+            conversation_data.get(
+                "runtime_metadata_version",
+                1 if metadata_update_requested else 0,
             )
-            metadata_version = int(
-                conversation_data.get(
-                    "runtime_metadata_version",
-                    1 if metadata_update_requested else 0,
-                )
-                or 0
+            or 0
+        )
+    elif joint_runtime_state is not None:
+        metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
+        metadata_version = int(joint_runtime_state["runtime_metadata_version"])
+    elif not metadata_update_requested:
+        metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
+        metadata_version = int(
+            (conversation or {}).get("runtime_metadata_version") or 0
+        )
+    else:
+        try:
+            resolved_metadata = resolve_conversation_runtime_metadata(
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+                request_metadata=agent_request.metadata,
+                update_requested=metadata_update_requested,
+                expected_version=agent_request.expected_metadata_version,
             )
-        elif joint_runtime_state is not None:
-            metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
-            metadata_version = int(joint_runtime_state["runtime_metadata_version"])
-        elif not metadata_update_requested:
-            metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
-            metadata_version = int(
-                (conversation or {}).get("runtime_metadata_version") or 0
-            )
-        else:
-            try:
-                resolved_metadata = resolve_conversation_runtime_metadata(
-                    conversation_id=agent_request.conversation_id,
-                    user_id=resolved_user_id,
-                    request_metadata=agent_request.metadata,
-                    update_requested=metadata_update_requested,
-                    expected_version=agent_request.expected_metadata_version,
-                )
-            except ConversationNotFoundError as exc:
-                raise AppException(
-                    ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
-                ) from exc
-            except RuntimeMetadataVersionConflict as exc:
-                raise AppException(
-                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
-                    details={"current_version": exc.current_version},
-                ) from exc
-            metadata_snapshot = resolved_metadata["runtime_metadata"]
-            metadata_version = resolved_metadata["runtime_metadata_version"]
+        except ConversationNotFoundError as exc:
+            raise AppException(
+                ErrorCode.CHAT_CONVERSATION_NOT_FOUND,
+            ) from exc
+        except RuntimeMetadataVersionConflict as exc:
+            raise AppException(
+                ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                details={"current_version": exc.current_version},
+            ) from exc
+        metadata_snapshot = resolved_metadata["runtime_metadata"]
+        metadata_version = resolved_metadata["runtime_metadata_version"]
 
-        agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
-        agent_request.__dict__["_runtime_metadata_version"] = metadata_version
+    agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
+    agent_request.__dict__["_runtime_metadata_version"] = metadata_version
 
     if (
         not agent_request.is_debug
@@ -530,7 +430,6 @@ async def _prepare_legacy_conversation(
         request_scope is not None
         and resolved_scope is not None
         and not agent_request.is_debug
-        and not resume
         and not is_new_conversation
         and agent_request.conversation_id is not None
         and agent_request.entrypoint != "workbench"
@@ -544,7 +443,6 @@ async def _prepare_legacy_conversation(
 
     if (
         not agent_request.is_debug
-        and not resume
         and not is_new_conversation
         and agent_request.conversation_id is not None
         and agent_request.agent_id is not None
@@ -565,7 +463,6 @@ async def run_agent_stream(
     user_id: str = None,
     tenant_id: str = None,
     skip_user_save: bool = False,
-    resume: bool = False,
     *,
     legacy_materializer: LegacyRunMaterializer | None = None,
     thread_manager: ThreadManager | None = None,
@@ -575,8 +472,6 @@ async def run_agent_stream(
     Start an agent run and stream responses.
     The gateway must supply the authenticated user and tenant for every entrypoint.
 
-    Args:
-        resume: If True, check for existing streaming message and continue from where it left off
     """
     if agent_request.entrypoint == "workbench" and not ENABLE_AGENT_WORKBENCH:
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
@@ -586,65 +481,12 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
-    if not resume:
-        thread_manager = require_legacy_thread_manager(thread_manager)
+    thread_manager = require_legacy_thread_manager(thread_manager)
     host = require_legacy_execution_host(execution_host)
     is_new_conversation, canonical_workbench = await _prepare_legacy_conversation(
         agent_request, resolved_user_id, resolved_tenant_id, language,
         http_request.headers.get("x-user-timezone") if http_request else None,
-        resume=resume,
     )
-
-    # Resume mode: check for existing streaming message
-    if resume:
-        resume_info = _detect_resume_position(
-            conversation_id=agent_request.conversation_id,
-            user_id=resolved_user_id,
-        )
-
-        if not resume_info["should_resume"]:
-            # Backend already finished
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={
-                    "status": resume_info["message_status"],
-                    "message": f"Stream already {resume_info['message_status']}: {resume_info['reason']}",
-                },
-            )
-
-        # Check the Runtime registry for an active local run.
-        existing_run_info = host.registry.get_agent_run_info(
-            user_id=resolved_user_id, conversation_id=agent_request.conversation_id
-        )
-        run_state = await runtime_state_service.get_run_state_async(
-            user_id=resolved_user_id,
-            conversation_id=agent_request.conversation_id,
-        )
-        is_remote_running = run_state.get("status") == "running"
-
-        if existing_run_info is None and not is_remote_running:
-            # Agent has finished while frontend was disconnected
-            # Update message status to completed if it's still streaming
-            try:
-                update_message_status(
-                    message_id=resume_info["message_id"], status="completed"
-                )
-            except Exception:
-                pass
-
-            return JSONResponse(
-                status_code=HTTPStatus.OK,
-                content={
-                    "status": "completed",
-                    "message": "Agent finished during disconnection",
-                },
-            )
-
-        return replay_legacy_stream(
-            agent_request.conversation_id, resolved_user_id, resume_info["resume_from_unit_index"],
-            channel_manager=streaming_channel_manager, state_service=runtime_state_service,
-            is_remote_running=is_remote_running,
-        )
 
     run_identifier = _agent_run_identifier(agent_request)
     try:

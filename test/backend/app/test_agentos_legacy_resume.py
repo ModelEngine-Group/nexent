@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -78,3 +78,20 @@ async def test_resume_preserves_legacy_status_response(resume_dependencies, assi
     assert response.status_code == 200
     assert json.loads(response.body) == expected
     replay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_replays_completed_message_while_local_channel_drains(resume_dependencies):
+    state, _, replay = resume_dependencies
+    state.return_value = (False, ("completed", 7))
+    channel = Mock(is_completed=False)
+    legacy_resume.streaming_channel_manager.get_channel.return_value = channel
+    legacy_resume.agent_run_manager.get_agent_run_info.return_value = Mock()
+
+    response = await legacy_resume.resume_legacy_conversation(42, ACTOR, workbench=False)
+
+    assert response is replay.return_value
+    replay.assert_called_once_with(
+        42, "user-a", 8, channel_manager=legacy_resume.streaming_channel_manager,
+        state_service=legacy_resume.runtime_state_service, is_remote_running=False,
+    )

@@ -48,7 +48,7 @@ async def lifecycle(monkeypatch):
     cancel = MagicMock(side_effect=lambda *_args, **_kwargs: future.cancel())
     monkeypatch.setattr(service_tests.legacy_thread_manager, "cancel", cancel)
     channel = service_tests.AsyncChannelMock()
-    monkeypatch.setattr(service.streaming_channel_manager, "get_or_create_channel", AsyncMock(return_value=channel))
+    monkeypatch.setattr(legacy_tracking.streaming_channel_manager, "get_or_create_channel", AsyncMock(return_value=channel))
 
     async def complete_channel(**kwargs):
         channel.complete(kwargs["status"])
@@ -277,7 +277,7 @@ async def test_explicit_stop_after_subscriber_disconnect_still_reaches_worker(li
 async def test_initial_stream_exposes_run_id_without_changing_legacy_sse(lifecycle, monkeypatch):
     env = lifecycle
     run_id = "a" * 32
-    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(legacy_tracking.runtime_state_service, "enabled", True)
     async def start_journal(_tenant, selected_run_id):
         return selected_run_id
 
@@ -307,7 +307,7 @@ async def test_claimed_run_binds_conversation_before_starting_producer(lifecycle
     scope = "b" * 64
     env.request._projection_run_id = run_id
     env.request._run_admission_scope = scope
-    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(legacy_tracking.runtime_state_service, "enabled", True)
     monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value=run_id), raising=False)
     order = []
 
@@ -337,7 +337,7 @@ async def test_failed_admission_binding_cleans_journal_before_releasing_reservat
     env = lifecycle
     env.request._projection_run_id = "a" * 32
     env.request._run_admission_scope = "b" * 64
-    monkeypatch.setattr(env.service.runtime_state_service, "enabled", True)
+    monkeypatch.setattr(legacy_tracking.runtime_state_service, "enabled", True)
     monkeypatch.setattr(env.channel, "start_journal", AsyncMock(return_value="a" * 32), raising=False)
     monkeypatch.setattr(env.channel, "finish_journal", AsyncMock(), raising=False)
     monkeypatch.setattr(legacy_tracking, "set_conversation_admission", lambda *args, **kwargs: False)
@@ -346,7 +346,7 @@ async def test_failed_admission_binding_cleans_journal_before_releasing_reservat
         assert (conversation_id, user_id, expected_channel) == (123, "u", env.channel)
         assert env.manager._reservations
 
-    monkeypatch.setattr(env.service.streaming_channel_manager, "remove_channel", AsyncMock(side_effect=remove))
+    monkeypatch.setattr(legacy_tracking.streaming_channel_manager, "remove_channel", AsyncMock(side_effect=remove))
     source = MagicMock()
 
     with pytest.raises(RuntimeError, match="claim is no longer pending"):
@@ -483,7 +483,7 @@ async def test_tracked_run_owns_identity_and_finalizes_with_redis_disabled(lifec
     run_id = "d" * 32
     env.request._track_execution = True
     env.request._projection_run_id = run_id
-    monkeypatch.setattr(env.service.runtime_state_service, "enabled", False)
+    monkeypatch.setattr(legacy_tracking.runtime_state_service, "enabled", False)
     monkeypatch.setattr(legacy_tracking, "track_execution", lambda identity: calls.append(("track", identity.run_id)))
     monkeypatch.setattr(service_tests.legacy_execution_host, "untrack", lambda identity: None, raising=False)
     monkeypatch.setattr(legacy_tracking, "begin_execution", lambda identity: calls.append(("begin", identity.run_id)))

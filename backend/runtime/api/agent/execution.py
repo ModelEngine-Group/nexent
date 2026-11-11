@@ -174,7 +174,6 @@ async def _run_public_conversation(agent_request, http_request, principal, resum
             http_request=http_request,
             user_id=principal.user_id,
             tenant_id=principal.tenant_id,
-            resume=False,
         )
     except ActiveExecutionError:
         return _execution_conflict_response()

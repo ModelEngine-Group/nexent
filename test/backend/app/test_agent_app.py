@@ -639,7 +639,7 @@ async def test_agentos_conversation_uses_signed_actor_and_preserves_request_cont
     result = await execution.run_agentos_conversation(payload, actor)
     assert result is runner.return_value
     args = runner.await_args.kwargs
-    assert (args["user_id"], args["tenant_id"], args["resume"]) == ("actor", "tenant", False)
+    assert (args["user_id"], args["tenant_id"]) == ("actor", "tenant")
     assert args["agent_request"].conversation_id == 42
     assert args["http_request"].cookies["NEXT_LOCALE"] == "en"
     assert args["http_request"].headers["x-user-timezone"] == "Asia/Shanghai"
