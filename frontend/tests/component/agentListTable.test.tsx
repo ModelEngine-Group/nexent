@@ -11,9 +11,10 @@ import {
   resizeAgentColumns,
 } from "../../app/[locale]/agents/components/agent-table-column-widths";
 import AgentTableHeader from "../../app/[locale]/agents/components/agent-list-table-header";
+import en from "../../public/locales/en/common.json";
 import type { Agent } from "@/types/agentConfig";
 
-const session = vi.hoisted(() => ({ provider: "local" }));
+const session = vi.hoisted(() => ({ provider: "local", locale: "zh" }));
 
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { authProvider: session.provider } }),
@@ -24,6 +25,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: { column?: string }) => {
       if (key === "agentConfig.list.resizeColumn")
         return `Resize ${options?.column}`;
+      if (session.locale === "en") return en[key as keyof typeof en] ?? key;
       const translations: Record<string, string> = {
         "agentConfig.list.column.name": "名称",
         "agentConfig.list.column.type": "类型",
@@ -96,6 +98,54 @@ const secondAgent = {
 describe("AgentListTable", () => {
   beforeEach(() => {
     session.provider = "local";
+    session.locale = "zh";
+  });
+
+  it("labels publication status in English for published and draft Agents", () => {
+    session.locale = "en";
+    render(
+      <AgentListTable
+        agents={[firstAgent, secondAgent]}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "Published?" })
+    ).toBeInTheDocument();
+    const publishedRow = screen.getByRole("row", { name: /健康小助手/ });
+    const draftRow = screen.getByRole("row", { name: /资料助手/ });
+    expect(within(publishedRow).getByText("Published")).toBeInTheDocument();
+    expect(within(draftRow).getByText("Draft")).toBeInTheDocument();
+  });
+
+  it("shows the current published version next to the name instead of the listed version", () => {
+    const agent: Agent = {
+      ...firstAgent,
+      version_label: "Published release",
+      repository_info: [
+        {
+          agent_repository_id: 10,
+          status: "shared",
+          version_no: 1,
+          version_label: "Listed release",
+        },
+      ],
+    };
+    render(
+      <AgentListTable
+        agents={[agent]}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    const nameCell = screen.getByRole("cell", { name: /健康小助手/ });
+    expect(within(nameCell).getByText("Published release")).toBeInTheDocument();
+    expect(nameCell).not.toHaveTextContent("Listed release");
   });
 
   it.each([

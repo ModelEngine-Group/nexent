@@ -24,7 +24,7 @@ from the target's pre-upgrade backup; Supabase cannot reconstruct application ro
 | --- | --- | --- |
 | Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
 | Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
-| Target transaction | Recheck account coverage under the account-writer lock, run historical 001 and account-array 009, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
+| Target transaction | Recheck account coverage under the account-writer lock, run historical 001 and account-array 010, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
 | Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
@@ -57,11 +57,11 @@ Active CAS/OAuth bindings remain in the project database; provider-only accounts
 have no local password login, while actual local password credentials retain it.
 
 The final account schema stores only `user_roles`; scalar response roles are
-computed. The importer applies 009 after historical 001 inside the same transaction
+computed. The importer applies 010 after historical 001 inside the same transaction
 and writes only the array. Inspection recognizes both layouts without recreating
-columns. Historical replay is followed by 009, which preserves existing arrays
+columns. Historical replay is followed by 010, which preserves existing arrays
 and drops any restored scalar column. Operations grants remain in independent
-010; account recovery has no dependency on operations tables.
+011; account recovery has no dependency on operations tables.
 
 ## Prepare the upgrade
 
@@ -73,7 +73,7 @@ acceptance completes.
 The host needs Bash and Docker CLI, or Bash and kubectl with access to the original
 namespace. **No host Python, pip, PostgreSQL driver or jq is required.** The selected
 `NEXENT_IMAGE` must package the current Python worker, its existing psycopg2
-runtime, `v2.9.0_001_local_user_accounts.sql`, and `v2.9.0_009_account_user_roles.sql`. Standard deployment selects that
+runtime, `v2.9.0_001_local_user_accounts.sql`, and `v2.9.0_010_account_user_roles.sql`. Standard deployment selects that
 image automatically; preload it for offline deployment. The independent gateway
 image is not the migration image.
 

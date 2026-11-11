@@ -159,7 +159,7 @@ def _account_import_sql(source_rows, *, dry_run=False):
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
     schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
-    roles_schema = (ROOT / "deploy/sql/migrations/v2.9.0_009_account_user_roles.sql").read_text(encoding="utf-8")
+    roles_schema = (ROOT / "deploy/sql/migrations/v2.9.0_010_account_user_roles.sql").read_text(encoding="utf-8")
     return "SET LOCAL standard_conforming_strings=on;\n" + inspection_sql() + r"""
 SET LOCAL nexent.account_import='on';
 """ + schema + "\n" + roles_schema + "\n" + r"""

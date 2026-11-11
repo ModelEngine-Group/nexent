@@ -20,14 +20,14 @@ def docker(*args, data=None):
 
 def build_worker_image(root, image, run_id):
     sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
-    role_sql = root / "deploy/sql/migrations/v2.9.0_009_account_user_roles.sql"
+    role_sql = root / "deploy/sql/migrations/v2.9.0_010_account_user_roles.sql"
     context = io.BytesIO()
     with tarfile.open(fileobj=context, mode="w") as archive:
         content = ("FROM nexent/nexent:latest\nLABEL codex.test=" + run_id + "\n"
                    "COPY migrate_docker.py /opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py\n"
                    "COPY inspect_accounts.sql /opt/deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql\n"
                    "COPY account.sql /opt/deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql\n"
-                   "COPY account_roles.sql /opt/deploy/sql/migrations/v2.9.0_009_account_user_roles.sql\n"
+                   "COPY account_roles.sql /opt/deploy/sql/migrations/v2.9.0_010_account_user_roles.sql\n"
                    'ENTRYPOINT ["sh","-c","exit 88"]\n').encode()
         info = tarfile.TarInfo("Dockerfile"); info.size = len(content); archive.addfile(info, io.BytesIO(content))
         for source, destination in [(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py", "migrate_docker.py"), (sql_file, "account.sql"), (role_sql, "account_roles.sql"), (root / "deploy/sql/tools/supabase_to_postgres/inspect_accounts.sql", "inspect_accounts.sql")]:
@@ -55,7 +55,7 @@ def assert_automatic_upgrade(root, temporary):
     user_id = str(uuid4())
     encoded = bcrypt.hashpw(b"original-password", bcrypt.gensalt(rounds=4)).decode()
     sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
-    role_sql = root / "deploy/sql/migrations/v2.9.0_009_account_user_roles.sql"
+    role_sql = root / "deploy/sql/migrations/v2.9.0_010_account_user_roles.sql"
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",

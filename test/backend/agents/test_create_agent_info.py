@@ -5064,7 +5064,7 @@ class TestCreateAgentRunInfo:
                 "httpx_client_factory": run_preparation.create_httpx_client,
                 "headers": {
                     "X-Tenant-ID": "tenant_1",
-                    "X-Nexent-Internal-Token": run_preparation.TOKEN,
+                    "X-Nexent-Internal-Token": run_preparation.NEXENT_MCP_INTERNAL_TOKEN,
                 },
             }
 

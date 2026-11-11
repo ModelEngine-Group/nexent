@@ -1,5 +1,5 @@
 -- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
--- Account structure is finalized by 009; this migration owns operations grants.
+-- Account structure is finalized by 010; this migration owns operations grants.
 BEGIN;
 DO $ops_roles$
 BEGIN

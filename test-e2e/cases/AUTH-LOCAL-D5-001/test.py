@@ -29,7 +29,7 @@ from local_auth import disposable_database
 
 def availability_sql():
     directory = ROOT / "deploy/sql/migrations"
-    return (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8") + "\n" + (directory / "v2.9.0_009_account_user_roles.sql").read_text(encoding="utf-8")
+    return (directory / "v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8") + "\n" + (directory / "v2.9.0_010_account_user_roles.sql").read_text(encoding="utf-8")
 
 
 def initialize_legacy(dsn):

@@ -167,6 +167,6 @@ assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate.sh" ] || fail "Host Shell migration entry point is missing"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_kubernetes.sh" ] || fail "Kubernetes Shell transport is missing"
 assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" 'COPY deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql /opt/deploy/sql/migrations/' "backend image must package the worker account SQL"
-assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" 'COPY deploy/sql/migrations/v2.9.0_009_account_user_roles.sql /opt/deploy/sql/migrations/' "backend image must package the canonical account role SQL"
+assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" 'COPY deploy/sql/migrations/v2.9.0_010_account_user_roles.sql /opt/deploy/sql/migrations/' "backend image must package the canonical account role SQL"
 
 echo "All image build tests passed."

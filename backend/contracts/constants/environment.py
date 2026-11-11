@@ -288,13 +288,6 @@ WORKER_NAME = os.getenv('WORKER_NAME')
 # Keep the historical default when the variable is not provided.
 WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_COUNT + 1)))
 
-# Voice Service Configuration
-APPID = os.getenv('APPID', '')
-TOKEN = os.getenv('TOKEN', '')
-CLUSTER = os.getenv('CLUSTER', 'volcano_tts')
-VOICE_TYPE = os.getenv('VOICE_TYPE', 'zh_male_jieshuonansheng_mars_bigtts')
-SPEED_RATIO = float(os.getenv('SPEED_RATIO', '1.3'))
-
 # ===== Memory System =====
 # MMR (Maximal Marginal Relevance) configuration
 MMR_LAMBDA = float(os.getenv('MMR_LAMBDA', '0.7'))
@@ -335,6 +328,7 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(os.getenv('PROVIDER_REQUEST_TIMEOUT_SECON
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv('NEXENT_MCP_SERVER')
+NEXENT_MCP_INTERNAL_TOKEN = os.getenv('NEXENT_MCP_INTERNAL_TOKEN', '')
 MCP_MANAGEMENT_API = os.getenv('MCP_MANAGEMENT_API', 'http://localhost:5015')
 
 # Maximum number of configured MCP services per tenant.
