@@ -57,7 +57,7 @@ it.each([true, false])(
   async (tail) => {
     const parts = await run(
       [
-        { type: "model_output", content: "Checking files.", step_id: "1" },
+        { type: "model_output_thinking", content: "Checking files.", step_id: "1" },
         {
           type: "tool",
           content: "list_directory",
@@ -65,10 +65,11 @@ it.each([true, false])(
           tool_call_id: "call-1",
           step_id: "1",
         },
-        { type: "model_output", content: "Observed result.", step_id: "2" },
+        { type: "step_count", content: "2", step_id: "2" },
+        { type: "model_output_thinking", content: "Observed result.", step_id: "2" },
         {
           type: "final_answer",
-          content: "",
+          content: "Observed result.",
           step_id: "2",
           answer_phase: "complete",
           reclassify_step: true,
@@ -77,22 +78,22 @@ it.each([true, false])(
       tail
     );
     const text = parts.filter((part) => part.type === "text");
-    expect(text.map((part) => part.text)).toEqual([
-      "Checking files.",
-      "Observed result.",
-    ]);
-    expect(text[0].isIntermediateMessage).toBe(true);
-    expect(text[1].isFinalAnswer).toBe(true);
-    expect(parts.indexOf(text[0])).toBeLessThan(
+    expect(text.map((part) => part.text)).toEqual(["Observed result."]);
+    expect(text[0].isFinalAnswer).toBe(true);
+    const progress = parts.find(
+      (part) => part.type === "reasoning" && part.text.includes("Checking files.")
+    );
+    expect(progress).toBeDefined();
+    expect(parts.indexOf(progress)).toBeLessThan(
       parts.findIndex((part) => part.type === "tool-call")
     );
-    expect(parts.filter((part) => part.type === "reasoning")).toEqual([]);
   }
 );
 
 it("rolls back failed native text without erasing earlier progress", async () => {
   const parts = await run([
-    { type: "model_output", content: "Earlier progress", step_id: "1" },
+    { type: "model_output_thinking", content: "Earlier progress", step_id: "1" },
+    { type: "step_count", content: "2", step_id: "2" },
     {
       type: "model_attempt_control",
       content: "",
@@ -101,7 +102,7 @@ it("rolls back failed native text without erasing earlier progress", async () =>
       phase: "begin",
     },
     {
-      type: "model_output",
+      type: "model_output_thinking",
       content: "Partial failed answer",
       step_id: "2",
       attempt_id: "failed",
@@ -113,10 +114,10 @@ it("rolls back failed native text without erasing earlier progress", async () =>
       attempt_id: "failed",
       phase: "rollback",
     },
-    { type: "model_output", content: "Successful answer", step_id: "2" },
+    { type: "model_output_thinking", content: "Successful answer", step_id: "2" },
     {
       type: "final_answer",
-      content: "",
+      content: "Successful answer",
       step_id: "2",
       answer_phase: "complete",
       reclassify_step: true,
@@ -124,7 +125,9 @@ it("rolls back failed native text without erasing earlier progress", async () =>
   ]);
   expect(
     parts.filter((part) => part.type === "text").map((part) => part.text)
-  ).toEqual(["Earlier progress", "Successful answer"]);
+  ).toEqual(["Successful answer"]);
+  expect(JSON.stringify(parts)).toContain("Earlier progress");
+  expect(JSON.stringify(parts)).not.toContain("Partial failed answer");
 });
 
 it("restores separate persisted native messages around tools without merging their positions", async () => {
@@ -136,14 +139,14 @@ it("restores separate persisted native messages around tools without merging the
         role: "assistant",
         message_id: 5,
         message: [
-          { type: "model_output", content: "Before tool", unit_index: 0 },
+          { type: "model_output_thinking", content: "Before tool", unit_index: 0 },
           {
             type: "tool",
             content: "list_directory",
             tool_call_id: "call-1",
             unit_index: 1,
           },
-          { type: "model_output", content: "After tool", unit_index: 2 },
+          { type: "model_output_thinking", content: "After tool", unit_index: 2 },
           { type: "final_answer", content: "Final answer", unit_index: 3 },
         ],
       },
@@ -156,15 +159,14 @@ it("restores separate persisted native messages around tools without merging the
   );
   const result = await adapter.load();
   const parts = result.messages[0].message.content as any[];
-  const text = parts.filter((part) => part.type === "text");
-  expect(text.map((part) => part.text)).toEqual([
-    "Before tool",
-    "After tool",
-    "Final answer",
-  ]);
+  expect(parts.filter((part) => part.type === "text").map((part) => part.text))
+    .toEqual(["Final answer"]);
+  const reasoning = parts.filter((part) => part.type === "reasoning");
   const tool = parts.findIndex((part) => part.type === "tool-call");
-  expect(parts.indexOf(text[0])).toBeLessThan(tool);
-  expect(parts.indexOf(text[1])).toBeGreaterThan(tool);
+  expect(reasoning[0].text).toContain("Before tool");
+  expect(reasoning[1].text).toContain("After tool");
+  expect(parts.indexOf(reasoning[0])).toBeLessThan(tool);
+  expect(parts.indexOf(reasoning[1])).toBeGreaterThan(tool);
 });
 
 it.each([true, false])(
@@ -186,7 +188,7 @@ it.each([true, false])(
           step_id: "1",
         },
         {
-          type: "model_output",
+          type: "model_output_thinking",
           content: "Actual answer",
           attempt_id: "native",
           step_id: "1",
@@ -200,7 +202,7 @@ it.each([true, false])(
         },
         {
           type: "final_answer",
-          content: "",
+          content: "Actual answer",
           answer_phase: "complete",
           reclassify_step: true,
           step_id: "1",
@@ -234,18 +236,9 @@ it("restores native reasoning separately from persisted final text", async () =>
             step_id: "1",
           },
           {
-            type: "model_output",
+            type: "final_answer",
             content: "Saved answer",
             unit_index: 1,
-            step_id: "1",
-          },
-          {
-            type: "final_answer",
-            content: "",
-            unit_index: 2,
-            step_id: "1",
-            answer_phase: "complete",
-            reclassify_step: true,
           },
         ],
       },

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NATIVE-FINAL-STREAM-20261111
+  change_type: bugfix
+  bug_id: NATIVE-FINAL-STREAM-20261111
+  title: Preserve CodeAgent event names and complete answers for native chat
+  description: Native assistant content uses the existing stream type and a successful text-only stop includes the full final answer.
+  observed_behavior: Native text uses model_output and text-only completion may carry empty content.
+  expected_behavior: Stream native text as model_output_thinking, keep provider reasoning separate, and include the accepted answer in the terminal final_answer event.
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: Existing verification accepts recovery of an empty completion from earlier stream chunks.
+  feature_contract_changed: false
+  affected_features:
+    existing: [NATIVE-RUNTIME]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-NATIVE-D2-002, AGENT-NATIVE-D3-002]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Emit legacy content and provider reasoning types with separate bodies.
+    - Return the full accepted final text without including earlier reasoning or failed attempts.
+    reason: Extend existing observer, model service, and UI projection regression coverage.
+    test_selectors:
+    - test/sdk/core/agents/test_native_public_text.py
+    - test/sdk/core/model_service/test_native_service_streaming.py
+    - test/backend/utils/test_final_answer_projection.py
+  notes: Follow-up to PR4315 AC-I01 and AC-I03. The experimental host records are normalized with a one-time SQL update. Existing formal case fixtures and ownership rules apply.

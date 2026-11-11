@@ -6,88 +6,10 @@ import test from "node:test";
 import { createFinalAnswerProjection } from "../lib/finalAnswerProjection.ts";
 
 const event = (step_id: string, content: string, extra = {}) => ({
-  type: "model_output",
+  type: "model_output_thinking",
   step_id,
   content,
   ...extra,
-});
-
-test("native public text keeps its position before tools and later final output", () => {
-  const parts: any[] = [];
-  const projection = createFinalAnswerProjection(parts);
-  projection.message(event("1", "Checking "));
-  projection.message(event("1", "files."));
-  parts.push({ type: "tool-call", toolName: "list_directory" });
-  projection.message(event("2", "The result is ready."));
-  projection.apply(
-    event("2", "", {
-      type: "final_answer",
-      reclassify_step: true,
-      answer_phase: "complete",
-    })
-  );
-  assert.equal(parts.length, 3);
-  assert.equal(parts[0].text, "Checking files.");
-  assert.equal(parts[0].isIntermediateMessage, true);
-  assert.equal(parts[1].type, "tool-call");
-  assert.equal(parts[2].text, "The result is ready.");
-  assert.equal(parts[2].isFinalAnswer, true);
-  assert.equal(parts[2].isIntermediateMessage, undefined);
-});
-
-test("native retry rollback removes failed text and retains committed earlier steps", () => {
-  const parts: any[] = [];
-  const projection = createFinalAnswerProjection(parts);
-  projection.message(event("1", "Committed progress"));
-  projection.control(event("2", "", { attempt_id: "a", phase: "begin" }));
-  projection.message(event("2", "Truncated candidate"));
-  projection.control(event("2", "", { attempt_id: "a", phase: "rollback" }));
-  assert.deepEqual(
-    parts.map((part) => part.text),
-    ["Committed progress"]
-  );
-  projection.message(event("2", "Successful retry"));
-  projection.apply(
-    event("2", "", { reclassify_step: true, answer_phase: "complete" })
-  );
-  assert.deepEqual(
-    parts.map((part) => part.text),
-    ["Committed progress", "Successful retry"]
-  );
-});
-
-test("native child messages and rollback keep parent scope independent", () => {
-  const parts: any[] = [];
-  const projection = createFinalAnswerProjection(parts);
-  projection.message(event("1", "Parent"));
-  const child = { invocation_id: "child" };
-  projection.control(
-    event("1", "", { ...child, attempt_id: "child-a", phase: "begin" })
-  );
-  projection.message(event("1", "Child partial", child), { runId: "child" });
-  projection.control(
-    event("1", "", { ...child, attempt_id: "child-a", phase: "rollback" })
-  );
-  assert.deepEqual(
-    parts.map((part) => part.text),
-    ["Parent"]
-  );
-});
-
-test("native final-answer tool preserves preceding public commentary", () => {
-  const parts: any[] = [];
-  const projection = createFinalAnswerProjection(parts);
-  projection.message(event("1", "Here is the conclusion."));
-  projection.apply(
-    event("1", "Final result", {
-      type: "final_answer",
-      answer_phase: "complete",
-    })
-  );
-  assert.deepEqual(
-    parts.map((part) => part.text),
-    ["Here is the conclusion.", "Final result"]
-  );
 });
 
 test("legacy final-answer deltas and completion retain their existing single slot", () => {
@@ -101,4 +23,28 @@ test("legacy final-answer deltas and completion retain their existing single slo
   );
   assert.equal(parts.length, 1);
   assert.equal(parts[0].text, "Answer");
+});
+
+test("legacy text events promote only the final native step and preserve provider reasoning", () => {
+  const earlier = { type: "reasoning", text: "Checking files." };
+  const tool = { type: "tool-call", toolName: "list_directory" };
+  const last = { type: "reasoning", text: "Provider reasoning.Final answer" };
+  const parts: any[] = [earlier, tool, last];
+  const projection = createFinalAnswerProjection(parts);
+
+  projection.recordReasoning(event("1", earlier.text, { type: "model_output_thinking" }), earlier);
+  projection.recordReasoning(event("2", "Provider reasoning.", { type: "model_output_deep_thinking" }), last);
+  projection.recordReasoning(event("2", "Final answer", { type: "model_output_thinking" }), last);
+  projection.apply(event("2", "Final answer", {
+    type: "final_answer",
+    answer_phase: "complete",
+    reclassify_step: true,
+  }));
+
+  assert.equal(parts.length, 4);
+  assert.equal(parts[0], earlier);
+  assert.equal(parts[1], tool);
+  assert.equal(parts[2].text, "Provider reasoning.");
+  assert.equal(parts[3].text, "Final answer");
+  assert.equal(parts[3].isFinalAnswer, true);
 });

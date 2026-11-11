@@ -39,7 +39,6 @@ _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
 
 
 class ProcessType(Enum):
-    MODEL_OUTPUT = "model_output"  # public assistant text, independent of run completion
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
@@ -207,17 +206,16 @@ class MessageObserver:
         self._step_output()["reclassify_step"] = True
 
     def complete_final_answer(self, agent_name: str, answer: str) -> None:
-        """Finalize the existing answer slot without appending its body twice."""
+        """Publish the accepted answer and its projection instructions."""
         state = self._step_output()
         streamed = "".join(state.get("answer", []))
-        if state.get("reclassify_step"):
-            streamed = "".join(state.get("body", []))
+        reclassify_step = state.get("reclassify_step", False)
         state["accepted_answer"] = answer
         self._emit(
             ProcessType.FINAL_ANSWER,
-            "" if streamed and streamed.strip() == answer.strip() else answer,
+            "" if not reclassify_step and streamed and streamed.strip() == answer.strip() else answer,
             agent_name=agent_name,
-            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
+            metadata={"answer_phase": "complete", "reclassify_step": reclassify_step},
         )
 
     @property
@@ -273,7 +271,6 @@ class MessageObserver:
         default_transformer = DefaultTransformer()
 
         self.transformers = {
-            ProcessType.MODEL_OUTPUT: default_transformer,
             ProcessType.AGENT_NEW_RUN: default_transformer,
             ProcessType.STEP_COUNT: StepCountTransformer(),
             ProcessType.PARSE: ParseTransformer(),
@@ -348,9 +345,6 @@ class MessageObserver:
             agent_id if explicit_agent_id else (agent_id or active_agent_id)
         )
         resolved_depth = depth if depth is not None else self._current_depth.get()
-        if process_type in {ProcessType.MODEL_OUTPUT, ProcessType.MODEL_OUTPUT_THINKING, ProcessType.MODEL_OUTPUT_CODE}:
-            state = self._step_output()
-            state.setdefault("body", []).append(str(content))
         metadata = dict(metadata or {})
         step_id = self._step_output().get("step_id")
         if step_id:
@@ -369,7 +363,6 @@ class MessageObserver:
                 attempt_id=(
                     self._model_attempt_id.get()
                     if process_type in {
-                        ProcessType.MODEL_OUTPUT,
                         ProcessType.MODEL_OUTPUT_THINKING,
                         ProcessType.MODEL_OUTPUT_DEEP_THINKING,
                         ProcessType.MODEL_OUTPUT_CODE,
@@ -389,7 +382,6 @@ class MessageObserver:
         self.legacy_code_fence_pending = False
         self._stream_state.in_final_answer = False
         self._step_output().pop("answer", None)
-        self._step_output().pop("body", None)
         self._step_output().pop("accepted_answer", None)
         self._step_output().pop("reclassify_step", None)
 
@@ -420,9 +412,9 @@ class MessageObserver:
         self._model_attempt_id.set(None)
 
     def add_assistant_text_delta(self, text: str) -> None:
-        """Stream public native content without interpreting legacy control tags."""
+        """Use the legacy text event for native content without parsing control tags."""
         if text:
-            self._emit(ProcessType.MODEL_OUTPUT, text)
+            self._emit(ProcessType.MODEL_OUTPUT_THINKING, text)
 
     def add_model_new_token(self, new_token):
         """Stream safe text immediately while retaining only incomplete protocol tags."""

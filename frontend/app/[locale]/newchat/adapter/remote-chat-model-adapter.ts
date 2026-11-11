@@ -715,7 +715,6 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "tool":
       return "tool-call";
     case "final_answer":
-    case "model_output":
     case "agent_run_info":
     case "user_input":
     case "agent_finish":
@@ -2559,17 +2558,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          if (chunk.type === "model_output") {
-            const top = resolveSubAgent(chunk.invocation_id);
-            flushOpenReasoning(chunk.invocation_id);
-            finalAnswers.message(
-              chunk,
-              top ? subAgentMetadataFor(top) : undefined
-            );
-            yield buildStreamResult(contentParts);
-            continue;
-          }
-
           if (chunk.type === "final_answer") {
             const top = resolveSubAgent(chunk.invocation_id);
             if (chunk.reclassify_step) {
@@ -3022,15 +3010,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "step_count" && isNl2Skill) {
             // The buffered SSE tail follows the live NL2Skill rule too.
           } else {
-            if (chunk.type === "model_output") {
-              const top = resolveSubAgent(chunk.invocation_id);
-              flushOpenReasoning(chunk.invocation_id);
-              finalAnswers.message(
-                chunk,
-                top ? subAgentMetadataFor(top) : undefined
-              );
-              yield buildStreamResult(contentParts);
-            } else if (chunk.type === "final_answer") {
+            if (chunk.type === "final_answer") {
               const top = resolveSubAgent(chunk.invocation_id);
               if (chunk.reclassify_step) {
                 if (top) top.slot.reasoningIdx = null;
@@ -3049,9 +3029,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning();
             }
             const partType =
-              chunk.type === "final_answer" || chunk.type === "model_output"
-                ? null
-                : mapChunkType(chunk.type);
+              chunk.type === "final_answer" ? null : mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {

@@ -128,9 +128,9 @@ def test_normal_mixed_generation_then_stop(provider):
     assert str(agent.run('Use effect then report the observation.')) == 'FINAL_OBSERVED'
     assert tool.executions == 1
     events = [json.loads(value) for value in model.observer.message_query]
-    public = [value['content'] for value in events if value['type']=='model_output']
+    public = [value['content'] for value in events if value['type']=='model_output_thinking']
     assert ''.join(public) == 'Checking now.FINAL_OBSERVED'
-    assert not any(value['type']=='model_output_thinking' for value in events)
+    assert not any(value['type']=='model_output' for value in events)
     assert ''.join(value['content'] for value in events if value['type']=='model_output_deep_thinking') == 'Provider reasoning.Provider reasoning.'
     assert all(value.get('attempt_id') for value in events if value['type']=='model_output_deep_thinking')
     assert len(requests) == 2

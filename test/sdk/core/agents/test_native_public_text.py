@@ -7,7 +7,7 @@ import json
 from nexent.core.utils.observer import MessageObserver, ProcessType
 
 
-def test_public_text_is_not_parsed_as_thinking_or_code():
+def test_public_text_uses_legacy_event_without_parsing_control_tags():
     observer = MessageObserver(lang="en")
     observer.add_message("", ProcessType.STEP_COUNT, "1")
     observer.begin_model_attempt("native-attempt", 1)
@@ -20,7 +20,7 @@ def test_public_text_is_not_parsed_as_thinking_or_code():
         "native", "<think>literal text</think><code>display only</code>"
     )
     events = [json.loads(message) for message in observer.message_query]
-    public = [event for event in events if event["type"] == "model_output"]
+    public = [event for event in events if event["type"] == "model_output_thinking"]
     assert len(public) == 1
     assert (
         public[0]["content"] == "<think>literal text</think><code>display only</code>"
@@ -29,12 +29,12 @@ def test_public_text_is_not_parsed_as_thinking_or_code():
     assert public[0]["step_id"]
     assert not any(
         event["type"]
-        in ("model_output_thinking", "model_output_code", "model_output_deep_thinking")
+        in ("model_output", "model_output_code", "model_output_deep_thinking")
         for event in events
     )
     final = [event for event in events if event["type"] == "final_answer"]
     assert len(final) == 1
-    assert final[0]["content"] == ""
+    assert final[0]["content"] == public[0]["content"]
     assert final[0]["answer_phase"] == "complete"
     assert final[0]["reclassify_step"] is True
 
@@ -50,7 +50,6 @@ def test_public_text_attempt_rollback_does_not_pollute_accepted_answer():
     observer.commit_model_attempt("second", 2)
     observer.mark_direct_final_answer()
     observer.complete_final_answer("native", "Accepted")
-    assert observer._step_output()["body"] == ["Accepted"]
     events = [json.loads(message) for message in observer.message_query]
     assert any(
         event["type"] == "model_attempt_control" and event.get("phase") == "rollback"
@@ -58,7 +57,7 @@ def test_public_text_attempt_rollback_does_not_pollute_accepted_answer():
     )
     assert (
         next(event for event in events if event["type"] == "final_answer")["content"]
-        == ""
+        == "Accepted"
     )
 
 
@@ -73,7 +72,6 @@ def test_provider_reasoning_cannot_be_promoted_to_final_answer():
     observer.commit_model_attempt("reasoning", 1)
     observer.mark_direct_final_answer()
     observer.complete_final_answer("native", "Actual public answer")
-    assert observer._step_output()["body"] == ["Actual public answer"]
     events = [json.loads(value) for value in observer.message_query]
     reasoning = [e for e in events if e["type"] == "model_output_deep_thinking"]
     assert len(reasoning) == 1
@@ -81,7 +79,7 @@ def test_provider_reasoning_cannot_be_promoted_to_final_answer():
     assert reasoning[0]["step_id"]
     final = [e for e in events if e["type"] == "final_answer"]
     assert len(final) == 1 and final[0]["answer_phase"] == "complete"
-    assert "Provider reasoning" not in final[0]["content"]
+    assert final[0]["content"] == "Actual public answer"
 
 
 import pytest
@@ -119,6 +117,6 @@ def test_raw_native_collector_forwards_reasoning_alias_once(aliases):
         == "Provider thought"
     )
     assert (
-        "".join(e["content"] for e in events if e["type"] == "model_output") == "Final"
+        "".join(e["content"] for e in events if e["type"] == "model_output_thinking") == "Final"
     )
     assert wire["content"] == "Final" and reason == "stop"

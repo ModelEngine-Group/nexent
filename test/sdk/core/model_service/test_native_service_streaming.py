@@ -87,7 +87,7 @@ def test_reasoning_and_public_text_are_emitted_once_separately(
         == reasoning
     )
     assert (
-        "".join(e["content"] for e in events if e["type"] == "model_output")
+        "".join(e["content"] for e in events if e["type"] == "model_output_thinking")
         == "Public answer"
     )
     assert not any(e["type"] == "final_answer" for e in events)
@@ -290,7 +290,7 @@ def test_completion_only_intermediate_text_and_tool_calls_are_preserved(native_p
     )
     assert result.tool_calls[0].id == "call"
     events = [json.loads(e) for e in delegate.observer.message_query]
-    assert [e["content"] for e in events if e["type"] == "model_output"] == ["Checking"]
+    assert [e["content"] for e in events if e["type"] == "model_output_thinking"] == ["Checking"]
     assert [
         e["content"] for e in events if e["type"] == "model_output_deep_thinking"
     ] == ["Provider thought"]

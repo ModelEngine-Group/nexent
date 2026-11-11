@@ -53,8 +53,8 @@ def test_reasoning_stream_and_unchanged_definition(model_index):
         token_events = [json.loads(e["content"]) for e in events if e.get("type") == "token_count"]
         assert token_events
         assert token_events[-1]["output_finish_reason"] in {"stop", "tool_calls"}
-        answer = finals[0].get("content") or "".join(str(e.get("content", "")) for e in events
-            if e.get("step_id") == finals[0].get("step_id") and e.get("type") == "model_output")
+        assert not any(e.get("type") == "model_output" for e in events)
+        answer = finals[0]["content"]
         assert "323" in answer
         after = definition_hash(client, config, headers, agent_id)
         assert after == before

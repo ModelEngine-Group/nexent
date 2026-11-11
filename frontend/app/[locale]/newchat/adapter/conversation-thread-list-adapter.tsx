@@ -1200,31 +1200,18 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          if (part.type === "model_output") {
-            flushReasoning(part.invocation_id);
-            finalAnswers.message(
-              {
-                ...part,
-                step_id:
-                  part.step_id ?? `stored-${part.unit_index ?? partIndex}`,
-              },
-              buildMetadata(part.invocation_id)
-            );
-            continue;
-          }
-
           if (
             part.type === "final_answer" &&
             !isClarificationFallback(content, part.content)
           ) {
             flushReasoning(part.invocation_id);
-            if (part.content || part.answer_phase === "complete") {
+            if (part.content) {
               const meta = buildMetadata(part.invocation_id);
               finalAnswers.apply(
                 {
                   ...part,
                   content: unwrapFinalAnswer(part.content),
-                  answer_phase: part.answer_phase ?? "delta",
+                  answer_phase: "delta",
                 },
                 meta
               );

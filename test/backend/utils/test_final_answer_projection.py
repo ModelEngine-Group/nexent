@@ -139,24 +139,26 @@ def test_step_without_answer_is_not_removed_and_empty_buffer_is_supported():
 
 
 def test_native_final_promotes_only_its_public_text_step():
-    progress = unit("model_output", "Checking files", "first")
+    progress = unit("model_output_thinking", "Checking files", "first")
     tool = unit("tool", "list_directory", "first")
-    answer = unit("model_output", "", "last", _content_fragments=["Observed ", "result"])
+    answer = unit("model_output_thinking", "", "last", _content_fragments=["Observed ", "result"])
     units = [progress, tool, answer]
     assert not resolve_answer_completion(units, {
         "answer_phase": "complete", "step_id": "last", "reclassify_step": True, "content": "",
     })
-    assert units[0] is progress and progress["type"] == "model_output"
+    assert units[0] is progress and progress["type"] == "model_output_thinking"
     assert units[1] is tool
     assert units[2]["type"] == "final_answer"
     assert units[2]["_content_fragments"] == ["Observed ", "result"]
 
 
 def test_native_canonical_final_replaces_only_same_step_public_text():
-    progress = unit("model_output", "Earlier progress", "first")
-    candidate = unit("model_output", "Unverified candidate", "last")
-    units = [progress, candidate]
+    text_type = "model_output_thinking"
+    progress = unit(text_type, "Earlier progress", "first")
+    reasoning = unit("model_output_deep_thinking", "Provider reasoning", "last")
+    candidate = unit(text_type, "Unverified candidate", "last")
+    units = [progress, reasoning, candidate]
     assert resolve_answer_completion(units, {
         "answer_phase": "complete", "step_id": "last", "reclassify_step": True, "content": "Verified final",
     })
-    assert units == [progress]
+    assert units == [progress, reasoning]

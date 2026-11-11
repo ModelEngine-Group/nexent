@@ -20,7 +20,6 @@ export function createFinalAnswerProjection(
 ) {
   const answers = new Map<string, any>();
   const labels = new Map<string, string>();
-  const messages = new Map<string, any>();
   const reasoning = new Map<
     string,
     { part: any; deep: string; body: string }
@@ -33,28 +32,11 @@ export function createFinalAnswerProjection(
       text: string;
       stepId?: string;
       reasoning: [string, { part: any; deep: string; body: string }][];
-      messages: [string, { part: any; text: string }][];
     }
   >();
   const scope = (event: AnswerEvent) => event.invocation_id ?? "parent";
   const step = (event: AnswerEvent) => `${scope(event)}/${event.step_id ?? ""}`;
   return {
-    message(event: AnswerEvent, metadata?: object) {
-      if (!event.content) return;
-      const key = step(event);
-      let part = messages.get(key);
-      if (!part) {
-        part = {
-          type: "text",
-          text: "",
-          isIntermediateMessage: true,
-          ...(metadata && { metadata }),
-        };
-        messages.set(key, part);
-        parts.push(part);
-      }
-      part.text += event.content;
-    },
     recordStep(event: AnswerEvent) {
       labels.set(step(event), event.content);
     },
@@ -78,9 +60,6 @@ export function createFinalAnswerProjection(
           part,
           text: part?.text ?? "",
           stepId: part?.answerStepId,
-          messages: [...messages]
-            .filter(([id]) => id.startsWith(key + "/"))
-            .map(([id, part]) => [id, { part, text: part.text }]),
           reasoning: [...reasoning]
             .filter(([id]) => id.startsWith(key + "/"))
             .map(([id, entry]) => [id, { ...entry }]),
@@ -89,18 +68,6 @@ export function createFinalAnswerProjection(
         const checkpoint = attempts.get(event.attempt_id);
         attempts.delete(event.attempt_id);
         if (event.phase !== "rollback" || !checkpoint) return;
-        for (const [id, part] of messages) {
-          if (!id.startsWith(checkpoint.scope + "/")) continue;
-          if (!checkpoint.messages.some(([savedId]) => savedId === id)) {
-            const index = parts.indexOf(part);
-            if (index >= 0) remove(index);
-            messages.delete(id);
-          }
-        }
-        for (const [id, saved] of checkpoint.messages) {
-          saved.part.text = saved.text;
-          messages.set(id, saved.part);
-        }
         for (const id of reasoning.keys()) {
           if (id.startsWith(checkpoint.scope + "/")) reasoning.delete(id);
         }
@@ -120,14 +87,6 @@ export function createFinalAnswerProjection(
     },
     apply(event: AnswerEvent, metadata?: object) {
       let content = event.content;
-      const message = messages.get(step(event));
-      if (event.reclassify_step && message) {
-        if (content) message.text = content;
-        delete message.isIntermediateMessage;
-        message.isFinalAnswer = true;
-        answers.set(scope(event), message);
-        return;
-      }
       if (event.reclassify_step && event.step_id) {
         for (const [key, entry] of reasoning) {
           if (key !== step(event)) continue;
