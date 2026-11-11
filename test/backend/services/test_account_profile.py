@@ -12,15 +12,17 @@ from management.db.models import UserAccount, UserTenant
 
 
 def test_profile_fields_belong_only_to_account_table():
-    assert {"user_role", "user_email"} <= set(UserAccount.__table__.columns.keys())
+    assert {"user_roles", "user_email"} <= set(UserAccount.__table__.columns.keys())
+    assert {"user_role", "roles"}.isdisjoint(UserAccount.__table__.columns.keys())
     assert "email" not in UserAccount.__table__.columns
-    assert {"user_role", "user_email"}.isdisjoint(UserTenant.__table__.columns.keys())
+    assert {"user_role", "user_email", "roles"}.isdisjoint(UserTenant.__table__.columns.keys())
 
 
 def test_account_dictionary_preserves_public_email_contract():
-    result = account._account_dict(UserAccount(user_id="identity", user_email="user@example.com", user_role="DEV"))
+    result = account._account_dict(UserAccount(user_id="identity", user_email="user@example.com", user_roles=["DEV", "OPS"]))
     assert result["email"] == result["user_email"] == "user@example.com"
     assert result["user_role"] == "DEV"
+    assert result["roles"] == ["DEV", "OPS"]
 
 
 def test_missing_account_profile_rejected(mocker):
@@ -31,19 +33,21 @@ def test_missing_account_profile_rejected(mocker):
     session.execute.assert_not_called()
 
 
-def test_role_update_writes_account_and_keeps_existing_email(mocker):
+@pytest.mark.parametrize("roles", [None, ["OPS", "DEV", "OPS"]])
+def test_role_update_writes_account_and_keeps_existing_email(mocker, roles):
     mocker.patch.object(account, "get_account", return_value={"user_id": "identity"})
     session = MagicMock()
-    account.set_account_profile("identity", "DEV", None, "actor", session)
+    account.set_account_profile("identity", "DEV", None, "actor", session, roles=roles)
     statement = session.execute.call_args.args[0].compile(dialect=postgresql.dialect())
     assert "UPDATE nexent.user_account_t" in str(statement)
-    assert statement.params["user_role"] == "DEV"
+    assert "user_role" not in statement.params and "roles" not in statement.params
+    assert statement.params["user_roles"] == (["DEV"] if roles is None else ["DEV", "OPS"])
     assert "user_email" not in statement.params
 
 
 def test_duplicate_profile_email_rejected(mocker):
-    mocker.patch.object(account, "get_account", return_value={"user_id":"identity"})
-    mocker.patch.object(account, "get_account_by_email", return_value={"user_id":"other"})
+    mocker.patch.object(account, "get_account", return_value={"user_id": "identity"})
+    mocker.patch.object(account, "get_account_by_email", return_value={"user_id": "other"})
     mocker.patch.object(account, "lock_account_keys")
     session = MagicMock()
     with pytest.raises(AccountConflictError):

@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
@@ -9,7 +9,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import {
   useMyEditableSkillCounts,
@@ -31,7 +31,7 @@ export default function SkillRepositoryPage() {
   const { pageVariants, pageTransition } = useSetupFlow();
   const searchParams = useSearchParams();
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = hasRole(user, "ADMIN");
   const [tab, setTab] = useState<SkillRepositoryTab>(
     SkillRepositoryTab.REPOSITORY
   );

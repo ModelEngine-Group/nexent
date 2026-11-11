@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,7 +37,7 @@ import ExpandEditModal from "@/components/common/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import ManageOfficialAgentsModal from "@/components/agent/ManageOfficialAgentsModal";
-import { USER_ROLES } from "@/const/auth";
+
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Text } = Typography;
@@ -70,7 +70,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
-  const canManageOfficialAgents = user?.role === USER_ROLES.SU;
+  const canManageOfficialAgents = hasRole(user, "SU");
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
 
@@ -82,10 +82,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view modal state
   const [fullscreenEdit, setFullscreenEdit] = useState<{
     visible: boolean;
-    field:
-      | "description"
-      | "prompt"
-      | null;
+    field: "description" | "prompt" | null;
     title: string;
     value: string;
   }>({
@@ -257,8 +254,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
 
   // Fullscreen view handlers
   const openFullscreenEdit = (
-    field:
-      "description" | "prompt",
+    field: "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";

@@ -42,7 +42,6 @@ def test_invalid_authorization_syntax_is_rejected(header):
 
 @pytest.fixture
 def session_policy(monkeypatch):
-    monkeypatch.setattr(identity, "IS_SPEED_MODE", False)
     monkeypatch.setattr(identity, "require_active_account", lambda uid: {"token_version": 0})
     monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
     monkeypatch.setattr(
@@ -124,7 +123,7 @@ def test_api_key_policy_uses_database_identity(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        northbound, "get_user_tenant_by_user_id", lambda _: {"tenant_id": "key-tenant"}
+        northbound, "get_user_tenant_by_user_id", lambda _: {"tenant_id": "key-tenant", "roles": ["USER"]}
     )
     principal = authenticate_identity("Bearer key", CredentialKind.API_KEY)
     assert (principal.user_id, principal.tenant_id, principal.token_id) == (

@@ -1,0 +1,121 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-MULTI-ROLE-D2-001
+  feature_id: AUTH-MULTI-ROLE
+  requirement_ids:
+  - AUTH-MULTI-ROLE-20261031
+  business_rule_ids:
+  - AUTH-MULTI-ROLE-RULE-01
+  - AUTH-MULTI-ROLE-RULE-02
+  - AUTH-MULTI-ROLE-RULE-05
+  - AUTH-MULTI-ROLE-RULE-06
+  - AUTH-MULTI-ROLE-RULE-07
+  - AUTH-MULTI-ROLE-RULE-08
+  title: 角色集合响应保持权限并集与旧请求兼容
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 角色集合响应保持权限并集与旧请求兼容
+  preconditions:
+  - Current-source management and required operations permission entry shell are available in an isolated test deployment.
+  - Logical fixture accounts su, tenant_a_admin_1, tenant_a_admin_2, tenant_a_user and tenant_b_admin have isolated
+    owned data.
+  - No mutation touches shared users; cleanup uses the fixture SU account and keeps all evidence outside Git.
+  test_data:
+    tenants:
+    - tenant_a
+    - tenant_b
+    ordinary_roles:
+    - ADMIN
+    - DEV
+    - USER
+    - OPS
+  steps:
+  - order: 1
+    action: As SU assign DEV plus OPS to tenant_a_user, then read /user/current_user_info using that user session.
+    expected: Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes
+      contain both grants without duplicate entries.
+  - order: 2
+    action: Assign OPS only, ADMIN plus OPS, and SU fixtures in turn; read permission metadata and use resource
+      read/write routes such as GET /ops/resources and POST /model/create with valid owned fixture payloads.
+    expected: Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business
+      writes return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is
+      own tenant.
+  - order: 3
+    action: Submit old role-only update for a single ordinary-role target, then repeat against a multi-role target
+      and submit role with roles together.
+    expected: Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input
+      is rejected by the documented validation contract; unknown and empty role sets are rejected.
+  - order: 4
+    action: With valid SU or ADMIN fixtures attempt user and invitation grants containing SPEED, then request protected
+      identity and resource APIs without credentials after disabling old speed-mode fallback.
+    expected: SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead of
+      an implicit SPEED identity; ASSET_OWNER feature gating and special-resource decisions retain the original
+      contract.
+  expected_results:
+  - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
+    both grants without duplicate entries.
+  - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
+    return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
+  - Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input is rejected
+    by the documented validation contract; unknown and empty role sets are rejected.
+  - SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead of an implicit
+    SPEED identity; ASSET_OWNER feature gating and special-resource decisions retain the original contract.
+  forbidden_side_effects:
+  - Changing another tenant data, returning secret fields, or granting pure OPS user-management or business-edit
+    capabilities.
+  acceptance:
+  - id: AC-01
+    description: Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes
+      contain both grants without duplicate entries.
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads,
+      business writes return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS
+      scope is own tenant.
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous
+      input is rejected by the documented validation contract; unknown and empty role sets are rejected.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-04
+    description: SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead
+      of an implicit SPEED identity; ASSET_OWNER feature gating and special-resource decisions retain the original
+      contract.
+    steps:
+    - 4
+    expected_results:
+    - 4
+  contract:
+    protocol: HTTP JSON
+    request_expectations:
+    - As SU assign DEV plus OPS to tenant_a_user, then read /user/current_user_info using that user session.
+    - Assign OPS only, ADMIN plus OPS, and SU fixtures in turn; read permission metadata and use resource read/write
+      routes such as GET /ops/resources and POST /model/create with valid owned fixture payloads.
+    - Submit old role-only update for a single ordinary-role target, then repeat against a multi-role target and
+      submit role with roles together.
+    - With valid SU or ADMIN fixtures attempt user and invitation grants containing SPEED, then request protected
+      identity and resource APIs without credentials after disabling old speed-mode fallback.
+    response_expectations:
+    - Response retains its original envelope, includes both roles once, and permissions and accessibleRoutes contain
+      both grants without duplicate entries.
+    - Pure OPS receives exactly the three approved entry grants and permitted tenant resource reads, business writes
+      return 403; ADMIN plus OPS retains ADMIN grants; SU operations scope is all tenants and OPS scope is own tenant.
+    - Single-role compatibility succeeds, multi-role target returns 409 without truncation, ambiguous input is rejected
+      by the documented validation contract; unknown and empty role sets are rejected.
+    - SPEED grant inputs are rejected with no persisted change; missing credentials return 401 instead of an implicit
+      SPEED identity; ASSET_OWNER feature gating and special-resource decisions retain the original contract.

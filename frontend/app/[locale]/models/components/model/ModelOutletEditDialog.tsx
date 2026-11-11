@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Modal, Spin } from "antd";
@@ -38,7 +39,7 @@ export function ModelOutletEditDialog({
     (!("reviewed_revision" in migration) ||
       typeof migration.reviewed_revision !== "number" ||
       migration.reviewed_revision <= 0);
-  const admin = user?.role === "SU" || user?.role === "ADMIN";
+  const admin = hasRole(user, "SU", "ADMIN");
   return (
     <Modal
       open

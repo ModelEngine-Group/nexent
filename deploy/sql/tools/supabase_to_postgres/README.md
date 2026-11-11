@@ -24,7 +24,7 @@ from the target's pre-upgrade backup; Supabase cannot reconstruct application ro
 | --- | --- | --- |
 | Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
 | Historical account import | Host Shell `migrate.sh --apply` runs before HTTPS/core service startup | Host Shell `migrate.sh --deployment kubernetes --apply` runs before application Secret replacement and application Helm rollout |
-| Target transaction | Recheck account coverage under the account-writer lock, run consolidated 001, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
+| Target transaction | Recheck account coverage under the account-writer lock, run historical 001 and account-array 009, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
 | Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
@@ -46,7 +46,7 @@ An existing incomplete table is not imported into or modified automatically.
 For a new migration, failed validation rolls back the new table, exclusions and
 profile moves before commit. Completed local accounts are preserved on rerun.
 
-`v2.9.0_001_local_user_accounts.sql` creates the final schema directly, without
+The immutable `v2.9.0_001_local_user_accounts.sql` creates the legacy account schema, without
 `account_status` or pending placeholders. Legacy status columns are converted to
 `delete_flag` and dropped inside the same transaction; ordinary replay never
 recreates them. Existing soft-deleted accounts, credentials and operator changes
@@ -55,6 +55,13 @@ execution history is retained. Transaction-local membership profiles supply role
 and emails to the importer without persisting unavailable ordinary identities.
 Active CAS/OAuth bindings remain in the project database; provider-only accounts
 have no local password login, while actual local password credentials retain it.
+
+The final account schema stores only `user_roles`; scalar response roles are
+computed. The importer applies 009 after historical 001 inside the same transaction
+and writes only the array. Inspection recognizes both layouts without recreating
+columns. Historical replay is followed by 009, which preserves existing arrays
+and drops any restored scalar column. Operations grants remain in independent
+010; account recovery has no dependency on operations tables.
 
 ## Prepare the upgrade
 
@@ -66,7 +73,7 @@ acceptance completes.
 The host needs Bash and Docker CLI, or Bash and kubectl with access to the original
 namespace. **No host Python, pip, PostgreSQL driver or jq is required.** The selected
 `NEXENT_IMAGE` must package the current Python worker, its existing psycopg2
-runtime, and `v2.9.0_001_local_user_accounts.sql`. Standard deployment selects that
+runtime, `v2.9.0_001_local_user_accounts.sql`, and `v2.9.0_009_account_user_roles.sql`. Standard deployment selects that
 image automatically; preload it for offline deployment. The independent gateway
 image is not the migration image.
 
@@ -201,12 +208,13 @@ source-directory deletion. No recovery or migration command needs host Python.
 | Supabase password users | Preserve UUID, compatible bcrypt/scrypt hash, source timestamps, email confirmation and bounded provider metadata |
 | Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
 | API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
-| Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. Speed mode retains its existing demo context |
+| Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. The retired SPEED role is removed without granting replacement permissions |
 | Unknown/custom identities | Unresolved active members stop migration with IDs; recover source/business profiles without generating replacement IDs or roles |
 | CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Preserve original IDs and valid bindings. Provider-only identities stay passwordless; accounts with actual local password credentials retain password login. Import Supabase credentials only where those source identities exist |
 | Audit and refresh data | Do not read/import `auth.audit_log_entries`, Supabase sessions, refresh tokens or recovery/confirmation secrets. No audit archive is created |
 
-Canonical `user_email` and `user_role` move from `user_tenant_t` to the account;
+Canonical `user_email` and the legacy role move from `user_tenant_t` to the account.
+The role is stored only in `user_roles`; scalar API values are derived from that array;
 tenant, group, key and business ownership remain unchanged. Provider metadata
 never supplies an application role. `source` counts rows read from the original source.
 `updated` counts hydrated legacy profiles,

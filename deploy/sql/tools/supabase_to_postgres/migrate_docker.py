@@ -159,9 +159,10 @@ def _account_import_sql(source_rows, *, dry_run=False):
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
     schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    roles_schema = (ROOT / "deploy/sql/migrations/v2.9.0_009_account_user_roles.sql").read_text(encoding="utf-8")
     return "SET LOCAL standard_conforming_strings=on;\n" + inspection_sql() + r"""
 SET LOCAL nexent.account_import='on';
-""" + schema + "\n" + r"""
+""" + schema + "\n" + roles_schema + "\n" + r"""
 CREATE TABLE IF NOT EXISTS nexent.account_migration_exclusion_t (
     exclusion_id SERIAL PRIMARY KEY,
     user_id VARCHAR(100) NOT NULL UNIQUE,
@@ -183,7 +184,7 @@ COMMENT ON COLUMN nexent.account_migration_exclusion_t.update_time IS 'UTC exclu
 COMMENT ON COLUMN nexent.account_migration_exclusion_t.delete_flag IS 'N for applicable historical exclusion, Y for retired evidence';
 
 CREATE TEMP TABLE account_import ON COMMIT DROP AS
-SELECT s.*, (s.delete_flag='Y') AS source_inactive, coalesce(p.role_value,a.user_role) AS role_value,
+SELECT s.*, (s.delete_flag='Y') AS source_inactive, coalesce(CASE WHEN p.role_value IS NOT NULL THEN ARRAY[p.role_value]::varchar[] END,a.user_roles) AS role_values,
        coalesce(p.email_value,a.user_email) AS profile_email,
        (p.user_id IS NOT NULL OR a.user_id IS NOT NULL) AS existing,
        NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u
@@ -191,7 +192,7 @@ SELECT s.*, (s.delete_flag='Y') AS source_inactive, coalesce(p.role_value,a.user
 FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s
 LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=s.user_id
 LEFT JOIN nexent.user_account_t a ON a.user_id=s.user_id;
-UPDATE account_import SET delete_flag='Y' WHERE orphan OR nullif(trim(role_value),'') IS NULL;
+UPDATE account_import SET delete_flag='Y' WHERE orphan OR role_values IS NULL OR cardinality(role_values)=0;
 DO $validate$
 DECLARE conflict_ids json;
 BEGIN
@@ -205,15 +206,15 @@ BEGIN
 END
 $validate$;
 UPDATE nexent.user_account_t a SET
-    user_email=s.user_email,user_role=s.role_value,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
+    user_email=s.user_email,user_roles=s.role_values,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
     password_login_enabled=s.password_login_enabled,token_version=s.token_version,
     email_confirmed_at=s.email_confirmed_at,source_metadata=s.source_metadata,
     create_time=s.create_time,update_time=s.update_time,delete_flag=s.delete_flag,updated_by='auth-migration'
 FROM account_import s WHERE a.user_id=s.user_id;
 INSERT INTO nexent.user_account_t
-    (user_id,user_email,user_role,password_hash,password_hash_scheme,password_login_enabled,token_version,
+    (user_id,user_email,user_roles,password_hash,password_hash_scheme,password_login_enabled,token_version,
      email_confirmed_at,source_metadata,create_time,update_time,delete_flag,created_by,updated_by)
-SELECT user_id,user_email,role_value,password_hash,password_hash_scheme,password_login_enabled,token_version,
+SELECT user_id,user_email,role_values,password_hash,password_hash_scheme,password_login_enabled,token_version,
        email_confirmed_at,source_metadata,create_time,update_time,delete_flag,'auth-migration','auth-migration'
 FROM account_import s WHERE delete_flag='N'
 AND NOT EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id);

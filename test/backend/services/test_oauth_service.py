@@ -260,6 +260,12 @@ oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
 sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
 
+# Provider helpers do not execute account completion or tenant provisioning.
+sys.modules["management.services.permission.identity.authentication"] = MagicMock()
+sys.modules["management.services.permission.identity.groups"] = MagicMock()
+sys.modules["management.services.permission.identity.invitations"] = MagicMock()
+sys.modules["management.services.tool.configuration"] = MagicMock()
+
 import management.services.permission.identity.oauth as oauth_service_module
 oauth_service_module.DEFAULT_TENANT_ID = "default-tenant-id"
 from gateway.authentication.auth import parse_state, parse_pending_oauth_token
@@ -704,8 +710,7 @@ class TestFindLocalAccountUserIdByEmail(unittest.TestCase):
 
     def test_lookup_uses_local_account_store(self):
         from unittest.mock import patch
-        with patch.dict(sys.modules, {"management.db.identity.account": MagicMock()}) as modules:
-            lookup = modules["management.db.identity.account"].get_account_by_email
+        with patch("management.services.permission.identity.oauth.get_account_by_email") as lookup:
             lookup.return_value = {"user_id": "stable-user"}
             self.assertEqual(find_account_user_id_by_email("existing@example.com"), "stable-user")
             lookup.assert_called_once_with("existing@example.com")

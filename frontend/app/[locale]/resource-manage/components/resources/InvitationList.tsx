@@ -1,4 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
+
+import { getRoleColor } from "@/lib/auth";
+import log from "@/lib/logger";
+import { hasRole, roleLabelKey } from "@/lib/roles";
+import { isSessionExpired } from "@/const/errorCode";
+import { ApiError } from "@/services/api";
 
 import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,7 +23,7 @@ import {
   Collapse,
   DatePicker,
   Progress,
-  Tooltip 
+  Tooltip,
 } from "antd";
 import { copyToClipboard } from "@/lib/clipboard";
 import { ColumnsType } from "antd/es/table";
@@ -48,7 +55,6 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import {
   ASSET_OWNER_INVITE_CODE_TYPE,
   ASSET_OWNER_TENANT_ID,
-  USER_ROLES,
 } from "@/const/auth";
 
 const { Panel } = Collapse;
@@ -63,9 +69,9 @@ export default function InvitationList({
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
-  const userRole = user?.role;
-  const isAdminRole = userRole === USER_ROLES.ADMIN;
-  const isSuperAdmin = userRole === USER_ROLES.SU;
+  const userRole = user?.roles ?? user?.role;
+  const isAdminRole = hasRole(userRole, "ADMIN");
+  const isSuperAdmin = hasRole(userRole, "SU");
   const isAssetOwnerInviteContext = tenantId === ASSET_OWNER_TENANT_ID;
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -119,14 +125,14 @@ export default function InvitationList({
             defaultGroupIds = [defaultGroupId];
           }
         } catch (error) {
-          console.warn("Failed to get default group:", error);
+          log.warn("Failed to get default group:", error);
           message.warning(
             t("tenantResources.invitation.loadDefaultGroupFailed")
           );
         }
       }
       form.setFieldsValue({
-        code_type: "USER_INVITE",
+        roles: ["USER"],
         capacity: 1,
         group_ids: defaultGroupIds,
       });
@@ -137,7 +143,14 @@ export default function InvitationList({
   const openEdit = (invitation: Invitation) => {
     setEditingInvitation(invitation);
     form.setFieldsValue({
-      code_type: invitation.code_type,
+      roles: invitation.roles ?? [
+        {
+          ADMIN_INVITE: "ADMIN",
+          DEV_INVITE: "DEV",
+          USER_INVITE: "USER",
+          ASSET_OWNER_INVITE: "ASSET_OWNER",
+        }[invitation.code_type] ?? "USER",
+      ],
       capacity: invitation.capacity,
       invitation_code: invitation.invitation_code,
       group_ids: invitation.group_ids || [],
@@ -148,28 +161,19 @@ export default function InvitationList({
     setModalVisible(true);
   };
 
+  const showInvitationError = (error: unknown, fallbackKey: string) => {
+    const code = error instanceof ApiError ? String(error.code) : "";
+    if (code === "401" || code === "499" || isSessionExpired(code)) return;
+    message.error(t(code === "403" ? "errorCode.000201" : fallbackKey));
+  };
+
   const handleDelete = async (invitationCode: string) => {
     try {
       await deleteInvitation(invitationCode);
       message.success(t("tenantResources.invitation.invitationDeleted"));
       refetch();
-    } catch (error: any) {
-      // Check if it's an authentication error
-      if (
-        error.code === 401 ||
-        error.code === 499 ||
-        error.message?.includes("Login expired")
-      ) {
-        // Let the global session expired handler deal with it
-        throw error;
-      } else {
-        // For other errors, show specific error message
-        const errorMessage =
-          error.response?.data?.message ||
-          error.message ||
-          "Failed to delete invitation";
-        message.error(errorMessage);
-      }
+    } catch (error) {
+      showInvitationError(error, "tenantResources.invitation.deleteFailed");
     }
   };
 
@@ -201,12 +205,13 @@ export default function InvitationList({
         // Asset-owner page hides code_type in the form; always send ASSET_OWNER_INVITE on create.
         const codeType = isAssetOwnerInviteContext
           ? ASSET_OWNER_INVITE_CODE_TYPE
-          : values.code_type;
+          : undefined;
         const createData: CreateInvitationRequest = {
           tenant_id: isAssetOwnerInviteContext
             ? ASSET_OWNER_TENANT_ID
             : tenantId!,
           code_type: codeType,
+          roles: isAssetOwnerInviteContext ? undefined : values.roles,
           invitation_code: values.invitation_code?.toUpperCase(),
           capacity: values.capacity,
           group_ids: isAssetOwnerInviteContext ? [] : values.group_ids || [],
@@ -218,20 +223,13 @@ export default function InvitationList({
       setModalVisible(false);
       refetch();
     } catch (error: any) {
-      // Check if it's an authentication error
-      if (
-        error.code === 401 ||
-        error.code === 499 ||
-        error.message?.includes("Login expired")
-      ) {
-        // Let the global session expired handler deal with it
-        throw error;
-      } else {
-        // For other errors, show specific error message
-        const errorMessage =
-          error.response?.data?.message || error.message || "Operation failed";
-        message.error(errorMessage);
-      }
+      if (error?.errorFields) return;
+      const failureKey = editingInvitation
+        ? "tenantResources.invitation.updateFailed"
+        : Number(error?.code) === 409
+          ? "tenantResources.invitation.alreadyExists"
+          : "tenantResources.invitation.createFailed";
+      showInvitationError(error, failureKey);
     }
   };
 
@@ -281,13 +279,24 @@ export default function InvitationList({
         dataIndex: "code_type",
         key: "code_type",
         width: 80,
-        render: (type: string) => {
-          return (
-            <Tag color="default">
-              {t(`tenantResources.invitation.codeType.${type}`)}
-            </Tag>
-          );
-        },
+        render: (type: string, record: Invitation) => (
+          <>
+            {(
+              record.roles ?? [
+                {
+                  ADMIN_INVITE: "ADMIN",
+                  DEV_INVITE: "DEV",
+                  USER_INVITE: "USER",
+                  ASSET_OWNER_INVITE: "ASSET_OWNER",
+                }[type] ?? type,
+              ]
+            ).map((role) => (
+              <Tag key={role} color={getRoleColor(role)}>
+                {t(roleLabelKey(role))}
+              </Tag>
+            ))}
+          </>
+        ),
       },
       {
         title: t("tenantResources.invitation.usage"),
@@ -389,7 +398,9 @@ export default function InvitationList({
               variant="solid"
             >
               <span className="inline-flex items-center mr-1">{icon}</span>
-              {t(`tenantResources.invitation.status.${status}`)}
+              {t(`tenantResources.invitation.status.${status}`, {
+                defaultValue: t("common.unknown"),
+              })}
             </Tag>
           );
         },
@@ -405,6 +416,7 @@ export default function InvitationList({
               <Button
                 type="text"
                 icon={<Edit className="h-4 w-4" />}
+                aria-label={t("common.edit")}
                 onClick={() => openEdit(record)}
                 size="small"
               />
@@ -415,20 +427,25 @@ export default function InvitationList({
                 danger
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
-                onClick={() => confirm({
-                  title: t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code }),
-                  content: t("common.cannotBeUndone"),
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record.invitation_code),
-                })}
+                onClick={() =>
+                  confirm({
+                    title: t(
+                      "tenantResources.invitation.confirmDeleteInvitation",
+                      { code: record.invitation_code }
+                    ),
+                    content: t("common.cannotBeUndone"),
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.invitation_code),
+                  })
+                }
               />
             </Tooltip>
           </div>
         ),
       },
     ],
-    [groupNameMap]
+    [groupNameMap, t]
   );
 
   // Group invitations by tenant for collapse view
@@ -491,7 +508,10 @@ export default function InvitationList({
                 header={
                   tenantId === ASSET_OWNER_TENANT_ID
                     ? t("tenantResources.invitation.assetOwnerTab")
-                    : `Tenant: ${tenantId}`
+                    : t("tenantResources.invitation.tenantHeading", {
+                        tenant:
+                          tenantId === "unknown" ? t("common.unknown") : tenantId,
+                      })
                 }
                 key={tenantId}
               >
@@ -529,37 +549,22 @@ export default function InvitationList({
         <Form form={form} layout="vertical">
           {!editingInvitation && !isAssetOwnerInviteContext && (
             <Form.Item
-              name="code_type"
+              name="roles"
               label={t("tenantResources.invitation.codeType")}
               rules={[
                 {
                   required: true,
+                  type: "array",
                   message: t("tenantResources.invitation.codeTypeRequired"),
                 },
               ]}
             >
               <Select
-                placeholder={t("tenantResources.invitation.codeType")}
-                options={[
-                  ...(isAdminRole
-                    ? []
-                    : [
-                        {
-                          value: "ADMIN_INVITE",
-                          label: t(
-                            "tenantResources.invitation.codeType.ADMIN_INVITE"
-                          ),
-                        },
-                      ]),
-                  {
-                    value: "DEV_INVITE",
-                    label: t("tenantResources.invitation.codeType.DEV_INVITE"),
-                  },
-                  {
-                    value: "USER_INVITE",
-                    label: t("tenantResources.invitation.codeType.USER_INVITE"),
-                  },
-                ]}
+                mode="multiple"
+                options={["ADMIN", "DEV", "USER", "OPS"].map((value) => ({
+                  value,
+                  label: t(roleLabelKey(value)),
+                }))}
               />
             </Form.Item>
           )}
@@ -584,7 +589,9 @@ export default function InvitationList({
                     try {
                       exists = await checkInvitationCodeExists(value);
                     } catch {
-                      throw new Error("Failed to check invitation code");
+                      throw new Error(
+                        t("tenantResources.invitation.checkFailed")
+                      );
                     }
                     if (exists) {
                       throw new Error(
@@ -622,7 +629,9 @@ export default function InvitationList({
                   if (!value) return;
                   const numValue = Number(value);
                   if (isNaN(numValue) || numValue < 1) {
-                    throw new Error(t("tenantResources.invitation.capacityMin"));
+                    throw new Error(
+                      t("tenantResources.invitation.capacityMin")
+                    );
                   }
                 },
               },

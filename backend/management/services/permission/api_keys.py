@@ -5,17 +5,32 @@
 import uuid
 from typing import Any, Dict, List, Optional
 
-from contracts.errors.exceptions import ForbiddenError, NotFoundException, ValidationError
+from contracts.errors.exceptions import (
+    ForbiddenError,
+    NotFoundException,
+    ValidationError,
+)
+from contracts.roles import has_any_role
 from management.db.client import get_db_session
 from management.db.identity.account import create_account
 from management.db.identity.group import add_user_to_group, query_groups
-from management.db.identity.token import create_token, generate_access_key, list_active_tokens_by_tenant, soft_delete_tokens_by_user
-from management.db.identity.user_tenant import get_user_tenant_by_email, get_user_tenant_in_tenant, insert_user_tenant
+from management.db.identity.token import (
+    create_token,
+    generate_access_key,
+    list_active_tokens_by_tenant,
+    soft_delete_tokens_by_user,
+)
+from management.db.identity.user_tenant import (
+    get_user_tenant_by_email,
+    get_user_tenant_in_tenant,
+    insert_user_tenant,
+)
+from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.permission.identity.groups import get_tenant_default_group_id
 
 
 def _require_tenant_admin(actor_tenant_id: str, actor_role: str) -> None:
-    if (actor_role or "").upper() not in {"ADMIN", "SU"}:
+    if not has_any_role(actor_role, {'ADMIN','SU'}):
         raise ForbiddenError("Only administrators can manage API keys")
     if not actor_tenant_id:
         raise ForbiddenError("Tenant context is required")
@@ -63,7 +78,7 @@ def create_api_users_batch(
 ) -> List[Dict[str, Any]]:
     """Create API-only users, group memberships, and keys."""
     _require_tenant_admin(actor_tenant_id, actor_role)
-    normalized_role = (role or "USER").upper()
+    normalized_role = role.strip().upper() if isinstance(role, str) else ""
     if normalized_role not in {"DEV", "USER"}:
         raise ValidationError("API user role must be DEV or USER")
     if count < 1 or count > 100:
@@ -100,6 +115,7 @@ def create_api_users_batch(
                 {
                     "user_id": user_id,
                     "role": normalized_role,
+                    "roles": [normalized_role],
                     "group_id": group["group_id"],
                     "group_name": group.get("group_name"),
                     "api_key": token["access_key"],
@@ -175,7 +191,6 @@ def list_tenant_api_keys(
     if tenant_id != actor_tenant_id:
         raise NotFoundException("Tenant not found")
     result = list_active_tokens_by_tenant(tenant_id, page, page_size, sort_order)
-    from management.services.permission.identity.display import enrich_cas_usernames
 
     enrich_cas_usernames(result.get("items", []), {
         "owner_cas_username": "user_id", "creator_cas_username": "created_by",

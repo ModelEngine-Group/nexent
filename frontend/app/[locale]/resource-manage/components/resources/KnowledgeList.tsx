@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -79,11 +80,11 @@ export default function KnowledgeList({
 
   // Get actual user role from auth context
   const { user } = useAuthorizationContext();
-  const userRole = user?.role ?? "";
+  const userRole = user?.roles ?? user?.role;
   // Only ADMIN can edit per-KB soft quotas
-  const isAdmin = userRole === "ADMIN";
+  const isAdmin = hasRole(userRole, "ADMIN");
   // SU and ADMIN can both manage tenant hard limit
-  const canManageQuota = userRole === "ADMIN" || userRole === "SU";
+  const canManageQuota = hasRole(userRole, "ADMIN") || hasRole(userRole, "SU");
 
   // Fetch groups for group selection
   const { data: groupData } = useGroupList(tenantId);
@@ -699,7 +700,7 @@ export default function KnowledgeList({
                 icon={<SettingOutlined className="h-4 w-4" />}
                 onClick={() => setQuotaModalVisible(true)}
               >
-                {userRole === "SU"
+                {hasRole(userRole, "SU")
                   ? t("quota.allocateStorage", "Allocate Storage")
                   : t("quota.quotaManagement", "Quota Management")}
               </Button>
@@ -726,7 +727,7 @@ export default function KnowledgeList({
           />
 
           {/* Quota modal: SU gets simple tenant allocation; ADMIN gets full quota management */}
-          {userRole === "SU" && (
+          {hasRole(userRole, "SU") && (
             <SuQuotaModal
               open={quotaModalVisible}
               tenantId={tenantId}
@@ -738,7 +739,7 @@ export default function KnowledgeList({
               onUsageChange={handleQuotaUsageChange}
             />
           )}
-          {userRole === "ADMIN" && (
+          {hasRole(userRole, "ADMIN") && (
             <QuotaSettingsModal
               open={quotaModalVisible}
               tenantId={tenantId}

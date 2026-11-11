@@ -647,6 +647,10 @@ class TestUpdateTenantInfo:
 class TestDeleteTenant:
     """Test cases for delete_tenant function"""
 
+    @pytest.fixture(autouse=True)
+    def membership_cleanup(self, mocker):
+        return mocker.patch("management.services.permission.identity.tenants.soft_delete_users_by_tenant_id", return_value=True)
+
     @pytest.mark.asyncio
     async def test_delete_tenant_success(self):
         """Test successfully deleting a tenant and all associated resources"""
@@ -657,7 +661,7 @@ class TestDeleteTenant:
         # Mock dependencies
         with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
              patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.delete_user_and_cleanup') as mock_delete_user, \
+             patch('management.services.permission.identity.tenants.user_service.delete_user_and_cleanup') as mock_delete_user, \
              patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
              patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
              patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \

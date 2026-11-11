@@ -551,6 +551,13 @@ def _semantic_search_impl(request, vdb_core):
     }
 
 
+@pytest.fixture(autouse=True)
+def isolated_tag_display(mocker):
+    """Keep tag persistence outside knowledge-list unit assertions."""
+    mocker.patch("management.services.knowledge_base.management.project_authorized_resource_tags",
+                 sys.modules["management.services.tag.projection"].project_authorized_resource_tags)
+
+
 class TestElasticSearchService(unittest.TestCase):
     def setUp(self):
         """
@@ -1521,7 +1528,7 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    def test_list_indices_creator_permission(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+    def test_list_indices_creator_and_dev_ops_union(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that creator of a knowledge base gets CREATOR permission.
 
@@ -1573,6 +1580,16 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("index1", result["indices"])
         self.assertNotIn("index2", result["indices"])
 
+        # The array is authoritative: adding OPS preserves DEV's group edit grant.
+        mock_get_user_tenant.return_value = {
+            "roles": ["DEV", "OPS"], "user_role": "USER", "tenant_id": "test_tenant"}
+        combined = ElasticSearchService.list_indices(
+            pattern="*", include_stats=False, target_tenant_id="test_tenant",
+            user_id="test_user", vdb_core=self.mock_vdb_core,
+        )
+        assert set(combined["indices"]) == {"index1", "index2"}
+        assert combined["count"] == 2
+
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
@@ -1622,7 +1639,6 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                            mock_get_group_ids):
         """
@@ -1669,7 +1685,6 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_hides_private_knowledge_base_from_group_member(
         self,
         mock_get_knowledge,
@@ -1708,7 +1723,6 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                                    mock_get_group_ids):
         """
@@ -1848,15 +1862,8 @@ class TestElasticSearchService(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    def test_list_indices_fallback_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
-        """
-        Test the fallback admin logic when user_id equals tenant_id.
-
-        This test verifies that:
-        1. When user_id equals tenant_id, user is treated as legacy admin regardless of user_role
-        2. Legacy admin gets EDIT permission on all knowledgebases in their tenant
-        3. Debug log is recorded for legacy admin identification
-        """
+    def test_list_indices_missing_role_does_not_infer_admin(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
+        """A matching tenant/user ID does not grant administrator access without roles."""
         # Setup
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
@@ -1892,33 +1899,16 @@ class TestElasticSearchService(unittest.TestCase):
                 vdb_core=self.mock_vdb_core
             )
 
-        # Assert
-        self.assertEqual(len(result["indices"]), 2)
-        self.assertEqual(result["count"], 2)
-        self.assertEqual(len(result["indices_info"]), 2)
-
-        # Both knowledgebases should have EDIT permission due to legacy admin fallback
-        for kb_info in result["indices_info"]:
-            self.assertEqual(kb_info["permission"], "EDIT")
-
-        # Verify info log was called once for each index for legacy admin identification
-        mock_logger.info.assert_has_calls([
-            call("User legacy_admin_user identified as legacy admin"),
-            call("User legacy_admin_user identified as legacy admin")
-        ])
+        assert result["indices"] == []
+        assert result["count"] == 0
+        assert result["indices_info"] == []
+        assert not any("identified as legacy admin" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
-    def test_list_indices_speed_version_admin_logic(self, mock_get_group_ids, mock_get_user_tenant, mock_get_knowledge):
-        """
-        Test the SPEED version admin logic when user is default user and tenant is default tenant.
-
-        This test verifies that:
-        1. When user_id equals DEFAULT_USER_ID and tenant_id equals DEFAULT_TENANT_ID, user is treated as admin
-        2. SPEED version admin gets EDIT permission on all knowledgebases in their tenant
-        3. Info log is recorded for SPEED version admin identification
-        """
+    def test_list_indices_default_identity_does_not_infer_admin(self, mock_get_group_ids, mock_get_user_tenant, mock_get_knowledge):
+        """The retired default identity shortcut cannot bypass group visibility."""
         # Setup
         self.mock_vdb_core.get_user_indices.return_value = ["index1", "index2"]
         mock_get_knowledge.return_value = [
@@ -1954,20 +1944,10 @@ class TestElasticSearchService(unittest.TestCase):
                 vdb_core=self.mock_vdb_core
             )
 
-        # Assert
-        self.assertEqual(len(result["indices"]), 2)
-        self.assertEqual(result["count"], 2)
-        self.assertEqual(len(result["indices_info"]), 2)
-
-        # Both knowledgebases should have EDIT permission due to legacy admin logic
-        for kb_info in result["indices_info"]:
-            self.assertEqual(kb_info["permission"], "EDIT")
-
-        # Verify info log was called once for each index for legacy admin identification
-        mock_logger.info.assert_has_calls([
-            call("User user_id identified as legacy admin"),
-            call("User user_id identified as legacy admin")
-        ])
+        assert result["indices"] == []
+        assert result["count"] == 0
+        assert result["indices_info"] == []
+        assert not any("identified as legacy admin" in str(call) for call in mock_logger.info.call_args_list)
 
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
@@ -7732,7 +7712,6 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
     @patch('management.services.knowledge_base.management.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_asset_owner_with_dev_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices ASSET_OWNER record gets READ permission when DEV (lines 975-978)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -7765,8 +7744,8 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
     @patch('management.services.knowledge_base.management.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
-    def test_list_indices_asset_owner_with_speed_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
-        """Test list_indices ASSET_OWNER record gets READ permission when SPEED (lines 975-978)."""
+    def test_list_indices_retired_role_is_rejected(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
+        """Retired roles cannot read protected knowledge-base records."""
         mock_user_tenant.return_value = {"user_role": "SPEED", "tenant_id": "tenant-1"}
         mock_group_ids.return_value = []
         mock_get_info.return_value = [{
@@ -7782,21 +7761,16 @@ class TestCoverageImprovement(unittest.TestCase):
             "asset-kb-3": {"base_info": {"embedding_model": ""}}
         }
 
-        result = ElasticSearchService.list_indices(
-            target_tenant_id="tenant-1",
-            user_id="speed-user",
-            vdb_core=self.mock_vdb_core,
-            include_stats=True,
-        )
-
-        self.assertEqual(result["count"], 1)
-        self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
+        with self.assertRaises(ValueError):
+            ElasticSearchService.list_indices(
+                target_tenant_id="tenant-1", user_id="retired-user",
+                vdb_core=self.mock_vdb_core, include_stats=True,
+            )
 
     # Tests for list_indices - PRIVATE permission (lines 1021-1022)
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_private_permission_hidden(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices excludes KB when ingroup_permission is PRIVATE (lines 1021-1022)."""
         mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
@@ -7825,7 +7799,6 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_both_empty_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 999-1001)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -7854,7 +7827,6 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_user_is_creator_gets_creator_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants CREATOR permission when user is the creator (line 1011-1013)."""
         mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
@@ -7888,7 +7860,6 @@ class TestCoverageImprovement(unittest.TestCase):
     @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
-    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_non_creator_edit_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants EDIT permission when user is not creator but ingroup_permission is EDIT (line 1014-1016)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -8130,7 +8101,6 @@ def _patch_kb_permission_context(
         "query_group_ids_by_user",
         lambda _user_id: user_group_ids or [],
     )
-    monkeypatch.setattr(vdb_service, "IS_SPEED_MODE", speed_mode)
     monkeypatch.setattr(vdb_service, "ASSET_OWNER_TENANT_ID", "asset-owner")
 
 
@@ -8162,7 +8132,7 @@ def test_resolve_knowledge_base_permission_datamate_creator_is_read_only(monkeyp
     assert permission == "READ_ONLY"
 
 
-def test_resolve_knowledge_base_permission_speed_mode_uses_record_tenant_when_user_has_no_tenant(
+def test_resolve_knowledge_base_permission_missing_membership_is_denied(
     monkeypatch,
 ):
     _patch_kb_permission_context(
@@ -8186,7 +8156,7 @@ def test_resolve_knowledge_base_permission_speed_mode_uses_record_tenant_when_us
         ElasticSearchService.resolve_knowledge_base_permission(
             "kb", "speed-user", tenant_id=None
         )
-        == "EDIT"
+        is None
     )
 
 
@@ -8250,8 +8220,8 @@ def test_resolve_knowledge_base_permission_without_user_tenant_returns_none(monk
 @pytest.mark.parametrize(
     "user_id,user_tenant,speed_mode,expected",
     [
-        ("tenant-1", {"tenant_id": "tenant-1"}, False, "EDIT"),
-        ("user-speed", None, True, "EDIT"),
+        ("tenant-1", {"tenant_id": "tenant-1"}, False, None),
+        ("missing-user", None, True, None),
         ("admin-user", {"user_role": "ADMIN", "tenant_id": "tenant-1"}, False, "EDIT"),
     ],
 )
@@ -8322,7 +8292,7 @@ def test_resolve_knowledge_base_permission_cross_tenant_returns_none(monkeypatch
     )
 
 
-def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch):
+def test_resolve_knowledge_base_permission_unknown_role_is_rejected(monkeypatch):
     _patch_kb_permission_context(
         monkeypatch,
         record={
@@ -8333,10 +8303,8 @@ def test_resolve_knowledge_base_permission_unknown_role_returns_none(monkeypatch
         user_tenant={"user_role": "GUEST", "tenant_id": "tenant-1"},
     )
 
-    assert (
+    with pytest.raises(ValueError, match="Unknown or retired role"):
         ElasticSearchService.resolve_knowledge_base_permission("kb", "guest-user", "tenant-1")
-        is None
-    )
 
 
 @pytest.mark.parametrize(
@@ -8885,6 +8853,7 @@ def _install_fake_celery_app(monkeypatch, inspector=None, task_result=None):
     app_module.app = celery_app
     monkeypatch.setitem(sys.modules, "data_process", package)
     monkeypatch.setitem(sys.modules, "data_process.app", app_module)
+    monkeypatch.setattr("management.services.knowledge_base.deletion.celery_app", celery_app)
     return celery_app
 
 

@@ -1,9 +1,10 @@
 # Nexent operations backend
 
 The operations backend runs in its own process and container using the existing
-backend image. It currently exposes only process health and API documentation.
-It does not initialize databases, Redis, MinIO, Elasticsearch, telemetry, Agent
-executors or schedulers.
+backend image. It exposes process health, authenticated operations scope and a
+read-only resource inventory. Authenticated requests reuse the existing PostgreSQL
+identity/permission tables and JWT settings. It does not start Redis, MinIO,
+Elasticsearch, telemetry, Agent executors or schedulers.
 
 ## Local startup
 
@@ -25,8 +26,11 @@ a nearby `.env`, set `PYTHON_DOTENV_DISABLED=1` before starting Python.
 | `/health/ready` | HTTP 200 with `{"status":"ready"}` after startup; otherwise HTTP 503 with `{"status":"not_ready"}` |
 | `/docs` | OpenAPI UI; health endpoints are omitted from the schema |
 
-Health checks describe only the operations process. Business monitoring APIs
-and their authentication will be added together in a later change.
+Health checks describe only the operations process and do not probe dependencies.
+`GET /ops/authorization`, `/ops/resources` and `/ops/scope` require a valid session.
+OPS is restricted to its tenant; SU can select any tenant or all tenants. The
+dashboard and configuration action grants are permission contracts; monitoring
+and configuration CRUD implementations are outside this change.
 
 ## Container startup
 
@@ -76,20 +80,20 @@ container rollout is performed by the bootstrap code.
 
 - `ops_service.py`: process launcher.
 - `ops/api/`: HTTP parsing, responses and application composition.
-- `ops/services/`: future business rules and orchestration.
+- `ops/services/`: operations scope and read-only inventory orchestration.
 - `ops/lifespan.py`: process resources and readiness lifecycle.
 
-Introduce database access and integration adapters only when a feature needs
-them. Simple process health does not require a forwarding service class.
+Database identity/permission access is reused from management. Resource inventory
+selects metadata fields explicitly; it does not return credentials or content.
 
 ## Kubernetes
 
 The existing `bash deploy/deploy.sh --defaults k8s` entry point enables the
 `nexent-ops` subchart whenever `application` is selected and waits for its
 Deployment to become ready. It reuses the selected backend image and does not
-mount business configuration, credentials, SQL or business storage. Only explicit
-ops settings, selected logging keys from the existing `nexent-env` Secret and
-SQL-startup-off are passed to its container; the Kubernetes API
+mount SQL or business storage. Explicit ops settings and selected logging,
+PostgreSQL and JWT keys from the existing `nexent-env` Secret are passed to its
+container. SQL startup remains off; the Kubernetes API
 service-account token is not mounted.
 
 The only storage mount is the logs PVC, using `global.sharedStorage.logs.existingClaim`

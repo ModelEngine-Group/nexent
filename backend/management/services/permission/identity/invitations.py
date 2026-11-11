@@ -2,21 +2,53 @@
 """
 Invitation service for managing invitation codes and records.
 """
+
 import logging
 import random
 import string
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from management.db.identity.invitation import query_invitation_by_code, query_invitation_by_id, add_invitation, modify_invitation, add_invitation_record, count_invitation_usage, query_invitations_with_pagination, remove_invitation
+from sqlalchemy import select
+
+from contracts.constants.constants import (
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_TENANT_ID,
+)
+from contracts.errors.exceptions import (
+    DuplicateError,
+    ForbiddenError,
+    IncorrectInviteCodeException,
+    NotFoundException,
+    UnauthorizedError,
+)
+from contracts.roles import (
+    has_any_role,
+    invitation_roles,
+    normalize_roles,
+    roles_from_record,
+)
+from management.db.client import get_db_session
+from management.db.identity.group import query_group_ids_by_user, query_groups
+from management.db.identity.invitation import (
+    add_invitation,
+    count_invitation_usage,
+    modify_invitation,
+    query_invitation_by_code,
+    query_invitation_by_id,
+    query_invitations_with_pagination,
+    remove_invitation,
+)
+from management.db.identity.roles import lock_tenants, locked_members
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.db.identity.group import query_group_ids_by_user
-from management.db.identity.role_permission import check_role_permission
-from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE
-from contracts.constants.environment import ENABLE_ASSET_OWNER_ROLE
-from contracts.errors.exceptions import NotFoundException, UnauthorizedError, DuplicateError
-from management.services.permission.identity.groups import get_tenant_default_group_id
+from management.db.models import TenantInvitationCode, TenantInvitationRecord
 from management.services.permission.asset_owner import require_asset_owner_enabled
+from management.services.permission.identity.groups import get_tenant_default_group_id
+from management.services.permission.identity.registration import (
+    invitation_usage,
+    locked_invitation,
+)
 from management.utils.serialization import convert_string_to_list
 
 logger = logging.getLogger(__name__)
@@ -24,133 +56,88 @@ logger = logging.getLogger(__name__)
 
 def create_invitation_code(
     tenant_id: str,
-    code_type: str,
+    code_type: Optional[str] = None,
     invitation_code: Optional[str] = None,
     group_ids: Optional[List[int]] = None,
     capacity: int = 1,
     expiry_date: Optional[str] = None,
     status: str = "IN_USE",
-    user_id: str = None
+    user_id: str = None,
+    roles=None,
 ) -> Dict[str, Any]:
-    """
-    Create a new invitation code with business logic.
-
-    Args:
-        tenant_id (str): Tenant ID
-        code_type (str): Invitation code type (ADMIN_INVITE, DEV_INVITE, USER_INVITE, ASSET_OWNER_INVITE)
-        invitation_code (Optional[str]): Invitation code, auto-generated if None
-        group_ids (Optional[List[int]]): Associated group IDs
-        capacity (int): Invitation code capacity
-        expiry_date (Optional[str]): Expiry date
-        status (str): Status
-        user_id (str): Current user ID
-
-    Returns:
-        Dict[str, Any]: Created invitation code information
-
-    Raises:
-        NotFoundException: When user not found
-        UnauthorizedError: When user doesn't have permission
-        ValueError: When code_type is invalid
-    """
-    # Validate code_type
-    valid_code_types = [
-        "ADMIN_INVITE",
-        "DEV_INVITE",
-        "USER_INVITE",
-        ASSET_OWNER_INVITE_CODE_TYPE,
-    ]
-    if ENABLE_ASSET_OWNER_ROLE:
-        valid_code_types.append(ASSET_OWNER_INVITE_CODE_TYPE)
-    if code_type not in valid_code_types:
-        raise ValueError(
-            f"Invalid code_type: {code_type}. Must be one of {valid_code_types}")
-
-    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and not ENABLE_ASSET_OWNER_ROLE:
-        raise UnauthorizedError(
-            "ASSET_OWNER feature is not enabled")
-
-    # Get user information
-    user_info = get_user_tenant_by_user_id(user_id)
-    if not user_info:
-        raise NotFoundException(f"User {user_id} not found")
-
-    user_role = user_info.get("user_role", "USER")
-
-    # Check permission based on code_type
-    if code_type in ["ADMIN_INVITE", ASSET_OWNER_INVITE_CODE_TYPE] and user_role not in ["SU"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to create ADMIN_INVITE codes")
-    elif code_type in ["DEV_INVITE", "USER_INVITE"] and user_role not in ["SU", "ADMIN"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to create {code_type} codes")
-
-    if code_type == ASSET_OWNER_INVITE_CODE_TYPE:
-        tenant_id = ASSET_OWNER_TENANT_ID
-        group_ids = []
-
-    # Set default group_ids based on code_type if not provided
-    if group_ids is None:
-        if code_type == "ADMIN_INVITE":
-            # For admin invites, try to use tenant default group, fallback to empty list
-            default_group_id = get_tenant_default_group_id(tenant_id)
-            group_ids = [default_group_id] if default_group_id else []
-        elif code_type in ["DEV_INVITE", "USER_INVITE"]:
-            group_ids = query_group_ids_by_user(user_id)
-        else:
-            group_ids = []
-
-    # Generate invitation code if not provided
-    if not invitation_code:
-        invitation_code = _generate_unique_invitation_code()
+    """Create a fixed grant using the same ordinary role policy as user editing."""
+    actor = get_user_tenant_by_user_id(user_id)
+    if not actor:
+        raise UnauthorizedError("User not found")
+    actor_roles = roles_from_record(actor)
+    if not has_any_role(actor_roles, {"SU", "ADMIN"}):
+        raise ForbiddenError("Not authorized to create invitations")
+    special = code_type == ASSET_OWNER_INVITE_CODE_TYPE
+    if special:
+        require_asset_owner_enabled()
+        if not has_any_role(actor_roles, {"SU"}):
+            raise UnauthorizedError("Asset owner invitations require platform administration")
+        assigned = ("ASSET_OWNER",)
+        if roles is not None and normalize_roles(roles) != assigned:
+            raise ValueError("Invitation role and type conflict")
+        tenant_id, group_ids = ASSET_OWNER_TENANT_ID, []
     else:
-        # Change to upper case by default
-        invitation_code = invitation_code.upper()
-
-    # Check if invitation code already exists
+        assigned = invitation_roles({"roles": roles, "code_type": code_type})
+        normalize_roles(assigned, ordinary_only=True)
+        if not has_any_role(actor_roles, {"SU"}) and tenant_id != actor["tenant_id"]:
+            raise ForbiddenError("Cannot invite users into another tenant")
+        if roles is not None and code_type and code_type != "TENANT_INVITE":
+            if invitation_roles({"code_type": code_type}) != assigned:
+                raise ValueError("Invitation role and type conflict")
+        code_type = {("ADMIN",): "ADMIN_INVITE", ("DEV",): "DEV_INVITE", ("USER",): "USER_INVITE"}.get(
+            assigned, "TENANT_INVITE"
+        )
+    if capacity < 1:
+        raise ValueError("Invitation capacity must be positive")
+    if group_ids is None:
+        if "ADMIN" in assigned:
+            default_group = get_tenant_default_group_id(tenant_id)
+            group_ids = [default_group] if default_group else []
+        else:
+            group_ids = query_group_ids_by_user(user_id) if not special and tenant_id == actor["tenant_id"] else []
+    if group_ids:
+        groups = query_groups(group_ids)
+        if isinstance(groups, dict):
+            groups = [groups]
+        if {int(g["group_id"]) for g in groups if g.get("tenant_id") == tenant_id} != {int(g) for g in group_ids}:
+            raise ForbiddenError("Invitation groups must belong to the target tenant")
+    invitation_code = invitation_code.upper() if invitation_code else _generate_unique_invitation_code()
     if query_invitation_by_code(invitation_code):
-        raise DuplicateError(
-            f"Invitation code '{invitation_code}' already exists")
-
-    # Create invitation (status will be set automatically)
-    invitation_id = add_invitation(
-        tenant_id=tenant_id,
-        invitation_code=invitation_code,
-        code_type=code_type,
-        group_ids=group_ids,
-        capacity=capacity,
-        expiry_date=expiry_date,
-        status=status,
-        created_by=user_id
-    )
-
-    # Automatically update status based on expiry date and capacity
-    update_invitation_code_status(invitation_id)
-
-    logger.info(
-        f"Created invitation code {invitation_code} (type: {code_type}) for tenant {tenant_id} by user {user_id}")
-
-    # Get the final invitation info with correct status
-    invitation_info = query_invitation_by_id(invitation_id)
-    normalized_info = _normalize_invitation_data(
-        invitation_info) if invitation_info else None
-
+        raise DuplicateError("Invitation code already exists")
+    with get_db_session() as session:
+        lock_tenants(session, [tenant_id, actor["tenant_id"]])
+        locked_actor = locked_members(session, [user_id]).get(user_id)
+        _check_invitation_manager(locked_actor, tenant_id, special)
+        invitation_id = add_invitation(
+            tenant_id=tenant_id,
+            invitation_code=invitation_code,
+            code_type=code_type,
+            roles=list(assigned),
+            group_ids=group_ids,
+            capacity=capacity,
+            expiry_date=expiry_date,
+            status=status,
+            created_by=user_id,
+            db_session=session,
+        )
     return {
         "invitation_id": invitation_id,
         "invitation_code": invitation_code,
         "code_type": code_type,
+        "roles": list(assigned),
         "group_ids": group_ids,
         "capacity": capacity,
         "expiry_date": expiry_date,
-        "status": normalized_info.get("status", "IN_USE") if normalized_info else "IN_USE"
+        "status": status,
     }
 
 
-def update_invitation_code(
-    invitation_id: int,
-    updates: Dict[str, Any],
-    user_id: str
-) -> bool:
+def update_invitation_code(invitation_id: int, updates: Dict[str, Any], user_id: str) -> bool:
     """
     Update invitation code information.
 
@@ -170,34 +157,40 @@ def update_invitation_code(
     if not user_info:
         raise UnauthorizedError(f"User {user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
+    user_role = roles_from_record(user_info)
 
     invitation_info = query_invitation_by_id(invitation_id)
     if not invitation_info:
         raise NotFoundException(f"Invitation {invitation_id} not found")
 
+    if not has_any_role(user_role, {"SU"}) and invitation_info["tenant_id"] != user_info["tenant_id"]:
+        raise ForbiddenError("Cannot manage another tenant's invitations")
     code_type = invitation_info.get("code_type")
-    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and user_role not in ["SU"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to update invitation codes")
-    elif user_role not in ["SU", "ADMIN"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to update invitation codes")
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and not has_any_role(user_role, {"SU"}):
+        raise UnauthorizedError(f"User role {user_role} not authorized to update invitation codes")
+    elif not has_any_role(user_role, {"SU", "ADMIN"}):
+        raise UnauthorizedError(f"User role {user_role} not authorized to update invitation codes")
 
-    # Update invitation code
-    success = modify_invitation(
-        invitation_id=invitation_id,
-        updates=updates,
-        updated_by=user_id
-    )
-
-    if success:
-        logger.info(
-            f"Updated invitation code {invitation_id} by user {user_id}")
-        # Automatically update status after successful update
-        update_invitation_code_status(invitation_id)
-
-    return success
+    if "roles" in updates or "code_type" in updates:
+        raise ValueError("Invitation roles are immutable")
+    if updates.get("group_ids"):
+        groups = query_groups(updates["group_ids"])
+        groups = [groups] if isinstance(groups, dict) else groups
+        if {int(g["group_id"]) for g in groups if g.get("tenant_id") == invitation_info["tenant_id"]} != set(
+            updates["group_ids"]
+        ):
+            raise ForbiddenError("Invitation groups must belong to the target tenant")
+    with _managed_invitation(invitation_id, user_id) as (session, row):
+        success = modify_invitation(invitation_id, updates, user_id, db_session=session)
+        session.expire(row)
+        if row.status != "DISABLE":
+            if row.expiry_date and row.expiry_date.date() < datetime.utcnow().date():
+                row.status = "EXPIRE"
+            elif invitation_usage(session, row.invitation_id) >= row.capacity:
+                row.status = "RUN_OUT"
+            else:
+                row.status = "IN_USE"
+        return success
 
 
 def delete_invitation_code(invitation_id: int, user_id: str) -> bool:
@@ -220,29 +213,22 @@ def delete_invitation_code(invitation_id: int, user_id: str) -> bool:
     if not user_info:
         raise UnauthorizedError(f"User {user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
+    user_role = roles_from_record(user_info)
 
     invitation_info = query_invitation_by_id(invitation_id)
     if not invitation_info:
         raise NotFoundException(f"Invitation {invitation_id} not found")
 
+    if not has_any_role(user_role, {"SU"}) and invitation_info["tenant_id"] != user_info["tenant_id"]:
+        raise ForbiddenError("Cannot manage another tenant's invitations")
     code_type = invitation_info.get("code_type")
-    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and user_role not in ["SU"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to delete invitation codes")
-    elif user_role not in ["SU", "ADMIN"]:
-        raise UnauthorizedError(
-            f"User role {user_role} not authorized to delete invitation codes")
+    if code_type == ASSET_OWNER_INVITE_CODE_TYPE and not has_any_role(user_role, {"SU"}):
+        raise UnauthorizedError(f"User role {user_role} not authorized to delete invitation codes")
+    elif not has_any_role(user_role, {"SU", "ADMIN"}):
+        raise UnauthorizedError(f"User role {user_role} not authorized to delete invitation codes")
 
-    # Delete invitation code
-    success = remove_invitation(
-        invitation_id=invitation_id, updated_by=user_id)
-
-    if success:
-        logger.info(
-            f"Deleted invitation code {invitation_id} by user {user_id}")
-
-    return success
+    with _managed_invitation(invitation_id, user_id) as (session, row):
+        return remove_invitation(invitation_id, user_id, db_session=session)
 
 
 def _normalize_invitation_data(invitation_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -257,9 +243,9 @@ def _normalize_invitation_data(invitation_data: Dict[str, Any]) -> Dict[str, Any
     """
     if not invitation_data:
         return invitation_data
-
-    # Create a copy to avoid modifying the original
-    normalized = invitation_data.copy()
+    normalized = dict(invitation_data)
+    if "roles" in normalized or "code_type" in normalized:
+        normalized["roles"] = list(invitation_roles(normalized))
 
     # Convert datetime objects to ISO format strings
     for key, value in normalized.items():
@@ -311,6 +297,7 @@ def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]
     """
     if not invitation_data:
         return invitation_data
+    invitation_data = dict(invitation_data)
 
     invitation_id = invitation_data.get("invitation_id")
     if not invitation_id:
@@ -324,6 +311,8 @@ def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]
     usage_count = count_invitation_usage(invitation_id)
     current_status = invitation_data.get("status", "IN_USE")
 
+    if current_status == "DISABLE":
+        return invitation_data
     new_status = current_status
 
     # Check expiry
@@ -332,18 +321,16 @@ def _calculate_current_status(invitation_data: Dict[str, Any]) -> Dict[str, Any]
             if isinstance(expiry_date, datetime):
                 expiry_datetime = expiry_date
             else:
-                expiry_datetime = datetime.fromisoformat(
-                    str(expiry_date).replace('Z', '+00:00'))
+                expiry_datetime = datetime.fromisoformat(str(expiry_date).replace("Z", "+00:00"))
             # Treat same date as not expired - only expire when current date is strictly after expiry date
             if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
-            logger.warning(
-                f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
+            logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
 
     # Check capacity
-    if usage_count >= capacity:
-        new_status = "RUN_OUT"
+    if new_status != "EXPIRE":
+        new_status = "RUN_OUT" if usage_count >= capacity else "IN_USE"
 
     # Update status in the data dict
     invitation_data["status"] = new_status
@@ -364,62 +351,61 @@ def check_invitation_available(invitation_code: str) -> bool:
     if not invitation:
         return False
 
+    if invitation.get("status") != "IN_USE":
+        return False
+    invitation = _calculate_current_status(invitation)
     # Check status
     if invitation.get("status") != "IN_USE":
         return False
 
-    # Check capacity
-    usage_count = count_invitation_usage(invitation["invitation_id"])
-    return usage_count < invitation["capacity"]
+    return True
 
 
-def use_invitation_code(
-    invitation_code: str,
-    user_id: str
-) -> Dict[str, Any]:
-    """
-    Use an invitation code by creating a usage record.
-
-    Args:
-        invitation_code (str): Invitation code to use
-        user_id (str): User ID using the code
-
-    Returns:
-        Dict[str, Any]: Invitation usage result including code_type
-
-    Raises:
-        NotFoundException: When invitation code not found or not available
-    """
-    # Check if invitation is available
-    if not check_invitation_available(invitation_code):
-        raise NotFoundException(
-            f"Invitation code {invitation_code} is not available")
-
-    # Get invitation code details
-    invitation_info = query_invitation_by_code(invitation_code)
-    if not invitation_info:
-        raise NotFoundException(f"Invitation code {invitation_code} not found")
-
-    # Create usage record
-    record_id = add_invitation_record(
-        invitation_id=invitation_info["invitation_id"],
-        user_id=user_id,
-        created_by=user_id
-    )
-
-    # Update invitation status
-    update_invitation_code_status(invitation_info["invitation_id"])
-
-    logger.info(f"User {user_id} used invitation code {invitation_code}")
-
-    return {
-        "invitation_record_id": record_id,
-        "invitation_code": invitation_code,
-        "user_id": user_id,
-        "invitation_id": invitation_info["invitation_id"],
-        "code_type": invitation_info["code_type"],
-        "group_ids": invitation_info["group_ids"]
-    }
+def use_invitation_code(invitation_code: str, user_id: str) -> Dict[str, Any]:
+    """Record an existing matching membership once, without granting extra roles."""
+    code = invitation_code.strip().upper()
+    snapshot = query_invitation_by_code(code)
+    if not snapshot:
+        raise NotFoundException("Invitation is unavailable")
+    with get_db_session() as session:
+        row = locked_invitation(session, code, snapshot)
+        member = locked_members(session, [user_id]).get(user_id)
+        if (
+            not member
+            or member["tenant_id"] != row.tenant_id
+            or roles_from_record(member) != invitation_roles({"roles": row.roles})
+        ):
+            raise ForbiddenError("Invitation usage requires its matching registered membership")
+        record = session.execute(
+            select(TenantInvitationRecord).where(
+                TenantInvitationRecord.invitation_id == row.invitation_id,
+                TenantInvitationRecord.user_id == user_id,
+                TenantInvitationRecord.delete_flag == "N",
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            if row.status != "IN_USE" or invitation_usage(session, row.invitation_id) >= row.capacity:
+                raise IncorrectInviteCodeException("Invitation capacity is exhausted")
+            record = TenantInvitationRecord(
+                invitation_id=row.invitation_id,
+                user_id=user_id,
+                created_by=user_id,
+                updated_by=user_id,
+                delete_flag="N",
+            )
+            session.add(record)
+            session.flush()
+            if invitation_usage(session, row.invitation_id) >= row.capacity:
+                row.status = "RUN_OUT"
+        return {
+            "invitation_record_id": record.invitation_record_id,
+            "invitation_code": code,
+            "user_id": user_id,
+            "invitation_id": row.invitation_id,
+            "code_type": row.code_type,
+            "roles": list(row.roles),
+            "group_ids": convert_string_to_list(row.group_ids) if row.group_ids else [],
+        }
 
 
 def update_invitation_code_status(invitation_id: int) -> bool:
@@ -443,6 +429,8 @@ def update_invitation_code_status(invitation_id: int) -> bool:
 
     usage_count = count_invitation_usage(invitation_id)
     current_status = invitation_info["status"]
+    if current_status == "DISABLE":
+        return False
 
     # Determine new status based on current conditions
     # Priority: EXPIRE > RUN_OUT > IN_USE
@@ -454,14 +442,12 @@ def update_invitation_code_status(invitation_id: int) -> bool:
             if isinstance(expiry_date, datetime):
                 expiry_datetime = expiry_date
             else:
-                expiry_datetime = datetime.fromisoformat(
-                    str(expiry_date).replace('Z', '+00:00'))
+                expiry_datetime = datetime.fromisoformat(str(expiry_date).replace("Z", "+00:00"))
             # Treat same date as not expired - only expire when current date is strictly after expiry date
             if current_time.date() > expiry_datetime.date():
                 new_status = "EXPIRE"
         except (ValueError, AttributeError, TypeError):
-            logger.warning(
-                f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
+            logger.warning(f"Invalid expiry_date format for invitation {invitation_id}: {expiry_date}")
 
     # Check capacity if not expired
     if new_status == "IN_USE" and usage_count >= capacity:
@@ -469,13 +455,8 @@ def update_invitation_code_status(invitation_id: int) -> bool:
 
     # Update status if changed
     if new_status != current_status:
-        modify_invitation(
-            invitation_id=invitation_id,
-            updates={"status": new_status},
-            updated_by="system"
-        )
-        logger.info(
-            f"Updated invitation code {invitation_id} status to {new_status}")
+        modify_invitation(invitation_id=invitation_id, updates={"status": new_status}, updated_by="system")
+        logger.info(f"Updated invitation code {invitation_id} status to {new_status}")
         return True
 
     return False
@@ -496,7 +477,7 @@ def _generate_unique_invitation_code(length: int = 6) -> str:
 
     while attempts < max_attempts:
         # Generate random code with letters and digits
-        code = ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+        code = "".join(random.choices(string.ascii_letters + string.digits, k=length))
 
         # Check uniqueness
         if not query_invitation_by_code(code):
@@ -504,8 +485,7 @@ def _generate_unique_invitation_code(length: int = 6) -> str:
 
         attempts += 1
 
-    raise RuntimeError(
-        f"Failed to generate unique invitation code after {max_attempts} attempts")
+    raise RuntimeError(f"Failed to generate unique invitation code after {max_attempts} attempts")
 
 
 def get_invitations_list(
@@ -514,7 +494,7 @@ def get_invitations_list(
     page_size: int,
     user_id: str,
     sort_by: Optional[str] = None,
-    sort_order: Optional[str] = None
+    sort_order: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get invitations list with pagination and permission checks.
@@ -538,7 +518,7 @@ def get_invitations_list(
     if not user_info:
         raise UnauthorizedError(f"User {user_id} not found")
 
-    user_role = user_info.get("user_role", "USER")
+    user_role = roles_from_record(user_info)
 
     # Permission logic:
     # - If tenant_id is provided: ADMIN or SU can view that tenant's invitations
@@ -546,33 +526,59 @@ def get_invitations_list(
     if tenant_id is not None:
         # ASSET_OWNER_TENANT_ID virtual tenant_id is used for asset-owner invites (SU only)
         if tenant_id == ASSET_OWNER_TENANT_ID:
-            if user_role not in ["SU"]:
-                raise UnauthorizedError(
-                    f"User role {user_role} not authorized to view asset owner invitations")
-        elif user_role not in ["SU", "ADMIN"]:
-            raise UnauthorizedError(
-                f"User role {user_role} not authorized to view invitation lists")
+            if not has_any_role(user_role, {"SU"}):
+                raise UnauthorizedError(f"User role {user_role} not authorized to view asset owner invitations")
+        elif not has_any_role(user_role, {"SU", "ADMIN"}):
+            raise UnauthorizedError(f"User role {user_role} not authorized to view invitation lists")
     else:
         # If no tenant_id specified, only SU can view all invitations
-        if user_role not in ["SU"]:
-            raise UnauthorizedError(
-                f"User role {user_role} not authorized to view all tenant invitations")
+        if not has_any_role(user_role, {"SU"}):
+            raise UnauthorizedError(f"User role {user_role} not authorized to view all tenant invitations")
+
+    if not has_any_role(user_role, {"SU"}) and tenant_id != user_info["tenant_id"]:
+        raise ForbiddenError("Cannot list another tenant's invitations")
 
     # Query invitations with pagination
     result = query_invitations_with_pagination(
-        tenant_id=tenant_id,
-        page=page,
-        page_size=page_size,
-        sort_by=sort_by,
-        sort_order=sort_order
+        tenant_id=tenant_id, page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order
     )
 
     logger.info(
-        f"User {user_id} queried invitations list (tenant: {tenant_id or 'all'}, page: {page}, size: {page_size})")
+        f"User {user_id} queried invitations list (tenant: {tenant_id or 'all'}, page: {page}, size: {page_size})"
+    )
 
     # Normalize each invitation item in the list
     if result and "items" in result:
-        result["items"] = [_normalize_invitation_data(
-            item) for item in result["items"]]
+        result["items"] = [_normalize_invitation_data(item) for item in result["items"]]
 
     return result
+
+
+def _check_invitation_manager(actor, tenant_id, special=False):
+    if not actor:
+        raise ForbiddenError("Acting user is unavailable")
+    roles = roles_from_record(actor)
+    if has_any_role(roles, {"SU"}):
+        return
+    if special or not has_any_role(roles, {"ADMIN"}) or actor["tenant_id"] != tenant_id:
+        raise ForbiddenError("Not authorized to manage these invitations")
+
+
+@contextmanager
+def _managed_invitation(invitation_id, user_id):
+    snapshot = query_invitation_by_id(invitation_id)
+    actor = get_user_tenant_by_user_id(user_id)
+    if not snapshot or not actor:
+        raise NotFoundException("Invitation or acting user is unavailable")
+    with get_db_session() as session:
+        lock_tenants(session, [snapshot["tenant_id"], actor["tenant_id"]])
+        actor = locked_members(session, [user_id]).get(user_id)
+        row = session.execute(
+            select(TenantInvitationCode)
+            .where(TenantInvitationCode.invitation_id == invitation_id, TenantInvitationCode.delete_flag == "N")
+            .with_for_update()
+        ).scalar_one_or_none()
+        if row is None or row.tenant_id != snapshot["tenant_id"]:
+            raise NotFoundException("Invitation is unavailable")
+        _check_invitation_manager(actor, row.tenant_id, row.code_type == ASSET_OWNER_INVITE_CODE_TYPE)
+        yield session, row
