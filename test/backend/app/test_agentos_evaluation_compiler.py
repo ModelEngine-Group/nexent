@@ -49,6 +49,26 @@ def test_snapshot_pins_the_first_catalog_model_for_a_legacy_duplicate_alias(mock
     lookup.assert_called_once_with({"display_name": "Evaluation", "model_type": "llm"}, "tenant-a")
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_snapshot_keeps_catalog_model_identity_across_duplicate_reordering(mocker, changed):
+    first = model_record(model_id=11, model_name="first")
+    second = model_record(model_id=12, model_name="second")
+    models = [create_model_config_from_record(record) for record in [first, second]]
+    current = {**first, "update_time": "revision-2"} if changed else first
+    mocker.patch.object(evaluation_snapshot, "get_model_records", return_value=[second, current])
+    resource = SimpleNamespace(agent_id=7, version_no=2)
+    aliases = {"Evaluation": (11, "revision-1")}
+
+    if changed:
+        with pytest.raises(ValueError, match="Catalog model revision changed"):
+            evaluation_snapshot._export_model("Evaluation", models, "tenant-a", resource, {}, catalog_model_versions=aliases)
+    else:
+        binding = evaluation_snapshot._export_model(
+            "Evaluation", models, "tenant-a", resource, {}, catalog_model_versions=aliases,
+        )
+        assert (binding.model_id, binding.revision) == (11, "revision-1")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode,child_ids", [
     ("generic_chat", []), ("single_agent_chat", [8]), ("multi_agent_chat", [9, 8]),

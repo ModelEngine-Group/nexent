@@ -28,7 +28,7 @@ from contracts.runtime_metadata import validate_runtime_metadata
 from infrastructure.a2a_execution import external_agent_execution_revision
 from infrastructure.agent_attachments import _build_internal_s3_url, validate_attachment_references
 from infrastructure.agent_model_config import (
-    create_model_config_from_record, create_tenant_default_model_config, model_record_revision,
+    create_model_config_from_record, create_tenant_default_model_config, model_record_revision, normalize_model_revision,
 )
 from infrastructure.agent_model_overrides import (
     apply_run_model_generation, get_provider_body_patch, merge_provider_body, provider_body_revision,
@@ -788,14 +788,22 @@ def _export_resource(
 
 def _export_model(
     alias, models, tenant_id, resource, agent_model_overrides, *, root_generation=None, turn_generation=None,
-    source_alias=None,
+    source_alias=None, catalog_model_versions=None,
 ):
     record_alias = source_alias if root_generation is not None or turn_generation is not None else alias
     candidates = get_model_records({"display_name": record_alias, "model_type": "llm"}, tenant_id)
     effective = [model for model in models if model.cite_name == record_alias]
     reserved = record_alias in {"main_model", "sub_model"}
     profile = None
-    if candidates and (len(effective) == len(candidates) or (reserved and len(effective) == len(candidates) + 1)):
+    pinned = (catalog_model_versions or {}).get(record_alias)
+    if pinned is not None:
+        model_id, revision = pinned
+        record = next((row for row in candidates if row["model_id"] == model_id), None)
+        if record is None or not effective or model_record_revision(record) != normalize_model_revision(revision):
+            raise ValueError("Catalog model revision changed during snapshot compilation")
+        selected = effective[0]
+        base = create_model_config_from_record(record)
+    elif candidates and (len(effective) == len(candidates) or (reserved and len(effective) == len(candidates) + 1)):
         # Both catalog reads use the same order. The SDK selects the first matching alias.
         # Full configuration comparison below rejects a binding that changed between reads.
         record = candidates[0]
@@ -842,7 +850,7 @@ def export_snapshot(
     agent, models, query, history, *, tenant_id, conversation_id, language, user_id=None, run_input=None,
     agent_model_overrides=None, prepared_conversation: PreparedConversationScope | None = None,
     root_generation=None, turn_generation=None, source_model_alias=None, workbench_skills=(),
-    allow_debug_planning=False, workbench_knowledge_tools=None,
+    allow_debug_planning=False, workbench_knowledge_tools=None, catalog_model_versions=None,
 ):
     from management.services.agent.tool_identity import resolve_tool_user_context
 
@@ -861,6 +869,7 @@ def export_snapshot(
                 alias, models, tenant_id, resource, agent_model_overrides,
                 root_generation=root_generation if alias == agent.model_name else None,
                 turn_generation=turn_generation if alias == agent.model_name else None, source_alias=source_model_alias,
+                catalog_model_versions=catalog_model_versions,
             )
             for alias in aliases
         ]

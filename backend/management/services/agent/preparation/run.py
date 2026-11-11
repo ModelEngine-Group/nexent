@@ -215,7 +215,7 @@ async def create_agent_run_info(
         history=history,
         language=language,
     )
-    model_versions = {} if resource_versions is not None else None
+    model_versions = {} if export_resources or resource_versions is not None else None
     model_options = {"versions": model_versions} if model_versions is not None else {}
     model_list = await create_model_config_list(tenant_id, **model_options)
     create_config_kwargs = {
@@ -398,6 +398,7 @@ async def create_agent_run_info(
             agent_config, model_list, final_query, None, run_input=run_input,
             tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
             agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
+            catalog_model_versions=model_versions,
             **export_options,
         )
 
