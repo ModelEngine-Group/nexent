@@ -42,7 +42,7 @@ change:
     reason: New unit boundaries and deployed D3 provide distinct missing lifecycle
       and ancestry evidence.
   notes: 'SPEC ../nexent-doc/nexent/codeagent-action-history-role/changes/v285-northbound-otel.
-    User-requested current PR4328 extension. No new D1: isolated UT and real D3 suffice;
+    Independent Northbound tracing change split from PR4328; no tool-history or output-parser changes. No new D1: isolated UT and real D3 suffice;
     existing disconnect/final-answer cases are adjacent regressions. Existing NB-CHAT-DISCONNECT-001
     and NB-CHAT-FINAL-ANSWER-001 were reviewed as unchanged wider business contracts,
     not selected for full execution: relevant normal SSE and new-conversation disconnect

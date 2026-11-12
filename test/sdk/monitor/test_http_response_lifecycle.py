@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def test_nb_ac001_real_asgi_response_lifecycle(tmp_path):
-    root = Path(__file__).resolve().parents[4]
+    root = Path(__file__).resolve().parents[3]
     cases = Path(__file__).with_name('_http_response_lifecycle_cases.py')
     env = {**os.environ, 'PYTHONPATH': str(root/'sdk')}
     result = subprocess.run([sys.executable, '-m', 'pytest', str(cases),
