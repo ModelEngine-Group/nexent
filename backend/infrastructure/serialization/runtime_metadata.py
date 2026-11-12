@@ -262,3 +262,34 @@ def validate_runtime_metadata(value: Any) -> Dict[str, Any]:
     _validate_mcp_headers_reserved_fields(value)
 
     return value
+
+
+# ---------------------------------------------------------------------------
+# Reserved-field stripping — keep transport-only keys out of persistence
+# ---------------------------------------------------------------------------
+
+# Top-level key prefix that marks a field as transport-only (never persisted,
+# never shown in conversation reads).  The SDK uses the same convention when
+# building LLM prompts, so stripping here guarantees the conversation history
+# never learns secrets that Phase-1 passthrough fields carry.
+_RESERVED_PREFIX = "_"
+
+
+def strip_reserved_runtime_metadata_fields(
+    metadata: Any,
+) -> Dict[str, Any]:
+    """Return a shallow copy of ``metadata`` with every top-level reserved
+    (``_``-prefixed) key removed.
+
+    Call this **before** persisting runtime metadata or handing it back to
+    callers as part of conversation reads.  The original dict is never
+    mutated in place; callers that still need the transport view (for
+    :func:`apply_mcp_header_passthrough`) keep their reference untouched.
+    """
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if not (isinstance(key, str) and key.startswith(_RESERVED_PREFIX))
+    }

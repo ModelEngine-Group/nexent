@@ -97,6 +97,7 @@ from infrastructure.concurrency import (
 )
 from management.utils.request_context import get_user_language
 from infrastructure.serialization.runtime_metadata import (
+    strip_reserved_runtime_metadata_fields,
     validate_runtime_metadata,
 )
 
@@ -350,6 +351,16 @@ async def run_agent_stream(
                 error_code,
                 details={"reason": exc.code.value},
             ) from exc
+    # Validation passed — now compute a clean copy without transport-only
+    # reserved fields (``_mcp_headers``, ``_mcp_headers_by_server``, and any
+    # future ``_``-prefixed key) for every persistence path below.  We never
+    # mutate ``agent_request.metadata`` in place because ``apply_mcp_header_
+    # passthrough`` later still needs to read the reserved fields from it.
+    clean_metadata = (
+        strip_reserved_runtime_metadata_fields(agent_request.metadata)
+        if metadata_update_requested
+        else {}
+    )
     metadata_entrypoint = getattr(
         agent_request, "_runtime_metadata_entrypoint", "native"
     )
@@ -458,7 +469,7 @@ async def run_agent_stream(
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
-            conversation_kwargs["runtime_metadata"] = agent_request.metadata or {}
+            conversation_kwargs["runtime_metadata"] = clean_metadata
         conversation_data = create_new_conversation(**conversation_kwargs)
         agent_request.conversation_id = conversation_data["conversation_id"]
         is_new_conversation = True
@@ -483,7 +494,7 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
-                    metadata=agent_request.metadata or {},
+                    metadata=clean_metadata,
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
             except RuntimeMetadataVersionConflict as exc:
@@ -515,15 +526,13 @@ async def run_agent_stream(
             )
 
         if agent_request.is_debug:
-            metadata_snapshot = (
-                dict(agent_request.metadata or {}) if metadata_update_requested else {}
-            )
+            metadata_snapshot = clean_metadata
             metadata_version = None
         elif is_new_conversation:
             metadata_snapshot = dict(
                 conversation_data.get(
                     "runtime_metadata",
-                    agent_request.metadata if metadata_update_requested else {},
+                    clean_metadata if metadata_update_requested else {},
                 )
                 or {}
             )
@@ -547,7 +556,7 @@ async def run_agent_stream(
                 resolved_metadata = resolve_conversation_runtime_metadata(
                     conversation_id=agent_request.conversation_id,
                     user_id=resolved_user_id,
-                    request_metadata=agent_request.metadata,
+                    request_metadata=clean_metadata if metadata_update_requested else None,
                     update_requested=metadata_update_requested,
                     expected_version=agent_request.expected_metadata_version,
                 )

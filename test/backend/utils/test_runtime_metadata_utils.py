@@ -199,3 +199,72 @@ def test_validate_runtime_metadata_wraps_serialization_failures(monkeypatch):
         validate_runtime_metadata({"project_id": "P001"})
 
     assert exc_info.value.code == RuntimeMetadataValidationCode.INVALID_METADATA_TYPE
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 reserved-field stripping — keep transport-only headers out of
+# persistence.  These tests guard against regression where a future edit
+# accidentally forgets to clean metadata before handing it to the DB.
+# ---------------------------------------------------------------------------
+
+def test_strip_reserved_fields_removes_underscore_prefixed_top_level_keys():
+    from infrastructure.serialization.runtime_metadata import (
+        strip_reserved_runtime_metadata_fields,
+    )
+
+    metadata = {
+        "project_id": "P001",
+        "tenant": "tenant-1",
+        "_mcp_headers": {"Cookie": "sid=super-secret"},
+        "_mcp_headers_by_server": {
+            "http://echo-mcp/mcp": {"Authorization": "Bearer xyz"}
+        },
+        # A future Phase-2 reserved field that does not exist yet — the
+        # underscore convention guarantees it is stripped too.
+        "_future_reserved": {"nested": "also-stripped"},
+    }
+
+    clean = strip_reserved_runtime_metadata_fields(metadata)
+
+    # Public keys survive intact.
+    assert clean == {"project_id": "P001", "tenant": "tenant-1"}
+    # Transport-only keys never reach persistence.
+    assert "_mcp_headers" not in clean
+    assert "_mcp_headers_by_server" not in clean
+    assert "_future_reserved" not in clean
+    # The caller's original dict is untouched — passthrough still needs it.
+    assert "_mcp_headers" in metadata
+
+
+@pytest.mark.parametrize("metadata", [None, {}, ["a", "b"], "text", 123])
+def test_strip_reserved_fields_is_defensive_on_non_dict_input(metadata):
+    from infrastructure.serialization.runtime_metadata import (
+        strip_reserved_runtime_metadata_fields,
+    )
+
+    assert strip_reserved_runtime_metadata_fields(metadata) == {}
+
+
+def test_strip_reserved_fields_keeps_underscore_nested_values():
+    """Only TOP-LEVEL keys are transport-reserved.  Nested dicts may legally
+    carry underscore-prefixed keys — those belong to the caller's domain and
+    must not be touched."""
+    from infrastructure.serialization.runtime_metadata import (
+        strip_reserved_runtime_metadata_fields,
+    )
+
+    metadata = {
+        "audit_context": {
+            "_actor": "system",
+            "_trace": {"_id": "xyz"},
+            "event": "login",
+        },
+        "_mcp_headers": {"Cookie": "secret"},
+    }
+
+    clean = strip_reserved_runtime_metadata_fields(metadata)
+
+    # Top-level _mcp_headers stripped.
+    assert "_mcp_headers" not in clean
+    # Nested underscore keys untouched.
+    assert clean["audit_context"] == metadata["audit_context"]
