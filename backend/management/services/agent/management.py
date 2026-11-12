@@ -349,6 +349,9 @@ async def list_all_agent_info_impl(
                     "allow_chat_metadata": bool(
                         agent.get("allow_chat_metadata", False)
                     ),
+                    "allow_mcp_header_passthrough": bool(
+                        agent.get("allow_mcp_header_passthrough", False)
+                    ),
                     "model_params_override": agent.get("model_params_override"),
                     "enable_protocol_repair_retry": agent.get(
                         "enable_protocol_repair_retry"

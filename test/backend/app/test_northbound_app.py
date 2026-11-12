@@ -19,7 +19,8 @@ from io import BytesIO
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from gateway.api.northbound import _role_for_context, router
-from contracts.errors.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
+from contracts.errors.codes import ErrorCode
 
 
 app = FastAPI()
@@ -458,6 +459,32 @@ def test_run_chat_maps_runtime_transport_errors(error, expected_status):
         )
 
     assert response.status_code == expected_status
+
+
+def test_run_chat_propagates_app_exception_to_the_global_handler():
+    """AppException must escape run_chat instead of becoming a generic 500."""
+    error = AppException(
+        ErrorCode.CHAT_MCP_HEADER_KEY_FORBIDDEN,
+        details={"reason": "MCP_HEADER_KEY_FORBIDDEN"},
+    )
+    with patch(
+        "gateway.api.northbound._get_northbound_context",
+        new_callable=AsyncMock,
+    ) as mock_ctx, patch(
+        "gateway.api.northbound.start_streaming_chat",
+        new_callable=AsyncMock,
+        side_effect=error,
+    ):
+        mock_ctx.return_value = MagicMock()
+
+        with pytest.raises(AppException) as exc_info:
+            client.post(
+                "/nb/v1/chat/run",
+                json={"agent_name": "general-assistant", "query": "Hello"},
+                headers=_build_headers(),
+            )
+
+    assert exc_info.value is error
 
 
 # =============================================================================
