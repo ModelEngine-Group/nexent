@@ -245,7 +245,7 @@ def test_default_helm_has_empty_env_secrets_and_service_specific_references():
                       for v in deployment["spec"]["template"]["spec"]["containers"][0].get("envFrom", [])]
         if name in BACKENDS:
             expected = [None, "nexent-env"]
-            if name in ("config", "runtime", "northbound"):
+            if name in ("config", "runtime"):
                 expected.append("nexent-monitoring-env")
             assert references == expected + ["nexent-secrets"]
         else:
@@ -380,8 +380,8 @@ NEXENT_SANDBOX_DEFAULT_LEVEL=wrong
     for deployment in deployments:
         name = deployment["metadata"]["name"].removeprefix("nexent-")
         container, effective = container_environment(documents, deployment)
-        assert effective["SHARED"] == ("monitoring" if name in ("config", "runtime", "northbound") else "root")
-        assert ("MONITOR_ONLY" in effective) == (name in ("config", "runtime", "northbound"))
+        assert effective["SHARED"] == ("monitoring" if name in ("config", "runtime") else "root")
+        assert ("MONITOR_ONLY" in effective) == (name in ("config", "runtime"))
         assert effective["MINIO_ACCESS_KEY"] == "final-access"
         assert effective["EMPTY"] == ""
         assert effective["UNKNOWN_NEW_FEATURE"] == "enabled"
