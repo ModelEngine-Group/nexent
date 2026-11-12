@@ -2,6 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { App, Segmented } from "antd";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
 import { trajectoryService } from "@/services/trajectoryService";
@@ -100,7 +107,8 @@ export function TrajectoryBody({
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
         >
-          {collapsed ? "▸" : "▾"} {t(`trajectory.${slot}`)}
+          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}{" "}
+          {t(`trajectory.${slot}`)}
         </button>
         <div className="flex flex-wrap items-center gap-1">
           <Segmented
@@ -112,8 +120,9 @@ export function TrajectoryBody({
               { label: "JSON", value: "json" },
             ]}
           />
-          <StandardButton
-            size="small"
+          <button
+            className="trajectory-icon-button"
+            aria-label={t("trajectory.copy")}
             disabled={!text && reference.availability !== "available"}
             onClick={() => {
               void navigator.clipboard.writeText(formatted).then(
@@ -122,8 +131,8 @@ export function TrajectoryBody({
               );
             }}
           >
-            {t("trajectory.copy")}
-          </StandardButton>
+            <Copy size={14} />
+          </button>
         </div>
       </header>
       {!collapsed && (
@@ -136,43 +145,67 @@ export function TrajectoryBody({
             </p>
           ) : (
             <>
-              <p className="px-3 py-1 text-xs text-gray-500">
-                {t("trajectory.characters", {
-                  count: reference.char_count ?? Array.from(text).length,
-                })}{" "}
-                ·{" "}
-                {t(
-                  offset === 0 && complete
-                    ? "trajectory.fullContent"
-                    : "trajectory.contentRange",
-                  {
-                    start: offset,
-                    end: chunk?.next ?? new TextEncoder().encode(text).length,
-                    total: reference.byte_count ?? "—",
-                  }
-                )}
-              </p>
-              <pre
-                className={
-                  expanded ? "trajectory-body-full" : "trajectory-body-preview"
-                }
-              >
-                {formatted || t("trajectory.emptyBody")}
-              </pre>
+              <div className="trajectory-code-card">
+                <div className="trajectory-code-toolbar">
+                  <span>{mode === "json" ? "JSON" : "TEXT"}</span>
+                  <span
+                    className="trajectory-code-meta"
+                    title={t(
+                      offset === 0 && complete
+                        ? "trajectory.fullContent"
+                        : "trajectory.contentRange",
+                      {
+                        start: offset,
+                        end:
+                          chunk?.next ?? new TextEncoder().encode(text).length,
+                        total: reference.byte_count ?? "—",
+                      }
+                    )}
+                  >
+                    {t("trajectory.characters", {
+                      count: reference.char_count ?? Array.from(text).length,
+                    })}
+                    <button
+                      className="trajectory-icon-button"
+                      aria-label={t(
+                        expanded
+                          ? "trajectory.collapseContent"
+                          : "trajectory.expandContent"
+                      )}
+                      onClick={() => {
+                        if (!reference.complete && !chunk) void load(0);
+                        else setExpanded((value) => !value);
+                      }}
+                    >
+                      {expanded ? (
+                        <Minimize2 size={13} />
+                      ) : (
+                        <Maximize2 size={13} />
+                      )}
+                    </button>
+                  </span>
+                </div>
+                <div className="trajectory-code-scroll">
+                  <pre
+                    className={
+                      expanded
+                        ? "trajectory-body-full"
+                        : "trajectory-body-preview"
+                    }
+                  >
+                    <span className="trajectory-line-numbers" aria-hidden>
+                      {Array.from(
+                        {
+                          length: Math.min(formatted.split("\n").length, 10000),
+                        },
+                        (_, index) => index + 1
+                      ).join("\n")}
+                    </span>
+                    <code>{formatted || t("trajectory.emptyBody")}</code>
+                  </pre>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2 p-2">
-                <StandardButton
-                  loading={loading}
-                  onClick={() => {
-                    if (!reference.complete && !chunk) void load(0);
-                    else setExpanded((value) => !value);
-                  }}
-                >
-                  {t(
-                    expanded
-                      ? "trajectory.collapseContent"
-                      : "trajectory.expandContent"
-                  )}
-                </StandardButton>
                 {chunk && chunk.offset > 0 && (
                   <StandardButton
                     disabled={loading}

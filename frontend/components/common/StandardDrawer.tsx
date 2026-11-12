@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Drawer } from "antd";
+import { cn } from "@/lib/utils";
 
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardCloseButton } from "@/components/common/StandardCloseButton";
@@ -18,6 +19,7 @@ export interface StandardDrawerProps {
   width?: number | string;
   footer?: ReactNode | null;
   maskClosable?: boolean;
+  bodyClassName?: string;
 }
 
 export function StandardDrawer({
@@ -32,6 +34,7 @@ export function StandardDrawer({
   width = 560,
   footer,
   maskClosable = false,
+  bodyClassName,
 }: StandardDrawerProps) {
   const defaultFooter = (
     <div className="flex h-8 w-full shrink-0 flex-nowrap items-center justify-end gap-4">
@@ -66,7 +69,10 @@ export function StandardDrawer({
           "!flex !h-full !flex-col !overflow-hidden !p-6 !shadow-[-2px_0_12px_0_rgba(0,0,0,0.08)]",
         header: "!m-0 !h-[28px] !w-full !shrink-0 !border-0 !p-0",
         title: "!w-full !min-w-0",
-        body: "!flex !min-h-0 !w-full !flex-1 !overflow-y-auto !px-0 !py-4",
+        body: cn(
+          "!flex !min-h-0 !w-full !flex-1 !overflow-y-auto !px-0 !py-4",
+          bodyClassName
+        ),
         footer: "!h-8 !w-full !shrink-0 !border-0 !p-0",
       }}
     >

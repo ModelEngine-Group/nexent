@@ -2,11 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Tag } from "antd";
+import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { BodyCache, formatMetric, formatTraceTime } from "@/lib/trajectory";
+import { BodyCache, formatMetric } from "@/lib/trajectory";
 import type { TrajectoryNode } from "@/types/trajectory";
 import { TrajectoryBody } from "./TrajectoryBody";
 import { AgentVersion } from "./AgentVersion";
+import {
+  CopyTraceId,
+  NodeIcon,
+  TrajectoryStatus,
+  nodeDuration,
+  nodeTime,
+} from "./TrajectoryPresentation";
 
 export function TrajectoryNodeDetail({
   node,
@@ -37,10 +45,7 @@ export function TrajectoryNodeDetail({
           [t("trajectory.totalTokens"), formatMetric(node.usage?.total, 0)],
         ]
       : []),
-    [
-      t("trajectory.duration"),
-      `${formatMetric(node.duration_ms == null ? null : node.duration_ms / 1000)} s`,
-    ],
+    [t("trajectory.duration"), nodeDuration(node.duration_ms)],
     ...(node.kind === "model"
       ? [
           [t("trajectory.ttft"), `${formatMetric(node.ttft_ms)} ms`],
@@ -62,110 +67,145 @@ export function TrajectoryNodeDetail({
   const output = node.usage?.output ?? known?.output;
   return (
     <div className="trajectory-node-detail" ref={container}>
-      <header>
-        <h2>{node.name}</h2>
-        {node.kind === "agent" && (
-          <Tag>
-            {t("trajectory.agentVersion")}:{" "}
-            <AgentVersion
-              version={node.agent_version_no}
-              name={node.agent_version_name}
-            />
-          </Tag>
-        )}
-        <Tag
-          color={
-            node.kind === "agent"
-              ? "purple"
-              : node.kind === "model"
-                ? "blue"
-                : "cyan"
-          }
-        >
-          {t(`trajectory.kinds.${node.kind}`, { defaultValue: node.kind })}
-        </Tag>
-        <Tag>
-          {t(`trajectory.businessStatus.${node.status}`, {
-            defaultValue: node.status,
-          })}
-        </Tag>
+      <header className="trajectory-node-heading">
+        <div className="trajectory-node-title">
+          <NodeIcon kind={node.kind} large />
+          <div className="min-w-0 flex-1">
+            <div className="trajectory-node-title-row">
+              <h2>{node.name}</h2>
+              {node.round_no != null && (
+                <span className="trajectory-round-label">
+                  {t("trajectory.round", { number: node.round_no })}
+                </span>
+              )}
+              <Tag>
+                {t(`trajectory.kinds.${node.kind}`, {
+                  defaultValue: node.kind,
+                })}
+              </Tag>
+            </div>
+            <div className="trajectory-node-id">
+              <span>Trace ID</span>
+              <code title={node.display_trace_id}>{node.display_trace_id}</code>
+              <CopyTraceId value={node.display_trace_id} />
+              {node.parent_id ? (
+                <button
+                  className="trajectory-parent-link"
+                  onClick={() => onParent(node.parent_id!)}
+                >
+                  <GitBranch size={12} />
+                  {t("trajectory.parent")}
+                </button>
+              ) : (
+                <span className="trajectory-root-label">
+                  {t("trajectory.rootNode")}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="trajectory-node-times">
+          <TrajectoryStatus status={node.status} />
+          <span>
+            {t("trajectory.started")} <time>{nodeTime(node.started_at)}</time>
+          </span>
+          <span>
+            {t("trajectory.finished")} <time>{nodeTime(node.finished_at)}</time>
+          </span>
+        </div>
       </header>
-      <div className="trajectory-node-id">
-        Trace ID: <code>{node.display_trace_id}</code>
-      </div>
-      <div className="trajectory-node-times">
-        <span>
-          {t("trajectory.started")}: {formatTraceTime(node.started_at)}
-        </span>
-        <span>
-          {t("trajectory.finished")}: {formatTraceTime(node.finished_at)}
-        </span>
-      </div>
-      <div className="trajectory-node-metrics">
-        {metrics.map(([label, value]) => (
-          <div key={label}>
-            <small>{label}</small>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-      {node.usage && !node.usage.complete && (
-        <p className="text-xs text-amber-700">
-          {t("trajectory.partialUsage")}
-          {known &&
-            ` · ${t("trajectory.knownTokens")}: ${formatMetric(known.total, 0)}`}
-        </p>
-      )}
-      {node.kind !== "tool" &&
-        input != null &&
-        output != null &&
-        input + output > 0 && (
-          <div className="trajectory-token-bar" title={`${input} / ${output}`}>
-            <span style={{ width: `${(input / (input + output)) * 100}%` }} />
-            <span />
-          </div>
+      <section className="trajectory-node-summary">
+        <div className="trajectory-node-metrics" data-kind={node.kind}>
+          {metrics.map(([label, value]) => (
+            <div
+              key={label}
+              title={
+                label === t("trajectory.ttft") &&
+                node.ttft_ms != null &&
+                node.started_at
+                  ? `${t("trajectory.firstTokenAt")}: ${nodeTime(new Date(Date.parse(node.started_at) + node.ttft_ms).toISOString())}`
+                  : undefined
+              }
+            >
+              <small>{label}</small>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+        {node.usage && !node.usage.complete && (
+          <p className="text-xs text-amber-700">
+            {t("trajectory.partialUsage")}
+            {known &&
+              ` · ${t("trajectory.knownTokens")}: ${formatMetric(known.total, 0)}`}
+          </p>
         )}
-      {node.kind === "model" && node.ttft_ms != null && node.started_at && (
-        <p className="text-xs text-gray-500">
-          {t("trajectory.firstTokenAt")}:{" "}
-          {formatTraceTime(
-            new Date(Date.parse(node.started_at) + node.ttft_ms).toISOString()
+        {node.kind !== "tool" &&
+          input != null &&
+          output != null &&
+          input + output > 0 && (
+            <div
+              className="trajectory-token-bar"
+              title={`${input} / ${output}`}
+            >
+              <span style={{ width: `${(input / (input + output)) * 100}%` }} />
+              <span />
+            </div>
           )}
-        </p>
-      )}
-      <section>
+      </section>
+      <section className="trajectory-execution-info">
         <button
           className="trajectory-section-title"
           aria-expanded={info}
           onClick={() => setInfo((value) => !value)}
         >
-          {info ? "▾" : "▸"} {t("trajectory.executionInfo")}
+          {info ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{" "}
+          {t("trajectory.executionInfo")}
         </button>
         {info && (
           <dl className="trajectory-info">
-            <dt>{t("trajectory.users")}</dt>
-            <dd>{node.user || node.user_id || "—"}</dd>
-            <dt>{t("trajectory.models")}</dt>
-            <dd>{node.model || "—"}</dd>
-            <dt>{t("trajectory.directCalls")}</dt>
-            <dd>{formatMetric(node.direct_child_count, 0)}</dd>
-            <dt>{t("trajectory.parent")}</dt>
-            <dd>
-              {node.parent_id ? (
-                <button
-                  className="trajectory-link break-all"
-                  onClick={() => onParent(node.parent_id!)}
-                >
-                  {node.parent_id}
-                </button>
-              ) : (
-                "—"
-              )}
-            </dd>
-            {Object.entries(node.attributes).map(([key, value]) => (
-              <div className="contents" key={key}>
-                <dt>{key}</dt>
+            <div>
+              <dt>{t("trajectory.users")}</dt>
+              <dd>{node.user || node.user_id || "—"}</dd>
+            </div>
+            {node.kind === "agent" && (
+              <div>
+                <dt>{t("trajectory.agentVersion")}</dt>
                 <dd>
+                  <AgentVersion
+                    version={node.agent_version_no}
+                    name={node.agent_version_name}
+                  />
+                </dd>
+              </div>
+            )}
+            {node.kind === "agent" && node.agent_version_name && (
+              <div>
+                <dt>{t("trajectory.versionName")}</dt>
+                <dd>{node.agent_version_name || "—"}</dd>
+              </div>
+            )}
+            <div>
+              <dt>{t("trajectory.models")}</dt>
+              <dd title={node.model || undefined}>{node.model || "—"}</dd>
+            </div>
+            <div>
+              <dt>TraceID</dt>
+              <dd title={node.display_trace_id}>{node.display_trace_id}</dd>
+            </div>
+            <div>
+              <dt>{t("trajectory.directCalls")}</dt>
+              <dd>{formatMetric(node.direct_child_count, 0)}</dd>
+            </div>
+            {Object.entries(node.attributes).map(([key, value]) => (
+              <div key={key}>
+                <dt>{key}</dt>
+                <dd
+                  title={
+                    typeof value === "object"
+                      ? JSON.stringify(value)
+                      : String(value)
+                  }
+                >
                   {typeof value === "object"
                     ? JSON.stringify(value)
                     : String(value)}
@@ -175,18 +215,25 @@ export function TrajectoryNodeDetail({
           </dl>
         )}
       </section>
-      {(["input", "reasoning", "output"] as const).map((slot) => (
-        <TrajectoryBody
-          key={`${node.id}:${slot}`}
-          reference={node[slot]}
-          slot={slot}
-          conversationId={conversationId}
-          nodeId={node.id}
-          cache={cache}
-          onLoaded={onLoaded}
-          onInvalidated={onInvalidated}
-        />
-      ))}
+      {(["input", "reasoning", "output"] as const)
+        .filter(
+          (slot) =>
+            slot !== "reasoning" ||
+            node.kind === "model" ||
+            node.reasoning.availability !== "not_returned"
+        )
+        .map((slot) => (
+          <TrajectoryBody
+            key={`${node.id}:${slot}`}
+            reference={node[slot]}
+            slot={slot}
+            conversationId={conversationId}
+            nodeId={node.id}
+            cache={cache}
+            onLoaded={onLoaded}
+            onInvalidated={onInvalidated}
+          />
+        ))}
     </div>
   );
 }

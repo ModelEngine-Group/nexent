@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { DatePicker, Popover, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Filter, RefreshCw, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Filter,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -33,6 +39,7 @@ import { TrajectorySummary } from "./TrajectorySummary";
 import { TrajectoryError } from "./TrajectoryFeedback";
 import { TrajectoryDrawer } from "./TrajectoryDrawer";
 import { CleanupDialog } from "./CleanupDialog";
+import { TrajectoryStatus } from "./TrajectoryPresentation";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -89,7 +96,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
         : ("descend" as const)
       : null;
   const modelHeader = (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center justify-between gap-1">
       {t("trajectory.models")}
       <Popover
         trigger="click"
@@ -114,68 +121,59 @@ export function ObservabilityCenter({ user }: { user: User }) {
   );
   const columns: ColumnsType<TrajectoryRecord> = [
     {
-      title: t("trajectory.agents"),
+      title: t("trajectory.agentSession"),
       dataIndex: "root_agent_name",
-      width: 180,
+      width: 250,
       render: (_, row) => (
-        <button className="trajectory-link" onClick={() => setSelected(row)}>
-          {row.root_agent_name ||
-            row.root_agent_id ||
-            t("trajectory.unknownAgent")}
-        </button>
-      ),
-    },
-    {
-      title: t("trajectory.agentVersion"),
-      key: "root_agent_version_no",
-      width: 100,
-      render: (_, row) => (
-        <AgentVersion
-          version={row.root_agent_version_no}
-          name={row.root_agent_version_name}
-        />
-      ),
-    },
-    {
-      title: t("trajectory.conversations"),
-      width: 220,
-      render: (_, row) => (
-        <div className="py-2">
-          <div className="truncate" title={row.conversation_title || ""}>
-            {row.conversation_title || "—"}
-          </div>
-          <small className="text-gray-500">{row.conversation_id}</small>
+        <div className="trajectory-record-agent">
+          <button className="trajectory-link" onClick={() => setSelected(row)}>
+            {row.root_agent_name ||
+              row.root_agent_id ||
+              t("trajectory.unknownAgent")}
+            <ChevronRight size={13} />
+          </button>
+          <span
+            title={`${row.conversation_title || ""} · ${row.conversation_id}`}
+          >
+            {row.conversation_title || row.conversation_id}
+          </span>
         </div>
+      ),
+    },
+    {
+      title: t("trajectory.latestVersion"),
+      key: "root_agent_version_no",
+      width: 126,
+      render: (_, row) => (
+        <span
+          className={`trajectory-version-tag${row.root_agent_version_no === 0 ? " is-draft" : ""}`}
+        >
+          <AgentVersion
+            version={row.root_agent_version_no}
+            name={row.root_agent_version_name}
+          />
+        </span>
       ),
     },
     {
       title: t("trajectory.rounds"),
       key: "round_count",
-      width: 80,
-      render: (_, row) => formatMetric(row.round_count, 0),
-    },
-    {
-      title: t("trajectory.users"),
-      width: 170,
+      width: 110,
       render: (_, row) => (
-        <div className="py-2">
-          <div>{row.user_name || row.user_id}</div>
-          <small className="text-gray-500">
-            {row.tenant_name || row.tenant_id}
+        <div className="trajectory-conversation-count">
+          <span>
+            {formatMetric(row.round_count, 0)} {t("trajectory.roundUnit")}
+          </span>
+          <small>
+            {t("trajectory.executionCount", { count: row.execution_count })}
           </small>
         </div>
       ),
     },
     {
-      title: modelHeader,
-      key: "models",
-      width: 180,
-      render: (_, row) => row.models.join(", ") || "—",
-    },
-    {
       title: t("trajectory.status"),
       key: "status",
-      width: 130,
+      width: 110,
       filteredValue: filters.status ? [filters.status] : null,
       filters: [
         { text: t("trajectory.success"), value: "success" },
@@ -189,19 +187,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
       filterMultiple: false,
       render: (_, row) => (
         <div>
-          <Tag
-            color={
-              row.status === "success"
-                ? "success"
-                : row.status === "error"
-                  ? "error"
-                  : "default"
-            }
-          >
-            {t(`trajectory.availability.${row.status || row.availability}`, {
-              defaultValue: row.availability,
-            })}
-          </Tag>
+          <TrajectoryStatus status={row.status || row.availability} />
           {row.coverage.complete !== true && row.trajectory_id && (
             <small className="block text-amber-700">
               {t("trajectory.partial")}
@@ -211,9 +197,55 @@ export function ObservabilityCenter({ user }: { user: User }) {
       ),
     },
     {
+      title: modelHeader,
+      key: "models",
+      width: 160,
+      render: (_, row) => (
+        <span className="trajectory-record-model">
+          {row.models.join(", ") || "—"}
+        </span>
+      ),
+    },
+    {
+      title: t("trajectory.cumulativeDuration"),
+      key: "duration_ms",
+      width: 100,
+      sorter: true,
+      sortOrder: sortOrder("duration_ms"),
+      render: (_, row) =>
+        `${formatMetric(row.duration_ms == null ? null : row.duration_ms / 1000)} s`,
+    },
+    {
+      title: t("trajectory.totalTokens"),
+      key: "total_tokens",
+      width: 110,
+      sorter: true,
+      sortOrder: sortOrder("total_tokens"),
+      render: (_, row) => (
+        <>
+          {formatMetric(row.usage?.total, 0)}
+          {row.usage && !row.usage.complete && (
+            <small className="block text-amber-700">
+              {t("trajectory.partial")}
+            </small>
+          )}
+        </>
+      ),
+    },
+    {
+      title: t("trajectory.users"),
+      width: 100,
+      render: (_, row) => row.user_name || row.user_id,
+    },
+    {
+      title: t("trajectory.tenants"),
+      width: 150,
+      render: (_, row) => row.tenant_name || row.tenant_id,
+    },
+    {
       title: (
         <div className="flex items-center gap-1">
-          {t("trajectory.started")}
+          {t("trajectory.lastExecution")}
           <Popover
             trigger="click"
             content={
@@ -280,42 +312,15 @@ export function ObservabilityCenter({ user }: { user: User }) {
         </div>
       ),
       key: "started_at",
-      width: 190,
+      width: 180,
       sorter: true,
       sortOrder: sortOrder("started_at"),
       render: (_, row) => formatTraceTime(row.started_at),
     },
     {
-      title: t("trajectory.finished"),
-      dataIndex: "finished_at",
-      width: 180,
-      render: formatTraceTime,
-    },
-    {
-      title: t("trajectory.duration"),
-      key: "duration_ms",
-      width: 110,
-      sorter: true,
-      sortOrder: sortOrder("duration_ms"),
-      render: (_, row) =>
-        `${formatMetric(row.duration_ms == null ? null : row.duration_ms / 1000)} s`,
-    },
-    {
-      title: "Token",
-      key: "total_tokens",
-      width: 120,
-      sorter: true,
-      sortOrder: sortOrder("total_tokens"),
-      render: (_, row) => (
-        <>
-          {formatMetric(row.usage?.total, 0)}
-          {row.usage && !row.usage.complete && (
-            <small className="block text-amber-700">
-              {t("trajectory.partial")}
-            </small>
-          )}
-        </>
-      ),
+      title: t("trajectory.conversationId"),
+      width: 300,
+      render: (_, row) => <code>{row.conversation_id}</code>,
     },
   ];
   return (
@@ -323,89 +328,118 @@ export function ObservabilityCenter({ user }: { user: User }) {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{t("trajectory.title")}</h1>
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-xs leading-[18px] text-gray-500">
             {t("trajectory.subtitle")}
           </p>
         </div>
-        <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
-          <span>
-            <StandardButton
-              icon={<Trash2 size={14} />}
-              disabled={!canCleanup}
-              onClick={() => setCleaning(true)}
-            >
-              {t("trajectory.cleanup")}
-            </StandardButton>
+        <div className="trajectory-page-actions">
+          <span className="trajectory-role">
+            <ShieldCheck size={16} />
+            {t(
+              user.role === "SU" ? "trajectory.superAdmin" : "trajectory.admin"
+            )}
           </span>
-        </Tooltip>
+          <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
+            <span>
+              <StandardButton
+                icon={<Trash2 size={14} />}
+                disabled={!canCleanup}
+                onClick={() => setCleaning(true)}
+              >
+                {t("trajectory.cleanup")}
+              </StandardButton>
+            </span>
+          </Tooltip>
+        </div>
       </header>
-      <section className="trajectory-panel flex flex-wrap items-center gap-3">
+      <section
+        className="trajectory-panel trajectory-filters"
+        data-role={user.role}
+      >
         {user.role === "SU" ? (
-          <DirectoryFilter
-            facet="tenants"
-            filters={{}}
-            value={tenant}
-            onChange={(option) => directoryChange("tenant_id", option)}
-          />
+          <label>
+            <span>{t("trajectory.tenants")}</span>
+            <DirectoryFilter
+              facet="tenants"
+              filters={{}}
+              value={tenant}
+              onChange={(option) => directoryChange("tenant_id", option)}
+            />
+          </label>
         ) : (
-          <Tag>
-            {t("trajectory.currentTenant")}: {user.tenantId}
-          </Tag>
+          <label>
+            <span>{t("trajectory.tenants")}</span>
+            <div className="trajectory-fixed-tenant" title={user.tenantId}>
+              {user.tenantId}
+            </div>
+          </label>
         )}
-        <DirectoryFilter
-          key={`users:${tenant || "all"}`}
-          facet="users"
-          filters={{ tenant_id: tenant }}
-          value={filters.target_user_id}
-          onChange={(option) => directoryChange("target_user_id", option)}
-        />
-        <DirectoryFilter
-          key={`agents:${tenant}:${filters.target_user_id}`}
-          facet="agents"
-          filters={{
-            tenant_id: tenant,
-            target_user_id: filters.target_user_id,
-          }}
-          value={filters.agent_id}
-          onChange={(option) => directoryChange("agent_id", option)}
-        />
-        <DirectoryFilter
-          key={`conversations:${tenant}:${filters.target_user_id}:${filters.agent_id}`}
-          facet="conversations"
-          filters={{
-            tenant_id: tenant,
-            target_user_id: filters.target_user_id,
-            agent_id: filters.agent_id,
-          }}
-          value={filters.conversation_id}
-          onChange={(option) => directoryChange("conversation_id", option)}
-        />
-        <StandardInput
-          className="!w-56"
-          aria-label={t("trajectory.idSearch")}
-          placeholder={t("trajectory.idSearch")}
-          maxLength={200}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          onPressEnter={() => {
-            change({ ...filters, id_query: search.trim() });
-            records.refresh();
-          }}
-        />
-        <StandardButton
-          variant="primary"
-          icon={<RefreshCw size={14} />}
-          loading={records.isFetching}
-          onClick={() => {
-            change({ ...filters, id_query: search.trim() });
-            records.refresh();
-          }}
-        >
-          {t("trajectory.query")}
-        </StandardButton>
+        <label>
+          <span>{t("trajectory.users")}</span>
+          <DirectoryFilter
+            key={`users:${tenant || "all"}`}
+            facet="users"
+            filters={{ tenant_id: tenant }}
+            value={filters.target_user_id}
+            onChange={(option) => directoryChange("target_user_id", option)}
+          />
+        </label>
+        <label>
+          <span>{t("trajectory.agents")}</span>
+          <DirectoryFilter
+            key={`agents:${tenant}:${filters.target_user_id}`}
+            facet="agents"
+            filters={{
+              tenant_id: tenant,
+              target_user_id: filters.target_user_id,
+            }}
+            value={filters.agent_id}
+            onChange={(option) => directoryChange("agent_id", option)}
+          />
+        </label>
+        <label>
+          <span>{t("trajectory.conversations")}</span>
+          <DirectoryFilter
+            key={`conversations:${tenant}:${filters.target_user_id}:${filters.agent_id}`}
+            facet="conversations"
+            filters={{
+              tenant_id: tenant,
+              target_user_id: filters.target_user_id,
+              agent_id: filters.agent_id,
+            }}
+            value={filters.conversation_id}
+            onChange={(option) => directoryChange("conversation_id", option)}
+          />
+        </label>
+        <label className="trajectory-id-filter">
+          <span>{t("trajectory.idSearchLabel")}</span>
+          <StandardInput
+            prefix={<Search size={14} />}
+            suffix={
+              <button
+                aria-label={t("trajectory.query")}
+                onClick={() => {
+                  change({ ...filters, id_query: search.trim() });
+                  records.refresh();
+                }}
+              >
+                <Search size={14} />
+              </button>
+            }
+            aria-label={t("trajectory.idSearch")}
+            placeholder={t("trajectory.idSearch")}
+            maxLength={200}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onPressEnter={() => {
+              change({ ...filters, id_query: search.trim() });
+              records.refresh();
+            }}
+          />
+        </label>
         <StandardButton onClick={clear}>{t("trajectory.clear")}</StandardButton>
       </section>
-      <div className="flex flex-wrap gap-2">
+      <div className="trajectory-active-filters">
         {Object.entries(filters)
           .filter(
             ([key, value]) =>
@@ -439,24 +473,30 @@ export function ObservabilityCenter({ user }: { user: User }) {
       {records.isError && (
         <TrajectoryError error={records.error} retry={refresh} />
       )}
-      <section className="trajectory-panel min-h-0 flex-1">
-        <div className="mb-3 flex justify-between text-xs text-gray-500">
+      <section className="trajectory-table-panel min-h-0 flex-1">
+        <div className="trajectory-list-caption">
           <span>
             {t("trajectory.total", { count: records.data?.total ?? 0 })}
           </span>
-          <span>
-            {records.data &&
-              `${t("trajectory.asOf")}: ${formatTraceTime(records.data.as_of)}`}
+          <span
+            title={
+              records.data
+                ? `${t("trajectory.asOf")}: ${formatTraceTime(records.data.as_of)}`
+                : undefined
+            }
+          >
+            {t("trajectory.retention")}
           </span>
         </div>
         <StandardTable<TrajectoryRecord>
-          className="[&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
+          className="trajectory-table [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!h-0 [&_.ant-table-tbody>tr.ant-table-measure-row>td]:!border-0"
+          size="middle"
           rowKey={recordKey}
           columns={columns}
           dataSource={records.data?.items ?? []}
           loading={records.isFetching}
           pagination={false}
-          scroll={{ x: 1550 }}
+          scroll={{ x: 1776 }}
           locale={{
             emptyText: records.isError
               ? t("trajectory.queryFailed")

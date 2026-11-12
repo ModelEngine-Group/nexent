@@ -13,7 +13,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`${base}/zh/observability`);
-  const table = page.locator(".trajectory-panel .ant-table");
+  const table = page.locator(".trajectory-table-panel .ant-table");
   const open = async () => {
     await table.getByRole("button", { name: "Friday", exact: true }).click();
     await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
@@ -107,7 +107,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         .locator(".trajectory-node-detail")
         .getByText("吞吐量", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText(/结束时间:/)).toBeVisible();
+    await expect(page.getByText(/结束时间/)).toBeVisible();
     await page.getByRole("treeitem", { name: /policy.check/ }).click();
     await expect(
       page.locator(".trajectory-node-detail").getByText(/智能体版本/),
@@ -144,7 +144,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
       .getByRole("button", { name: "读取下一块", exact: true })
       .first()
       .click();
-    await expect(page.locator(".trajectory-body pre").first()).toHaveText("终");
+    await expect(page.locator(".trajectory-body pre code").first()).toHaveText("终");
     await page.getByRole("button", { name: "加载更多", exact: true }).click();
     await expect(
       page.getByRole("treeitem", { name: /Later tool/ }),
@@ -166,12 +166,12 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     });
     await expect.poll(() => state.records.length).toBe(count);
     await page
-      .getByRole("textbox", { name: "搜索会话 ID / 节点 Trace ID" })
+      .getByRole("textbox", { name: "Trace ID / 会话 ID" })
       .fill("draft");
     await page.getByRole("combobox", { name: "用户", exact: true }).click();
     await page.getByRole("option").filter({ hasText: "Owner" }).click();
     await expect(
-      page.getByRole("textbox", { name: "搜索会话 ID / 节点 Trace ID" }),
+      page.getByRole("textbox", { name: "Trace ID / 会话 ID" }),
     ).toHaveValue("");
     expect(
       state.writes.filter((path) => /chat|run|tool/.test(path)),
@@ -237,7 +237,7 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     state.multiRound = true;
     await page.goto(`${base}/zh/observability`);
     await expect(
-      table.getByRole("columnheader", { name: "轮数" }),
+      table.getByRole("columnheader", { name: "对话轮次" }),
     ).toBeVisible();
     expect(
       state.records

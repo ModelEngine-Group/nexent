@@ -2,15 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Spin } from "antd";
+import { Clock3, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { StandardDrawer } from "@/components/common/StandardDrawer";
 import { StandardButton } from "@/components/common/StandardButton";
-import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
+import {
+  BodyCache,
+  invalidatesTrajectory,
+  formatMetric,
+} from "@/lib/trajectory";
 import { useConversationTrajectory } from "@/hooks/trajectory/useConversationTrajectory";
 import type { TrajectoryRecord } from "@/types/trajectory";
 import { TrajectoryError, CoverageNotice } from "./TrajectoryFeedback";
 import { TrajectoryTimeline } from "./TrajectoryTimeline";
 import { TrajectoryNodeDetail } from "./TrajectoryNodeDetail";
+import { CopyTraceId, nodeDuration } from "./TrajectoryPresentation";
 
 export function TrajectoryDrawer({
   row,
@@ -88,92 +94,127 @@ export function TrajectoryDrawer({
   return (
     <StandardDrawer
       open
-      title={row.conversation_title || t("trajectory.executionDetail")}
+      title={t("trajectory.conversationDetail")}
       closeLabel={t("trajectory.close")}
       closeText={t("trajectory.close")}
       onClose={onClose}
-      width="min(1400px, 94vw)"
+      width="min(1440px, 92vw)"
       maskClosable
+      bodyClassName="!pb-0"
       footer={null}
     >
       <div className="trajectory-drawer-content">
         <div className="trajectory-drawer-heading">
-          <span>{row.conversation_title || row.conversation_id}</span>
-          <code>{row.conversation_id}</code>
-          <span>{t("trajectory.shanghai")}</span>
+          <span>{row.tenant_name || row.tenant_id}</span>
+          <span>/</span>
+          <span>{row.user_name || row.user_id}</span>
+          <span>/</span>
+          <strong>{row.root_agent_name || t("trajectory.unknownAgent")}</strong>
         </div>
-        {query.isPending && (
-          <div className="p-6 text-center">
-            <Spin />
-          </div>
-        )}
-        {(query.isError || fatal != null) && (
-          <TrajectoryError error={fatal ?? query.error} retry={retry} />
-        )}
-        {fatal == null && pages && (
-          <>
-            <CoverageNotice
-              coverage={pages[0]?.directory?.coverage ?? row.coverage}
-            />
-            {!nodes.length && !unavailable.length && (
-              <Alert
-                type="info"
-                showIcon
-                title={t(
-                  `trajectory.availability.${pages[0]?.directory?.availability ?? row.availability}`
-                )}
-              />
-            )}
-            {query.hasPreviousPage && (
-              <StandardButton
-                loading={query.isFetchingPreviousPage}
-                onClick={() => void query.fetchPreviousPage()}
+        <div className="trajectory-viewer">
+          <header className="trajectory-viewer-heading">
+            <div className="trajectory-viewer-title">
+              <h1>{row.root_agent_name || t("trajectory.unknownAgent")}</h1>
+              <span className="trajectory-round-label">
+                {formatMetric(row.round_count, 0)} {t("trajectory.roundUnit")}
+              </span>
+              <span
+                className="trajectory-task-name"
+                title={row.conversation_title || undefined}
               >
-                {t("trajectory.previousRounds")}
-              </StandardButton>
-            )}
-            <div className="trajectory-detail-grid">
-              <TrajectoryTimeline
-                nodes={nodes}
-                unavailable={unavailable.map(({ run }) => run!)}
-                selected={selected?.id}
-                complete={!query.hasNextPage && !query.hasPreviousPage}
-                cache={cache}
-                onSelect={(node) => setSelectedId(node.id)}
-                onEndReached={
-                  canLoad ? () => void query.fetchNextPage() : undefined
-                }
+                {row.conversation_title}
+              </span>
+            </div>
+            <div className="trajectory-viewer-identity">
+              <span>Trace ID</span>
+              <code>{row.conversation_id}</code>
+              <CopyTraceId value={row.conversation_id} />
+              <i />
+              <span>
+                <Clock3 size={12} />
+                {nodeDuration(row.duration_ms)}
+              </span>
+              <span>
+                <Sparkles size={12} />
+                {formatMetric(row.usage?.total, 0)} Tokens
+              </span>
+            </div>
+          </header>
+          {query.isPending && (
+            <div className="p-6 text-center">
+              <Spin />
+            </div>
+          )}
+          {(query.isError || fatal != null) && (
+            <TrajectoryError error={fatal ?? query.error} retry={retry} />
+          )}
+          {fatal == null && pages && (
+            <>
+              <CoverageNotice
+                coverage={pages[0]?.directory?.coverage ?? row.coverage}
               />
-              {selected && (
-                <TrajectoryNodeDetail
-                  key={selected.id}
-                  node={selected}
-                  conversationId={row.conversation_id}
-                  cache={cache}
-                  onLoaded={() => setContentRevision((value) => value + 1)}
-                  onInvalidated={(error) => {
-                    cache.clear();
-                    setInvalidated(error);
-                  }}
-                  onParent={setSelectedId}
+              {!nodes.length && !unavailable.length && (
+                <Alert
+                  type="info"
+                  showIcon
+                  title={t(
+                    `trajectory.availability.${pages[0]?.directory?.availability ?? row.availability}`
+                  )}
                 />
               )}
-            </div>
-            <div className="trajectory-segment-navigation">
-              <small>
-                {t("trajectory.loadedRange")} · {nodes.length}{" "}
-                {t("trajectory.nodes")}
-              </small>
-              <StandardButton
-                disabled={!query.hasNextPage}
-                loading={query.isFetchingNextPage}
-                onClick={() => void query.fetchNextPage()}
-              >
-                {t("trajectory.loadMore")}
-              </StandardButton>
-            </div>
-          </>
-        )}
+              {query.hasPreviousPage && (
+                <StandardButton
+                  loading={query.isFetchingPreviousPage}
+                  onClick={() => void query.fetchPreviousPage()}
+                >
+                  {t("trajectory.previousRounds")}
+                </StandardButton>
+              )}
+              <div className="trajectory-detail-grid">
+                <TrajectoryTimeline
+                  nodes={nodes}
+                  unavailable={unavailable.map(({ run }) => run!)}
+                  selected={selected?.id}
+                  complete={!query.hasNextPage && !query.hasPreviousPage}
+                  cache={cache}
+                  onSelect={(node) => setSelectedId(node.id)}
+                  onEndReached={
+                    canLoad ? () => void query.fetchNextPage() : undefined
+                  }
+                />
+                {selected && (
+                  <TrajectoryNodeDetail
+                    key={selected.id}
+                    node={selected}
+                    conversationId={row.conversation_id}
+                    cache={cache}
+                    onLoaded={() => setContentRevision((value) => value + 1)}
+                    onInvalidated={(error) => {
+                      cache.clear();
+                      setInvalidated(error);
+                    }}
+                    onParent={setSelectedId}
+                  />
+                )}
+              </div>
+              <footer className="trajectory-segment-navigation">
+                <small>
+                  {t("trajectory.loadedRange")} · {nodes.length}{" "}
+                  {t("trajectory.nodes")}
+                </small>
+                {query.hasNextPage && (
+                  <StandardButton
+                    disabled={!query.hasNextPage}
+                    loading={query.isFetchingNextPage}
+                    onClick={() => void query.fetchNextPage()}
+                  >
+                    {t("trajectory.loadMore")}
+                  </StandardButton>
+                )}
+              </footer>
+            </>
+          )}
+        </div>
       </div>
     </StandardDrawer>
   );

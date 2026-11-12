@@ -2,12 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Empty, Select } from "antd";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
-import { BodyCache, filterTree, formatMetric } from "@/lib/trajectory";
+import {
+  BodyCache,
+  filterTree,
+  formatMetric,
+  formatTraceTime,
+} from "@/lib/trajectory";
 import type { TrajectoryExecution, TrajectoryNode } from "@/types/trajectory";
 import { AgentVersion } from "./AgentVersion";
+import {
+  NodeIcon,
+  TrajectoryStatus,
+  nodeDuration,
+} from "./TrajectoryPresentation";
 
 export function TrajectoryTimeline({
   nodes,
@@ -94,24 +105,46 @@ export function TrajectoryTimeline({
   const rows: (
     | { node: TrajectoryNode; depth: number }
     | { execution: TrajectoryExecution; depth: number }
-  )[] = treeRows;
+    | { heading: TrajectoryNode; depth: number }
+    | { axis: TrajectoryNode; depth: number }
+  )[] = treeRows.flatMap((entry) =>
+    entry.node.parent_id === null
+      ? [
+          ...(entry.node.round_no != null
+            ? [{ heading: entry.node, depth: 0 }]
+            : []),
+          { axis: entry.node, depth: 0 },
+          entry,
+        ]
+      : [entry]
+  );
   if (!filtering) {
     for (const execution of unavailable) {
       const index = rows.findIndex(
         (entry) =>
           ("node" in entry
             ? (entry.node.round_no ?? 0)
-            : entry.execution.round_no) > execution.round_no
+            : "execution" in entry
+              ? entry.execution.round_no
+              : "heading" in entry
+                ? (entry.heading.round_no ?? 0)
+                : (entry.axis.round_no ?? 0)) > execution.round_no
       );
       rows.splice(index < 0 ? rows.length : index, 0, { execution, depth: 0 });
     }
   }
-  const duration = root?.duration_ms;
   const originNode = (node: TrajectoryNode) =>
-    byId.get(node.execution_root_id ?? "") ?? root;
+    byId.get(node.execution_root_id ?? "") ??
+    root ??
+    (node.parent_id === null ? node : undefined);
+  const roots = nodes.filter((node) => node.parent_id === null);
+  const modelCalls =
+    roots.length && roots.every((node) => node.model_call_count != null)
+      ? roots.reduce((sum, node) => sum + node.model_call_count!, 0)
+      : null;
   const start = Math.min(
     Math.max(0, rows.length - 1),
-    Math.max(0, Math.floor((viewport.top - 180) / 44) - 10)
+    Math.max(0, Math.floor((viewport.top - 150) / 44) - 10)
   );
   const finish = Math.min(
     rows.length,
@@ -153,9 +186,9 @@ export function TrajectoryTimeline({
         });
       }}
     >
-      <div className="flex flex-wrap gap-2 p-3">
+      <div className="trajectory-timeline-controls">
         <StandardInput
-          className="!min-w-28 !flex-1"
+          prefix={<Search size={14} />}
           aria-label={t("trajectory.nodeSearch")}
           placeholder={t("trajectory.nodeSearch")}
           value={search}
@@ -165,62 +198,58 @@ export function TrajectoryTimeline({
             setViewport((previous) => ({ ...previous, top: 0 }));
           }}
         />
-        <Select
-          aria-label={t("trajectory.nodeType")}
-          value={kind}
-          onChange={(value) => {
-            setKind(value);
-            container.current?.scrollTo?.(0, 0);
-            setViewport((previous) => ({ ...previous, top: 0 }));
-          }}
-          options={[
-            { value: "", label: t("trajectory.allTypes") },
-            ...["agent", "model", "tool"].map((value) => ({
-              value,
-              label: t(`trajectory.kinds.${value}`),
-            })),
-          ]}
-        />
-        <StandardButton
-          onClick={() =>
-            setCollapsed((previous) =>
-              previous.size
-                ? new Set()
-                : new Set(
-                    nodes
-                      .filter(
-                        (node) => (children.get(node.id)?.length ?? 0) > 0
-                      )
-                      .map((node) => node.id)
-                  )
-            )
-          }
-        >
-          {t(
-            collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
-          )}
-        </StandardButton>
-      </div>
-      <p className="px-3 text-xs text-gray-500">
-        {t("trajectory.searchScope")}:{" "}
-        {t(
-          complete &&
-            !nodes.some((node) => node.round_no != null) &&
-            nodes.every((node) => node.input?.complete && node.output?.complete)
-            ? "trajectory.currentExecution"
-            : "trajectory.loadedRange"
-        )}{" "}
-        · {rows.length} {t("trajectory.nodes")}
-      </p>
-      <div className="trajectory-time-axis">
-        <span>{t("trajectory.timeline")}</span>
-        <div>
-          <span>0 s</span>
+        <div className="trajectory-tree-toolbar">
+          <span>{t("trajectory.timeline")}</span>
+          <StandardButton
+            className="trajectory-collapse-all !h-[22px] !border-0 !p-0 !text-xs !text-[#777]"
+            onClick={() =>
+              setCollapsed((previous) =>
+                previous.size
+                  ? new Set()
+                  : new Set(
+                      nodes
+                        .filter(
+                          (node) => (children.get(node.id)?.length ?? 0) > 0
+                        )
+                        .map((node) => node.id)
+                    )
+              )
+            }
+          >
+            {t(
+              collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
+            )}
+          </StandardButton>
+        </div>
+        <div className="trajectory-tree-filter">
           <span>
-            {formatMetric(duration == null ? null : duration / 1000)} s
+            {nodes.length} {t("trajectory.nodes")}
           </span>
+          <Select
+            variant="borderless"
+            aria-label={t("trajectory.nodeType")}
+            value={kind}
+            onChange={(value) => {
+              setKind(value);
+              container.current?.scrollTo?.(0, 0);
+              setViewport((previous) => ({ ...previous, top: 0 }));
+            }}
+            options={[
+              { value: "", label: t("trajectory.allTypes") },
+              ...["agent", "model", "tool"].map((value) => ({
+                value,
+                label: t(`trajectory.kinds.${value}`),
+              })),
+            ]}
+          />
         </div>
       </div>
+      <p
+        className="trajectory-tree-hint"
+        title={`${t("trajectory.searchScope")}: ${t(complete && !nodes.some((node) => node.round_no != null) && nodes.every((node) => node.input?.complete && node.output?.complete) ? "trajectory.currentExecution" : "trajectory.loadedRange")}`}
+      >
+        {t("trajectory.timelineHint")} · {t("trajectory.loadedRange")}
+      </p>
       <div
         className="trajectory-timeline-rows"
         role="tree"
@@ -246,6 +275,41 @@ export function TrajectoryTimeline({
                 </span>
               </div>
             );
+          if ("heading" in entry) {
+            const node = entry.heading;
+            return (
+              <div
+                key={`heading:${node.id}`}
+                className="trajectory-round-heading"
+                data-round={node.round_no}
+              >
+                <strong>
+                  {t("trajectory.round", { number: node.round_no })}
+                </strong>
+                <time>
+                  {formatTraceTime(node.started_at).split(" ")[1] || "—"}
+                </time>
+                <TrajectoryStatus status={node.status} />
+                <span title={node.input?.text || ""}>
+                  {node.input?.text || node.name}
+                </span>
+              </div>
+            );
+          }
+          if ("axis" in entry)
+            return (
+              <div
+                key={`axis:${entry.axis.id}`}
+                className="trajectory-time-axis"
+              >
+                <span>{t("trajectory.callNode")}</span>
+                <div>
+                  <span>0 s</span>
+                  <span>{nodeDuration(entry.axis.duration_ms)}</span>
+                </div>
+                <span>{t("trajectory.duration")}</span>
+              </div>
+            );
           const { node, depth } = entry;
           const index = start + localIndex;
           const hasChildren = (children.get(node.id)?.length ?? 0) > 0;
@@ -260,10 +324,10 @@ export function TrajectoryTimeline({
             descendants++;
           const color =
             node.kind === "agent"
-              ? "#722ed1"
+              ? "#7d99d8"
               : node.kind === "model"
-                ? "#1677ff"
-                : "#08979c";
+                ? "#b29acf"
+                : "#82b4b5";
           return (
             <div
               key={node.id}
@@ -273,6 +337,13 @@ export function TrajectoryTimeline({
                 className="trajectory-tree-label"
                 style={{ paddingLeft: Math.min(depth, 10) * 16 + 8 }}
               >
+                {depth > 0 && (
+                  <span
+                    aria-hidden
+                    className="trajectory-tree-connector"
+                    style={{ left: Math.min(depth, 10) * 16 }}
+                  />
+                )}
                 <button
                   className="trajectory-toggle"
                   aria-label={t(
@@ -290,7 +361,13 @@ export function TrajectoryTimeline({
                     })
                   }
                 >
-                  {hasChildren ? (open ? "▾" : "▸") : "·"}
+                  {hasChildren ? (
+                    open ? (
+                      <ChevronDown size={12} />
+                    ) : (
+                      <ChevronRight size={12} />
+                    )
+                  ) : null}
                 </button>
                 <button
                   role="treeitem"
@@ -305,34 +382,10 @@ export function TrajectoryTimeline({
                     .join(" · ")}
                   onClick={() => onSelect(node)}
                 >
-                  {node.parent_id === null && node.round_no != null && (
-                    <small
-                      className="mr-1"
-                      title={
-                        node.matches_filters
-                          ? t("trajectory.matchedRound")
-                          : undefined
-                      }
-                    >
-                      {t("trajectory.round", { number: node.round_no })}
-                      {node.matches_filters ? " •" : ""} ·{" "}
-                      {t(`trajectory.businessStatus.${node.status}`, {
-                        defaultValue: node.status,
-                      })}
-                    </small>
-                  )}
-                  <span className="truncate">
-                    <span style={{ color }}>●</span> {node.name}
-                  </span>
-                  {node.parent_id === null &&
-                    node.round_no != null &&
-                    node.input?.text && (
-                      <span className="ml-1 truncate text-xs font-normal text-gray-500">
-                        {node.input.text}
-                      </span>
-                    )}
+                  <NodeIcon kind={node.kind} />
+                  <span className="truncate">{node.name}</span>
                   {node.kind === "agent" && (
-                    <span className="ml-1 shrink-0 text-xs text-gray-500">
+                    <span className="trajectory-tree-version">
                       <AgentVersion
                         version={node.agent_version_no}
                         name={node.agent_version_name}
@@ -350,17 +403,6 @@ export function TrajectoryTimeline({
                 aria-label={`${node.name}: ${formatMetric(node.duration_ms)} ms`}
                 onClick={() => onSelect(node)}
               >
-                {node.parent_id === null && node.round_no != null && (
-                  <span className="trajectory-round-axis">
-                    0 s ·{" "}
-                    {formatMetric(
-                      originNode(node)?.duration_ms == null
-                        ? null
-                        : originNode(node)!.duration_ms! / 1000
-                    )}{" "}
-                    s
-                  </span>
-                )}
                 {bar && (
                   <>
                     <span
@@ -394,13 +436,10 @@ export function TrajectoryTimeline({
                     )}
                   </>
                 )}
-                <small>
-                  {formatMetric(
-                    node.duration_ms == null ? null : node.duration_ms / 1000
-                  )}{" "}
-                  s
-                </small>
               </button>
+              <span className="trajectory-row-duration">
+                {nodeDuration(node.duration_ms)}
+              </span>
             </div>
           );
         })}
@@ -410,6 +449,15 @@ export function TrajectoryTimeline({
         />
         <div ref={end} />
       </div>
+      <footer
+        className="trajectory-tree-footer"
+        title={t("trajectory.loadedRange")}
+      >
+        <span aria-hidden />
+        {t("trajectory.loadedModelCalls", {
+          count: formatMetric(modelCalls, 0),
+        })}
+      </footer>
     </div>
   );
 }

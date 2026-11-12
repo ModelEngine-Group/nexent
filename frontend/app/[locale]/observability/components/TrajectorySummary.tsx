@@ -21,8 +21,7 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
         <div key={key}>
           <small>{key.slice(0, 3).toUpperCase()}</small>
           <strong>
-            {formatMetric(values?.[key] == null ? null : values[key] / 1000)}{" "}
-            <small>s</small>
+            {formatMetric(values?.[key] == null ? null : values[key] / 1000)} s
           </strong>
         </div>
       ))}
@@ -31,32 +30,34 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
   return (
     <>
       <div className="trajectory-summary">
-        <section style={{ borderColor: "#0067D1", color: "#0067D1" }}>
+        <section style={{ borderLeftColor: "#0067D1", color: "#0067D1" }}>
           <header>{t("trajectory.conversationCount")}</header>
           <strong>{formatMetric(valid?.conversation_count, 0)}</strong>
         </section>
-        <section style={{ borderColor: "#AD6800", color: "#AD6800" }}>
+        <section style={{ borderLeftColor: "#AD6800", color: "#AD6800" }}>
           <header>
             {t("trajectory.meanDuration")}
             <small>{samples(valid?.duration.sample_count)}</small>
           </header>
           <strong>
-            {formatMetric(
-              valid?.duration.mean_ms == null
-                ? null
-                : valid.duration.mean_ms / 1000
-            )}{" "}
-            <small>s</small>
+            <span>
+              {formatMetric(
+                valid?.duration.mean_ms == null
+                  ? null
+                  : valid.duration.mean_ms / 1000
+              )}
+            </span>{" "}
+            s
           </strong>
         </section>
-        <section style={{ borderColor: "#722ED1", color: "#722ED1" }}>
+        <section style={{ borderLeftColor: "#722ED1", color: "#722ED1" }}>
           <header>
             {t("trajectory.ttft")}
             <small>{samples(valid?.ttft.sample_count)}</small>
           </header>
           {percentiles(valid?.ttft)}
         </section>
-        <section style={{ borderColor: "#08979C", color: "#08979C" }}>
+        <section style={{ borderLeftColor: "#08979C", color: "#08979C" }}>
           <header>
             {t("trajectory.runDuration")}
             <small>{samples(valid?.conversation_duration?.sample_count)}</small>
