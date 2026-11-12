@@ -9,6 +9,7 @@ acceptance_bindings:
   AC-DELTA: [test_northbound_answer_modes_match_finalized_history]
   AC-VALIDATE: [test_northbound_rejects_invalid_modes_without_creating_conversations]
   AC-HEADERS: [test_northbound_answer_modes_match_finalized_history]
+  AC-PREVIEW: [test_northbound_answer_modes_match_finalized_history]
 preparation:
   families: []
   anchors: true

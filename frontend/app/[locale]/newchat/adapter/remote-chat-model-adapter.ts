@@ -100,6 +100,7 @@ interface SseChunk {
   attempt_id?: string;
   step_id?: string;
   answer_phase?: "delta" | "complete";
+  answer_preview?: boolean;
   reclassify_step?: boolean;
   phase?: "begin" | "rollback" | "commit";
   attempt?: number;
@@ -656,6 +657,14 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
       });
     }
     if (typeof parsed.type === "string") {
+      // Preview and confirmation share one answer slot, separate from reasoning.
+      if (
+        parsed.type === "model_output_thinking" &&
+        parsed.answer_preview === true &&
+        parsed.answer_phase === "delta"
+      ) {
+        parsed.type = "final_answer";
+      }
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
       }

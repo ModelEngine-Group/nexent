@@ -835,8 +835,22 @@ async def _stream_agent_chunks(
                                 )
                         next_unit_index += 1
 
-            # Complete mode suppresses incremental final_answer events; the
-            # single reconstructed root answer is emitted at finalization.
+            # Publish a wire-only preview while keeping buffered units canonical.
+            # Child answers stay suppressed; only the root can be confirmed below.
+            if (
+                final_answer_mode == "complete"
+                and getattr(agent_run_info.agent_config, "agent_core", "smolagents") == "smolagents"
+                and chunk_type == "final_answer"
+                and data.get("answer_phase") == "delta"
+                and not data.get("invocation_id")
+                and chunk_content
+            ):
+                preview = {**data, "type": "model_output_thinking", "answer_preview": True}
+                preview_chunk = "data: " + json.dumps(preview, ensure_ascii=False) + "\n\n"
+                for public_frame in await publish_public(preview_chunk):
+                    yield public_frame
+
+            # Complete mode emits the reconstructed root answer at finalization.
             if chunk_type != "final_answer" or final_answer_mode == "delta":
                 for public_frame in await publish_public(f"data: {chunk}\n\n"):
                     yield public_frame

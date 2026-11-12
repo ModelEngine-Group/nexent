@@ -21,12 +21,19 @@ import {
   parseStepTokenCount,
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 
-async function consume(events: Record<string, unknown>[]) {
+async function consume(
+  events: Record<string, unknown>[],
+  bufferedTail = false
+) {
   runAgent.mockImplementationOnce(async () =>
     new ReadableStream<Uint8Array>({
       start(c) {
-        for (const e of events)
-          c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(e)}\n\n`));
+        for (const [index, e] of events.entries())
+          c.enqueue(
+            new TextEncoder().encode(
+              `data: ${JSON.stringify(e)}${bufferedTail && index === events.length - 1 ? "" : "\n\n"}`
+            )
+          );
         c.close();
       },
     }).getReader()
@@ -47,10 +54,176 @@ async function consume(events: Record<string, unknown>[]) {
   const run = remoteChatModelAdapter.run(options);
   const results: ChatModelRunResult[] = [];
   if (Symbol.asyncIterator in run)
-    for await (const result of run) results.push(result);
+    for await (const result of run) results.push(structuredClone(result));
   else results.push(await run);
   return results;
 }
+
+it.each([false, true])(
+  "replaces complete-mode previews once while retaining real reasoning (tail=%s)",
+  async (bufferedTail) => {
+    const results = await consume(
+      [
+        {
+          type: "model_output_thinking",
+          content: "Real thought",
+          step_id: "s",
+        },
+        {
+          type: "model_output_deep_thinking",
+          content: "Deep thought",
+          step_id: "s",
+        },
+        {
+          type: "model_output_thinking",
+          content: "Draft ",
+          step_id: "s",
+          answer_phase: "delta",
+          answer_preview: true,
+        },
+        {
+          type: "model_output_thinking",
+          content: "answer",
+          step_id: "s",
+          answer_phase: "delta",
+          answer_preview: true,
+        },
+        {
+          type: "final_answer",
+          content: "Corrected answer",
+          step_id: "s",
+          answer_phase: "complete",
+        },
+      ],
+      bufferedTail
+    );
+    const partial = results.find((result) =>
+      result.content?.some(
+        (part) => part.type === "text" && part.text === "Draft "
+      )
+    );
+    expect(partial).toBeDefined();
+    expect(
+      partial!.content?.some(
+        (part) => "isFinalAnswer" in part && part.isFinalAnswer
+      )
+    ).toBe(false);
+    const final = results.at(-1)!;
+    expect(final.content?.filter((part) => part.type === "text")).toEqual([
+      expect.objectContaining({
+        text: "Corrected answer",
+        isFinalAnswer: true,
+      }),
+    ]);
+    expect(
+      final.content
+        ?.filter((part) => part.type === "reasoning")
+        .map((part) => part.text)
+        .join("")
+    ).toBe("Real thoughtDeep thought");
+    expect(JSON.stringify(final.content)).not.toContain("Draft");
+  }
+);
+
+it("renders a buffered preview without treating it as a confirmed final answer", async () => {
+  const results = await consume(
+    [
+      {
+        type: "model_output_thinking",
+        content: "Partial",
+        step_id: "s",
+        answer_phase: "delta",
+        answer_preview: true,
+      },
+    ],
+    true
+  );
+  expect(results.at(-1)!.content).toEqual([
+    expect.objectContaining({
+      type: "text",
+      text: "Partial",
+      isFinalAnswer: false,
+    }),
+  ]);
+});
+
+it("rolls back a rejected preview before displaying the accepted answer", async () => {
+  const results = await consume([
+    {
+      type: "model_attempt_control",
+      content: "",
+      phase: "begin",
+      attempt_id: "bad",
+    },
+    {
+      type: "model_output_thinking",
+      content: "Rejected",
+      step_id: "s",
+      answer_phase: "delta",
+      answer_preview: true,
+      attempt_id: "bad",
+    },
+    {
+      type: "model_attempt_control",
+      content: "",
+      phase: "rollback",
+      attempt_id: "bad",
+    },
+    {
+      type: "model_output_thinking",
+      content: "Accepted",
+      step_id: "s",
+      answer_phase: "delta",
+      answer_preview: true,
+    },
+    {
+      type: "final_answer",
+      content: "Accepted",
+      step_id: "s",
+      answer_phase: "complete",
+    },
+  ]);
+  expect(
+    results.some((result) =>
+      result.content?.some(
+        (part) => part.type === "text" && part.text === "Rejected"
+      )
+    )
+  ).toBe(true);
+  expect(results.at(-1)!.content).toEqual([
+    expect.objectContaining({
+      type: "text",
+      text: "Accepted",
+      isFinalAnswer: true,
+    }),
+  ]);
+});
+
+it("keeps a failed partial preview unconfirmed", async () => {
+  const result = (
+    await consume([
+      {
+        type: "model_output_thinking",
+        content: "Partial",
+        step_id: "s",
+        answer_phase: "delta",
+        answer_preview: true,
+      },
+      { type: "error", content: "Persistence failed" },
+    ])
+  ).at(-1)!;
+  expect(result.status).toMatchObject({ type: "incomplete", reason: "error" });
+  expect(
+    result.content?.some(
+      (part) => part.type === "text" && part.text === "Partial"
+    )
+  ).toBe(true);
+  expect(
+    result.content?.some(
+      (part) => "isFinalAnswer" in part && part.isFinalAnswer
+    )
+  ).toBe(false);
+});
 it("uses the original reasoning, tool and final parts for both Core event formats", async () => {
   const legacy = [
     { type: "step_count", content: "Step 1", step_id: "s1" },
