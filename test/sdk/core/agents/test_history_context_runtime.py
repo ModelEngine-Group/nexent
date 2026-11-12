@@ -272,7 +272,7 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
         "CURRENT TASK", "CURRENT PLAN", "observation 1", "observation 2",
     )]
     assert positions == sorted(positions)
-    assert '<CODE_EXEC_RESULT>' in rendered
+    assert '<completed_action>' in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
@@ -319,14 +319,14 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     rendered = _rendered_text(result.messages)
     assert "<code>" not in rendered
     assert "print(" in rendered and "ok" in rendered
-    assert "<OUTPUT>ok</OUTPUT>" in rendered
-    assert "<RETURN_VALUE>done</RETURN_VALUE>" in rendered
+    assert "outcome:\nok" in rendered
+    assert "recorded_result:\ndone" in rendered
     assert "Calling tools:" not in rendered
     assert "Observation:" not in rendered
 
     summary_rendered = _rendered_text(manager.render_memory_messages(memory))
     assert "<code>" not in summary_rendered
-    assert "<OUTPUT>ok</OUTPUT>" in summary_rendered
+    assert "outcome:\nok" in summary_rendered
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
 

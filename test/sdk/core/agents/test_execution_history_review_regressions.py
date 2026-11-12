@@ -29,6 +29,20 @@ from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
 from nexent.core.utils.observer import MessageObserver
 
 
+def assert_legacy_calls(text, calls):
+    """Check names, argument values and order in the restored history format."""
+    remaining = unescape(text)
+    for call in calls:
+        if isinstance(call, dict) and 'name' in call:
+            value = call.get('arguments', {})
+            arguments = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            expected = f"tool: {call['name']}\ninput:\n{arguments}"
+        else:
+            expected = 'tool_record: ' + (call if isinstance(call, str) else json.dumps(call, ensure_ascii=False))
+        assert expected in remaining
+        remaining = remaining.split(expected, 1)[1]
+
+
 @pytest.mark.parametrize("arguments", [{"q": "foo"}, "foo", {}, None])
 @pytest.mark.parametrize("single", [False, True])
 def test_ac_r5_ordinary_legacy_calls_preserve_names_and_arguments(arguments, single):
@@ -43,9 +57,9 @@ def test_ac_r5_ordinary_legacy_calls_preserve_names_and_arguments(arguments, sin
     messages = ContextItemRenderer().render([item])
     texts = [m["content"][0]["text"] for m in messages]
     assert len(texts) == 1
-    assert json.loads(unescape(texts[0].split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == calls
+    assert_legacy_calls(texts[0], calls)
     assert all("<code>" not in t for t in texts)
-    assert "<OUTPUT>completed</OUTPUT>" in texts[-1] and "<ERROR>known error</ERROR>" in texts[-1]
+    assert "outcome:\ncompleted" in texts[-1] and "recorded_error:\nknown error" in texts[-1]
     assert item.content == original
 
 
@@ -58,10 +72,10 @@ def test_ac_r5_interpreter_source_is_read_only_data(arguments):
     assert len(messages) == 1
     text = messages[0]["content"][0]["text"]
     assert "<code>" not in text
-    assert json.loads(unescape(text.split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == [
+    assert_legacy_calls(text, [
         {"name": "python_interpreter", "arguments": arguments}
-    ]
-    assert "<RETURN_VALUE>done</RETURN_VALUE>" in text
+    ])
+    assert "recorded_result:\ndone" in text
 
 
 
@@ -77,7 +91,7 @@ def test_ac_r5_mixed_legacy_calls_keep_order_and_unknown_records_as_data():
     texts = [m["content"][0]["text"] for m in ContextItemRenderer().render([item])]
     assert len(texts) == 1
     assert "<code>" not in texts[0]
-    assert json.loads(unescape(texts[0].split("<TOOL_RECORD>")[1].split("</TOOL_RECORD>")[0])) == calls
+    assert_legacy_calls(texts[0], calls)
     assert item.content == original
 
 
@@ -100,7 +114,7 @@ def test_ac_r5_supplied_legacy_actions_reach_actual_agent_model_request():
                       prompt_templates=templates, context_runtime=runtime, max_steps=1, verbosity_level=0)
     assert agent.run("Finish") == "done"
     assert len(captured) == 1 and "search" in captured[0] and "archive" in captured[0]
-    assert "<TOOL_RECORD>" in captured[0] and "<code>" not in captured[0]
+    assert "tool: search" in captured[0] and "<code>" not in captured[0]
 
 
 @pytest.mark.parametrize("passthrough", [False, True])
@@ -118,8 +132,8 @@ def test_ac_r5_authoritative_output_is_not_duplicated_by_fallback(passthrough):
         assert messages == expected
     else:
         assert "original" not in str(messages)
-        assert "<TOOL_RECORD>" in str(messages)
-        assert "<RETURN_VALUE>done</RETURN_VALUE>" in str(messages)
+        assert "tool: search" in str(messages)
+        assert "recorded_result:\ndone" in messages[0]['content'][0]['text']
 
 
 @pytest.mark.parametrize("history_enabled", [False, True])
@@ -286,9 +300,9 @@ def test_no_record_action_compacts_only_above_threshold_without_fake_reference(h
         model=model, memory=memory, current_run_start_idx=0,
         run_context=manager.prepare_run_context(memory, "", []),
     )
-    rendered = str(result.messages)
+    rendered = '\n'.join(part['text'] for message in result.messages for part in message['content'])
     assert "head" in rendered and "tail" in rendered
-    assert "<ERROR>known failure</ERROR>" in rendered
+    assert "recorded_error:\nknown failure" in rendered
     assert "OUTPUT_REF" not in rendered and "SUMMARIED_RESULT" not in rendered
     assert rendered.count("print(data)") == 1
     assert step.observations == original

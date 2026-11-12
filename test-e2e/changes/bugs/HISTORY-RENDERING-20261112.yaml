@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: HISTORY-RENDERING-20261112
+  change_type: bugfix
+  bug_id: HISTORY-RENDERING-20261112
+  title: Restore v2.8.2 action-history presentation and deduplicate result text
+  description: Restore read-only completed_action fields while retaining canonical results and all existing summary/recall capabilities.
+  observed_behavior: Current history uses TOOL_RECORD and CODE_EXEC_RESULT rather than the requested v2.8.2 presentation.
+  expected_behavior: One assistant history record preserves actual tool/input/output/error, removes only equal return/output duplication and retains summary/recall.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing regressions enforce the replaced presentation and lack exact-equality rendering deduplication assertions.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-171]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGENT-HISTORY-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Restore legacy read-only action fields and actual step identity without replaying model narration.
+    - Deduplicate equal stdout/return text while preserving different values, repeated logs, errors and masked output.
+    - Verify actual execution count and next-model-request results in strict and legacy modes.
+    - Preserve summaries, previews and authorized original-result recall.
+    test_selectors:
+    - test/sdk/core/agents/test_history_rendering_v282.py
+    - test/sdk/core/agents/test_output_protocol_patch.py
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_execution_history_review_regressions.py
+    reason: Renderer unit behavior and existing real internal Agent collaboration already have owners; no duplicate formal D1.
+  notes: >-
+    SPEC nexent-doc/nexent/codeagent-action-history-role/changes/chat-action-history-rendering/design.md.
+    User explicitly preserves parsing/execution/summary/recall and Northbound/OTel.
+    Update only presentation expectations in existing manual AGENT-HISTORY-D3-001; preserve other obligations.
+    UT results and manual/model-runtime execution evidence must be reported separately.

@@ -91,15 +91,33 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
+def _render_tool_arguments(arguments: Any) -> str:
+    """Preserve interpreter source and ordinary arguments as read-only data."""
+    value = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False, default=str)
+    return escape(value)
+
+
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
-    from .execution_history import result_text
-
     c = item.content
+    labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
+    parts = [
+        '<completed_action_history read_only="true">',
+        labels["completed_action_notice"],
+        labels["completed_action_format_notice"],
+        "<completed_action>",
+    ]
+    if c.get("step_number") is not None:
+        parts.append(f"index: {escape(str(c['step_number']))}")
     calls = c.get("tool_calls") or []
     calls = calls if isinstance(calls, list) else [calls]
-    action = escape(json.dumps(calls, ensure_ascii=False, default=str))
+    for call in calls:
+        if isinstance(call, dict) and "name" in call:
+            parts.append(f"tool: {escape(str(call['name']))}")
+            parts.append("input:\n" + _render_tool_arguments(call.get("arguments", {})))
+        else:
+            parts.append("tool_record: " + _render_tool_arguments(call))
     fields = c.get("execution_fields")
     if fields is None:
         # Compatibility for externally supplied ContextItems, without duplicating result text.
@@ -107,29 +125,36 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
         if c.get("observations") is not None:
             fields["OUTPUT"] = str(c["observations"])
         result = c.get("result")
-        if result is not None and str(result) != str(c.get("observations", "")):
+        if result is not None and (c.get("observations") is None or str(result) != str(c["observations"])):
             fields["RETURN_VALUE"] = str(result)
         if c.get("error"):
             fields["ERROR"] = str(c["error"])
     if not fields:
         fields = {"STDOUT": ""}
+    fields = dict(fields)
+    if "RETURN_VALUE" in fields:
+        value = fields["RETURN_VALUE"]
+        if any(channel in fields and fields[channel] in (value, value + "\n")
+               for channel in ("STDOUT", "OUTPUT")):
+            del fields["RETURN_VALUE"]
     if c.get("summary"):
-        body = f"<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>"
+        parts.append(f"outcome:\n<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>")
     elif c.get("preview") is not None:
-        body = '<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>"
+        parts.append('outcome:\n<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>")
     else:
-        body = result_text(fields)
+        for channel, value in fields.items():
+            label = {"STDOUT": "outcome", "OUTPUT": "outcome", "RETURN_VALUE": "recorded_result",
+                     "ERROR": "recorded_error"}.get(channel)
+            if label:
+                parts.append(f"{label}:\n{escape(value)}")
+            else:
+                parts.append(f"outcome:\n{escape(channel)}:\n{escape(value)}")
     if (c.get("summary") or c.get("preview") is not None) and fields.get("ERROR"):
-        body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
+        parts.append("recorded_error:\n" + escape(fields["ERROR"]))
     if c.get("output_ref"):
-        body += "\n<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>"
-    record = (
-        '<completed_action_history read_only="true">\n'
-        + "<TOOL_RECORD>" + action + "</TOOL_RECORD>\n"
-        + "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>\n"
-        + "</completed_action_history>"
-    )
-    return [_text_message("assistant", record)]
+        parts.append("<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>")
+    parts.extend(["</completed_action>", "</completed_action_history>"])
+    return [_text_message("assistant", "\n".join(parts))]
 
 
 class ContextItemRenderer:

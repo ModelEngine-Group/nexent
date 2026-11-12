@@ -3,7 +3,6 @@
 
 import json
 from copy import deepcopy
-from html import unescape
 
 import pytest
 from smolagents.agents import EMPTY_PROMPT_TEMPLATES
@@ -88,9 +87,9 @@ def test_ac005_only_actual_call_and_runtime_fields_enter_history():
     assert len(messages) == 1 and messages[0]['role'] == 'assistant'
     text = messages[0]['content'][0]['text']
     assert 'FAKE_RESULT' not in text and '>fake<' not in text
-    assert text.count('<CODE_EXEC_RESULT>') == 1
-    assert '<RETURN_VALUE>False</RETURN_VALUE>' in text and '<ERROR>actual failure</ERROR>' in text
-    assert json.loads(unescape(text.split('<TOOL_RECORD>')[1].split('</TOOL_RECORD>')[0]))[0]['arguments'] == 'actual()'
+    assert text.count('<completed_action>') == 1 and '<CODE_EXEC_RESULT>' not in text
+    assert 'recorded_result:\nFalse' in text and 'recorded_error:\nactual failure' in text
+    assert 'tool: python_interpreter\ninput:\nactual()' in text
 
 
 @pytest.mark.parametrize('strict', [False, True])
