@@ -1,8 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
 import { Flex } from "antd";
-import { useSetupFlow } from "@/hooks/useSetupFlow";
 import UserManageComp from "./components/UserManageComp";
 
 /**
@@ -14,13 +14,9 @@ import UserManageComp from "./components/UserManageComp";
  * - Layout uses Flex for responsive design and proper content flow.
  */
 export default function TenantResourcesPage() {
-
   return (
     <>
-      <Flex
-        vertical
-        className="h-full w-full overflow-hidden"
-      >
+      <Flex vertical className="h-full w-full overflow-hidden">
         <UserManageComp />
       </Flex>
     </>

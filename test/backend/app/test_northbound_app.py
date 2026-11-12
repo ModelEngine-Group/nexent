@@ -18,7 +18,7 @@ from io import BytesIO
 # Agent management is outside the HTTP boundary exercised in this module.
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
-    from gateway.api.northbound import router
+    from gateway.api.northbound import _role_for_context, router
 from contracts.errors.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
 
 
@@ -55,11 +55,9 @@ def test_health_check():
     assert data["service"] == "northbound-api"
 
 
-def test_role_for_context_normalizes_database_role():
-    with patch("gateway.api.northbound.get_user_role_by_tenant", return_value="admin") as mock_role:
-        from gateway.api.northbound import _role_for_context
-
-        assert _role_for_context("user-1", "tenant-1") == "ADMIN"
+def test_role_for_context_preserves_all_database_roles():
+    with patch("gateway.api.northbound.get_user_role_by_tenant", return_value=("DEV", "OPS")) as mock_role:
+        assert _role_for_context("user-1", "tenant-1") == ("DEV", "OPS")
 
     mock_role.assert_called_once_with("user-1", "tenant-1")
 

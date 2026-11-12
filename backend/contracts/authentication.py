@@ -19,6 +19,7 @@ class AuthenticatedIdentity:
     language: str = "zh"
     token_id: Optional[int] = None
     kind: CredentialKind = CredentialKind.SESSION
+    roles: tuple[str, ...] = ()
 
 
 @dataclass

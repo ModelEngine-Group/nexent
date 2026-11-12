@@ -189,6 +189,10 @@ sys.modules['botocore.exceptions'] = MagicMock()
 sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
+# Isolate newly explicit account and CAS persistence boundaries.
+sys.modules['management.db.identity.account'] = MagicMock()
+sys.modules['management.db.identity.cas_session'] = MagicMock()
+
 # Now import the module under test
 import gateway.authentication.auth as au
 import gateway.authentication.northbound_auth as nb_auth
@@ -273,8 +277,7 @@ def test_validate_aksk_authentication_invalid(monkeypatch):
 
 def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     token = au.generate_test_jwt("user-1", expires_in=1234)
-    # ensure not in speed mode and no DEBUG_JWT_EXPIRE_SECONDS was set for this test
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    # Verify the configured lifetime without a debug override.
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     seconds = au.get_jwt_expiry_seconds(token)
@@ -491,7 +494,6 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
         algorithm="HS256",
     )
 
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
@@ -502,7 +504,6 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
 
 
 def test_get_jwt_expiry_seconds_uses_debug_override(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 77)
 
     assert au.get_jwt_expiry_seconds("Bearer ignored-token") == 77
@@ -521,7 +522,6 @@ def test_get_jwt_expiry_seconds_rejects_non_positive_lifetime(monkeypatch):
         algorithm="HS256",
     )
 
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
@@ -538,7 +538,6 @@ def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
 
 def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
     token = au.generate_test_jwt("user-1", expires_in=120)
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
@@ -547,15 +546,14 @@ def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
     assert int(time.time()) + 60 <= expires_at <= int(time.time()) + 180
 
 
-def test_calculate_expires_at_speed_mode(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
-    exp = au.calculate_expires_at("irrelevant")
-    # far future (> 1 year)
-    assert exp > int(time.time()) + 3600 * 24 * 365
+def test_expiry_does_not_restore_retired_unbounded_sessions(monkeypatch):
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 120)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    expires = au.calculate_expires_at("irrelevant")
+    assert int(time.time()) + 60 <= expires <= int(time.time()) + 180
 
 
 def test_extract_user_id_from_jwt_token(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
     uid = au._extract_user_id_from_jwt_token("Bearer " + token)
@@ -564,7 +562,6 @@ def test_extract_user_id_from_jwt_token(monkeypatch):
 
 def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
     """Test that missing JWT_SECRET raises UnauthorizedError"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", "")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
@@ -574,7 +571,6 @@ def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
 
 def test_extract_user_id_invalid_signature_raises(monkeypatch):
     """Test that token signed with wrong secret raises UnauthorizedError"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", "wrong-secret")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
@@ -584,7 +580,6 @@ def test_extract_user_id_invalid_signature_raises(monkeypatch):
 
 def test_extract_user_id_expired_token_raises(monkeypatch):
     """Test that expired token raises UnauthorizedError (ExpiredSignatureError path)"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     # Token expired 1 hour ago
     token = au.generate_test_jwt("user-xyz", expires_in=-3600)
@@ -595,7 +590,6 @@ def test_extract_user_id_expired_token_raises(monkeypatch):
 
 def test_extract_user_id_malformed_token_raises(monkeypatch):
     """Test that malformed JWT raises UnauthorizedError (InvalidTokenError path)"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired"):
@@ -630,32 +624,27 @@ def test_extract_user_id_generic_exception_raises(monkeypatch):
         au._extract_user_id_from_jwt_token("Bearer any-token")
 
 
-def test_get_current_user_id_speed_mode(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
-    uid, tid = au.get_current_user_id("Bearer anything")
-    assert uid == au.DEFAULT_USER_ID and tid == au.DEFAULT_TENANT_ID
+def test_missing_credentials_have_no_default_identity(monkeypatch):
+    with pytest.raises(UnauthorizedError):
+        au.get_current_user_id(None)
 
 
 def test_get_current_user_id_with_mapping(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
     # user->tenant mapping
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
-                        lambda u: {"tenant_id": "tenant-a"})
+                        lambda u: {"tenant_id": "tenant-a", "roles": ["USER"]})
     uid, tid = au.get_current_user_id(token)
     assert uid == "user-a" and tid == "tenant-a"
 
 
 def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     set_import_attribute(monkeypatch, au, "JWT_ISSUER", "http://localhost:54321")
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
-                        lambda u: {"tenant_id": "tenant-a"})
-    sys.modules["management.db.identity.cas_session"] = MagicMock(
-        is_cas_session_active=MagicMock(return_value=False)
-    )
+                        lambda u: {"tenant_id": "tenant-a", "roles": ["USER"]})
+    set_import_attribute(monkeypatch, au, "is_cas_session_active", lambda _: False)
 
     token = au.generate_session_jwt("user-a", 1000, session_id="cas-session-1")
 
@@ -705,7 +694,6 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 
 def test_get_jwt_expiry_seconds_exception(monkeypatch):
     """Test JWT expiry seconds calculation with exception"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
 
     # Mock jwt.decode to raise exception
@@ -720,7 +708,6 @@ def test_get_jwt_expiry_seconds_exception(monkeypatch):
 
 def test_get_current_user_id_no_tenant_mapping(monkeypatch):
     """Test get_current_user_id when no tenant mapping found"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
     set_import_attribute(monkeypatch, au, "JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
 
@@ -733,7 +720,6 @@ def test_get_current_user_id_no_tenant_mapping(monkeypatch):
 
 def test_get_current_user_id_exception(monkeypatch):
     """Test get_current_user_id with exception"""
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
 
     # Mock _extract_user_id_from_jwt_token to raise exception
     set_import_attribute(monkeypatch, au, "_extract_user_id_from_jwt_token",
@@ -850,7 +836,7 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        mock_user_tenant = {"tenant_id": "tenant456"}
+        mock_user_tenant = {"tenant_id": "tenant456", "roles": ["USER"]}
 
         set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
         set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
@@ -960,7 +946,6 @@ class TestGetCurrentUserContext:
     """Tests for authenticated tenant and role resolution."""
 
     def test_returns_normalized_role_and_tenant(self, monkeypatch):
-        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
         set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
         set_import_attribute(monkeypatch,
             au,
@@ -968,24 +953,22 @@ class TestGetCurrentUserContext:
             lambda user_id: {"tenant_id": "tenant-1", "user_role": "admin"},
         )
 
-        assert au.get_current_user_context("Bearer token") == ("user-1", "tenant-1", "ADMIN")
+        assert au.get_current_user_context("Bearer token") == ("user-1", "tenant-1", ("ADMIN",))
 
     def test_rejects_user_without_tenant_record(self, monkeypatch):
-        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
         set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
         set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda user_id: None)
 
         with pytest.raises(UnauthorizedError, match="relationship not found"):
             au.get_current_user_context("Bearer token")
 
-    def test_speed_mode_does_not_require_tenant_record(self, monkeypatch):
-        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
-        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
-
-        assert au.get_current_user_context(None) == ("speed-user", "speed-tenant", "SPEED")
+    def test_retired_role_is_not_an_authenticated_context(self, monkeypatch):
+        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("retired", "tenant"))
+        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: {"tenant_id": "tenant", "roles": ["SPEED"]})
+        with pytest.raises(UnauthorizedError, match="roles"):
+            au.get_current_user_context("Bearer token")
 
     def test_rejects_user_without_role(self, monkeypatch):
-        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
         set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
         set_import_attribute(monkeypatch,
             au,
@@ -1020,7 +1003,6 @@ def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens(
 
 
 def test_get_current_user_id_rejects_blank_and_subjectless_tokens(monkeypatch):
-    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
 
     with pytest.raises(UnauthorizedError, match="No authorization header provided"):
         au.get_current_user_id("   ")

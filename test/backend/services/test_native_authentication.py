@@ -10,6 +10,8 @@ import pytest
 
 from contracts.errors.exceptions import UnauthorizedError, TenantResourceLimitError
 from infrastructure.security.passwords import hash_password
+from management.services.permission.identity import registration
+from management.db.models import TenantInvitationCode
 from management.services.permission.identity import authentication as auth
 from gateway.authentication import auth as helpers
 
@@ -44,6 +46,7 @@ async def test_native_signin_checks_password_and_local_membership(monkeypatch, a
         "id": "user-native",
         "email": "user@example.com",
         "role": "DEV",
+        "roles": ["DEV"],
     }
     assert data["data"]["session"]["refresh_token"] == ""
     with pytest.raises(UnauthorizedError):
@@ -67,36 +70,27 @@ async def test_native_signin_rejects_unavailable_password_identity(
 
 
 @pytest.mark.asyncio
-async def test_registration_account_and_membership_share_transaction(
-    monkeypatch, account
-):
-    session = object()
+async def test_registration_account_and_membership_share_transaction(monkeypatch, account):
+
+    session = MagicMock()
+    invite = TenantInvitationCode(invitation_id=1, tenant_id="t", roles=["USER"],
+                                  code_type="USER_INVITE", status="IN_USE", capacity=2, group_ids="")
     create = MagicMock(return_value=account)
-    member = MagicMock()
-    monkeypatch.setattr(auth, "get_db_session", lambda: nullcontext(session))
-    monkeypatch.setattr(auth, "create_account", create)
-    monkeypatch.setattr(auth, "insert_user_tenant", member)
-    monkeypatch.setattr(auth, "check_invitation_available", lambda code: True)
-    monkeypatch.setattr(
-        auth,
-        "get_invitation_by_code",
-        lambda code: {"tenant_id": "t", "code_type": "USER_INVITE"},
-    )
-    monkeypatch.setattr(auth, "use_invitation_code", lambda *a: {"group_ids": []})
-    monkeypatch.setattr(auth, "init_tool_list_for_tenant", AsyncMock())
-    monkeypatch.setattr(auth, "init_skill_list_for_tenant", AsyncMock())
-    data = await auth.signup_user_with_invitation(
-        "user@example.com", "Password123", " invite ", False
-    )
-    assert data["user"]["id"] == "user-native"
-    assert data["session"] is None
+    member = MagicMock(return_value={"tenant_id": "t", "roles": ["USER"]})
+    monkeypatch.setattr(registration, "get_db_session", lambda: nullcontext(session))
+    monkeypatch.setattr(registration, "query_invitation_by_code", lambda code: {"tenant_id": "t"})
+    monkeypatch.setattr(registration, "locked_invitation", lambda *args: invite)
+    monkeypatch.setattr(registration, "invitation_usage", lambda *args: 0)
+    monkeypatch.setattr(registration, "create_account", create)
+    monkeypatch.setattr(registration, "insert_user_tenant", member)
+    created, membership = registration.register_invited_account("user@example.com", "encoded", " invite ")
+    assert created is account
+    assert membership == {"tenant_id": "t", "roles": ["USER"]}
     assert create.call_args.kwargs["db_session"] is session
     assert member.call_args.kwargs["db_session"] is session
     member.side_effect = TenantResourceLimitError("limit reached")
     with pytest.raises(TenantResourceLimitError):
-        await auth.signup_user_with_invitation(
-            "user@example.com", "Password123", "INVITE", False
-        )
+        registration.register_invited_account("user@example.com", "encoded", "INVITE")
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import { hasRole } from "@/lib/roles";
 
 import React, {
   useCallback,
@@ -57,7 +58,6 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
 import { formatFileSize } from "@/lib/utils";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
-import { USER_ROLES } from "@/const/auth";
 
 import log from "@/lib/logger";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
@@ -288,7 +288,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const { user } = useAuthorizationContext();
   const { isReady: permissionsReady, can } = usePermission();
   const tenantId = user?.tenantId || null;
-  const showPersonalCapacity = user?.role === USER_ROLES.USER;
+  const showPersonalCapacity = hasRole(user, "USER");
   const quotaMap = useMemo(() => {
     const map = new Map<string, KBQuotaStatus>();
     quotaUsage?.breakdown?.forEach((quota) => {

@@ -197,6 +197,7 @@ db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
+db_models_mod.UserTenant = MagicMock(name="UserTenant")
 
 sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
@@ -224,6 +225,9 @@ utils_mod.add_update_tracking = _add_update_tracking
 sys.modules["management.utils.audit_fields"] = utils_mod
 sys.modules["management.utils.audit_fields"] = utils_mod
 
+
+# Isolate the explicit membership lookup from unrelated account persistence.
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
 
 # Import module under test after stubbing
 

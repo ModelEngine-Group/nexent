@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 
 
-from local_auth_http import native_runtime, runtime, register, bearer  # noqa: F401
+from local_auth_http import native_runtime, runtime, register, bearer, seed_membership_roles  # noqa: F401
 
 
 def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
@@ -29,7 +29,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     client.app.include_router(routes.router)
     monkeypatch.setattr(routes, "record_security_event", lambda *a, **kw: None)
     admin = register(client)["user"]["id"]
-    assert update_user_tenant_role(admin, "ADMIN", admin)
+    assert seed_membership_roles(admin, ["ADMIN"])
     admin_key = create_token("nexent-local-admin-key", admin)["access_key"]
     with get_db_session() as session:
         group = models.TenantGroupInfo(tenant_id="tenant-native", group_name="API-only regression", created_by=admin, updated_by=admin)
@@ -44,7 +44,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
         assert northbound_auth.validate_bearer_token(user["api_key"])[0]
         with get_db_session() as session:
             account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == user["user_id"])).scalar_one()
-            assert account.delete_flag == "N" and account.user_role == "DEV"
+            assert account.delete_flag == "N" and account.user_roles == ["DEV"]
             assert account.user_email is account.password_hash is account.email_confirmed_at is None
             assert not account.password_login_enabled
             assert session.query(models.TenantGroupUser).filter_by(user_id=user["user_id"], group_id=group_id).count() == 1
@@ -98,7 +98,7 @@ def test_native_http_identity_password_and_api_keys(runtime):
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.db.identity.account import get_account
 
-    assert update_user_tenant_role(data["user"]["id"], "DEV", data["user"]["id"])
+    assert seed_membership_roles(data["user"]["id"], ["DEV"])
     assert get_account(data["user"]["id"])["user_role"] == "DEV"
     updated_profile = client.get("/api/user/current_user_info", headers=bearer(token)).json()
     assert updated_profile["data"]["user"]["user_role"] == "DEV"

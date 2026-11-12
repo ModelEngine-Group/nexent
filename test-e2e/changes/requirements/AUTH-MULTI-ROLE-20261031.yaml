@@ -1,0 +1,116 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-MULTI-ROLE-20261031
+  change_type: requirement
+  requirement_id: AUTH-MULTI-ROLE-20261031
+  title: 新增运维管理员权限（含多角色支持重构）
+  description: Scope is role arrays, union authorization, administrator assignments,
+    invitation grants and UI access only.
+  affected_features:
+    existing:
+    - AUTH-LOCAL
+    added:
+    - AUTH-MULTI-ROLE
+    modified:
+    - AUTH-LOCAL
+    retired: []
+  affected_cases:
+    existing:
+    - API-027
+    added:
+    - AUTH-MULTI-ROLE-D2-001
+    - AUTH-MULTI-ROLE-D2-002
+    - AUTH-MULTI-ROLE-D2-003
+    - AUTH-MULTI-ROLE-D3-001
+    - AUTH-MULTI-ROLE-D4-001
+    - AUTH-MULTI-ROLE-D5-001
+    modified:
+    - AUTH-LOCAL-D2-001
+    - AUTH-LOCAL-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Normalize nonempty role arrays and reject unknown or incompatible identities;
+      preserve single-role external mappings.
+    - Union action-specific permissions and scopes while preserving tenant/private/special-resource
+      constraints.
+    - Grant and revoke ADMIN DEV USER OPS using current actor/target scope; prevent
+      self and last ADMIN removal.
+    - Keep invitation roles immutable and issuer-independent after creation; preserve
+      group defaults and atomic registration failures.
+    - Replace the complete array without role versions and reject old single-role
+      writes that would truncate a multi-role target.
+    - Store account roles only in user_roles; compute legacy scalar responses and
+      preserve account import, schema replay and role_permission_t.user_role.
+    - Reject retired SPEED inputs and remove missing-credential/implicit-admin fallbacks;
+      migration prechecks protect active SPEED-only subjects and ASSET_OWNER remains
+      unchanged.
+    - Reuse the resource page for OPS with tenant-scoped reads, hidden write controls,
+      redacted credentials and diagnostics that do not persist resource changes.
+    - Apply the ordinary route authorization contract with an OPS session; verify
+      the public health probe and personal token endpoint through the D2 HTTP case.
+    reason: Existing RBAC and DAC UT prove single-role cases; user UT covers own-tenant
+      ADMIN and cross-tenant/SU rejection; invitation UT has old admin-invite restriction
+      that must change. Strengthen those units rather than duplicate them as formal
+      D1; actual transaction and HTTP boundaries require D2/D3/D5.
+    test_selectors:
+    - test/backend/services/test_account_profile.py
+    - test/backend/services/test_auth_migration_automatic.py
+    - test/backend/services/test_auth_migration_container_worker.py
+    - test/backend/database/test_local_account_persistence.py
+    - test/backend/database/test_user_tenant_db.py
+    - test/backend/management/test_contracts_directory_architecture.py
+    - test/backend/permissions/test_roles.py
+    - test/backend/permissions/test_rbac.py
+    - test/backend/permissions/test_dac.py
+    - test/backend/permissions/test_operations.py
+    - test/backend/permissions/test_resource_access.py
+    - test/backend/permissions/test_tenant_scope.py
+    - test/backend/services/test_model_health_outlet_routing.py
+    - test/backend/management/test_identity_import_architecture.py
+    - test/backend/services/test_role_assignment.py
+    - test/backend/services/test_invitation_roles.py
+    - test/backend/services/test_invitation_lifecycle.py
+    - test/backend/services/test_invited_registration.py
+    - test/backend/app/test_identity_role_endpoints.py
+    - test/backend/ops/test_resource_inventory.py
+    - test/backend/services/test_invitation_service.py
+    - test/backend/services/test_user_service.py
+    - test/backend/services/test_api_key_service.py
+    - test/backend/services/test_cas_service.py
+    - test/backend/services/test_local_account_cli.py
+    - test/backend/ops/test_bootstrap.py
+    - frontend/tests/component/accountMonitoring.test.tsx
+    - frontend/tests/component/casResourceIdentity.test.tsx
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    - frontend/tests/component/casIdentityApiContract.test.tsx
+    - frontend/tests/component/multiRolePermissions.test.tsx
+    - test/backend/database/test_notification_db.py
+    - test/backend/services/test_vectordatabase_service.py
+    - test/backend/services/test_skill_repository_service.py
+    - test/backend/database/test_knowledge_db.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/services/test_tenant_service.py
+    - test/backend/services/test_group_service.py
+    - test/backend/services/test_native_authentication.py
+    - test/backend/services/test_native_authentication_flows.py
+    - test/backend/app/test_app_factory.py
+    - test/backend/app/test_user_management_app.py
+    - test/backend/app/test_vectordatabase_app.py
+    - test/backend/app/test_quota_app.py
+    - test/backend/app/test_skill_app.py
+  notes: Implemented OPS permissions with supporting role-array refactor, fixed invitation
+    grants, atomic local registration and administrator invariants. AUTH-LOCAL-D2-001
+    fixture setup now uses authoritative arrays; its original identity/API-key assertions
+    remain. API-027 is retained. OAuth/CAS journeys remain skipped_by_policy; their
+    unchanged mapping policies are covered by UT. Operations business CRUD is not
+    implemented. Roles are now authoritative on user_account_t.user_roles with computed scalar responses and a read-only
+    membership projection; writes lock both account and membership rows. Existing
+    account-profile UT and D3 registration assertions cover this ownership. The completed one-time migration Case and script were deleted at the
+    user's request; local execution evidence remains available and migration acceptance
+    does not add a maintained operations migration Case. Existing AUTH-LOCAL-D5-001 is strengthened only for its account-import and deployment responsibilities, including user_roles and scalar-column removal.
+    Coverage backfill adds isolated assertions for locked invitation updates and redemption, registration rollback,
+    user endpoint error mapping, and the inventory query projection and pagination. Existing D2 and D3 retain
+    live tenant authorization and registration concurrency proof. D2 and D4 also exercise
+    shared resource tabs, scoped lists and details, and the absence of write controls.

@@ -32,9 +32,9 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
     assert sorted(actual) == expected
 
 
-def test_gateway_owns_two_authentication_implementations_and_one_route_file():
+def test_gateway_owns_authentication_and_one_route_file():
     assert {p.name for p in (BACKEND / "gateway/authentication").glob("*.py")} == {
-        "__init__.py", "auth.py", "northbound_auth.py"
+        "__init__.py", "auth.py", "credentials.py", "northbound_auth.py"
     }
     assert {p.name for p in (BACKEND / "gateway/api").glob("*.py")} == {"__init__.py", "northbound.py"}
     assert not (BACKEND / "gateway/api/northbound").exists()

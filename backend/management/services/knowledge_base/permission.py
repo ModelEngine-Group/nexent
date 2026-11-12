@@ -6,10 +6,10 @@ import logging
 from typing import List, Optional
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT
-from contracts.constants.environment import IS_SPEED_MODE
+from contracts.roles import roles_from_record
 from management.db.identity.group import query_group_ids_by_user
-from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.knowledge_base.repository import get_knowledge_record
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 
@@ -38,22 +38,16 @@ def resolve_knowledge_base_permissions(
     if not records:
         return {}
     user_tenant = get_user_tenant_by_user_id(user_id)
-    if not user_tenant and not IS_SPEED_MODE:
+    if not user_tenant:
         return {record["index_name"]: None for record in records}
-    user_role = (user_tenant or {}).get("user_role")
+    user_role = roles_from_record(user_tenant or {})
     user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
-    if user_id == user_tenant_id:
-        user_role = "ADMIN"
-    elif IS_SPEED_MODE and not user_role:
-        user_role = "SPEED"
-    role = (user_role or "").upper()
+    role = user_role
     groups = query_group_ids_by_user(user_id)
     permissions = {}
     for record in records:
         index_name = record["index_name"]
         effective_tenant = user_tenant_id
-        if IS_SPEED_MODE and not effective_tenant:
-            effective_tenant = str(record.get("tenant_id") or tenant_id or "")
         access = ResourceAccessControl.check(
             Resource(
                 resource_type="knowledge_base",

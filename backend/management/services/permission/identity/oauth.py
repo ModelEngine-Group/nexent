@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.constants.constants import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE
-from contracts.authentication import PendingOAuthIdentity
+
 import json
 import logging
 import os
@@ -9,19 +8,77 @@ import ssl
 import time
 import urllib.request
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, quote
+from urllib.parse import quote, urlencode
 
 import jwt
-from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
+from pydantic import EmailStr, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
-from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.constants.environment import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.authentication import PendingOAuthIdentity
+from contracts.constants.constants import (
+    ASSET_OWNER_INVITE_CODE_TYPE,
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+    OAUTH_PENDING_EXPIRE_SECONDS,
+    OAUTH_PENDING_PURPOSE,
+)
 from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
-from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
+from contracts.constants.environment import (
+    JWT_EXPIRY_SECONDS,
+    JWT_SECRET,
+    OAUTH_CA_BUNDLE,
+    OAUTH_CALLBACK_BASE_URL,
+    OAUTH_LOGIN_MODE,
+    OAUTH_SSL_VERIFY,
+)
+from contracts.errors.exceptions import (
+    OAuthLinkError,
+    OAuthProviderError,
+    TenantResourceLimitError,
+)
+from contracts.roles import (
+    has_any_role,
+    invitation_roles,
+    primary_role,
+    roles_from_record,
+)
+from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
+from infrastructure.security.passwords import hash_password
+from management.db.client import get_db_session
+from management.db.identity.account import create_account, get_account_by_email
+from management.db.identity.oauth_account import (
+    delete_oauth_account,
+    get_oauth_account_by_provider,
+    get_soft_deleted_oauth_account,
+    insert_oauth_account,
+    list_oauth_accounts_by_user_id,
+    reactivate_oauth_account,
+    update_oauth_account_tokens,
+)
+from management.db.identity.user_tenant import (
+    get_user_tenant_by_user_id,
+    insert_user_tenant,
+)
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from management.utils.oauth_providers import get_all_provider_definitions, get_provider_definition, is_provider_enabled
-from management.db.identity.oauth_account import delete_oauth_account, get_oauth_account_by_provider, get_soft_deleted_oauth_account, insert_oauth_account, list_oauth_accounts_by_user_id, reactivate_oauth_account, update_oauth_account_tokens
-from management.db.identity.user_tenant import get_user_tenant_by_user_id, insert_user_tenant
+from management.services.permission.identity.authentication import (
+    validate_password_strength,
+)
+from management.services.permission.identity.groups import add_user_to_groups
+from management.services.permission.identity.invitations import (
+    check_invitation_available,
+    get_invitation_by_code,
+    use_invitation_code,
+)
+from management.services.permission.identity.registration import (
+    register_invited_account,
+)
+from management.services.tool.configuration import init_tool_list_for_tenant
+from management.utils.oauth_providers import (
+    get_all_provider_definitions,
+    get_provider_definition,
+    is_provider_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +97,6 @@ def _build_ssl_context() -> ssl.SSLContext:
 
 
 _SSL_CTX = _build_ssl_context()
-
-
 
 
 def _resolve_field(data: dict, field_path: str) -> Any:
@@ -288,8 +343,6 @@ def generate_pending_oauth_token(
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-
-
 def get_pending_oauth_info(payload: PendingOAuthIdentity) -> Dict[str, Any]:
     provider_email = payload.get("provider_email") or ""
     return {
@@ -312,7 +365,6 @@ def _validate_email(email: Optional[str]) -> str:
 def find_account_user_id_by_email(email: Optional[str]) -> Optional[str]:
     if not email:
         return None
-    from management.db.identity.account import get_account_by_email
 
     account = get_account_by_email(email) if email else None
     return account["user_id"] if account else None
@@ -335,14 +387,6 @@ async def complete_pending_oauth_account(
     invite_code: str,
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
-    from management.services.permission.identity.groups import add_user_to_groups
-    from management.services.permission.identity.invitations import (
-        check_invitation_available,
-        get_invitation_by_code,
-        use_invitation_code,
-    )
-    from management.services.tool.configuration import init_tool_list_for_tenant
-    from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
 
     pending = pending_identity
     provider = pending["provider"]
@@ -366,10 +410,6 @@ async def complete_pending_oauth_account(
     if not invitation_info:
         raise OAuthLinkError("Invitation code is invalid or unavailable")
 
-    from management.db.identity.account import create_account
-    from infrastructure.security.passwords import hash_password
-    from management.db.client import get_db_session
-    from management.services.permission.identity.authentication import validate_password_strength
 
     if not validate_password_strength(password):
         raise OAuthLinkError("Password must be at least 8 characters with uppercase, lowercase, and digit")
@@ -379,23 +419,12 @@ async def complete_pending_oauth_account(
     tenant_id = invitation_info["tenant_id"]
     if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
         tenant_id = ASSET_OWNER_TENANT_ID
-    user_role = _role_from_invitation_type(invitation_info.get("code_type", "USER_INVITE"))
-    is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
+    assigned_roles = invitation_roles(invitation_info)
+    user_role = primary_role(assigned_roles)
+    is_asset_owner_registration = has_any_role(user_role, {ASSET_OWNER_ROLE})
 
-    with get_db_session() as session:
-        account = create_account(final_email, hash_password(password), db_session=session)
-        user_id = account["user_id"]
-        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_role=user_role,
-                           user_email=final_email, db_session=session)
-
-    invitation_result = use_invitation_code(normalized_invite_code, user_id)
-    group_ids = invitation_result.get("group_ids", [])
-    if isinstance(group_ids, str):
-        from management.utils.serialization import convert_string_to_list
-
-        group_ids = convert_string_to_list(group_ids)
-    if group_ids and not is_asset_owner_registration:
-        add_user_to_groups(user_id, group_ids, user_id)
+    account, member = register_invited_account(final_email, hash_password(password), normalized_invite_code)
+    user_id = account["user_id"]
 
     if not is_asset_owner_registration:
         await init_tool_list_for_tenant(tenant_id, user_id)
@@ -420,6 +449,7 @@ async def complete_pending_oauth_account(
             "id": str(user_id),
             "email": final_email,
             "role": user_role,
+            "roles": list(assigned_roles),
         },
         "session": {
             "access_token": jwt_token,

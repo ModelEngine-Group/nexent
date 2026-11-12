@@ -36,7 +36,10 @@ import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
-import { MODEL_TOKEN_LIMIT_KEYS, withoutModelTokenLimits } from "@/lib/modelParameterLayers";
+import {
+  MODEL_TOKEN_LIMIT_KEYS,
+  withoutModelTokenLimits,
+} from "@/lib/modelParameterLayers";
 import { AgentModelParameters } from "@/components/model/AgentModelParameters";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -440,7 +443,7 @@ export default function AgentPrompt({
       agentId === null ||
       modelInitialization.current.complete ||
       isReadOnly ||
-      (!canManageModels(user?.role ?? "") && !isSpeedMode)
+      (!canManageModels(user?.roles ?? user?.role) && !isSpeedMode)
     )
       return;
 
@@ -468,7 +471,7 @@ export default function AgentPrompt({
     modelListLoaded,
     modelOptions,
     updateAgent,
-    user?.role,
+    user?.roles ?? user?.role,
   ]);
 
   useEffect(() => {
@@ -632,7 +635,8 @@ export default function AgentPrompt({
     for (const [key, val] of Object.entries(editingOverrideValue)) {
       // Custom params are diffed per-key below (deleting an inherited row
       // must persist a removal, not drop the key).
-      if (key === "__custom__" || MODEL_TOKEN_LIMIT_KEYS.includes(key)) continue;
+      if (key === "__custom__" || MODEL_TOKEN_LIMIT_KEYS.includes(key))
+        continue;
       // Reasoning is an agent-owned snapshot; do not compare with the model
       // level setting.
       if (
@@ -659,7 +663,7 @@ export default function AgentPrompt({
     setConfiguringModelId(null);
   };
 
-  const canManage = canManageModels(user?.role ?? "");
+  const canManage = canManageModels(user?.roles ?? user?.role);
   const isModelSelectionDisabled = isReadOnly || (!canManage && !isSpeedMode);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1078,40 +1082,48 @@ export default function AgentPrompt({
           onClose={() => setConfiguringModelId(null)}
           onApply={(entry) => {
             const updated = { ...modelParamsOverride };
-            if (Object.keys(entry).length) updated[String(configuringModel.id)] = entry;
+            if (Object.keys(entry).length)
+              updated[String(configuringModel.id)] = entry;
             else delete updated[String(configuringModel.id)];
-            updateAgent({ model_params_override: Object.keys(updated).length ? updated : null });
+            updateAgent({
+              model_params_override: Object.keys(updated).length
+                ? updated
+                : null,
+            });
           }}
         />
-      ) : <ModelParamsModal
-        open={configuringModelId !== null}
-        title={
-          configuringModel
-            ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
-            : t("model.advanced.overrideTitle", {
-                defaultValue: "模型参数覆盖",
-              })
-        }
-        onClose={() => setConfiguringModelId(null)}
-        onConfirm={handleConfirmOverride}
-        modelOptions={modelOptions}
-        selectedModelId={configuringModelId}
-        onSelectModel={(id) => setConfiguringModelId(id)}
-        value={editingOverrideValue ?? {}}
-        onChange={(next) => setEditingOverrideValue(next)}
-        modelType={(configuringModel as any)?.type ?? "llm"}
-        reasoningCapability={(configuringModel as any)?.reasoningCapability}
-        inheritedDefaults={{
-          context_window_tokens: (configuringModel as any)?.contextWindowTokens,
-          max_input_tokens: (configuringModel as any)?.maxInputTokens,
-          max_output_tokens: (configuringModel as any)?.maxOutputTokens,
-          default_output_reserve_tokens: (configuringModel as any)
-            ?.defaultOutputReserveTokens,
-          temperature: (configuringModel as any)?.temperature,
-          top_p: (configuringModel as any)?.topP,
-        }}
-        disabled={isModelSelectionDisabled}
-      />}
+      ) : (
+        <ModelParamsModal
+          open={configuringModelId !== null}
+          title={
+            configuringModel
+              ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}`
+              : t("model.advanced.overrideTitle", {
+                  defaultValue: "模型参数覆盖",
+                })
+          }
+          onClose={() => setConfiguringModelId(null)}
+          onConfirm={handleConfirmOverride}
+          modelOptions={modelOptions}
+          selectedModelId={configuringModelId}
+          onSelectModel={(id) => setConfiguringModelId(id)}
+          value={editingOverrideValue ?? {}}
+          onChange={(next) => setEditingOverrideValue(next)}
+          modelType={(configuringModel as any)?.type ?? "llm"}
+          reasoningCapability={(configuringModel as any)?.reasoningCapability}
+          inheritedDefaults={{
+            context_window_tokens: (configuringModel as any)
+              ?.contextWindowTokens,
+            max_input_tokens: (configuringModel as any)?.maxInputTokens,
+            max_output_tokens: (configuringModel as any)?.maxOutputTokens,
+            default_output_reserve_tokens: (configuringModel as any)
+              ?.defaultOutputReserveTokens,
+            temperature: (configuringModel as any)?.temperature,
+            top_p: (configuringModel as any)?.topP,
+          }}
+          disabled={isModelSelectionDisabled}
+        />
+      )}
     </div>
   );
 }

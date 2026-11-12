@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
@@ -26,6 +27,7 @@ import {
 
 export interface UseMcpConfigOptions {
   enabled?: boolean;
+  readOnly?: boolean;
   tenantId?: string | null;
   onServerAdded?: () => void;
   onServerDeleted?: () => void;
@@ -71,8 +73,10 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
 
   // Filter to match MCP space "My" tab: only show editable or group-shared MCPs
   const serverList = useMemo(
-    () => rawServerList.filter((s) => s.permission === "EDIT" || s.group_ids),
-    [rawServerList],
+    () => options.readOnly
+      ? rawServerList
+      : rawServerList.filter((s) => s.permission === "EDIT" || s.group_ids),
+    [rawServerList, options.readOnly],
   );
 
   const {
@@ -206,10 +210,15 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     const key = `${server.service_name}__${server.mcp_url}`;
     setHealthCheckLoading(prev => ({ ...prev, [key]: true }));
     try {
-      const result = await checkMcpServerHealth(server.mcp_id);
-      invalidateMcpServers();
-      invalidateMcpContainers();
-      await refreshToolsAndAgents();
+      const result = await checkMcpServerHealth(
+        server.mcp_id,
+        options.readOnly ? options.tenantId : undefined,
+      );
+      if (!options.readOnly) {
+        invalidateMcpServers();
+        invalidateMcpContainers();
+        await refreshToolsAndAgents();
+      }
       if (result.success) {
         return { success: true, messageKey: "mcpConfig.message.healthCheckSuccess" };
       } else {
@@ -217,14 +226,16 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       }
     } catch (error) {
       log.error("Health check failed:", error);
-      invalidateMcpServers();
-      invalidateMcpContainers();
-      await refreshToolsAndAgents();
+      if (!options.readOnly) {
+        invalidateMcpServers();
+        invalidateMcpContainers();
+        await refreshToolsAndAgents();
+      }
       return { success: false, message: "Health check failed", messageKey: "mcpConfig.message.healthCheckFailed" };
     } finally {
       setHealthCheckLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [invalidateMcpServers, invalidateMcpContainers, refreshToolsAndAgents, options.tenantId]);
+  }, [invalidateMcpServers, invalidateMcpContainers, refreshToolsAndAgents, options.readOnly, options.tenantId]);
 
   // Update MCP server
   const handleUpdateServer = useCallback(async (

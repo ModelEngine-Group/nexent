@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -544,7 +546,13 @@ function formatSkillUpdateTime(iso: string | null | undefined): string {
   return `${y}/${m}/${day} ${h}:${min}`;
 }
 
-export default function SkillList({ tenantId }: { tenantId: string | null }) {
+export default function SkillList({
+  tenantId,
+  readOnly = false,
+}: {
+  tenantId: string | null;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [form] = Form.useForm();
@@ -772,13 +780,15 @@ export default function SkillList({ tenantId }: { tenantId: string | null }) {
             className="w-40"
           />
         </div>
-        <Button
-          type="primary"
-          icon={<Download className="h-4 w-4" />}
-          onClick={() => setInstallModalOpen(true)}
-        >
-          {t("tenantResources.skills.installOfficialSkills")}
-        </Button>
+        {!readOnly && (
+          <Button
+            type="primary"
+            icon={<Download className="h-4 w-4" />}
+            onClick={() => setInstallModalOpen(true)}
+          >
+            {t("tenantResources.skills.installOfficialSkills")}
+          </Button>
+        )}
       </div>
       <Table<SkillListItem>
         columns={columns}

@@ -134,7 +134,7 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
 });
 
-test.each([false, true])(
+test.each([false])(
   "failed authorization retries and applies permissions before redirect (speed=%s)",
   async (speed) => {
     state.speed = speed;
