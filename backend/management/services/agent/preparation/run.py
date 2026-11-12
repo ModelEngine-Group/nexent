@@ -91,6 +91,139 @@ def _ensure_agent_reasoning_snapshot(
 
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 northbound MCP header passthrough preflight
+# ---------------------------------------------------------------------------
+
+
+async def preflight_mcp_header_passthrough(
+    *,
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+    metadata: Optional[Dict[str, Any]],
+    agent_record: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Validate Phase-1 passthrough headers **before** an SSE stream opens.
+
+    This is the northbound 400 vs SSE-error fix for Phase 1.  When
+    :func:`apply_mcp_header_passthrough` runs *inside* the
+    :class:`generate_stream` async generator body, the northbound endpoint has
+    already committed to HTTP 200 via :class:`StreamingResponse`, so callers
+    only see an SSE error event, never the HTTP 400 + business codes
+    ``CHAT_MCP_HEADER_ROUTE_NOT_FOUND`` (010111) and
+    ``CHAT_MCP_PLACEHOLDER_UNRESOLVED`` (010112) that the Phase-1 spec
+    promises.
+
+    Callers must **invoke this function BEFORE** the northbound route returns
+    its :class:`StreamingResponse`.  It reuses exactly the same AgentConfig +
+    MCP lookup machinery that :func:`create_agent_run_info` uses, so the
+    ``mcp_host`` shape passed to
+    :func:`management.services.agent.mcp_passthrough.validate_mcp_header_passthrough`
+    is a faithful preimage of what the full pipeline will eventually build.
+
+    Raises
+    ------
+    AppException
+        010111 (unmatched ``by_server`` URL) or 010112 (strict mode unresolved
+        placeholder) when the caller-supplied metadata cannot be applied.
+        Surface these as HTTP 400 — never swallow them into an SSE error.
+    """
+    from management.services.agent.mcp_passthrough import (
+        validate_mcp_header_passthrough,
+        extract_passthrough_headers,
+    )
+    from management.services.agent.preparation.compiler import create_agent_config
+    from management.services.agent.preparation.tools import (
+        filter_mcp_servers_and_tools,
+    )
+    from nexent.core.concurrency import run_blocking
+
+    version_no_int = int(version_no or 0)
+
+    # Reuse the agent_record if the caller already fetched it (subscription.py
+    # does so early in run_agent_stream).  Otherwise do a single blocking
+    # lookup — cheap enough because this is the only DB hit we need here.
+    if agent_record is None or int(agent_record.get("version_no", -1)) != version_no_int:
+        agent_record = await run_blocking(
+            "preflight-agent-lookup",
+            search_agent_info_by_agent_id,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=version_no_int,
+        ) or {}
+
+    # Skip the whole preflight when the caller did not supply any reserved
+    # fields — no need to build AgentConfig / MCP list for nothing.
+    mode, passthrough_headers = extract_passthrough_headers(metadata)
+    if mode is None or not passthrough_headers:
+        return
+
+    # Agent has no switch — no preflight needed (apply_mcp_header_passthrough
+    # itself handles switch=OFF via silent no-op).
+    if not agent_record:
+        return
+
+    # Build a lightweight AgentConfig (no workspace prep, no model snapshots)
+    # solely to enumerate which MCP servers the agent actually uses.  The
+    # regular create_agent_config call below does a full agent lookup + tool
+    # join inside compiler.py, which is exactly what we want here.
+    agent_config = await create_agent_config(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        version_no=version_no_int,
+    )
+
+    # Fetch remote MCP server list and resolve the used URLs the same way
+    # create_agent_run_info does.
+    from management.db.remote.mcp_server import (
+        get_remote_mcp_server_list,
+        get_tenant_local_mcp_server,
+    )
+
+    remote_mcp_list = await get_remote_mcp_server_list(
+        tenant_id=tenant_id, is_need_auth=True
+    )
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
+    remote_mcp_list.append(
+        {
+            "remote_mcp_server_name": "outer-apis",
+            "remote_mcp_server": default_mcp_url,
+            "status": True,
+        }
+    )
+    remote_mcp_dict = {
+        record["remote_mcp_server_name"]: record
+        for record in remote_mcp_list
+        if record.get("status")
+    }
+    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
+
+    # Build a minimal mcp_host-shaped list.  We only need URL + static headers
+    # (Authorization token + per-server custom_headers) for the validate call.
+    mcp_host: List[Dict[str, Any]] = []
+    for url in used_mcp_urls:
+        mcp_record = None
+        for record in remote_mcp_list:
+            if record.get("remote_mcp_server") == url and record.get("status"):
+                mcp_record = record
+                break
+        static_headers: Dict[str, Any] = {}
+        if mcp_record:
+            auth_token = mcp_record.get("authorization_token")
+            if auth_token:
+                static_headers["Authorization"] = auth_token
+            custom_headers = mcp_record.get("custom_headers")
+            if custom_headers and isinstance(custom_headers, dict):
+                static_headers.update(custom_headers)
+        entry: Dict[str, Any] = {"url": url}
+        if static_headers:
+            entry["headers"] = static_headers
+        mcp_host.append(entry)
+
+    validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
+
+
 async def create_agent_run_info(
     agent_id,
     minio_files,

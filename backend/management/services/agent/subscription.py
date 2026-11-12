@@ -956,6 +956,37 @@ async def run_agent_stream(
         stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
+
+    # -------------------------------------------------------------------
+    # Phase-1 MCP header passthrough preflight — MUST run BEFORE the
+    # StreamingResponse is committed so AppException (010111 / 010112) surfaces
+    # as HTTP 400 instead of getting swallowed into an SSE error event later.
+    # -------------------------------------------------------------------
+    if agent_request.metadata is not None and agent_request.agent_id is not None:
+        try:
+            from management.services.agent.preparation.run import (
+                preflight_mcp_header_passthrough,
+            )
+
+            await preflight_mcp_header_passthrough(
+                agent_id=int(agent_request.agent_id),
+                tenant_id=resolved_tenant_id,
+                version_no=int(agent_request.version_no or 0),
+                metadata=agent_request.metadata,
+            )
+        except Exception as exc:
+            # AppException propagates as HTTP 400 — this is the desired
+            # northbound contract.  Anything else here is a code bug; reraise
+            # so FastAPI surfaces 500.
+            from contracts.errors.exceptions import AppException
+
+            if isinstance(exc, AppException):
+                raise
+            logger.error(
+                "preflight_mcp_header_passthrough raised unexpected exception",
+                exc_info=True,
+            )
+            raise
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():

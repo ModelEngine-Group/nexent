@@ -210,8 +210,86 @@ def resolve_placeholders(
 
 
 # ---------------------------------------------------------------------------
-# 4. Top-level orchestration — modifies mcp_host in place
+# 4. Pure pre-validation — raises AppException BEFORE any SSE is committed
 # ---------------------------------------------------------------------------
+
+
+def validate_mcp_header_passthrough(
+    metadata: Optional[Dict[str, Any]],
+    agent_record: Dict[str, Any],
+    mcp_host: Sequence[Any],
+) -> None:
+    """Raise :class:`AppException` when the caller-supplied passthrough
+    headers would violate the contract documented in the Phase-1 spec.
+
+    This function is **non-mutating** — it never touches ``mcp_host``.  It
+    exists so callers that need to fail **before** opening an SSE stream
+    (to surface HTTP 400 + business codes 010111 / 010112 at the northbound
+    entry point) can check early without triggering the full run machinery.
+
+    The two failure modes surface the exact same business codes that
+    :func:`apply_mcp_header_passthrough` uses, so callers get consistent
+    error messages regardless of when they validate.
+    """
+    if not isinstance(mcp_host, list) or not mcp_host:
+        return
+
+    strict_mode = bool(
+        agent_record.get("strict_mcp_placeholder_resolution", False)
+    )
+
+    mode, passthrough_headers = extract_passthrough_headers(metadata)
+
+    # (a) by_server routing: every URL key must match a configured MCP server.
+    if mode == "by_server" and passthrough_headers:
+        configured_urls = {
+            str(item["url"])
+            for item in mcp_host
+            if isinstance(item, dict) and "url" in item
+        }
+        unmatched = sorted(set(passthrough_headers) - configured_urls)
+        if unmatched:
+            raise AppException(
+                ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND,
+                details={"unmatched_server_urls": unmatched},
+            )
+
+    # (b) Strict mode placeholder resolution — needs mcp_host static headers.
+    if strict_mode:
+        passthrough_allowed = bool(
+            agent_record.get("allow_mcp_header_passthrough", False)
+        )
+        unresolved: List[str] = []
+        for item in mcp_host:
+            if not isinstance(item, dict) or "url" not in item:
+                continue
+            server_url = str(item["url"])
+            current_headers = item.get("headers") or {}
+            context_block = (
+                passthrough_headers.get(server_url)
+                if mode == "by_server"
+                else passthrough_headers
+            ) or {}
+            _, _, missing = resolve_placeholders(
+                current_headers,
+                context_block,
+                passthrough_allowed=passthrough_allowed,
+                run_id="preflight",
+                agent_id=int(agent_record.get("agent_id", 0) or 0),
+                server_url=server_url,
+            )
+            unresolved.extend(missing)
+        if unresolved:
+            raise AppException(
+                ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED,
+                details={"unresolved_placeholders": sorted(set(unresolved))},
+            )
+
+
+# ---------------------------------------------------------------------------
+# 5. Top-level orchestration — modifies mcp_host in place
+# ---------------------------------------------------------------------------
+
 
 def apply_mcp_header_passthrough(
     mcp_host: List[Any],
@@ -250,6 +328,24 @@ def apply_mcp_header_passthrough(
         )
         agent_record = {}
 
+    # Pre-check: raise AppException before any mutation happens.  Callers that
+    # want HTTP 400 instead of SSE error must run the same check BEFORE the
+    # StreamingResponse is returned — this guard keeps the error semantics
+    # identical everywhere apply() is called from.
+    try:
+        validate_mcp_header_passthrough(metadata, agent_record, mcp_host)
+    except AppException:
+        raise
+    except Exception:
+        # validate never raises non-AppException in happy-path failures, but
+        # a malformed mcp_host or metadata dict should be treated exactly
+        # like the rest of apply — never let a tool-side issue crash the run.
+        logger.warning(
+            "agent_id=%s run_id=%s event=passthrough_precheck_failed",
+            agent_id, run_id,
+            exc_info=True,
+        )
+
     passthrough_allowed = bool(
         agent_record.get("allow_mcp_header_passthrough", False)
     )
@@ -259,21 +355,10 @@ def apply_mcp_header_passthrough(
 
     mode, passthrough_headers = extract_passthrough_headers(metadata)
 
-    # by_server routing: every URL key must match a configured MCP server,
-    # otherwise the caller thinks they injected a header that silently went
-    # nowhere.  Surface it as a dedicated 400 instead of a silent no-op.
-    if mode == "by_server" and passthrough_headers:
-        configured_urls = {
-            str(item["url"])
-            for item in mcp_host
-            if isinstance(item, dict) and "url" in item
-        }
-        unmatched = sorted(set(passthrough_headers) - configured_urls)
-        if unmatched:
-            raise AppException(
-                ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND,
-                details={"unmatched_server_urls": unmatched},
-            )
+    # -----------------------------------------------------------------------
+    # Mutation phase — only starts now.  All validation errors above raised
+    # before any call to mcp_host item["headers"] = ... happens.
+    # -----------------------------------------------------------------------
 
     total_unresolved: List[str] = []
 
@@ -327,7 +412,8 @@ def apply_mcp_header_passthrough(
                 agent_id, run_id, server_url, sorted(set(resolved_names)),
             )
 
-    # Strict mode: unresolved placeholders abort the run with 400.
+    # Strict mode — resolved to the same exception that validate_mcp_header_
+    # passthrough raises, so in-stream callers see the same business code.
     if strict_mode and total_unresolved:
         raise AppException(
             ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED,
