@@ -3,6 +3,7 @@
 """Terminal ordinary-chat clarification never dispatches resource actions."""
 
 import asyncio
+import importlib
 import json
 from threading import Event
 from types import SimpleNamespace
@@ -136,6 +137,9 @@ async def test_model_finishes_observation_then_pauses_before_native_dispatch(sav
 
 @pytest.fixture
 def loop_manager():
+    # Keep SDK cold imports outside the finite cleanup deadline without mocking Runner.stop.
+    importlib.import_module("openjiuwen.core.runner.runner")
+    importlib.import_module("openjiuwen.core.sys_operation.local._rw_lock_manager")
     manager = ThreadManager("clarification-loop", {
         "background-service": LanePolicy(name="background-service", max_workers=1, max_queue_size=0)})
     manager.start()

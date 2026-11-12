@@ -32,6 +32,8 @@ change:
     - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
     - test/sdk/core/agents/test_jiuwen_native_files.py
     - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/sdk/core/agents/test_jiuwen_execution_loop.py
+    - test/sdk/core/agents/test_jiuwen_clarification.py
     - test/backend/agents/test_jiuwen_creator_results.py
     - test/backend/services/test_agent_execution_history_stream.py
     - test/backend/services/test_nl2skill_history_protocol.py

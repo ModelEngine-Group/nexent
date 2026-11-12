@@ -3,6 +3,7 @@
 """Jiuwen invocations share an owned loop without serializing whole runs."""
 
 import asyncio
+import importlib
 from contextvars import ContextVar
 from threading import Event
 from types import SimpleNamespace
@@ -17,6 +18,9 @@ from nexent.core.utils.observer import MessageObserver
 
 @pytest.fixture
 def manager():
+    # Load the real SDK before timing owned-loop cleanup; cold imports are not shutdown work.
+    importlib.import_module("openjiuwen.core.runner.runner")
+    importlib.import_module("openjiuwen.core.sys_operation.local._rw_lock_manager")
     owner = ThreadManager("jiuwen-loop-ut", {
         name: LanePolicy(name=name, max_workers=4, max_queue_size=8)
         for name in ("agent-run", "background-service")
