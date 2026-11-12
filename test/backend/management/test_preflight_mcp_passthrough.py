@@ -39,9 +39,14 @@ def _patch_preflight_deps(monkeypatch, *, agent_record=None, mcp_host=None,
                           validate_raises=None):
     """Patch everything preflight touches.
 
-    ``validate_mcp_header_passthrough`` and ``extract_passthrough_headers``
-    are imported *inside* ``preflight_mcp_header_passthrough`` (not at module
-    level), so they must be patched on their owning module directly.
+    ``preflight_mcp_header_passthrough`` does **function-local imports** for
+    several of its dependencies (create_agent_config, filter_mcp_servers_and_tools,
+    validate_mcp_header_passthrough, extract_passthrough_headers, run_blocking).
+    A function-local ``from X import Y`` bypasses the importing module's
+    namespace and binds directly to ``X.Y`` — so we MUST patch the *source*
+    module (``compiler.create_agent_config``, etc.), not ``run_mod.<name>``.
+    Patching run_mod would silently be a no-op and the real implementation
+    would run, which is exactly what caused 4 tests to hit PostgreSQL.
 
     Returns a dict of the patched calls so assertions can inspect them.
     """
@@ -83,16 +88,23 @@ def _patch_preflight_deps(monkeypatch, *, agent_record=None, mcp_host=None,
         if validate_raises is not None:
             raise validate_raises
 
+    # Patch on the SOURCE modules — these are the names preflight's local
+    # imports will resolve to at call time.
     from management.services.agent import mcp_passthrough as mcp_mod
+    from management.services.agent.preparation import compiler as compiler_mod
+    from management.services.agent.preparation import tools as tools_mod
 
-    monkeypatch.setattr(run_mod, "create_agent_config", _fake_create_agent_config)
+    monkeypatch.setattr(compiler_mod, "create_agent_config", _fake_create_agent_config)
+    monkeypatch.setattr(tools_mod, "filter_mcp_servers_and_tools",
+                        _fake_filter_mcp_servers_and_tools)
+    monkeypatch.setattr(mcp_mod, "validate_mcp_header_passthrough", _fake_validate)
+
+    # These two are NOT re-imported inside preflight — it uses run_mod's
+    # module-level bindings — so run_mod is the correct patch target.
     monkeypatch.setattr(run_mod, "get_remote_mcp_server_list",
                         _fake_get_remote_mcp_server_list)
     monkeypatch.setattr(run_mod, "get_tenant_local_mcp_server",
                         _fake_get_tenant_local_mcp_server)
-    monkeypatch.setattr(run_mod, "filter_mcp_servers_and_tools",
-                        _fake_filter_mcp_servers_and_tools)
-    monkeypatch.setattr(mcp_mod, "validate_mcp_header_passthrough", _fake_validate)
     return calls
 
 
@@ -261,12 +273,12 @@ def test_preflight_call_site_isawaitable_guard_swallows_plain_magicmock():
     import inspect
 
     # Simulate what happens if someone patches preflight_mcp_header_passthrough
-    # with a plain MagicMock instead of AsyncMock.
-    from unittest.mock import MagicMock
+    # with a plain MagicMock instead of AsyncMock: calling it returns a
+    # MagicMock, which is NOT awaitable → guard must skip the await.
+    plain_mock = MagicMock()
+    assert not inspect.isawaitable(plain_mock())
 
-    result = MagicMock()
-    # A plain MagicMock is NOT awaitable.
-    assert not inspect.isawaitable(result)
-
-    awaitable_result = AsyncMock()
-    assert inspect.isawaitable(awaitable_result)
+    # AsyncMock() itself is NOT awaitable either; the awaitable is the
+    # coroutine returned by *calling* it.  Guard must take the await branch.
+    async_mock = AsyncMock()
+    assert inspect.isawaitable(async_mock())
