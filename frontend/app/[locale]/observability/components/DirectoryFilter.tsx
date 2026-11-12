@@ -60,6 +60,12 @@ export function DirectoryFilter({
     ];
   }, [keyword, recent, query.data]);
   const selected = options.find((option) => option.id === value);
+  const displayName = (option: DirectoryOption) =>
+    facet === "models"
+      ? option.name || option.id
+      : option.name && option.name !== option.id
+        ? option.name
+        : t("trajectory.unnamedOption");
   const loading = query.isFetching || search.trim() !== keyword;
   return (
     <Select
@@ -79,8 +85,8 @@ export function DirectoryFilter({
                 ? JSON.stringify([selected.tenant_id, selected.id])
                 : value,
               label: selected
-                ? `${selected.name || selected.id} (${selected.id})`
-                : value,
+                ? displayName(selected)
+                : t("trajectory.unnamedOption"),
             }
           : undefined
       }
@@ -108,11 +114,10 @@ export function DirectoryFilter({
         value: JSON.stringify([option.tenant_id, option.id]),
         label: (
           <div className="py-1">
-            <div>{option.name || option.id}</div>
-            <div className="text-xs text-gray-500">
-              {option.id}
-              {option.tenant_name ? ` · ${option.tenant_name}` : ""}
-            </div>
+            <div>{displayName(option)}</div>
+            {option.tenant_name && option.tenant_name !== option.tenant_id && (
+              <div className="text-xs text-gray-500">{option.tenant_name}</div>
+            )}
           </div>
         ),
       }))}

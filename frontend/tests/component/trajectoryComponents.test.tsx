@@ -36,6 +36,11 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: vi.fn(),
 }));
+vi.mock("@/services/tenantService", () => ({
+  getTenant: vi
+    .fn()
+    .mockResolvedValue({ tenant_id: "tenant", tenant_name: "Tenant" }),
+}));
 vi.mock("@/services/trajectoryService", () => ({
   trajectoryService: {
     records: vi.fn(),
@@ -140,15 +145,28 @@ describe("trajectory timeline", () => {
         onSelect={vi.fn()}
       />
     );
-    await user.click(
-      screen.getByRole("button", { name: "trajectory.collapseAll" })
-    );
+    const collapse = screen.getByRole("button", {
+      name: "trajectory.collapseAll",
+    });
+    expect(collapse).toHaveTextContent(/^$/);
+    expect(collapse.querySelector("svg")).toBeInTheDocument();
+    expect(collapse).toHaveAttribute("title", "trajectory.collapseAll");
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    await user.click(collapse);
     expect(
       screen.queryByRole("treeitem", { name: /DeepSeek/ })
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "trajectory.expandAll" })
-    ).toBeVisible();
+    const expand = screen.getByRole("button", { name: "trajectory.expandAll" });
+    expect(expand).toBeVisible();
+    expect(expand).toHaveTextContent(/^$/);
+    expect(expand.querySelector("svg")).toBeInTheDocument();
+    expect(expand).toHaveAttribute("title", "trajectory.expandAll");
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    await user.click(expand);
+    expect(screen.getByRole("treeitem", { name: /DeepSeek/ })).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "trajectory.collapseAll" })
+    );
     await user.type(
       screen.getByRole("textbox", { name: "trajectory.nodeSearch" }),
       "retention_days"
@@ -350,8 +368,7 @@ describe("node details and bounded body reads", () => {
     expect(screen.getByText("— Token/s")).toBeVisible();
     expect(screen.queryByText("trajectory.modelCalls")).not.toBeInTheDocument();
   });
-  it("uses returned UTF-8 byte offset, replaces chunks, and aborts on unmount", async () => {
-    const user = userEvent.setup();
+  it("automatically loads the first UTF-8 chunk, appends on scroll, and aborts on unmount", async () => {
     api.content.mockResolvedValueOnce({
       text: "中文",
       offset: 0,
@@ -380,13 +397,17 @@ describe("node details and bounded body reads", () => {
       />,
       { wrapper }
     );
-    await user.click(
-      screen.getByRole("button", { name: "trajectory.expandContent" })
+    await waitFor(() =>
+      expect(view.container.querySelector("pre code")?.textContent).toBe(
+        JSON.stringify({ content: "中文" }, null, 2)
+      )
     );
-    expect(await screen.findByText("中文")).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "trajectory.nextChunk" })
-    );
+    expect(api.content).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "trajectory.nextChunk" })
+    ).not.toBeInTheDocument();
+    const content = view.container.querySelector("pre")!;
+    fireEvent.scroll(content, { target: { scrollTop: 20 } });
     expect(api.content.mock.calls[1][2]).toBe(6);
     const signal = api.content.mock.calls[1][3]!;
     view.unmount();
@@ -493,6 +514,9 @@ describe("summary, facets and drawer", () => {
       wrapper,
     });
     expect(await screen.findByRole("treeitem")).toBeVisible();
+    expect(
+      document.querySelector(".trajectory-drawer-heading")
+    ).not.toBeInTheDocument();
     expect(api.snapshot.mock.calls[0][0].trajectory_id).toBe("execution");
     fireEvent.click(document.querySelector(".ant-drawer-mask")!);
     expect(close).toHaveBeenCalledOnce();
@@ -553,14 +577,12 @@ describe("summary, facets and drawer", () => {
       Object.assign(new Error(), { code: "snapshot_reset" })
     );
     render(<TrajectoryDrawer row={record} onClose={vi.fn()} />, { wrapper });
-    await screen.findAllByText("private preview");
-    await userEvent.click(
-      screen.getAllByRole("button", { name: "trajectory.expandContent" })[0]
-    );
     await waitFor(() =>
       expect(screen.queryByText("private preview")).not.toBeInTheDocument()
     );
-    expect(screen.getByText("trajectory.errors.snapshot_reset")).toBeVisible();
+    expect(
+      await screen.findByText("trajectory.errors.snapshot_reset")
+    ).toBeVisible();
     expect(screen.queryByRole("treeitem")).not.toBeInTheDocument();
   });
 });

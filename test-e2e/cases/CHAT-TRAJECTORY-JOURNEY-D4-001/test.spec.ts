@@ -127,10 +127,6 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     await search.fill("retention_days");
     await expect(page.getByRole("treeitem", { name: /Friday/ })).toBeVisible();
     await search.clear();
-    await page
-      .getByRole("button", { name: "展开全文", exact: true })
-      .first()
-      .click();
     await expect
       .poll(() =>
         state.reads.some(
@@ -140,11 +136,21 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
         ),
       )
       .toBe(true);
-    await page
-      .getByRole("button", { name: "读取下一块", exact: true })
-      .first()
-      .click();
-    await expect(page.locator(".trajectory-body pre code").first()).toHaveText("终");
+    await expect(
+      page.getByRole("button", { name: "读取下一块", exact: true }),
+    ).toHaveCount(0);
+    const body = page.locator(".trajectory-body pre").first();
+    await expect(body.locator("code")).toContainText("aaaa");
+    const readStart = state.reads.length;
+    await body.hover();
+    await page.mouse.wheel(0, 600);
+    await expect(body.locator("code")).toContainText("终");
+    await expect(body.locator("code")).toContainText("aaaa");
+    expect(
+      state.reads
+        .slice(readStart)
+        .some((url) => url.searchParams.get("offset") === "1048576"),
+    ).toBe(true);
     await page.getByRole("button", { name: "加载更多", exact: true }).click();
     await expect(
       page.getByRole("treeitem", { name: /Later tool/ }),
@@ -178,12 +184,8 @@ journey("CHAT-TRAJECTORY-JOURNEY-D4-001", async ({ page, contract }) => {
     ).toHaveLength(0);
   });
   await contract.step(steps[4], async () => {
-    await open();
     state.failure = "snapshot_reset";
-    await page
-      .getByRole("button", { name: "展开全文", exact: true })
-      .first()
-      .click();
+    await table.getByRole("button", { name: "Friday", exact: true }).click();
     await expect(
       page.getByText("数据范围已变化，请重新查询", { exact: true }),
     ).toBeVisible();

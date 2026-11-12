@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DatePicker, Popover, Tag, Tooltip } from "antd";
+import { useQuery } from "@tanstack/react-query";
 import type { ColumnsType } from "antd/es/table";
 import {
   ChevronRight,
@@ -14,6 +15,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { useTranslation } from "react-i18next";
+import { getTenant } from "@/services/tenantService";
 import type { User } from "@/types/auth";
 import type {
   DirectoryField,
@@ -49,6 +51,9 @@ export function ObservabilityCenter({ user }: { user: User }) {
   const initial = (): TrajectoryFilters =>
     user.role === "ADMIN" ? { tenant_id: user.tenantId } : {};
   const [filters, setFilters] = useState<TrajectoryFilters>(initial);
+  const [directoryLabels, setDirectoryLabels] = useState<
+    Partial<Record<DirectoryField, string>>
+  >({});
   const [search, setSearch] = useState("");
   const [paging, setPaging] = useState({ page: 1, page_size: 10 });
   const [sorting, setSorting] = useState<
@@ -63,6 +68,13 @@ export function ObservabilityCenter({ user }: { user: User }) {
     ...paging,
     ...sorting,
   });
+  const tenantDetails = useQuery({
+    queryKey: ["trajectory-fixed-tenant", user.tenantId],
+    queryFn: () => getTenant(user.tenantId!),
+    enabled: user.role === "ADMIN" && !!user.tenantId,
+    retry: false,
+    staleTime: 60_000,
+  });
   const change = (next: TrajectoryFilters) => {
     setFilters(next);
     setPaging((value) => ({ ...value, page: 1 }));
@@ -70,6 +82,24 @@ export function ObservabilityCenter({ user }: { user: User }) {
   };
   const directoryChange = (field: DirectoryField, option?: DirectoryOption) => {
     let next = resetFilters(filters, field, option?.id);
+    const directoryFields: DirectoryField[] = [
+      "tenant_id",
+      "target_user_id",
+      "agent_id",
+      "conversation_id",
+    ];
+    const fieldIndex = directoryFields.indexOf(field);
+    setDirectoryLabels((previous) => {
+      const labels = { ...previous };
+      for (const dependent of directoryFields.slice(fieldIndex))
+        delete labels[dependent];
+      if (option)
+        labels[field] =
+          option.name && option.name !== option.id
+            ? option.name
+            : t("trajectory.unnamedOption");
+      return labels;
+    });
     // Cross-tenant IDs need the tenant returned by the authorized facet.
     if (option && field !== "tenant_id" && !filters.tenant_id)
       next = { ...next, tenant_id: option.tenant_id };
@@ -79,6 +109,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
   };
   const clear = () => {
     setSearch("");
+    setDirectoryLabels({});
     change(initial());
     setCleaning(false);
   };
@@ -88,6 +119,17 @@ export function ObservabilityCenter({ user }: { user: User }) {
     records.refresh();
   };
   const tenant = filters.tenant_id;
+  const tenantRecord = records.data?.items.find(
+    (row) => row.tenant_id === user.tenantId
+  );
+  const fixedTenantName =
+    (tenantDetails.data?.tenant_name !== user.tenantId
+      ? tenantDetails.data?.tenant_name
+      : undefined) ||
+    (tenantRecord?.tenant_name !== tenantRecord?.tenant_id
+      ? tenantRecord?.tenant_name
+      : undefined) ||
+    "—";
   const canCleanup = !!tenant && tenant === user.tenantId;
   const sortOrder = (field: RecordsRequest["sort_by"]) =>
     sorting.sort_by === field
@@ -127,9 +169,9 @@ export function ObservabilityCenter({ user }: { user: User }) {
       render: (_, row) => (
         <div className="trajectory-record-agent">
           <button className="trajectory-link" onClick={() => setSelected(row)}>
-            {row.root_agent_name ||
-              row.root_agent_id ||
-              t("trajectory.unknownAgent")}
+            {(row.root_agent_name && row.root_agent_name !== row.root_agent_id
+              ? row.root_agent_name
+              : null) || t("trajectory.unknownAgent")}
             <ChevronRight size={13} />
           </button>
           <span
@@ -238,11 +280,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
       render: (_, row) => row.user_name || row.user_id,
     },
     {
-      title: t("trajectory.tenants"),
-      width: 150,
-      render: (_, row) => row.tenant_name || row.tenant_id,
-    },
-    {
       title: (
         <div className="flex items-center gap-1">
           {t("trajectory.lastExecution")}
@@ -323,6 +360,15 @@ export function ObservabilityCenter({ user }: { user: User }) {
       render: (_, row) => <code>{row.conversation_id}</code>,
     },
   ];
+  if (user.role === "SU")
+    columns.splice(8, 0, {
+      title: t("trajectory.tenants"),
+      width: 150,
+      render: (_, row) =>
+        row.tenant_name && row.tenant_name !== row.tenant_id
+          ? row.tenant_name
+          : "—",
+    });
   return (
     <main className="trajectory-center">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -369,9 +415,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
         ) : (
           <label>
             <span>{t("trajectory.tenants")}</span>
-            <div className="trajectory-fixed-tenant" title={user.tenantId}>
-              {user.tenantId}
-            </div>
+            <div className="trajectory-fixed-tenant">{fixedTenantName}</div>
           </label>
         )}
         <label>
@@ -465,7 +509,16 @@ export function ObservabilityCenter({ user }: { user: User }) {
                 }
               }}
             >
-              {t(`trajectory.filterLabels.${key}`)}: {value}
+              {t(`trajectory.filterLabels.${key}`)}:{" "}
+              {[
+                "tenant_id",
+                "target_user_id",
+                "agent_id",
+                "conversation_id",
+              ].includes(key)
+                ? directoryLabels[key as DirectoryField] ||
+                  t("trajectory.unnamedOption")
+                : value}
             </Tag>
           ))}
       </div>
@@ -496,7 +549,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
           dataSource={records.data?.items ?? []}
           loading={records.isFetching}
           pagination={false}
-          scroll={{ x: 1776 }}
+          scroll={{ x: user.role === "SU" ? 1776 : 1626 }}
           locale={{
             emptyText: records.isError
               ? t("trajectory.queryFailed")

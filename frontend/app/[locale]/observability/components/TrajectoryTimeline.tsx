@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Empty, Select } from "antd";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Search,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
@@ -18,6 +24,7 @@ import {
   NodeIcon,
   TrajectoryStatus,
   nodeDuration,
+  userInputPreview,
 } from "./TrajectoryPresentation";
 
 export function TrajectoryTimeline({
@@ -201,7 +208,14 @@ export function TrajectoryTimeline({
         <div className="trajectory-tree-toolbar">
           <span>{t("trajectory.timeline")}</span>
           <StandardButton
-            className="trajectory-collapse-all !h-[22px] !border-0 !p-0 !text-xs !text-[#777]"
+            className="trajectory-collapse-all !h-[22px] !w-[22px] !border-0 !p-0 !text-[#777]"
+            aria-label={t(
+              collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
+            )}
+            title={t(
+              collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
+            )}
+            aria-expanded={collapsed.size === 0}
             onClick={() =>
               setCollapsed((previous) =>
                 previous.size
@@ -216,8 +230,10 @@ export function TrajectoryTimeline({
               )
             }
           >
-            {t(
-              collapsed.size ? "trajectory.expandAll" : "trajectory.collapseAll"
+            {collapsed.size ? (
+              <ChevronsUpDown size={14} aria-hidden />
+            ) : (
+              <ChevronsDownUp size={14} aria-hidden />
             )}
           </StandardButton>
         </div>
@@ -277,6 +293,7 @@ export function TrajectoryTimeline({
             );
           if ("heading" in entry) {
             const node = entry.heading;
+            const userInput = userInputPreview(node.input?.text);
             return (
               <div
                 key={`heading:${node.id}`}
@@ -290,9 +307,7 @@ export function TrajectoryTimeline({
                   {formatTraceTime(node.started_at).split(" ")[1] || "—"}
                 </time>
                 <TrajectoryStatus status={node.status} />
-                <span title={node.input?.text || ""}>
-                  {node.input?.text || node.name}
-                </span>
+                <span title={userInput}>{userInput || "—"}</span>
               </div>
             );
           }

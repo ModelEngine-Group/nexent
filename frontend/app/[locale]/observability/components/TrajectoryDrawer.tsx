@@ -13,7 +13,7 @@ import {
 } from "@/lib/trajectory";
 import { useConversationTrajectory } from "@/hooks/trajectory/useConversationTrajectory";
 import type { TrajectoryRecord } from "@/types/trajectory";
-import { TrajectoryError, CoverageNotice } from "./TrajectoryFeedback";
+import { TrajectoryError } from "./TrajectoryFeedback";
 import { TrajectoryTimeline } from "./TrajectoryTimeline";
 import { TrajectoryNodeDetail } from "./TrajectoryNodeDetail";
 import { CopyTraceId, nodeDuration } from "./TrajectoryPresentation";
@@ -98,19 +98,12 @@ export function TrajectoryDrawer({
       closeLabel={t("trajectory.close")}
       closeText={t("trajectory.close")}
       onClose={onClose}
-      width="min(1440px, 92vw)"
+      width="min(1800px, 98vw)"
       maskClosable
       bodyClassName="!pb-0"
       footer={null}
     >
       <div className="trajectory-drawer-content">
-        <div className="trajectory-drawer-heading">
-          <span>{row.tenant_name || row.tenant_id}</span>
-          <span>/</span>
-          <span>{row.user_name || row.user_id}</span>
-          <span>/</span>
-          <strong>{row.root_agent_name || t("trajectory.unknownAgent")}</strong>
-        </div>
         <div className="trajectory-viewer">
           <header className="trajectory-viewer-heading">
             <div className="trajectory-viewer-title">
@@ -150,9 +143,6 @@ export function TrajectoryDrawer({
           )}
           {fatal == null && pages && (
             <>
-              <CoverageNotice
-                coverage={pages[0]?.directory?.coverage ?? row.coverage}
-              />
               {!nodes.length && !unavailable.length && (
                 <Alert
                   type="info"

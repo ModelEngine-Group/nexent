@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useEffect, useRef, useState } from "react";
-import { App, Segmented } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { App, Segmented, Spin } from "antd";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,21 +10,12 @@ import {
   Minimize2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { StandardButton } from "@/components/common/StandardButton";
 import { trajectoryService } from "@/services/trajectoryService";
 import { BodyCache, invalidatesTrajectory } from "@/lib/trajectory";
 import type { ContentReference } from "@/types/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
 
-export function TrajectoryBody({
-  reference,
-  slot,
-  conversationId,
-  nodeId,
-  cache,
-  onLoaded,
-  onInvalidated,
-}: {
+interface TrajectoryBodyProps {
   reference: ContentReference;
   slot: string;
   conversationId: string;
@@ -32,12 +23,38 @@ export function TrajectoryBody({
   cache: BodyCache;
   onLoaded: () => void;
   onInvalidated?: (error: unknown) => void;
-}) {
+}
+
+export function TrajectoryBody(props: TrajectoryBodyProps) {
+  return (
+    <TrajectoryBodyContent
+      key={JSON.stringify([
+        props.conversationId,
+        props.nodeId,
+        props.slot,
+        props.reference.content_id,
+        props.reference.availability,
+        props.reference.complete,
+      ])}
+      {...props}
+    />
+  );
+}
+
+function TrajectoryBodyContent({
+  reference,
+  slot,
+  conversationId,
+  nodeId,
+  cache,
+  onLoaded,
+  onInvalidated,
+}: TrajectoryBodyProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [mode, setMode] = useState("text");
+  const [mode, setMode] = useState("json");
   const [chunk, setChunk] = useState<{
     offset: number;
     next: number;
@@ -48,7 +65,12 @@ export function TrajectoryBody({
   const [error, setError] = useState<unknown>(null);
   const request = useRef<AbortController | null>(null);
   const retryOffset = useRef(0);
-  useEffect(() => () => request.current?.abort(), []);
+  const progress = useRef<typeof chunk>(null);
+  const failed = useRef(false);
+  const callbacks = useRef({ onLoaded, onInvalidated });
+  useEffect(() => {
+    callbacks.current = { onLoaded, onInvalidated };
+  }, [onLoaded, onInvalidated]);
   const text = chunk?.text ?? reference.text ?? reference.preview ?? "";
   const complete = chunk?.complete ?? reference.complete;
   const offset = chunk?.offset ?? 0;
@@ -60,48 +82,91 @@ export function TrajectoryBody({
       formatted = JSON.stringify({ content: text }, null, 2);
     }
   }
-  async function load(offset: number) {
-    if (!reference.content_id) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    retryOffset.current = offset;
-    setLoading(true);
-    setError(null);
-    try {
-      const key = `${nodeId}:${slot}:${offset}`;
-      // Revalidate each explicit read; the bounded cache supports local search only.
-      const value = await trajectoryService.content(
-        conversationId,
-        reference.content_id,
-        offset,
-        controller.signal
-      );
-      if (controller.signal.aborted) return;
-      cache.set(key, value.text);
-      setChunk({
-        offset: value.offset,
-        next: value.next_offset,
-        text: value.text,
-        complete: value.complete,
-      });
-      onLoaded();
-      setExpanded(true);
-    } catch (cause) {
-      if (!controller.signal.aborted) {
-        if (invalidatesTrajectory(cause)) {
-          cache.clear();
-          onInvalidated?.(cause);
+  const load = useCallback(
+    async (offset: number) => {
+      if (!reference.content_id || request.current) return;
+      const controller = new AbortController();
+      request.current = controller;
+      retryOffset.current = offset;
+      setLoading(true);
+      setError(null);
+      try {
+        const key = `${nodeId}:${slot}:0`;
+        // Each chunk is authorized by the server; the bounded cache supports local search only.
+        const value = await trajectoryService.content(
+          conversationId,
+          reference.content_id,
+          offset,
+          controller.signal
+        );
+        if (controller.signal.aborted) return;
+        if (
+          value.offset !== offset ||
+          !Number.isSafeInteger(value.next_offset) ||
+          value.next_offset < offset ||
+          (!value.complete && value.next_offset === offset)
+        )
+          throw { code: "invalid_parameters" };
+        const accumulated =
+          offset === 0
+            ? value.text
+            : (progress.current?.text ?? "") + value.text;
+        if (
+          Math.max(
+            accumulated.length * 2,
+            new TextEncoder().encode(accumulated).length
+          ) > cache.limit
+        )
+          throw { code: "body_budget_exceeded" };
+        cache.set(key, accumulated);
+        const next = {
+          offset: 0,
+          next: value.next_offset,
+          text: accumulated,
+          complete: value.complete,
+        };
+        progress.current = next;
+        failed.current = false;
+        setChunk(next);
+        callbacks.current.onLoaded();
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          if (invalidatesTrajectory(cause)) {
+            cache.clear();
+            callbacks.current.onInvalidated?.(cause);
+          }
+          failed.current = true;
+          setError(cause);
         }
-        setError(cause);
+      } finally {
+        if (request.current === controller && !controller.signal.aborted) {
+          request.current = null;
+          setLoading(false);
+        }
       }
-    } finally {
-      if (request.current === controller && !controller.signal.aborted)
-        setLoading(false);
-    }
-  }
+    },
+    [reference.content_id, conversationId, nodeId, slot, cache]
+  );
+  useEffect(() => {
+    if (reference.availability === "available" && !reference.complete)
+      void load(0);
+    return () => {
+      request.current?.abort();
+      request.current = null;
+    };
+  }, [load, reference.availability, reference.complete]);
+  const loadAtBottom = (element: HTMLElement) => {
+    const current = progress.current;
+    if (
+      current &&
+      !current.complete &&
+      !failed.current &&
+      element.scrollTop + element.clientHeight >= element.scrollHeight - 24
+    )
+      void load(current.next);
+  };
   return (
-    <section className="trajectory-body">
+    <section className="trajectory-body" aria-busy={loading}>
       <header>
         <button
           aria-expanded={!collapsed}
@@ -172,10 +237,7 @@ export function TrajectoryBody({
                           ? "trajectory.collapseContent"
                           : "trajectory.expandContent"
                       )}
-                      onClick={() => {
-                        if (!reference.complete && !chunk) void load(0);
-                        else setExpanded((value) => !value);
-                      }}
+                      onClick={() => setExpanded((value) => !value)}
                     >
                       {expanded ? (
                         <Minimize2 size={13} />
@@ -187,6 +249,11 @@ export function TrajectoryBody({
                 </div>
                 <div className="trajectory-code-scroll">
                   <pre
+                    tabIndex={0}
+                    onScroll={(event) => loadAtBottom(event.currentTarget)}
+                    onWheel={(event) => {
+                      if (event.deltaY > 0) loadAtBottom(event.currentTarget);
+                    }}
                     className={
                       expanded
                         ? "trajectory-body-full"
@@ -205,24 +272,15 @@ export function TrajectoryBody({
                   </pre>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 p-2">
-                {chunk && chunk.offset > 0 && (
-                  <StandardButton
-                    disabled={loading}
-                    onClick={() => void load(0)}
-                  >
-                    {t("trajectory.firstChunk")}
-                  </StandardButton>
-                )}
-                {!complete && reference.content_id && (
-                  <StandardButton
-                    loading={loading}
-                    onClick={() => void load(chunk ? chunk.next : 0)}
-                  >
-                    {t("trajectory.nextChunk")}
-                  </StandardButton>
-                )}
-              </div>
+              {loading && (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 p-2 text-xs text-gray-500"
+                >
+                  <Spin size="small" />
+                  {t("trajectory.loadingContent")}
+                </div>
+              )}
             </>
           )}
           {error != null && (

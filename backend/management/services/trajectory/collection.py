@@ -329,6 +329,18 @@ def records(
                 raise QueryError("snapshot_reset", 409)
         budget.check()
 
+    agent_ids = {str(item["root_agent_id"]) for item in result if item["root_agent_id"]}
+    agent_names = service.catalog.agent_names(tenants, agent_ids)
+    if not isinstance(agent_names, dict):
+        agent_names = {}
+    for item in result:
+        if item["root_agent_id"]:
+            agent_id = str(item["root_agent_id"])
+            display_name = agent_names.get((item["tenant_id"], agent_id))
+            item["root_agent_name"] = (
+                display_name if display_name and display_name != agent_id else None
+            )
+
     def stable(item):
         return (
             item["tenant_id"],

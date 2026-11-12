@@ -46,6 +46,7 @@ def service():
     catalog.candidates.return_value = [row]
     catalog.resolve.return_value = row
     catalog.names.return_value = {"t": "Tenant"}
+    catalog.agent_names.return_value = {}
     catalog.message_upper.return_value = 0
     instance = TrajectoryService(Mock(), catalog, ReferenceStore())
     instance.archive = SimpleNamespace(
@@ -122,6 +123,7 @@ def test_model_and_child_id_filtering_empty_values(service):
 
 
 def test_list_projects_historical_root_version_not_child_or_current_agent(service):
+    service.catalog.agent_names.return_value = {("t", "7"): "Current display name"}
     original = service.load.side_effect
 
     def load(*args):
@@ -133,8 +135,24 @@ def test_list_projects_historical_root_version_not_child_or_current_agent(servic
     service.load.side_effect = load
     result = records(service, Actor("admin", "t", "ADMIN"), {})
     assert all(row["root_agent_version_no"] == 3 for row in result["items"])
-    assert all(row["root_agent_version_name"] == "Historical release" for row in result["items"])
-    service.catalog.agent_names.assert_not_called()
+    assert all(
+        row["root_agent_version_name"] == "Historical release"
+        for row in result["items"]
+    )
+    assert all(
+        row["root_agent_name"] == "Current display name" for row in result["items"]
+    )
+    service.catalog.agent_names.assert_called_once_with(["t"], {"7"})
+
+
+@pytest.mark.parametrize(
+    "names", [{}, {("t", "7"): "7"}, {("other", "7"): "Other tenant agent"}]
+)
+def test_missing_agent_display_name_never_uses_id_or_another_tenant(service, names):
+    service.catalog.agent_names.return_value = names
+    result = records(service, Actor("admin", "t", "ADMIN"), {})
+    assert result["items"]
+    assert all(row["root_agent_name"] is None for row in result["items"])
 
 
 def test_old_archive_root_version_stays_unknown(service):

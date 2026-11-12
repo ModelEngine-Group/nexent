@@ -223,18 +223,6 @@
   font-size: 14px;
   line-height: 1.5;
 }
-.trajectory-drawer-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #777;
-  min-height: 20px;
-  flex-shrink: 0;
-}
-.trajectory-drawer-heading strong {
-  font-weight: 400;
-  color: #191919;
-}
 .trajectory-viewer {
   display: flex;
   flex-direction: column;
@@ -627,7 +615,8 @@
   gap: 12px 14px;
 }
 .trajectory-node-metrics[data-kind="model"] {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(160px, 1.8fr);
+  grid-template-columns: repeat(4, minmax(64px, 1fr)) max-content max-content;
+  column-gap: 10px;
 }
 .trajectory-node-metrics[data-kind="tool"] {
   grid-template-columns: 1fr;
@@ -817,6 +806,14 @@
   color: #999;
   font-size: 12px;
 }
+@media (max-width: 1350px) {
+  .trajectory-node-metrics[data-kind="model"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .trajectory-node-metrics[data-kind="model"] > div:nth-child(5) {
+    grid-column: span 2;
+  }
+}
 @media (max-width: 1100px) {
   .trajectory-filters {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -832,12 +829,6 @@
   }
   .trajectory-node-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .trajectory-node-metrics[data-kind="model"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .trajectory-node-metrics[data-kind="model"] > div:nth-child(5) {
-    grid-column: span 2;
   }
 }
 @media (max-width: 800px) {

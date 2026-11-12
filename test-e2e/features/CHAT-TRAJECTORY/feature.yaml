@@ -17,6 +17,7 @@ feature:
   - rule_id: TRJ-RULE-003
     description: 管理员用户→最近根Agent→会话查询，自研调用树/思考/工具详情/折叠与本段概览，不建历史Agent关联。 用户列表直接复用；两个会话分组接口扩展view=trajectory管理员分支，保留原登录用户合同。
       可观测中心按历史根Agent筛选授权执行集合，静态分页与全量耗时/TTFT汇总基于同一成员快照，Token与调用数按完整子树计算。 列表展示根版本，树和详情展示所选Agent自身版本，模型和工具不展示。
+      正文首块自动读取，触底后按服务端UTF-8偏移追加，失败位置重试并取消旧节点请求。
       会话视图每会话一行，先确定最新执行四态再匹配历史执行，累计指标独立于匹配指标；详情按根执行顺序连续追加全部保留轮次。
   - rule_id: TRJ-RULE-004
     description: 显式查询静态历史快照，真实指标可为空；切换选择清理旧请求，无实时订阅或自动刷新。 模型TTFT记录首个非空回答/思考/工具参数增量，空块和usage排除，未知可空且零值有效；模型Span、事件、Histogram和本地OTLP使用同一实测值。
@@ -46,6 +47,7 @@ feature:
     - CHAT-TRAJECTORY-REFERENCES-20261111
     - CHAT-TRAJECTORY-DEPLOYMENT-20261111
     - CHAT-TRAJECTORY-CONVERSATION-20261111
+    - CHAT-TRAJECTORY-AUTO-CONTENT-20261112
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
       historical provenance for retired Cases. Unit contracts stay in UT; preserve

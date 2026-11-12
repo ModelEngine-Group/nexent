@@ -196,22 +196,6 @@ export function TrajectoryNodeDetail({
               <dt>{t("trajectory.directCalls")}</dt>
               <dd>{formatMetric(node.direct_child_count, 0)}</dd>
             </div>
-            {Object.entries(node.attributes).map(([key, value]) => (
-              <div key={key}>
-                <dt>{key}</dt>
-                <dd
-                  title={
-                    typeof value === "object"
-                      ? JSON.stringify(value)
-                      : String(value)
-                  }
-                >
-                  {typeof value === "object"
-                    ? JSON.stringify(value)
-                    : String(value)}
-                </dd>
-              </div>
-            ))}
           </dl>
         )}
       </section>

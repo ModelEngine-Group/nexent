@@ -6,7 +6,6 @@ import type {
   Percentiles,
   TrajectorySummary as Summary,
 } from "@/types/trajectory";
-import { CoverageNotice } from "./TrajectoryFeedback";
 
 export function TrajectorySummary({ summary }: { summary?: Summary }) {
   const { t } = useTranslation();
@@ -65,11 +64,6 @@ export function TrajectorySummary({ summary }: { summary?: Summary }) {
           {percentiles(valid?.conversation_duration)}
         </section>
       </div>
-      {summary && (
-        <CoverageNotice
-          coverage={summary.complete ? summary.coverage : { complete: false }}
-        />
-      )}
     </>
   );
 }
