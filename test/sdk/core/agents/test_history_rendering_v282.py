@@ -159,3 +159,25 @@ def test_actual_call_executes_once_and_next_request_has_one_real_result(strict):
     )
     assert str(agent.run('Execute the actual tool once.')) == 'Confirmed actual result'
     assert calls == ['actual'] and len(requests) == 2
+
+
+@pytest.mark.parametrize('value', ['VALUE', 'line one\nline two\n', 'quote " and \\ literal', '0', 'False', ''])
+@pytest.mark.parametrize('print_newline', ['', '\n'])
+def test_docker_string_repr_return_is_not_rendered_twice(value, print_newline):
+    fields = {'OUTPUT': value + print_newline, 'RETURN_VALUE': repr(value)}
+    text = render(fields, tool_calls=[{'name': 'python_interpreter', 'arguments': 'print(value)\nvalue'}])
+    assert 'recorded_result:' not in text
+    assert fields == {'OUTPUT': value + print_newline, 'RETURN_VALUE': repr(value)}
+
+
+@pytest.mark.parametrize('channel,tool,output,value', [
+    ('STDOUT', 'python_interpreter', 'VALUE\n', "'VALUE'"),
+    ('OUTPUT', 'search', 'VALUE\n', "'VALUE'"),
+    ('OUTPUT', 'python_interpreter', 'VALUE\nVALUE\n', "'VALUE'"),
+    ('OUTPUT', 'python_interpreter', 'VALUE\n', "'DIFFERENT'"),
+    ('OUTPUT', 'python_interpreter', 'VALUE\n', "'unterminated"),
+    ('OUTPUT', 'python_interpreter', 'VALUE\n', "str('VALUE')"),
+])
+def test_repr_dedup_preserves_other_channels_tools_and_distinct_values(channel, tool, output, value):
+    text = render({channel: output, 'RETURN_VALUE': value}, tool_calls=[{'name': tool}])
+    assert 'recorded_result:' in text

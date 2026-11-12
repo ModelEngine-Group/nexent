@@ -134,8 +134,15 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     fields = dict(fields)
     if "RETURN_VALUE" in fields:
         value = fields["RETURN_VALUE"]
-        if any(channel in fields and fields[channel] in (value, value + "\n")
-               for channel in ("STDOUT", "OUTPUT")):
+        duplicate = any(channel in fields and fields[channel] in (value, value + "\n")
+                        for channel in ("STDOUT", "OUTPUT"))
+        if (not duplicate and c.get("execution_fields") is not None and "OUTPUT" in fields
+                and any(isinstance(call, dict) and call.get("name") == "python_interpreter" for call in calls)):
+            # Remote interpreter text/plain represents strings with Python repr.
+            # Compare complete output only; print may add one final newline.
+            output = fields["OUTPUT"]
+            duplicate = value in (repr(output), repr(output.removesuffix("\n")))
+        if duplicate:
             del fields["RETURN_VALUE"]
     if c.get("summary"):
         parts.append(f"outcome:\n<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>")

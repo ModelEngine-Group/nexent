@@ -10,7 +10,7 @@ change:
   escaped_stage: D3
   coverage_gap:
     type: missing_assertion
-    description: Existing regressions enforce the replaced presentation and lack exact-equality rendering deduplication assertions.
+    description: Existing regressions enforce the replaced presentation and lack exact-equality rendering deduplication assertions, including the Docker Jupyter string representation.
   feature_contract_changed: false
   affected_features:
     existing: [F-171]
@@ -38,5 +38,6 @@ change:
   notes: >-
     SPEC nexent-doc/nexent/codeagent-action-history-role/changes/chat-action-history-rendering/design.md.
     User explicitly preserves parsing/execution/summary/recall and Northbound/OTel.
+    Docker runtime acceptance additionally exposed a canonical OUTPUT/string-repr RETURN_VALUE duplicate; strengthen renderer-only equality and unit coverage without changing original execution records.
     Update only presentation expectations in existing manual AGENT-HISTORY-D3-001; preserve other obligations.
     UT results and manual/model-runtime execution evidence must be reported separately.
