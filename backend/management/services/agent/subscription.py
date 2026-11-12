@@ -971,6 +971,7 @@ async def run_agent_stream(
             await preflight_mcp_header_passthrough(
                 agent_id=int(agent_request.agent_id),
                 tenant_id=resolved_tenant_id,
+                user_id=str(user_id or ""),
                 version_no=int(agent_request.version_no or 0),
                 metadata=agent_request.metadata,
             )

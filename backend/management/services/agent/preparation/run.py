@@ -100,7 +100,8 @@ async def preflight_mcp_header_passthrough(
     *,
     agent_id: int,
     tenant_id: str,
-    version_no: int,
+    user_id: str = "",
+    version_no: int = 0,
     metadata: Optional[Dict[str, Any]],
     agent_record: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -170,16 +171,12 @@ async def preflight_mcp_header_passthrough(
     agent_config = await create_agent_config(
         agent_id=agent_id,
         tenant_id=tenant_id,
+        user_id=user_id or "preflight",
         version_no=version_no_int,
     )
 
     # Fetch remote MCP server list and resolve the used URLs the same way
     # create_agent_run_info does.
-    from management.db.remote.mcp_server import (
-        get_remote_mcp_server_list,
-        get_tenant_local_mcp_server,
-    )
-
     remote_mcp_list = await get_remote_mcp_server_list(
         tenant_id=tenant_id, is_need_auth=True
     )
