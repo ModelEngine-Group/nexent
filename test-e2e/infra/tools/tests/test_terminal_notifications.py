@@ -71,8 +71,8 @@ def test_restored_configuration_is_not_mistaken_for_verified_recovery(tmp_path, 
         assert suite_notify.send_report(tmp_path, ENV) == "SENT"
     text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
     assert "restore-local" in text
-    assert ("恢复用例验证通过" in text) is verified
-    assert ("恢复用例未通过或尚未完成" in text) is (not verified)
+    assert ("部署模式、服务检查通过" in text) is verified
+    assert ("环境恢复检查未通过或尚未完成" in text) is (not verified)
 
 
 def test_missing_report_still_sends_saved_terminal_reason(tmp_path):
@@ -133,7 +133,7 @@ def test_notification_redacts_known_secret_without_rewriting_local_evidence(tmp_
     assert "fake-secret-value" in (tmp_path / "summary.json").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("failure", [None, "build", "interrupt", "recovery-probe", "restore-local", "publish"])
+@pytest.mark.parametrize("failure", [None, "build", "interrupt", "case-timeout", "restore-local", "publish"])
 def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, failure):
     repo, home, env_path, original, records, settings = campaign_fixture(tmp_path)
     settings["hooks"]["build"] = [["offline-build"]]
@@ -155,7 +155,7 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
             raise KeyboardInterrupt()
         directory.mkdir(parents=True)
         rows = [{"case_id": r["case_id"], "stage": r["stage"], "result":
-                 "TIMEOUT" if failure == "recovery-probe" and directory.name == "restore-local" else "PASS"}
+                 "TIMEOUT" if failure == "case-timeout" and r["case_id"] == "PW-KB-LOCAL-01" else "PASS"}
                 for r in selected]
         for row in rows:
             if on_result:
@@ -170,8 +170,8 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
             patch("report_ownership.enrich", side_effect=lambda repo, rows, head: (rows, [])), \
             patch("suite_publish.publish_latest", side_effect=OSError("offline publication failure")) as publish, \
             patch.object(suite_notify, "logged", return_value=0) as send:
-        code = modes.execute_campaign(repo, home, records[:2], settings, daily=True,
-                                      publish_latest=failure in {"publish", "recovery-probe", "restore-local"},
+        code = modes.execute_campaign(repo, home, records if failure == "case-timeout" else records[:2], settings, daily=True,
+                                      publish_latest=failure in {"publish", "case-timeout", "restore-local"},
                                       execute_one=execute, all_records=records, hook=hook,
                                       machine_env=lambda *_: env, on_batch_created=created.append)
     assert len(created) == 1
@@ -180,15 +180,16 @@ def test_campaign_notifies_for_failure_and_recovery_interruptions(tmp_path, fail
     assert json.loads((directory / "notification.json").read_text())["status"] == "SENT"
     summary = json.loads((directory / "summary.json").read_text())
     assert code == (0 if failure in {None, "publish"} else 1)
-    assert summary["execution_complete"] is (failure in {None, "publish"})
+    assert summary["execution_complete"] is (failure in {None, "publish", "case-timeout"})
     text = (directory / "notification-report.md").read_text(encoding="utf-8")
-    if failure in {"recovery-probe", "restore-local"}:
+    if failure == "restore-local":
         publish.assert_not_called()
         assert prior_report.read_text(encoding="utf-8") == "previous complete batch"
         assert "环境可用性未验证" in text or "不能认为环境已恢复可用" in text
-    if failure == "recovery-probe":
-        assert summary["counts"] == {"PASS": 2}  # The separate recovery probe is not a third business case.
-        assert "restore-local" in text
+    if failure == "case-timeout":
+        assert summary["counts"] == {"PASS": 2, "TIMEOUT": 1}
+        publish.assert_called_once()
+        assert "部署模式、服务检查通过" in text
     assert env_path.read_bytes() == original
     assert text.count("## 终态与环境恢复") == 1
 

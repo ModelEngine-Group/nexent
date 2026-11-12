@@ -486,9 +486,7 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                       (" (reused)" if reused else ""), flush=True)
                 if on_result is not None:
                     on_result(dict(row))
-                if (home / "state/deployment-guard/pending.json").exists() or (
-                    stage == "D5" and row["result"] in {"TIMEOUT", "CLEANUP_FAILED"}
-                ):
+                if (home / "state/deployment-guard/pending.json").exists():
                     raise RuntimeError("Environment recovery needs verification before continuing")
             state["stages"][stage] = "COMPLETE"
         current = fingerprint(repo)

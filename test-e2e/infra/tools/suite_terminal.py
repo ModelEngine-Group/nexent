@@ -43,9 +43,9 @@ def terminal_context(directory, summary, *, metadata_directory=None):
         else:
             reason = "未记录具体原因，请核查启动、执行及恢复日志"
     if state.get("local_restored_and_verified") is True:
-        recovery = "Local 配置恢复及恢复用例验证通过"
+        recovery = "Local 配置恢复及部署模式、服务检查通过"
     elif restoration.get("status") == "RESTORED":
-        recovery = "Local 配置已还原；恢复用例未通过或尚未完成，环境可用性未验证"
+        recovery = "Local 配置已还原；环境恢复检查未通过或尚未完成，环境可用性未验证"
     elif retry.get("status") == "PREPARED_FOR_REDEPLOY":
         recovery = "Local 配置已还原；待重新部署及恢复验证，前批恢复标记仍待处理"
     elif provenance.get("deployment_campaign") or (metadata / "deployment-plan.json").exists():

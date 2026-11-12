@@ -233,7 +233,7 @@ class ModeSwitch:
                 path.unlink(missing_ok=True)
         if self.switched:
             self.hook("deploy", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
-            self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
+        self.hook("preflight", self.settings, self.repo, self.home, self.directory / "restore-local", self.env)
         self.verify(self.baseline_values, "restore-local")
         # Deployment can re-render ignored files; restore their exact saved bytes afterwards.
         for path, content in self.originals.items():
@@ -276,12 +276,12 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
     old_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     print(f"Deployment campaign: {directory}", flush=True)
 
-    def child(label, group, *, recovery=False):
+    def child(label, group):
         child_dir = directory / "profiles" / label
         seen = set()
 
         def record_result(row):
-            if not recovery and row["case_id"] not in seen:
+            if row["case_id"] not in seen:
                 case_id = row["case_id"]
                 for section in ("cases", "logs"):
                     source = child_dir / section / (case_id if section == "cases" else case_id + ".log")
@@ -312,17 +312,10 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         # Finalization can add NOT_EXECUTED rows after an interruption.
         for row in results:
             record_result(row)
-        if not summary["execution_complete"] or (recovery and any(row["result"] != "PASS" for row in results)):
+        if not summary["execution_complete"]:
             raise RuntimeError("Incomplete or unsafe deployment group: " + label)
-        if any(row["result"] in {"TIMEOUT", "CLEANUP_FAILED"} and row["stage"] == "D5" for row in results):
+        if (home / "state/deployment-guard/pending.json").exists():
             raise RuntimeError("Deployment group needs environment safety review")
-
-    def local_recovery_cases():
-        recovery = [r for r in all_records if r["case_id"] in rules["recovery_cases"]]
-        if switch.retry is not None and (not recovery or len(recovery) != len(set(rules["recovery_cases"]))
-                or any(r["status"] != "active" or not r.get("execution") for r in recovery)):
-            raise RuntimeError("Daily recovery requires executable Local recovery Cases")
-        return recovery
 
     try:
         # Also excludes other opted-in test homes operating on this checkout.
@@ -346,7 +339,6 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                     hook("preflight", settings, repo, home, directory, env)
                 switch.verify({}, "local")
                 if switch.retry is not None:
-                    child("recover-previous-local", local_recovery_cases(), recovery=True)
                     switch.retry.record("REDEPLOY_VERIFIED", batch=str(directory))
                 state["stages"]["D0"] = "COMPLETE"
                 for label, group in selected.items():
@@ -364,7 +356,6 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 state["profile"] = "restore-local"
                 save(directory / "status.json", state)
                 switch.restore()
-                child("restore-local", local_recovery_cases(), recovery=True)
                 switch.complete()
                 restoration_ok = True
                 current = fingerprint(repo)

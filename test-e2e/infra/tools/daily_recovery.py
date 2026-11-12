@@ -117,9 +117,8 @@ class DailyRetry:
                             if p.exists() or p.is_symlink()), None)
             if journal is not None:
                 for line in plain(journal).read_text(encoding="utf-8").splitlines():
-                    row = json.loads(line)
-                    if row.get("stage") == "D5" and row.get("result") in {"TIMEOUT", "CLEANUP_FAILED"}:
-                        raise RuntimeError("Previous D5 timeout/cleanup failure requires environment safety review")
+                    if not isinstance(json.loads(line), dict):
+                        raise ValueError("Invalid previous execution journal")
             elif previous.get("stages", {}).get("D5", "PENDING") != "PENDING":
                 raise RuntimeError("Previous D5 execution has no recovery evidence")
             if not isinstance(files, list) or len(files) != 4 or document(backup / "index.json") != {"files": files}:

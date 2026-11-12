@@ -164,14 +164,14 @@ def test_live_owner_and_d5_fault_journal_remain_hard_stops(abandoned):
 
 
 @pytest.mark.parametrize("outcome", ["TIMEOUT", "CLEANUP_FAILED"])
-def test_prior_unsafe_d5_results_block_even_without_a_fault_marker(abandoned, outcome):
+def test_prior_case_outcome_does_not_replace_environment_recovery_checks(abandoned, outcome):
     repo, home, batch, marker, switch = abandoned
     path = batch / "results.journal.jsonl"
     path.write_text(json.dumps({"stage": "D5", "result": outcome}) + "\n")
-    with deployment_lock(repo), pytest.raises(RuntimeError, match="D5 timeout/cleanup"):
-        with recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/unsafe-d5"):
-            pass
-    assert marker.exists()
+    before = path.read_bytes()
+    with deployment_lock(repo), recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/retry-d5"):
+        assert marker.exists()
+    assert marker.exists() and path.read_bytes() == before
 
 
 def test_dead_parent_without_terminal_batch_receipt_does_not_prove_children_exited(abandoned):
@@ -298,7 +298,7 @@ def run_campaign(abandoned, launch_name, failure=None, invalid_recovery=None):
     def execute(repo, home, selected, settings, *, directory, on_result=None):
         probes.append(directory.name)
         assert marker.exists()  # Neither old recovery nor the active campaign disappears early.
-        results = [{"case_id": r["case_id"], "stage": r["stage"], "result": "FAIL" if failure == "probe" else "PASS", "evidence": []} for r in selected]
+        results = [{"case_id": r["case_id"], "stage": r["stage"], "result": "FAIL" if failure == "case" and r["case_id"] == "LOCAL-RECOVERY" else "PASS", "evidence": []} for r in selected]
         directory.mkdir(parents=True)
         for row in results:
             if on_result:
@@ -313,24 +313,24 @@ def run_campaign(abandoned, launch_name, failure=None, invalid_recovery=None):
             patch.object(modes.ModeSwitch, "verify", new=verify), \
             patch("report_ownership.enrich", side_effect=lambda repo, rows, head: (rows, [])), \
             patch("suite_notify.send_report") as notify:
-        code = modes.execute_campaign(repo, home, records[:2], settings, daily=True, publish_latest=False,
+        code = modes.execute_campaign(repo, home, records[:2] if invalid_recovery else records, settings, daily=True, publish_latest=False,
                                       execute_one=execute, all_records=records, hook=hook,
                                       machine_env=lambda *_: {"NEXENT_TEST_ASSETS_CONTAINER_HOST": "127.0.0.1"})
         notify.assert_not_called()
     return code, calls, probes
 
 
-@pytest.mark.parametrize("failure", [None, "build", "deploy", "preflight", "verify", "probe"])
-def test_redeploy_and_local_probe_must_succeed_before_business_cases(abandoned, failure):
+@pytest.mark.parametrize("failure", [None, "build", "deploy", "preflight", "verify", "case"])
+def test_only_environment_failures_block_redeployment(abandoned, failure):
     repo, home, batch, marker, switch = abandoned
     old = marker.read_bytes()
     code, calls, probes = run_campaign(abandoned, "campaign", failure)
     assert code == (0 if failure is None else 1)
     assert (home / "runtime/daily-recovery/campaign/pending.json").read_bytes() == old
-    assert marker.exists() is (failure is not None)
-    if failure is None:
+    assert marker.exists() is (failure not in {None, "case"})
+    if failure in {None, "case"}:
         assert calls[:3] == ["build", "deploy", "preflight"]
-        assert probes == ["recover-previous-local", "local", "modelengine", "restore-local"]
+        assert probes == ["local", "modelengine"]
         assert json.loads((home / "runs/daily-launch/campaign/recovery.json").read_text())["status"] == "RECOVERED"
     else:
         assert "local" not in probes and "modelengine" not in probes
@@ -349,12 +349,12 @@ def test_another_failed_redeploy_does_not_prevent_a_later_success(abandoned):
 
 
 @pytest.mark.parametrize("invalid", ["empty", "blocked", "unimplemented"])
-def test_empty_or_unexecutable_recovery_is_never_a_success(abandoned, invalid):
+def test_legacy_recovery_case_metadata_does_not_block_environment_checks(abandoned, invalid):
     repo, home, batch, marker, switch = abandoned
     code, calls, probes = run_campaign(abandoned, "no-recovery", invalid_recovery=invalid)
-    assert code == 1 and not probes and marker.exists()
+    assert code == 0 and probes == ["local", "modelengine"] and not marker.exists()
     receipt = json.loads((home / "runs/daily-launch/no-recovery/recovery.json").read_text())
-    assert receipt["status"] == "ADOPTED_BY_REDEPLOY"
+    assert receipt["status"] == "RECOVERED"
 
 
 def test_exited_owner_is_detected_without_signalling_it():
@@ -371,3 +371,18 @@ def test_posix_owner_probe_fails_closed_on_permission_errors(exception, expected
             raise exception()
     with patch.object(recovery.os, "name", "posix"), patch.object(recovery.os, "kill", side_effect=probe):
         assert recovery.owner_alive(123) is expected
+
+
+def test_failed_local_business_case_is_recorded_once_and_other_groups_continue(abandoned):
+    repo, home, _, marker, _ = abandoned
+    code, _, groups = run_campaign(abandoned, "business-failure", "case")
+    assert code == 1
+    assert groups == ["local", "modelengine"]
+    assert not marker.exists()
+    batch = next((home / "runs/repository-daily").glob("deployment-*"))
+    summary = json.loads((batch / "summary.json").read_text())
+    rows = [json.loads(line) for line in (batch / "checkpoints/results.jsonl").read_text().splitlines()]
+    assert summary["execution_complete"] is True and summary["status"] == "FAILED"
+    assert summary["counts"] == {"PASS": 2, "FAIL": 1}
+    assert [r["result"] for r in rows if r["case_id"] == "LOCAL-RECOVERY"] == ["FAIL"]
+    assert json.loads((batch / "status.json").read_text())["local_restored_and_verified"] is True

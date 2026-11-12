@@ -56,9 +56,12 @@ business data/volumes remain intact.
 The old journal remains pending through synchronization, asset validation and
 doctor. A new deployment campaign then adopts responsibility with its own backup
 and pending journal. It builds/deploys the latest synchronized revision, requires
-preflight and runtime-mode verification, and executes the configured Local recovery
-selection before starting ordinary Cases. Final Local restoration and recovery
-must pass before clearing that campaign's unchanged journal. Any failure retains
+preflight and runtime-mode verification before starting ordinary Cases. Final Local
+restoration, service readiness and deployment-mode checks must pass before clearing
+that campaign's unchanged journal. Business Cases are never recovery gates: they run
+once in their normal group, and FAIL/TIMEOUT/CLEANUP_FAILED remains a failed result
+without suppressing independent Cases. Only an unresolved environment fault marker
+blocks further execution; a D5 outcome alone is not evidence of such a fault. Any failure retains
 recoverable evidence; a later Daily can try again after its owner exits.
 
 Targeted runs and resume do not gain this permission. A D5 fault journal or active
@@ -103,8 +106,8 @@ deployment executor before synchronization.
 If the supervisor prepared an old Local recovery journal, the worker revalidates
 that journal, receipt, private before-image path and exact restored config bytes,
 then reconstructs its own recovery context without overwriting the original
-backup. Old markers remain until the existing redeploy and recovery-probe gates
-succeed. An exit without a matching terminal launch receipt becomes INCOMPLETE,
+backup. Old markers remain until the existing redeploy, service-readiness and
+deployment-mode checks succeed. An exit without a matching terminal launch receipt becomes INCOMPLETE,
 including a zero exit; it never implies successful test execution. A failed
 worker also leaves a redacted traceback in `worker-error.log` when it can save one.
 The fresh notification helper and the worker use the same launch/batch receipts,
@@ -130,9 +133,9 @@ rewritten. D6 and the sanitized publication bundle retain the validation receipt
 ## Terminal reports and notifications
 
 Daily sends a terminal report when a run succeeds, fails or is interrupted. A
-failed recovery probe must not suppress notification. The report states the
+failed environment recovery check must not suppress notification. The report states the
 execution status, saved reason, result counts and recovery state, distinguishing
-restored configuration from a passed Local recovery probe. Missing recovery
+restored configuration from passed deployment-mode and service checks. Missing recovery
 evidence is reported as unverified, never as a healthy environment. Partial runs
 retain `NOT_EXECUTED` and the original nonzero exit status.
 
@@ -177,3 +180,6 @@ python -m pytest -p no:nexent_formal_pytest test-e2e/infra/tools/tests/test_dail
 
 The formal pytest plugin is disabled only for framework UT so they do not require
 machine-local business credentials. It remains enabled for actual formal Cases.
+
+The legacy catalog `recovery_cases` list is retained for format compatibility; it no
+longer schedules extra startup/finalization business tests or makes them a gate.

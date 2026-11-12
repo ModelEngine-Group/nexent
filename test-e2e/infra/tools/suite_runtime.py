@@ -274,9 +274,9 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
     if provenance.get("deployment_campaign"):
         lines += ["## 部署切换与 Local 恢复", "",
                   "- 部署例外和执行分组：`deployment-plan.json`；常规用例不重复计数。",
-                  "- Local 配置恢复及恢复用例验证：" +
+                  "- Local 配置恢复及部署模式、服务检查：" +
                   ("通过" if state.get("local_restored_and_verified") else "未完成或未通过，不能认为环境已恢复可用"),
-                  "- 恢复记录：`restoration.json`；恢复回归原始证据仅保留在执行机器：`profiles/restore-local/`。",
+                  "- 恢复记录：`restoration.json`；部署模式检查：`restore-local/mode-verification.json`。",
                   "- 原始配置备份仅保留在执行机器的私有 runtime 目录，不进入共享日志包。", ""]
     return lines
 
