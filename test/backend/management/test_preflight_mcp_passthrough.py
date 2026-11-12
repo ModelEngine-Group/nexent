@@ -170,10 +170,12 @@ async def test_preflight_happy_path_builds_mcp_host_and_validates(monkeypatch):
     assert cfg_args["user_id"] == "u-1"
     assert cfg_args["version_no"] == 5
 
-    # filter output contains both the remote and the injected local URL
+    # filter received the agent config and a dict keyed by SERVER NAME,
+    # with the URL living inside each record (run.py:191-195).
     agent_cfg, remote_dict = calls["filter"]
-    assert "http://rt:5018/mcp" in remote_dict
-    assert "http://rt-local/mcp" in remote_dict
+    assert set(remote_dict.keys()) == {"echo-headers", "outer-apis"}
+    urls_in_dict = {rec["remote_mcp_server"] for rec in remote_dict.values()}
+    assert urls_in_dict == {"http://rt:5018/mcp", "http://rt-local/mcp"}
 
     # validate_mcp_header_passthrough received an mcp_host list
     meta, rec_out, host = calls["validate"]
@@ -232,9 +234,13 @@ async def test_preflight_run_blocking_refetch_with_hit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_preflight_validates_raises_appexception(monkeypatch):
+    from contracts.errors.codes import ErrorCode
+
     calls = _patch_preflight_deps(
         monkeypatch,
-        validate_raises=AppException("010111", "route not found"),
+        validate_raises=AppException(
+            ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND, "route not found"
+        ),
     )
     with pytest.raises(AppException) as exc_info:
         await run_mod.preflight_mcp_header_passthrough(
@@ -242,7 +248,7 @@ async def test_preflight_validates_raises_appexception(monkeypatch):
             metadata={"_mcp_headers": {"Cookie": "x"}},
             agent_record=_agent_record(),
         )
-    assert exc_info.value.code == "010111"
+    assert exc_info.value.error_code == ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND
 
 
 # ---------------------------------------------------------------------------
