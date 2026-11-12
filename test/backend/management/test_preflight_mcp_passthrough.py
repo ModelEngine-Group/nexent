@@ -178,6 +178,47 @@ async def test_preflight_happy_path_builds_mcp_host_and_validates(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_preflight_run_blocking_refetch_when_record_missing(monkeypatch):
+    """When agent_record=None / version_mismatch, preflight falls through
+    to run_blocking(... search_agent_info_by_agent_id ...) and if that
+    returns {} → bails out (line 160-161)."""
+    from nexent.core import concurrency as concurrency_mod
+
+    blocker = AsyncMock(return_value={})  # empty → switch OFF → bail
+    monkeypatch.setattr(concurrency_mod, "run_blocking", blocker)
+
+    calls = _patch_preflight_deps(monkeypatch)
+    # agent_record=None + no default version  → enters run_blocking path
+    await run_mod.preflight_mcp_header_passthrough(
+        agent_id=1, tenant_id="t", version_no=0,
+        metadata={"_mcp_headers": {"Cookie": "x"}},
+        agent_record=None,
+    )
+    blocker.assert_awaited_once()
+    # agent_record became {} → switch OFF → bail before AgentConfig
+    assert "validate" not in calls
+
+
+@pytest.mark.asyncio
+async def test_preflight_run_blocking_refetch_with_hit(monkeypatch):
+    """run_blocking returns a real agent_record with switch ON → proceeds
+    through AgentConfig + validate (covers the normal DB-refetch path)."""
+    from nexent.core import concurrency as concurrency_mod
+
+    blocker = AsyncMock(return_value=_agent_record(passthrough=True, version_no=0))
+    monkeypatch.setattr(concurrency_mod, "run_blocking", blocker)
+
+    calls = _patch_preflight_deps(monkeypatch)
+    await run_mod.preflight_mcp_header_passthrough(
+        agent_id=1, tenant_id="t", version_no=0,
+        metadata={"_mcp_headers": {"Cookie": "x"}},
+        agent_record=None,
+    )
+    blocker.assert_awaited_once()
+    assert "validate" in calls
+
+
+@pytest.mark.asyncio
 async def test_preflight_validates_raises_appexception(monkeypatch):
     calls = _patch_preflight_deps(
         monkeypatch,
