@@ -56,7 +56,7 @@ def test_cancelled_root_does_not_stop_parallel_root_sessions(monkeypatch):
         assert len(children) == 3 and all(event["status"] == "completed" for event in children)
     assert not [effect for effect in state["effects"] if effect.startswith("0:")]
 @pytest.mark.parametrize("setting", ["RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "DEFAULT_TOOL_CALL_TIMEOUT"])
-def test_configured_outer_deadline_closes_stalled_a2a_and_recovers(monkeypatch, setting):
+def test_configured_outer_deadline_closes_stalled_a2a_and_recovers(monkeypatch, caplog, setting):
     with monkeypatch.context() as patch:
         patch.setenv("RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", "5")
         patch.setenv("DEFAULT_TOOL_CALL_TIMEOUT", "5")
@@ -74,6 +74,12 @@ def test_configured_outer_deadline_closes_stalled_a2a_and_recovers(monkeypatch, 
     assert state["closed"] and len(state["remote"]) == 1
     assert not state["effects"] and not state["parent_effects"]
     assert "CHILD_DONE" not in str(events)
+    # Prove the configured outer boundary fired, rather than the 0.3-second A2A fallback.
+    if setting == "RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS":
+        assert "event=agent_collaboration_timeout" in caplog.text
+        assert "timeout_seconds=0.100" in caplog.text
+    else:
+        assert "Tool 'delegate' timed out after 0.1s" in caplog.text
     with monkeypatch.context() as patch:
         recovered, state, events, _ = asyncio.run(run_collaboration(patch, child_core="a2a"))
     assert recovered.attempt_outcome == "completed"
