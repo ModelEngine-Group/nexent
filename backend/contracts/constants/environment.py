@@ -69,13 +69,11 @@ A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = float(os.getenv('A2A_AGENT_INVOCATION_TIM
 
 # Queue-plus-execution deadline for one Jiuwen local-child or external A2A call (seconds).
 # The parent model deadline may shorten this limit; it does not replace the A2A HTTP deadline.
-RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS = parse_positive_float(
-    os.getenv('RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS'), 'RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS', 300.0)
+RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS = parse_positive_float(os.getenv('RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS'), 'RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS', 300.0)
 # Jiuwen's outer deadline for one tool.invoke, including A2A and controlled Python tools (seconds).
 # Pass it through run parameters and ToolCard metadata instead of changing Jiuwen's process-global default.
 # For longer A2A calls, increase this, the collaboration limit and A2A_AGENT_INVOCATION_TIMEOUT_SECONDS together.
-DEFAULT_TOOL_CALL_TIMEOUT = parse_positive_float(
-    os.getenv('DEFAULT_TOOL_CALL_TIMEOUT'), 'DEFAULT_TOOL_CALL_TIMEOUT', 300.0)
+DEFAULT_TOOL_CALL_TIMEOUT = parse_positive_float(os.getenv('DEFAULT_TOOL_CALL_TIMEOUT'), 'DEFAULT_TOOL_CALL_TIMEOUT', 300.0)
 
 # Container-internal skills storage path
 CONTAINER_SKILLS_PATH = os.getenv('SKILLS_PATH')
