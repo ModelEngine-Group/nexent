@@ -7,4 +7,3 @@
 - D3 [AGT-065](../../cases/AGT-065/case.yaml) · active
 - D3 [AGT-066](../../cases/AGT-066/case.yaml) · active
 - D3 [NB-CHAT-DISCONNECT-001](../../cases/NB-CHAT-DISCONNECT-001/case.yaml) · active
-- D3 [NB-OTEL-001](../../cases/NB-OTEL-001/case.yaml) · active

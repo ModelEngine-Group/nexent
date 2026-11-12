@@ -191,7 +191,6 @@ services:
       UMASK: "0022"
     env_file:
       - ../../env/.env
-      - ../../env/monitoring.env
     user: root
     depends_on:
       nexent-elasticsearch:
