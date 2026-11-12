@@ -852,8 +852,17 @@ function RunsTab() {
                         }
                       );
                       const d = await r.json();
+                      if (!r.ok) {
+                        message.error(
+                          d?.message ||
+                            d?.detail ||
+                            t("agentEvaluation.trialFailed")
+                        );
+                        return;
+                      }
                       setTrialResult(d.data || d);
                     } catch {
+                      message.error(t("agentEvaluation.trialFailed"));
                     } finally {
                       setTrialRunning(false);
                     }

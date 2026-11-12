@@ -5192,6 +5192,7 @@
   "agentEvaluation.trialResult": "试运行结果",
   "agentEvaluation.trialRun": "试运行",
   "agentEvaluation.trialRunning": "试运行中，请稍候...",
+  "agentEvaluation.trialFailed": "试运行失败，请检查配置后重试",
   "agentEvaluation.versionRequired": "版本 *",
   "agentEvaluation.scoreMin": "评分下限",
   "agentEvaluation.scoreMax": "评分上限 (≤100)",
