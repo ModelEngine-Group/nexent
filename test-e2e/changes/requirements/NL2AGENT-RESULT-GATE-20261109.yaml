@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-RESULT-GATE-20261109
+  change_type: requirement
+  title: Use explicit creator completion for result cards and retain an independent
+    draft action
+  description: Remove answer-driven result inference from live and history; draft
+    editing stays a separate Workbench action under either Core.
+  affected_features:
+    existing: []
+    modified:
+    - AGENT-CORE-CONFIG
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGENT-CORE-GLOBAL-D3-001
+    modified:
+    - JIUWEN-AGENT-CREATOR-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Persisted draft completeness remains the sole source of agent_generation_completed;
+      partial/invalid saves cannot promote completion.
+    reason: Frontend-only product changes use Vitest unit/component regressions. Existing
+      Python completion validation tests cover the unchanged backend contract; no
+      artificial Python source edits.
+    test_selectors:
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+  notes: SPEC runtime-agent-core-factory AC-RG-01..04. FE and Python UT results stay
+    separate. D4 runs the identical business contract in each outer-selected Core;
+    no provider mocks or deployment mutation inside the Case, owns only its draft/conversation.
+    Outer campaign must restore private env and original Core and run recovery. No
+    new D1/D5.
+  requirement_id: NL2AGENT-RESULT-GATE-20261109

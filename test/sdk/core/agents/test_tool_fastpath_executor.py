@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Deferred execution preserves values, rejects replay and owns acquired resources."""
 
 import json
@@ -9,8 +10,8 @@ import pytest
 from smolagents.default_tools import FinalAnswerTool
 from smolagents.local_python_executor import InterpreterError, LocalPythonExecutor
 
-from nexent.core.agents import sandbox
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 
 

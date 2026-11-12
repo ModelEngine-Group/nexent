@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-IMAGE-D3-001
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-001
+  title: Uploaded image through deployed Jiuwen file assistant and follow-up
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove actual image decoding through an authorized saved assistant, configured
+    vision model and persisted conversation.
+  preconditions:
+  - Authorized deployed Jiuwen file assistant with analyze_image; existing authorized
+    image upload and configured real vision model; machine-local test IDs.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Create a temporary conversation and analyze the authorized existing image
+      using the saved Jiuwen assistant.
+    expected: Actual analyze_image result is nonempty, its output is not an error,
+      exactly one completed root terminal and a substantive final answer are saved.
+  - order: 2
+    action: Ask a follow-up about the previously analyzed image with no new attachment
+      and empty client history.
+    expected: Answer uses previous image facts, no image tool replay; original messages
+      unchanged, DB indices monotonic; reload and cleanup succeed.
+  expected_results:
+  - Real image analysis completes with a successful tool observation, substantive
+    visual content and persisted completed result.
+  - Follow-up uses DB history without replay; original messages are unchanged and
+    temporary conversation is cleaned.
+  forbidden_side_effects:
+  - No modification to the saved assistant or original conversation, no arbitrary
+    model fallback, no HTTP-200-only pass, no credentials or signed URLs in public
+    test output.
+  acceptance:
+  - id: AC-01
+    description: Real image execution and safe persisted follow-up.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 600
+  integration_boundary:
+  - Authenticated deployed runtime HTTP and DB, Jiuwen ModelService, real image understanding
+    tool/model.
+  observations:
+  - Tool results, root terminal, visual answer, DB snapshots and subsequent no-tool
+    response.
+  cleanup:
+  - Delete only the run-owned temporary conversation; retain sanitized evidence outside
+    Git.

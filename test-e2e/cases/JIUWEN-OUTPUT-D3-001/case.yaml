@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-OUTPUT-D3-001
+  feature_id: JIUWEN-OUTPUT
+  requirement_ids:
+  - JIUWEN-M5-20261016
+  - JIUWEN-HITL-HISTORY-20261106
+  - JIUWEN-BACKEND-OUTPUT-20261111
+  business_rule_ids:
+  - JIUWEN-OUTPUT-RULE-001
+  - JIUWEN-OUTPUT-RULE-002
+  - JIUWEN-OUTPUT-RULE-003
+  - JIUWEN-OUTPUT-RULE-005
+  title: Jiuwen output contract and display D3
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Preserve ordered runtime facts and explicit terminal semantics through
+    streaming, persistence and display.
+  preconditions:
+  - Installed Jiuwen and existing local controlled model/resource services; isolated
+    PostgreSQL for persistence; frontend fixture server for D4.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run real Jiuwen through controlled HTTP native/text model endpoints and
+      authorized tool/MCP/Skill or child/A2A integrations.
+    expected: Observations retain ordered content/reasoning blocks, exact tool results,
+      full provider IDs, unique local IDs and invocation grouping; usage absent is
+      unknown.
+  - order: 2
+    action: Pass output through the backend stream persistence path and reload the
+      saved conversation.
+    expected: Exactly one explicit RunResult determines status and final content;
+      JSON envelopes and original results survive storage, with final blocks unambiguously
+      linked. Internal history echoes and final envelope tags are absent from public
+      deltas, terminal content and reloaded answers; exact structured tool results
+      remain unchanged. Non-mergeable step, tool, observation and terminal content
+      matches the live event after decoding exactly one stored envelope. Preserve
+      meaningful reasoning/action step labels while retaining the existing omission
+      of empty answer-only step markers. Native/text ask_user waiting terminals retain
+      completed/awaiting_input with empty final content/blocks and no error after
+      reload, before and after a saved clarification response.
+  expected_results:
+  - Observations retain ordered content/reasoning blocks, exact tool results, full
+    provider IDs, unique local IDs and invocation grouping; usage absent is unknown.
+    Public step capacity and processing mode agree with the actual Nexent ContextManager
+    configuration and survive persistence. Backend SSE and history APIs expose model_output_thinking,
+    execution_logs, token_count and final_answer instead of native model_output/tool_result/step_observation/run_terminal;
+    exact identities and terminal validation are retained.
+  - Exactly one explicit RunResult determines status and final content; JSON envelopes
+    and original results survive storage, with final blocks unambiguously linked.
+    Internal context and final protocol envelopes cannot leak into public answers
+    or saved display. Step labels and other non-mergeable content survive exactly
+    one envelope rather than acquiring a second serialized event inside their content.
+    A valid empty awaiting_input terminal is not treated as an invalid final answer;
+    source records remain unchanged by history projection.
+  forbidden_side_effects:
+  - No inferred success from EOF or text; no duplicate final, lost partial, cross-invocation
+    tool pairing, invented reasoning or native HTTP bypass.
+  acceptance:
+  - id: AC-01
+    description: Public output and terminal/display contract preserves execution facts.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  integration_boundary:
+  - Real Jiuwen/ModelService/resource protocols to backend stream and PostgreSQL persistence.
+  observations:
+  - Public events, result status, tool and invocation identities, saved envelopes
+    and cleanup.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and
+    HTTP response.

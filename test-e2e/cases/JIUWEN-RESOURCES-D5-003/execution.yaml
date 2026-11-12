@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: JIUWEN-RESOURCES-D5-003
+implementations:
+- framework: pytest
+  file: test_collaboration.py
+  selector: test_
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_nested_stop_and_recovery
+  - test_cancelled_root_does_not_stop_parallel_root_sessions
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

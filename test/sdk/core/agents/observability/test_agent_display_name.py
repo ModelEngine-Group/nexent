@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-019/020: display names never replace executable identifiers."""
 
 from threading import Event
@@ -5,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.utils.observer import MessageObserver
 from nexent.monitor import AgentRunMetadata
 

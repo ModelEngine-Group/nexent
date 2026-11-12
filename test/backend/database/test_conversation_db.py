@@ -3643,8 +3643,10 @@ def test_get_historical_context_returns_latest_summary_and_only_new_turns(
         SimpleNamespace(message_id=32, message_index=5, message_role="assistant",
                         message_content="new answer", minio_files=None, status="completed"),
     ]
+    records_result = MagicMock()
+    records_result.all.return_value = []
     session.execute.side_effect = [
-        current_result, candidates_result, boundary_result, messages_result]
+        current_result, candidates_result, boundary_result, messages_result, records_result]
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
 
     result = get_historical_context(1, 25, "user-a", "tenant-a")

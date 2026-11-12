@@ -8,10 +8,13 @@ feature:
   status: active
   description: '智能体运行与对话 / Human-in-the-loop: 旧 HITL 控制字段被拒绝，普通对话与消息分组继续可用；审批、暂停、引导功能已移除'
   business_rules:
+  - rule_id: F-179-RULE-02
+    description: Ordinary Agent retries retain the original owned user boundary and selectable answer siblings after history reload; identical independent questions remain separate turns and reconnect does not add an orphan branch.
   - rule_id: F-179-RULE-01
     description: 旧 HITL 控制字段被拒绝，普通对话与消息分组继续可用；审批、暂停、引导功能已移除
   required_test_stages:
   - D1
   - D2
+  - D4
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

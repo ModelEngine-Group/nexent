@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SDK Workbench identity acceptance tests."""
 
 from unittest.mock import Mock
 
-from nexent.core.agents.agent_model import AgentConfig
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 
 
 def test_ut_sdk_wb_001_agent_config_carries_formal_runtime_identity():

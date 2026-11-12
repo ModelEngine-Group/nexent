@@ -1,0 +1,57 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-CLARIFICATION-20261105
+  change_type: bugfix
+  bug_id: JIUWEN-CLARIFICATION-20261105
+  title: Bridge ordinary human clarification into Jiuwen native and text protocols
+  description: Reuse shared forms and policy, terminate before dispatch and publish the existing public interaction
+    event.
+  observed_behavior: Jiuwen omits the old clarification protocol and has no equivalent terminal tool; models ask
+    using prose. Native persisted forms also fail the existing submit identity comparison because the DAL only reads bare forms.
+  expected_behavior: When the model explicitly requests essential missing information, both Jiuwen protocols publish
+    one validated form and await input without executing tools or continuing the model loop. Submission must recognize the saved public single envelope and retain strict ownership, source identity and atomic answer persistence.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing bridge D3 proves authorized tool execution but not terminal human forms; creator card
+      tests are a different interaction protocol. Existing form UT covers bare records and controlled D3 does not exercise real UI submission against the persisted native envelope; the real D4 and native DAL regression close this gap.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-MODEL-BRIDGE
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    modified:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    added:
+    - JIUWEN-CLARIFICATION-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Expose ordinary-chat clarification and protocol-specific shared prompts while preserving creator exclusions
+      and name collisions.
+    - Validate exclusive terminal forms before any action, preserve ordinary prose and reject malformed/mixed actions.
+    - Emit one public card and completed/awaiting_input without cancellation or another model call; retain smolagents
+      parsing behavior.
+    - Native clarification uses the existing string-valued event content; serialization, history loading and submitted-answer
+      identity preserve the form without exposing envelopes.
+    reason: Unit contracts cover validation and termination. Existing D3 adds actual Jiuwen/HTTP boundaries without
+      duplicating a D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_clarification.py
+    - test/sdk/core/agents/test_clarification_protocol.py
+    - test/sdk/core/agents/test_clarification_runtime.py
+    - test/backend/utils/test_runtime_output.py
+    - frontend/tests/workbench/ClarificationHistoryAdapter.test.ts
+    - test/backend/services/test_clarification_response.py
+  notes: 'Design/task: ../nexent-doc/docs/Developing/runtime-agent-core-factory. User confirmed the screenshot used
+    Jiuwen. Existing D3 self-contained loopback and owned threads/sessions are cleaned with no business data writes;
+    frontend renderer and persisted-history contracts remain unchanged. New real D4 proves deployed model/card/submit/history
+    beyond the controlled D3. It owns a source clone and conversations, uses existing Local Jiuwen deployment, never
+    changes deployment flags and cleans only its resources. Native stored-envelope submission is additionally checked
+    in DAL regression.'

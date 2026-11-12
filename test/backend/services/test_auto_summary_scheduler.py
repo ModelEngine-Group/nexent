@@ -189,10 +189,10 @@ sys.modules['nexent.core.models.stt_model'] = stt_mod
 sys.modules['nexent.core.models.tts_model'] = tts_mod
 
 # Mock agent modules
-agent_model_mod = types.ModuleType('nexent.core.agents.agent_model')
+agent_model_mod = types.ModuleType('nexent.core.agents.contracts.config')
 agent_model_mod.ToolConfig = object
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
-sys.modules['nexent.core.agents.agent_model'] = agent_model_mod
+sys.modules['nexent.core.agents.contracts.config'] = agent_model_mod
 
 # Mock jinja2
 jinja2_mod = types.ModuleType('jinja2')

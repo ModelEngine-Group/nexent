@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``SearchMemoryTool`` focusing on the Phase 4
 ``MemoryContextService`` integration path.
 
@@ -10,7 +11,7 @@ The tool declares all constructor parameters as ``Field(...)`` with
 ``exclude=True`` so that Pydantic treats them as configuration metadata
 for the smolagents ``Tool`` schema. When no kwarg is supplied for a
 parameter, the FieldInfo placeholder remains on the instance, matching
-the production wiring in ``sdk.nexent.core.agents.nexent_agent`` which
+the production wiring in ``sdk.nexent.core.agents.cores.smolagents.agent`` which
 constructs the tool bare and then assigns every attribute manually.
 These tests follow that pattern so they stay in sync with the real
 runtime path.

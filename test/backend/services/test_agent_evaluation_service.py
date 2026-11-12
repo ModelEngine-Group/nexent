@@ -172,13 +172,13 @@ class _MockToolConfig:
 
 _agent_model_mock.AgentVerificationConfig = _MockAgentVerificationConfig
 _agent_model_mock.ToolConfig = _MockToolConfig
-sys.modules["nexent.core.agents.agent_model"] = _agent_model_mock
-sys.modules["nexent.core.agents.agent_context"] = MagicMock()
-sys.modules["nexent.core.agents.run_agent"] = MagicMock()
+sys.modules["nexent.core.agents.contracts.config"] = _agent_model_mock
+sys.modules["nexent.core.agents.context"] = MagicMock()
+sys.modules["nexent.core.agents.orchestration.entry"] = MagicMock()
 
-_nexent_core_agents_sandbox_module = types.ModuleType("nexent.core.agents.sandbox")
+_nexent_core_agents_sandbox_module = types.ModuleType("nexent.core.agents.sandbox.execution")
 _nexent_core_agents_sandbox_module._scan_shell_calls = MagicMock(return_value=[])
-sys.modules["nexent.core.agents.sandbox"] = _nexent_core_agents_sandbox_module
+sys.modules["nexent.core.agents.sandbox.execution"] = _nexent_core_agents_sandbox_module
 _nexent_core_agents.sandbox = _nexent_core_agents_sandbox_module
 
 sys.modules["nexent.core.utils.observer"] = MagicMock()

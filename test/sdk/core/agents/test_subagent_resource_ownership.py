@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Invocation drains and shared skills obey root resource ownership."""
 
 from threading import Event, Lock
@@ -6,8 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents import sandbox
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 
 

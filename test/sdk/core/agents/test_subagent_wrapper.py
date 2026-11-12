@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for sub-agent wrapper delegation and observer boundaries."""
 
 from __future__ import annotations
@@ -6,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper, _default_task_extractor
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper, _default_task_extractor
 from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 
 

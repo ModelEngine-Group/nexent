@@ -1,0 +1,54 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-SAVED-SKILLS-20261021
+  change_type: bugfix
+  bug_id: JIUWEN-SAVED-SKILLS-20261021
+  title: Preserve saved-agent skill authorization and native sandbox file generation
+  description: Pass explicit Skills snapshots to every skill tool and expose controlled
+    Python in native Jiuwen mode.
+  observed_behavior: Saved docx Skill bindings fail preparation; without native file
+    creation the model guesses nonexistent S3 skill paths.
+  expected_behavior: Authorized saved Skill tools prepare, native Python creates and
+    uploads actual files through the configured sandbox, follow-ups never replay tasks.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: Existing UT checked only script authorization; resource integration
+      did not exercise native Python file creation or saved Skill initialization.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-RESOURCES
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D5-001
+    modified:
+    - JIUWEN-RESOURCES-D3-001
+    added:
+    - JIUWEN-SKILL-FILES-D4-001
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - All three skill tools receive detached saved/transient authorization and preserve
+      tenant/version; empty snapshot cannot inherit saved skills.
+    - Native sandbox entry uses configured executor, authorized bindings and managed
+      lane; schemas and reserved names fail closed.
+    reason: Unit edge/error contracts supplement real Runner and real-provider file
+      generation boundaries.
+    test_selectors:
+    - test/backend/agents/test_create_agent_info.py::TestGetSkillScriptTools
+    - test/sdk/core/agents/test_jiuwen_native_files.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/tools/test_workbench_skill_readers.py
+  notes: Existing runtime-agent-core-factory SPEC 2026-10-21 AC-SK-01..04. Strengthen
+    resource D3 with native sandbox write; reuse D5 cleanup. Real saved docx-agent
+    journey needs owned source clone and artifact/history assertions. No new D1; unrelated
+    F-111-RULE-02 gate blocker retained. New direct saved-Skill browser D4 proves
+    a distinct standalone published-agent authorization boundary; old image/child
+    D4 cannot represent a source file generator without image tools. Prepared D4 is
+    blocked by unrelated global validation; direct fixed-journey diagnostic execution
+    is recorded separately.

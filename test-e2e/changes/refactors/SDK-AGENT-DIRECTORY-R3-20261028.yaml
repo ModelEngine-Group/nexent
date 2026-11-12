@@ -1,0 +1,71 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-DIRECTORY-R3-20261028
+  change_type: refactor
+  title: Separate neutral context contracts Core memory bridges and sandbox modules
+  description: Preserve CM selection budgets summaries and history while moving native memory projection and message
+    conversion behind explicit Core adapters. Split sandbox configuration, execution TLS and library compatibility
+    without changing isolation or resource ownership.
+  feature_contract_changed: false
+  no_case_change_reason: Existing context history resource output and cancellation acceptance contracts remain valid.
+    Import identity dependency and packaging gaps are traditional UT; existing controlled integration and reliability
+    Cases are reused without a new D1.
+  affected_features:
+    existing:
+    - JIUWEN-CONTEXT
+    - JIUWEN-RESOURCES
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-CONTEXT-D3-001
+    - JIUWEN-CONTEXT-D5-001
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-OUTPUT-D3-001
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Public input evidence final context and clarification types retain identity validation and serialization.
+    - Neutral CM algorithms do not import native memory or message classes; Core bridges preserve ordered payloads.
+    - Legacy memory entry points remain explicit compatibility facades and are not used by Jiuwen.
+    - CM configuration budgets summaries fingerprints and persistence failure behavior remain unchanged.
+    - Sandbox configuration execution TLS bootstrap and optional library seams preserve old imports and patch targets.
+    - Sandbox cancellation partial setup leases tool bridging and TLS trust retain original ownership and isolation.
+    - Models and model-service compatibility files retain exactly the baseline hashes.
+    reason: Existing CM sandbox and Core tests prove retained algorithms and errors. New boundary, compatibility
+      and installed-wheel assertions address the directory refactor without duplicating D1.
+    test_selectors:
+    - test/sdk/core/agents/test_context_directory_boundaries.py
+    - test/sdk/core/agents/test_sandbox_directory_boundaries.py
+    - test/sdk/core/agents/test_context_manager_assembly.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    - test/sdk/core/context_runtime/test_runtimes.py
+    - test/sdk/core/agents/test_context_input.py
+    - test/sdk/core/agents/test_context_import_isolation.py
+    - test/sdk/core/agents/test_context_canonical_imports.py
+    - test/sdk/core/agents/context/test_long_term_memory_selector.py
+    - test/sdk/core/agents/test_sandbox.py
+    - test/sdk/core/agents/test_sandbox_tls.py
+    - test/sdk/core/agents/test_sandbox_tls_files.py
+    - test/sdk/core/agents/test_sandbox_workspace.py
+    - test/sdk/core/agents/test_sandbox_lease_cleanup.py
+    - test/sdk/core/agents/test_sandbox_channel_readiness.py
+    - test/sdk/core/agents/test_sandbox_tool_bridge_lifecycle.py
+    - test/sdk/core/agents/test_nexent_agent_context_runtime_factory.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_core_agent_planning.py
+    - test/sdk/core/agents/test_jiuwen_context.py
+    - test/backend/agents/test_create_agent_info.py
+  notes: Baseline is f1d515ffc plus the uncommitted R1 and R2 worktree. No model migration, dependency upgrade environment
+    change production deployment or permission expansion is in scope. On 2026-10-29, obsolete compatibility UT file
+    selectors were rebound to canonical/removal tests by SDK-AGENT-CANONICAL-IMPORTS-20261029. Original old-import
+    execution claims describe this historical stage only.

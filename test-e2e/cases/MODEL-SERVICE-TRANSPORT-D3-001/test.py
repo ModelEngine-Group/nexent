@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.concurrency.manager import ThreadManager
 from nexent.core.concurrency.models import LanePolicy, ManagedTaskSpec

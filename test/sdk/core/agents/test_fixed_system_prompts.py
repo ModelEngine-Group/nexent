@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """D1 contracts for SDK-owned fixed system prompts."""
 
 from pathlib import Path
@@ -54,7 +53,7 @@ def test_ut_sdk_dpr_012_fixed_prompt_resource_is_packaged():
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_ut_sdk_dpr_012_fixed_hitl_prompt_matches_approved_policy(language):
     """UT-SDK-DPR-012: SDK HITL text matches the approved bilingual policy."""
-    from nexent.core.agents.clarification import clarification_policy
+    from nexent.core.agents.prompt.clarification import clarification_policy
     from nexent.core.prompts import load_prompt
 
     expected = ("### 向用户澄清\n" if language == "zh" else "### Clarifying with the User\n") + EXPECTED_CLARIFICATION[language]
@@ -85,7 +84,7 @@ def test_ut_sdk_dpr_012_summary_defaults_and_explicit_overrides():
 
 def test_ut_sdk_dpr_012_verifier_uses_sdk_fixed_prompt():
     """UT-SDK-DPR-012: final verification reads its system prompt from SDK resources."""
-    from nexent.core.agents.verification import VerificationController
+    from nexent.core.agents.cores.smolagents.verification import VerificationController
     from nexent.core.prompts import load_prompt
 
     controller = VerificationController.__new__(VerificationController)

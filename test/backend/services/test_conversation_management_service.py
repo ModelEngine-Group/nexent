@@ -37,19 +37,19 @@ _stub_nexent_openai_model()
 # Exercise the real Jinja renderer used by SDK prompt assembly.
 import jinja2
 
-# Stub nexent.core.agents.agent_model to satisfy imports in contracts.agent and agent_run_manager
-agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+# Stub nexent.core.agents.contracts.config to satisfy imports in contracts.agent and agent_run_manager
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
-sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
-# Stub nexent.core.agents.agent_context for agent_run_manager import
-agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+# Stub nexent.core.agents.context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.context")
 agent_context_mod.ContextManager = object
 agent_context_mod.ContextManagerConfig = object
-sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+sys.modules["nexent.core.agents.context"] = agent_context_mod
 
 # Stub management.services.agent.lifecycle to avoid importing the real module
 agent_run_manager_mod = types.ModuleType("management.services.agent.lifecycle")
@@ -388,33 +388,18 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(save_source_search(search_data, user_id="u"), 7)
         mock_create_source_search.assert_called_once_with(search_data, user_id="u")
 
-    @patch('management.services.conversation.service.save_message')
-    def test_save_conversation_user(self, mock_save_message):
-        """User messages only create a message row, no unit records are created."""
-        mock_save_message.return_value = 999
+    @patch('management.services.conversation.service.append_conversation_user_message')
+    def test_save_conversation_user(self, mock_append):
+        """User messages use the database-reserved pair and create no unit records."""
+        mock_append.return_value = (999, 2)
         agent_request = AgentRequest(
-            conversation_id=123,
-            query="What is machine learning?",
-            minio_files=[],
-            history=[
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"}
-            ]
+            conversation_id=123, query="What is machine learning?", minio_files=[],
+            history=[{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there"}],
         )
-
-        # Execute
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        # Assert: save_message is called exactly once (no unit records for user messages)
-        mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.conversation_id, 123)
-        # Based on 1 user message in history
-        self.assertEqual(request_arg.message_idx, 2)
-        self.assertEqual(request_arg.role, "user")
-        self.assertEqual(request_arg.message[0].type, "string")
-        self.assertEqual(
-            request_arg.message[0].content, "What is machine learning?")
+        mock_append.assert_called_once_with(123, "What is machine learning?", [], self.user_id)
+        self.assertEqual(agent_request._runtime_user_message_id, 999)
+        self.assertEqual(agent_request._runtime_user_message_index, 2)
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -429,10 +414,10 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
         """Remove the appended runtime time marker before persisting the user request."""
-        mock_save_message.return_value = 1001
+        mock_save_message.return_value = (1001, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is the weather?\n\n[Current time: 2026-01-01 20:00:00]",
@@ -443,13 +428,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is the weather?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is the weather?")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
         """When query has no [Current time: ...] prefix, it should be persisted as-is."""
-        mock_save_message.return_value = 1002
+        mock_save_message.return_value = (1002, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is machine learning?",
@@ -460,13 +445,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is machine learning?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is machine learning?")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_empty_query(self, mock_save_message):
         """When query is empty, it should be persisted as-is without errors."""
-        mock_save_message.return_value = 1003
+        mock_save_message.return_value = (1003, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="",
@@ -477,13 +462,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "")
 
-    @patch('management.services.conversation.service.save_message')
+    @patch('management.services.conversation.service.append_conversation_user_message')
     def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
         """When query has [Current time: prefix but no closing bracket, persist as-is."""
-        mock_save_message.return_value = 1004
+        mock_save_message.return_value = (1004, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="[Current time: no closing bracket here",
@@ -494,8 +479,8 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "[Current time: no closing bracket here")
 
     @patch('management.services.conversation.service.get_llm_adapter_from_config')
     @patch('management.services.conversation.service.compose_auxiliary_prompt')
@@ -2063,3 +2048,40 @@ def test_message_database_failure_preserves_unexpected_error():
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_saved_automation_user_keeps_provenance_and_runtime_pair():
+    from contracts.conversation import MessageSource
+    from management.services.conversation import service
+
+    request = AgentRequest(conversation_id=123, query="scheduled task", minio_files=None)
+    request._message_source = MessageSource.AUTOMATION
+    with patch.object(service, "append_conversation_user_message", return_value=(44, 6)) as append:
+        service.save_conversation_user(request, "owner", "tenant")
+    append.assert_called_once_with(123, "scheduled task", None, "owner", message_source=MessageSource.AUTOMATION)
+    assert request._runtime_user_message_id == 44 and request._runtime_user_message_index == 6
+
+
+def test_history_service_projects_old_jiuwen_answer_without_rewriting_user_or_stored_records():
+    import copy
+    import json
+    from management.services.conversation import service
+
+    raw = '<completed_action_history>PRIVATE</completed_action_history><final_answer>Clean link</final_answer>'
+    envelope = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+                "type": "run_terminal", "status": "completed", "final_content": raw, "final_block_ids": ["b"]}
+    history = {"conversation_id": 123, "create_time": "2026-10-20", "search_records": [], "image_records": [],
+               "message_records": [
+                   {"message_id": 1, "role": "user", "message_content": raw, "units": []},
+                   {"message_id": 2, "role": "assistant", "message_content": raw, "opinion_flag": None,
+                    "units": [{"unit_type": "run_terminal", "unit_content": json.dumps(envelope)}]},
+               ]}
+    original = copy.deepcopy(history)
+    with patch.object(service, "get_conversation_history", return_value=history):
+        result = service.get_conversation_history_service(123, "owner")[0]
+    assert result["message"][0]["message"] == raw
+    answer = result["message"][1]
+    assert answer["status"] == "completed"
+    assert next(u for u in answer["message"] if u["type"] == "final_answer")["content"] == "Clean link"
+    assert "PRIVATE" not in json.dumps(answer)
+    assert history == original

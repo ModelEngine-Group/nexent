@@ -16,13 +16,13 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
-  - SDK 契约模块可导入：nexent.core.models.capacity_budget、nexent.core.agents.agent_model、nexent.core.models.openai_llm、nexent.core.context_runtime.contracts。
+  - SDK 契约模块可导入：nexent.core.models.capacity_budget、nexent.core.agents.contracts.config、nexent.core.models.openai_llm、nexent.core.agents.contracts.context。
   - 纯内存测试：无需外部文件资产，不读取生产凭据、API Key 或模型密钥。
   test_data:
     legacy_asset_declaration: '- 无固定文件资产；使用 pytest 内存构造的一致性 ContextBudgetSnapshot 字典/实例作为 fixture（字段含 fingerprint、w1_fingerprint、provider、model_name、requested_output_tokens、output_reserve_source、effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens、uncertainty_reserve_tokens、uncertainty_reserve_basis、warnings）。'
   steps:
   - order: 1
-    action: 在本地工作区导入被测契约符号：nexent.core.models.capacity_budget 的 ContextBudgetSnapshot、parse_context_budget_snapshot、CallerMaxTokensOverrideForbidden、ContextBudgetCapacityMismatch；nexent.core.agents.agent_model
+    action: 在本地工作区导入被测契约符号：nexent.core.models.capacity_budget 的 ContextBudgetSnapshot、parse_context_budget_snapshot、CallerMaxTokensOverrideForbidden、ContextBudgetCapacityMismatch；nexent.core.agents.contracts.config
       的 AgentConfig、AgentRunInfo；nexent.core.models.openai_llm 的 OpenAIModel。
     expected: AgentConfig/AgentRunInfo 的序列化键为 context_budget_snapshot，旧键 safe_input_budget_snapshot 不出现；process-local 字段不落入序列化输出。
   - order: 2

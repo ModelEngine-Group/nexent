@@ -104,6 +104,7 @@ import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
 import { getCreationRetryTarget } from "@/features/workbench/creationRetry";
+import { getConversationRetryTarget } from "@/lib/conversationRetry";
 import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
@@ -1569,7 +1570,8 @@ const AssistantMessage: FC<{
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
         {showAgentCreationResult &&
-        typeof createdAgent?.agentId === "number" &&
+        createdAgent?.completed === true &&
+        typeof createdAgent.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
             agentId={createdAgent.agentId}
@@ -1609,14 +1611,14 @@ const AssistantActionBar: FC = () => {
     const runConfig = aui.thread.composer().getState().runConfig;
     const custom = runConfig.custom as
       { runtimeMode?: string; [key: string]: unknown } | undefined;
-    if (
-      custom?.runtimeMode !== "nl2skill" &&
-      custom?.runtimeMode !== "nl2agent"
-    ) {
+    if (custom?.runtimeMode === "agent-debug") {
       aui.message.reload();
       return;
     }
-    const target = getCreationRetryTarget(
+    const resolveTarget = creationMode
+      ? getCreationRetryTarget
+      : getConversationRetryTarget;
+    const target = resolveTarget(
       aui.thread.getState().messages,
       aui.message.getState().parentId
     );
@@ -1646,21 +1648,13 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        {creationMode ? (
-          <TooltipIconButton
-            tooltip={t("chat.thread.refresh")}
-            onClick={reloadMessage}
-            disabled={creationRetryDisabled}
-          >
-            <RefreshCwIcon />
-          </TooltipIconButton>
-        ) : (
-          <ActionBarPrimitive.Reload asChild>
-            <TooltipIconButton tooltip={t("chat.thread.refresh")}>
-              <RefreshCwIcon />
-            </TooltipIconButton>
-          </ActionBarPrimitive.Reload>
-        )}
+        <TooltipIconButton
+          tooltip={t("chat.thread.refresh")}
+          onClick={reloadMessage}
+          disabled={creationRetryDisabled}
+        >
+          <RefreshCwIcon />
+        </TooltipIconButton>
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton
@@ -1911,6 +1905,7 @@ const SubAgentGroupRenderer: FC<{
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
     metadata?: {
+      executionStatus?: "completed" | "failed" | "stopped";
       subagentId?: number | string;
       runId?: string;
       agentName?: string;
@@ -1973,6 +1968,9 @@ const SubAgentGroupRenderer: FC<{
 
   return (
     <SubAgentContainer
+      executionStatus={indices
+        .map((index) => content[index]?.metadata?.executionStatus)
+        .find((status) => status === "failed" || status === "stopped")}
       agentName={descriptor.agentName}
       depth={descriptor.depth}
       isRunning={descriptor.isRunning}

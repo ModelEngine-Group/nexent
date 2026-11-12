@@ -5,8 +5,8 @@
 from threading import Event
 
 import pytest
-from nexent.core.agents.agent_model import ModelConfig
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.contracts.config import ModelConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_service.compatibility.invocation_options import (
     LegacyInvocationOptions,

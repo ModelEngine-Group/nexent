@@ -5,6 +5,8 @@
 from pathlib import Path
 
 import pytest
+
+from nexent.core.agents.prompt.policies import common_behavior_guidance
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.prompts import load_prompt
 
@@ -53,7 +55,8 @@ def test_ut_be_dpr_001_fixed_sections_are_complete_and_localized(language, is_ma
         if language == "zh" else
         "Follow the user's requested response format strictly; do not add headings, paragraphs, or fields the user did not request.\n"
     )
-    assert format_override in composer.render_system_section("final_answer_guidance")
+    assert format_override in common_behavior_guidance(language)
+    assert format_override not in composer.render_system_section("final_answer_guidance")
     assert composer.render_system_section("sandbox_workspace_guidance")
     assert composer.render_system_section("self_verification_guidance")
     assert composer.render_system_section("skill_usage")
@@ -323,7 +326,7 @@ def test_ut_be_dpr_008_final_stage_and_verifier_keep_their_runtime_contract(
 
     verification_source = (
         Path(__file__).parents[3]
-        / "sdk" / "nexent" / "core" / "agents" / "verification.py"
+        / "sdk" / "nexent" / "core" / "agents" / "cores" / "smolagents" / "verification.py"
     ).read_text(encoding="utf-8")
     assert "def _build_verifier_messages(" in verification_source
     assert 'load_prompt("en", "agent/answer_verifier")' in verification_source

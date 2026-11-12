@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from nexent.core.agent_runtime_support.contracts import RuntimeResourceView
+from nexent.core.agents.contracts.resources import RuntimeResourceView
 from nexent.core.model_service.contracts import (
     AssistantMessage, ModelError, ModelEvent, ModelMessage, ModelRequest, ToolCall, ToolCallDelta, ToolDefinition,
 )

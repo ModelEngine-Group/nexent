@@ -1,0 +1,29 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-CONTEXT
+  name: Jiuwen shared context and persisted conversation continuation
+  status: active
+  description: Saved CM policy, shared checkpoints and old conversations after configuration-side
+    Core changes.
+  business_rules:
+  - rule_id: JIUWEN-CONTEXT-RULE-001
+    description: Jiuwen consumes existing ContextManager selection, budgets and summary
+      checkpoints through ModelService without native compaction or fabricated AgentMemory.
+  - rule_id: JIUWEN-CONTEXT-RULE-002
+    description: Existing conversation database facts load after configuration-side
+      Core changes in both directions; current input occurs once and completed tasks
+      are never replayed.
+  - rule_id: JIUWEN-CONTEXT-RULE-003
+    description: Failed or cancelled summarization cannot overwrite valid checkpoints,
+      leak another owner history or execute historical tools.
+  required_test_stages:
+  - D3
+  - D4
+  - D5
+  source:
+    requirement_ids:
+    - JIUWEN-M4-20261016
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

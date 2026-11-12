@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 from copy import deepcopy
 
 import pytest
-from nexent.core.agents.clarification import ClarificationForm
+from nexent.core.agents.contracts.clarification import ClarificationForm
 
 
 @pytest.fixture

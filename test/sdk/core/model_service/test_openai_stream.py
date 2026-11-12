@@ -54,6 +54,28 @@ def tool(index, name=None, arguments=None, call_id=None):
     return raw
 
 
+@pytest.mark.parametrize("continuation_id", [None, ""])
+def test_tool_id_placeholder_preserves_established_call(openai_profile, stream_request, continuation_id):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({"tool_calls": [tool(0, "lookup", '{"q":', "call-1")]}))
+    decoder.push(frame({"tool_calls": [tool(0, arguments='"value"}', call_id=continuation_id)]}, finish="tool_calls"))
+    completed = decoder.push(SSEEvent("[DONE]"))[-1].message
+    assert completed.tool_calls[0].provider_call_id == "call-1"
+    assert completed.tool_calls[0].raw_arguments == '{"q":"value"}'
+
+
+def test_identical_terminal_usage_is_idempotent(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    usage = {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2}
+    first = decoder.push(frame({"content": "OK"}, finish="stop", usage=usage))
+    repeated = decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
+    assert not any(event.type == "usage" for event in first + repeated)
+    completed = decoder.push(SSEEvent("[DONE]"))
+    assert sum(event.type == "usage" for event in first + repeated + completed) == 1
+    assert completed[-1].message.usage.input_tokens == 0
+    assert completed[-1].message.usage.output_tokens == 2
+
+
 def test_interleaved_reasoning_text_and_tools_complete_with_stable_ids(
     openai_profile, stream_request
 ):
@@ -428,7 +450,7 @@ def test_vllm_023_user_sample_accepts_empty_delta_usage_trailer(openai_profile, 
     sample = Path(__file__).resolve().parents[3] / "fixtures/model_service/vllm_023_glm_tail.sse"
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
     events = []
-    for packet in sample.read_text().strip().split("\n\n"):
+    for packet in sample.read_text(encoding="utf-8").strip().split("\n\n"):
         events += decoder.push(SSEEvent(packet.removeprefix("data: ")))
     assert [e.type for e in events].count("usage") == 1
     complete = [e.message for e in events if e.type == "message_completed"]

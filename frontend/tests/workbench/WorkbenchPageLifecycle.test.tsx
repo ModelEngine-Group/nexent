@@ -845,6 +845,42 @@ it("preserves completion synchronization after supporting partial policy saves",
   expect(view.markCompletionSynced).toHaveBeenCalledExactlyOnceWith(42);
 });
 
+it("binds the independent draft action to the active creation target and run lock", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  await act(async () => {
+    await runConfig().onNl2AgentDraftCreated({
+      agentId: 42,
+      displayName: "Draft",
+    });
+  });
+  expect(
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        draftAgentId?: number;
+      }>
+    ).props.draftAgentId
+  ).toBe(42);
+  view.running = true;
+  page.rerender(<WorkbenchPage />);
+  expect(
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        disabled: boolean;
+      }>
+    ).props.disabled
+  ).toBe(true);
+});
+
 it("serializes creator snapshot reads so delayed policy saves cannot overwrite the latest value", async () => {
   view.threadId = "local";
   view.items = [{ id: "local", remoteId: "" }];

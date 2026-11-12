@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -21,7 +23,7 @@ export function AgentCreationResultCard({
   agentId,
   name,
   description,
-  completed = true,
+  completed = false,
 }: {
   agentId: number;
   name?: string;
@@ -38,7 +40,7 @@ export function AgentCreationResultCard({
   } | null>(null);
 
   useEffect(() => {
-    if (name) return;
+    if (!completed || name) return;
     let cancelled = false;
     void searchAgentInfo(agentId, undefined, 0)
       .then((result) => {
@@ -54,7 +56,9 @@ export function AgentCreationResultCard({
     return () => {
       cancelled = true;
     };
-  }, [agentId, name]);
+  }, [agentId, name, completed]);
+
+  if (!completed) return null;
 
   const displayName =
     name ||
@@ -63,6 +67,7 @@ export function AgentCreationResultCard({
   const displayDescription = description || agentDetails?.description;
   return (
     <Link
+      data-slot="agent-creation-result"
       href={`/${locale}/agents/${agentId}`}
       className="group my-4 block w-full min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:border-primary/45 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
@@ -77,9 +82,7 @@ export function AgentCreationResultCard({
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
               <CheckCircle2 className="size-3" aria-hidden="true" />
-              {completed
-                ? t("workbench.creation.agentDraftReady", "草稿已生成")
-                : t("workbench.creation.agentDraftSaved", "草稿已保存")}
+              {t("workbench.creation.agentDraftReady", "草稿已生成")}
             </span>
           </div>
           <h3 className="mt-1 truncate text-base font-semibold text-foreground">

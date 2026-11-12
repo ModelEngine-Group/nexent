@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import json
@@ -5,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.sandbox import _scan_shell_calls
+from nexent.core.agents.sandbox.execution import _scan_shell_calls
 from nexent.core.tools.run_skill_script_tool import (
     RunSkillScriptTool,
     SkillScriptExecutionError,

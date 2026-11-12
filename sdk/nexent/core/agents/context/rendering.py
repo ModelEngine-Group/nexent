@@ -16,6 +16,7 @@ from .formatting import (
     _format_tools_description,
     _format_worker_agents_description,
 )
+from .history_facts import turn_execution_text, turn_user_text
 from .models import ContextItem, ContextItemType
 
 
@@ -85,10 +86,12 @@ def _summary_dict_to_markdown(data: dict, labels: dict | None = None) -> str:
 
 
 def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
-    return [
-        _text_message("user", str(item.content["user_message"])),
-        _text_message("assistant", str(item.content["assistant_final_answer"])),
-    ]
+    messages = [_text_message("user", turn_user_text(item.content))]
+    execution = turn_execution_text(item.content)
+    if execution:
+        messages.append(_text_message("assistant", execution))
+    messages.append(_text_message("assistant", str(item.content["assistant_final_answer"])))
+    return messages
 
 
 def _render_legacy_tool_call(call: Any) -> str:

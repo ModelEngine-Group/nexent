@@ -2,11 +2,10 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import type { AssistantRuntime } from "@assistant-ui/react";
-import { useConversationResume } from "@/features/workbench/hooks/useConversationResume";
-
 import { createConversationDetailLoader } from "@/lib/conversationDetails";
 import { QueryClient } from "@tanstack/react-query";
+import type { AssistantRuntime } from "@assistant-ui/react";
+import { useConversationResume } from "@/features/workbench/hooks/useConversationResume";
 
 const service = vi.hoisted(() => ({ getById: vi.fn() }));
 vi.mock("@/services/conversationService", () => ({
@@ -226,9 +225,9 @@ it.each(["completed", "streaming"])(
       .mockReset()
       .mockResolvedValueOnce({
         ...conversation(),
-        streaming_message: { message_id: 2, status },
+        streaming_message: { ...conversation().streaming_message, status },
       })
-      .mockResolvedValue({ streaming_message: { status: "completed" } });
+      .mockResolvedValue({ ...conversation(), streaming_message: undefined });
     const client = new QueryClient();
     const details = createConversationDetailLoader(client, "resume-test");
     await details.load("12");

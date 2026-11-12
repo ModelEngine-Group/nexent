@@ -175,5 +175,3 @@ def update(database, profile, session, **kwargs):
         db_session=session,
         **kwargs,
     )
-
-

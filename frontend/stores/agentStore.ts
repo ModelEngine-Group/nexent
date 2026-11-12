@@ -310,9 +310,7 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt !== undefined
-    ? { prompt: patch.prompt }
-    : {}),
+  ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools

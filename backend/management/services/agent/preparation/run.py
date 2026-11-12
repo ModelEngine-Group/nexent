@@ -223,6 +223,11 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_model_records"] = captured_records
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        final_query = await join_minio_file_description_to_query(
+            minio_files=minio_files, query=query, history=None, language=language,
+        )
+
     # v2.6.0: Apply per-agent model params override to model_config_list.
     # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
     # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig
@@ -309,6 +314,8 @@ async def create_agent_run_info(
                         ):
                             mc.reasoning_budget_tokens = budget
                     break
+    _capture_child_model_configs(agent_config, model_list, tenant_id)
+
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append(
@@ -411,6 +418,15 @@ async def create_agent_run_info(
     apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
         outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        from management.services.model.runtime_options import compile_bound_model_profile
+
+        selected = next((model for model in model_list if model.cite_name == agent_config.model_name), None)
+        if selected is None:
+            raise ValueError("MODEL_OUTLET_NOT_FOUND")
+        selected.resolved_profile = compile_bound_model_profile(selected, agent_config)
+        selected.prompt_cache = None
+
     agent_run_info = build_run_info(
         query=final_query,
         model_config_list=model_list,
@@ -468,3 +484,92 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
         model_list.append(root)
         agent_config.model_name = root.cite_name
         return
+
+
+def _apply_agent_model_overrides(model_list, *, agent_id, tenant_id, version_no):
+    """Apply legacy child options only when no canonical outlet is available."""
+    from nexent.core.model_service.profiles.protocol_parameters import without_outlet_token_limits
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "enable_thinking":
+                                if isinstance(v, bool):
+                                    mc.enable_thinking = v
+                                    if not v:
+                                        mc.reasoning_effort = None
+                                        mc.reasoning_budget_tokens = None
+                                continue
+                            if k == "reasoning_effort":
+                                if isinstance(v, str):
+                                    mc.reasoning_effort = v
+                                continue
+                            if k == "reasoning_budget_tokens":
+                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                                    mc.reasoning_budget_tokens = v
+                                continue
+                            if k == "__custom__" and isinstance(v, dict):
+                                for custom_key, custom_value in without_outlet_token_limits(v).items():
+                                    # A null custom value is an explicit
+                                    # removal marker: the agent opts out of a
+                                    # model-level custom param instead of
+                                    # inheriting it.
+                                    if custom_value is None:
+                                        merged.pop(custom_key, None)
+                                    else:
+                                        merged[custom_key] = custom_value
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    if override_entry.get("reasoning_effort") is not None:
+                        mc.reasoning_effort = override_entry["reasoning_effort"]
+                    if override_entry.get("reasoning_budget_tokens") is not None:
+                        budget = override_entry["reasoning_budget_tokens"]
+                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                            mc.reasoning_budget_tokens = budget
+                    break
+
+
+def _capture_child_model_configs(config, models, tenant_id):
+    """Freeze already bound child outlets before root-only conversation preferences."""
+    from management.services.model.runtime_options import compile_bound_model_profile, compile_model_runtime_profile
+
+    for child in getattr(config, "worker_agents", ()):
+        child_models = [model.model_copy(deep=True) for model in models]
+        selected = next((model for model in child_models if model.cite_name == child.model_name), None)
+        if selected is None:
+            raise ValueError("CHILD_MODEL_OUTLET_NOT_FOUND")
+        if selected.resolved_profile is None:
+            _apply_agent_model_overrides(child_models, agent_id=child.agent_id,
+                                         tenant_id=tenant_id, version_no=child.version_no)
+            if child.agent_core == "jiuwen":
+                selected.resolved_profile = compile_model_runtime_profile(selected, child)
+        elif child.agent_core == "jiuwen":
+            selected.resolved_profile = compile_bound_model_profile(selected, child)
+        if child.agent_core == "jiuwen":
+            selected.prompt_cache = None
+        child.runtime_model_config = selected.model_copy(deep=True)
+        _capture_child_model_configs(child, models, tenant_id)

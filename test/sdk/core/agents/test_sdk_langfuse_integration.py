@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 SDK Integration Test with Real Model and LangFuse Tracing
 
@@ -21,7 +22,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from nexent.core.agents.context.handlers import register_all
-from nexent.core.context_runtime.managed.runtime import ManagedContextRuntime
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
 from nexent.core.models.openai_llm import OpenAIModel
 
 

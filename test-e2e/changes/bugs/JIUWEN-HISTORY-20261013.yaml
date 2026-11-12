@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-HISTORY-20261013
+  change_type: bugfix
+  bug_id: JIUWEN-HISTORY-20261013
+  title: Replay conversation history through the native Jiuwen model
+  description: Normalize Nexent history and native messages before invoking the model.
+  observed_behavior: The second turn fails with a dict has no attribute role error in the native model client.
+  expected_behavior: Replay authorized history after system instructions and before the current query, preserving native tool messages and isolated run sessions.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing D1 checks compiled history but never submits it to the model; existing D3 uses no history.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Native and dictionary message inputs replay history for streaming and non-streaming calls.
+    - System instructions remain first; history and current query occur once without mutating inputs.
+    - Empty history and provider failures preserve existing behavior.
+    reason: Unit conversion proof is separate from the native model HTTP and tool execution boundary.
+    test_selectors: [test/sdk/core/agents/test_jiuwen_history.py]
+  notes: 'Reuse runtime-agent-core-factory SPEC AC-002 and legacy owner AGENT-CORE-001. The owner and Cases have not been migrated to the canonical registry: do not invent canonical IDs. Strengthen legacy AGENT-CORE-D3-001 for direct SDK history and authorized ContextInput snapshot history; regress AGENT-CORE-D1-002 and AGENT-CORE-D5-001. Preserve stable IDs and legacy bindings; broader acceptance completeness remains unreviewed. Canonical affected ID lists are empty because these legacy assets are outside its index. Global validation has an existing unrelated AIDP rule-reference blocker; canonical baseline reconciliation is deferred.'

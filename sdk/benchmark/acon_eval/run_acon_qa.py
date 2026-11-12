@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run ACON multi-objective QA benchmark with nexent agent.
 
 Loads ACON's nq_multi_8 data, builds a nexent CoreAgent with
@@ -57,7 +58,7 @@ from agent_runner import (
     ContextManagerConfig,
 )
 
-from nexent.core.agents.agent_model import AgentHistory
+from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.agents.context import ContextManager
 
 

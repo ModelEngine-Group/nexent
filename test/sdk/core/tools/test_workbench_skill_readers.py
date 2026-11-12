@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Request-scoped Skill reader authorization regressions."""
 
 import json
@@ -41,7 +42,7 @@ def test_runtime_reader_and_runner_resolve_the_same_isolated_snapshot(tmp_path):
     import tarfile
     from types import SimpleNamespace
     from unittest.mock import MagicMock
-    from nexent.core.agents.sandbox import SandboxSkillScriptRunner
+    from nexent.core.agents.sandbox.execution import SandboxSkillScriptRunner
 
     snapshot_root = tmp_path / "snapshot"
     skill_root = snapshot_root / "tenant" / "mounted"

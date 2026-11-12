@@ -118,7 +118,7 @@ def test_faf_d1_001_reasoning_protocol_quote_is_not_answer():
 
 
 def test_faf_d1_001_managed_agent_completes_one_answer(mocker):
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
     observer = MessageObserver()
     observer.add_subagent_start("child", "Child", invocation_id="child")
@@ -140,7 +140,7 @@ def test_faf_d1_001_managed_agent_completes_one_answer(mocker):
 
 
 def test_faf_d1_001_legacy_envelope_retains_trailing_answer(mocker):
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
     agent = object.__new__(CoreAgent)
     agent.observer = MessageObserver()
@@ -173,7 +173,7 @@ def test_faf_d1_001_legacy_completion_moves_body_without_retransmission():
 
 @pytest.mark.parametrize("prefix", ["", "Thought. "])
 def test_faf_d1_001_merged_code_action_accepts_final_envelope(prefix):
-    from nexent.core.agents.output_protocol import ExplicitFinalAnswer, classify_model_output
+    from nexent.core.agents.cores.smolagents.output_protocol import ExplicitFinalAnswer, classify_model_output
 
     result = classify_model_output(prefix + "<FINAL_ANSWER>Final</FINAL_ANSWER>", protocol="code_action")
     assert isinstance(result, ExplicitFinalAnswer)

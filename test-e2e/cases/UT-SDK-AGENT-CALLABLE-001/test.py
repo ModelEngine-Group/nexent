@@ -10,13 +10,13 @@ from unittest.mock import Mock
 import pytest
 
 from nexent.core.agent_names import resolve_external_agent_configs
-from nexent.core.agents import sandbox
-from nexent.core.agents.a2a_agent_proxy import ExternalA2AAgentProxy, ExternalA2AAgentWrapper
-from nexent.core.agents.agent_model import ExternalA2AAgentConfig
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.resources.a2a import ExternalA2AAgentProxy, ExternalA2AAgentWrapper
+from nexent.core.agents.contracts.config import ExternalA2AAgentConfig
 from nexent.core.agents.context.formatting import _format_external_agents_description
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
 

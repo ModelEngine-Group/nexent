@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -5,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents import sandbox
-from nexent.core.agents.sandbox_workspace import SandboxWorkspace, probe_workspace
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.resources.workspace import SandboxWorkspace, probe_workspace
 from nexent.core.tools.create_file_tool import CreateFileTool
 from nexent.core.tools.read_file_tool import ReadFileTool
 from nexent.core.tools.upload_to_s3_tool import UploadToS3Tool

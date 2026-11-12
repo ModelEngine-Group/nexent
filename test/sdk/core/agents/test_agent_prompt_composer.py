@@ -259,7 +259,7 @@ def test_ut_sdk_dpr_003_two_context_snapshots_do_not_share_resources():
 
 def test_ut_sdk_dpr_001_nested_manager_call_uses_manager_role():
     """UT-SDK-DPR-001: a called manager retains its own task/report module."""
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
     agent = CoreAgent.__new__(CoreAgent)
     agent.workspace_path = None
@@ -268,7 +268,7 @@ def test_ut_sdk_dpr_001_nested_manager_call_uses_manager_role():
     agent.prompt_templates = AgentPromptComposer(_bundle(role="manager")).compatibility_templates()
     agent.run = MagicMock(return_value='{"answer":"done"}')
     agent.observer = MagicMock()
-    with patch("nexent.core.agents.core_agent.RunResult", type("UnusedRunResult", (), {})):
+    with patch("nexent.core.agents.cores.smolagents.core_agent.RunResult", type("UnusedRunResult", (), {})):
         report = agent(task='Return JSON with only the key "answer".')
 
     assert agent.run.call_args.args[0] == 'Return JSON with only the key "answer".'

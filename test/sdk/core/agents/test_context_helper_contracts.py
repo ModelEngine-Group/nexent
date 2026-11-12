@@ -29,11 +29,8 @@ from nexent.core.agents.context.formatting import (
 from nexent.core.agents.context.llm_summary import _strip_code_fences
 from nexent.core.agents.context.rendering import ContextItemRenderer, ContextItemRenderingError
 from nexent.core.agents.context.step_renderer import StepRenderer
-from nexent.core.context_runtime.contracts import (
-    ContextEvidence,
-    FinalContext,
-    UnconfiguredContextRuntime,
-)
+from nexent.core.agents.contracts.context import ContextEvidence, FinalContext
+from nexent.core.agents.cores.smolagents.context_contracts import UnconfiguredContextRuntime
 
 
 class _Role(Enum):

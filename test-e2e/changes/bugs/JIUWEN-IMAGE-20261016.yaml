@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-IMAGE-20261016
+  change_type: bugfix
+  bug_id: JIUWEN-IMAGE-20261016
+  title: Jiuwen uploaded-image qualification and safe protocol diagnostics
+  description: Diagnose the reported response failure separately from a confirmed
+    missing image model binding.
+  observed_behavior: Uploaded image reaches the workspace but the reported run fails
+    with an opaque protocol error; independent tool execution also exposes an unconfigured
+    default image model.
+  expected_behavior: Use an explicitly configured image model; retain safe protocol
+    diagnostics without changing public error or retry contracts; image results and
+    follow-up history are real.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: M6 resource fixtures do not validate real uploaded image content
+      and subsequent conversation continuity.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    - JIUWEN-MODEL-BRIDGE
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    added:
+    - JIUWEN-IMAGE-D3-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Known adapter categories are logged safely; arbitrary categories and provider
+      payloads remain private.
+    - Public error classification and retry flags are unchanged.
+    - Reuse existing image tool success, empty input and missing-model assertions.
+    reason: Diagnostics are an isolated normalization responsibility; actual deployed
+      image capability requires separate D3 proof.
+    test_selectors:
+    - test/sdk/core/model_service/test_protocol_diagnostics.py
+    - test/sdk/core/tools/test_analyze_image_tool.py
+  notes: Existing runtime-agent-core-factory SPEC updated directly. Original screenshot
+    protocol cause remains unconfirmed until reproduced; successful configured-image
+    probes are not a root-cause claim. No new D1; preserve existing cases. Existing
+    F-111 missing rule blocks global gate.

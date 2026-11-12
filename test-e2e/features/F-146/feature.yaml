@@ -11,7 +11,7 @@ feature:
   - rule_id: F-146-RULE-01
     description: new/existing conversation、agent_name/query/model override、SSE
   - rule_id: F-146-RULE-02
-    description: Northbound chat defaults to one complete root final_answer; explicit final_answer_mode=delta retains incremental answer phases. Invalid modes return 422 before execution.
+    description: Northbound chat defaults to one complete root final_answer; smolagents streams root answer previews as model_output_thinking with answer_preview=true and answer_phase=delta before successful final confirmation. Previews replace the same display slot and are not persisted as thinking. Explicit final_answer_mode=delta retains incremental answer phases. Invalid modes return 422 before execution.
   required_test_stages:
   - D2
   - D3

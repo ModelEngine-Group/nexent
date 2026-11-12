@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D5-003
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-004
+  title: Mixed Core children and A2A D5
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove configured child dispatch and owned remote execution.
+  preconditions:
+  - Installed Jiuwen and smolagents; controlled local model HTTP/SSE and A2A endpoints.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run configured children and A2A through the real factory with controlled protocol endpoints. Cancel
+      one root while two other roots each run three children on the shared Runner loop.
+    expected: Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote
+      calls contain trusted caller context without parent model overrides. Cancellation closes only its owned sessions;
+      unaffected root and child terminals complete without cross-loop failure.
+  - order: 2
+    action: Complete or cancel/stall the nested execution, then run a fresh invocation.
+    expected: Results and nested observations are balanced; cancellation/deadline closes owned calls and permits
+      recovery without replay or active workers.
+  expected_results:
+  - Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote calls contain
+    trusted caller context without parent model overrides. Unaffected concurrent roots and children remain healthy
+    when one root is cancelled.
+  - Results and nested observations are balanced; cancellation/deadline closes owned calls and permits recovery
+    without replay or active workers.
+  forbidden_side_effects:
+  - No parent model/credential/history leakage, unauthorized resources, cross-invocation state, orphan calls or
+    false reclamation.
+  acceptance:
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  risk_type: RELIABILITY
+  risk: Child cancellation or A2A stalls leak nested workers and remote calls.
+  condition:
+  - One control/model-tool worker and two sandbox workers for two concurrent isolated kernels; also exhaust sandbox
+    capacity and bound queue wait by the collaboration deadline.
+  - Cancel during child model read or cancel/timeout during A2A response.
+  metrics:
+  - Terminal outcome, subsequent calls, active futures/workers and elapsed close time.
+  thresholds:
+  - Exit within 10 seconds; zero leaked workers or calls after stop.
+  recovery_expectations:
+  - Subsequent isolated resource run completes.

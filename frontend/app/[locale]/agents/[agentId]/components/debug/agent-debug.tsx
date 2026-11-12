@@ -13,6 +13,7 @@ import {
 } from "@assistant-ui/react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
@@ -142,6 +143,8 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const { agentCore } = useDeployment();
+  const effectiveChatMode = agentCore === "jiuwen" ? "execution" : chatMode;
   const [clearEpoch, setClearEpoch] = useState(0);
   const [compareClearEpoch, setCompareClearEpoch] = useState(0);
   const [sourcesPanelCloseEpoch, setSourcesPanelCloseEpoch] = useState(0);
@@ -245,7 +248,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
           <AgentDebugChat
             agent={debugAgent}
             agentId={agentId}
-            chatMode={chatMode}
+            chatMode={effectiveChatMode}
             onChatModeChange={setChatMode}
             clearEpoch={clearEpoch}
             onSourcesPanelOpen={handleSourcesPanelOpen}
@@ -260,7 +263,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
             onSourcesPanelOpen={handleSourcesPanelOpen}
             sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
             agentId={agentId}
-            chatMode={chatMode}
+            chatMode={effectiveChatMode}
             onChatModeChange={setChatMode}
           />
         </div>

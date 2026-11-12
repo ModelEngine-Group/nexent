@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 interface AnswerEvent {
   type: string;
   content: string;
@@ -6,6 +8,7 @@ interface AnswerEvent {
   attempt_id?: string;
   phase?: string;
   answer_phase?: "delta" | "complete";
+  answer_preview?: boolean;
   reclassify_step?: boolean;
 }
 
@@ -29,6 +32,8 @@ export function createFinalAnswerProjection(
       part?: any;
       text: string;
       stepId?: string;
+      isFinalAnswer?: boolean;
+      isAnswerPreview?: boolean;
       reasoning: [string, { part: any; deep: string; body: string }][];
     }
   >();
@@ -58,6 +63,8 @@ export function createFinalAnswerProjection(
           part,
           text: part?.text ?? "",
           stepId: part?.answerStepId,
+          isFinalAnswer: part?.isFinalAnswer,
+          isAnswerPreview: part?.isAnswerPreview,
           reasoning: [...reasoning]
             .filter(([id]) => id.startsWith(key + "/"))
             .map(([id, entry]) => [id, { ...entry }]),
@@ -79,11 +86,15 @@ export function createFinalAnswerProjection(
         if (checkpoint.part) {
           checkpoint.part.text = checkpoint.text;
           checkpoint.part.answerStepId = checkpoint.stepId;
+          checkpoint.part.isFinalAnswer = checkpoint.isFinalAnswer;
+          checkpoint.part.isAnswerPreview = checkpoint.isAnswerPreview;
           answers.set(checkpoint.scope, checkpoint.part);
         } else answers.delete(checkpoint.scope);
       }
     },
     apply(event: AnswerEvent, metadata?: object) {
+      const isPreview =
+        event.answer_preview === true && event.answer_phase === "delta";
       let content = event.content;
       if (event.reclassify_step && event.step_id) {
         for (const [key, entry] of reasoning) {
@@ -106,13 +117,17 @@ export function createFinalAnswerProjection(
         part = {
           type: "text",
           text: "",
-          isFinalAnswer: true,
+          isFinalAnswer: !isPreview,
           ...(metadata && { metadata }),
         };
         parts.push(part);
         answers.set(key, part);
       }
       if (!part) return;
+      if (isPreview || part.isAnswerPreview) {
+        part.isAnswerPreview = isPreview;
+        part.isFinalAnswer = !isPreview;
+      }
       if (event.answer_phase === "delta") {
         if (event.step_id && part.answerStepId !== event.step_id)
           part.text = "";

@@ -38,4 +38,3 @@ def test_model_management_entry_delegates_without_legacy_filter(
     assert getattr(facade, name)("profile-or-id", tenant_id="tenant-one") == 42
     delegated.assert_called_once_with("profile-or-id", tenant_id="tenant-one")
     legacy_filter.assert_not_called()
-

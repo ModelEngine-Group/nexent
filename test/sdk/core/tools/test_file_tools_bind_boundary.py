@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bind-mode tools preserve successful operations and reject cross-base effects."""
 
 import json
@@ -5,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.sandbox_workspace import SandboxWorkspace
+from nexent.core.agents.resources.workspace import SandboxWorkspace
 from nexent.core.tools.create_file_tool import CreateFileTool
 from nexent.core.tools.delete_file_tool import DeleteFileTool
 from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool

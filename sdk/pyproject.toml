@@ -69,6 +69,10 @@ preview-features = ["index-by-name"]
 index-strategy = "unsafe-first-match"
 
 [project.optional-dependencies]
+jiuwen = [
+    "openjiuwen==0.1.19",
+    "jsonschema>=4.18,<5",
+]
 quality = [
     "ruff>=0.9.0",
     "pytest==9.1.1"
@@ -98,7 +102,7 @@ exclude = ["tests*", "examples*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"nexent.core.model_service.profiles" = ["**/*.toml", "README.md", "LICENSE"]
+"nexent.core.model_service.profiles" = ["**/*.toml", "LICENSE", "README.md"]
 "nexent.core.prompts" = ["zh/*/*.yaml", "en/*/*.yaml"]
 "nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 

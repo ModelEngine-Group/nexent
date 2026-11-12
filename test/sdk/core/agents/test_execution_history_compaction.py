@@ -249,8 +249,8 @@ def test_ac014_structured_summary_content_and_no_savings_are_handled():
 
 def runtime_agent(prompt_templates=None):
     from smolagents.models import Model
-    from nexent.core.agents.core_agent import CoreAgent
-    from nexent.core.agents.context.runtime import ManagedContextRuntime
+    from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+    from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
     from nexent.core.utils.observer import MessageObserver
 
     class UnitModel(Model):
@@ -346,13 +346,14 @@ def test_ac003_legacy_observation_fallback_keeps_masking_and_empty_success(obser
     assert len(observer.execution_history._records) == 1
 
 
-def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs():
+def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs(monkeypatch):
     from smolagents.agents import EMPTY_PROMPT_TEMPLATES
     from smolagents.models import ChatMessage, MessageRole, TokenUsage
     from nexent.core.utils.observer import ProcessType
 
     # Keep prompt cost controlled so the small budget tests reader clipping,
     # independently of the SDK's full default instruction/tool template.
+    monkeypatch.setattr("nexent.core.agents.prompt.policies.common_behavior_guidance", lambda language="en": "Shared behavior fixture.")
     templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
     templates['system_prompt'] = 'Execute the requested code and return the final answer.'
     agent, observer, runtime, _ = runtime_agent(prompt_templates=templates)

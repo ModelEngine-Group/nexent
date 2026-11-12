@@ -16,7 +16,7 @@ import pytest
 
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.models.capacity_resolver import ModelCapacitySnapshot

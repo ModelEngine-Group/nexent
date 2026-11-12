@@ -1,0 +1,1417 @@
+# Explicit source dispositions; API bindings are managed separately.
+mapping_id = "models_dev_source_v1"
+mapping_version = 1
+
+[[rules]]
+rule_id = "model.name"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "name"
+source_type = "string"
+target_path = "/identity/name"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.description"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "description"
+source_type = "string"
+target_path = "/identity/description"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.family"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "family"
+source_type = "string"
+target_path = "/identity/family"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.attachment"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "attachment"
+source_type = "boolean"
+target_path = "/reference_metadata/attachment"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.reasoning"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "reasoning"
+source_type = "boolean"
+target_path = "/reasoning/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.tool_call"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "tool_call"
+source_type = "boolean"
+target_path = "/tools/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.structured_output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "structured_output"
+source_type = "boolean"
+target_path = "/structured_output/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.temperature"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "temperature"
+source_type = "boolean"
+target_path = "/sampling/temperature/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.open_weights"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "open_weights"
+source_type = "boolean"
+target_path = "/reference_metadata/open_weights"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.knowledge"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "knowledge"
+source_type = "string"
+target_path = "/reference_metadata/knowledge"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.release_date"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "release_date"
+source_type = "string"
+target_path = "/reference_metadata/release_date"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.last_updated"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "last_updated"
+source_type = "string"
+target_path = "/reference_metadata/last_updated"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.modalities"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "modalities"
+source_type = "object"
+target_path = "/modalities"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.modalities.input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "modalities.input"
+source_type = "array"
+target_path = "/modalities/input"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.modalities.input[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "modalities.input[]"
+source_type = "string"
+target_path = "/modalities/input[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.modalities.output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "modalities.output"
+source_type = "array"
+target_path = "/modalities/output"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.modalities.output[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "modalities.output[]"
+source_type = "string"
+target_path = "/modalities/output[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.limit"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "limit"
+source_type = "object"
+target_path = "/reference_metadata/limit"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.limit.context"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "limit.context"
+source_type = "integer"
+target_path = "/context/combined_window"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.limit.input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "limit.input"
+source_type = "integer"
+target_path = "/context/input_limit"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.limit.output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "limit.output"
+source_type = "integer"
+target_path = "/context/output_limit"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.license"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "license"
+source_type = "string"
+target_path = "/reference_metadata/license"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.links"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "links"
+source_type = "array"
+target_path = "/reference_metadata/links"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.links[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "links[]"
+source_type = "object"
+target_path = "/reference_metadata/links[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.links[].url"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "links[].url"
+source_type = "string"
+target_path = "/reference_metadata/links[]/url"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.links[].label"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "links[].label"
+source_type = "string"
+target_path = "/reference_metadata/links[]/label"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.links[].type"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "links[].type"
+source_type = "string"
+target_path = "/reference_metadata/links[]/type"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights"
+source_type = "array"
+target_path = "/reference_metadata/weights"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights[]"
+source_type = "object"
+target_path = "/reference_metadata/weights[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights[].url"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights[].url"
+source_type = "string"
+target_path = "/reference_metadata/weights[]/url"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights[].label"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights[].label"
+source_type = "string"
+target_path = "/reference_metadata/weights[]/label"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights[].format"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights[].format"
+source_type = "string"
+target_path = "/reference_metadata/weights[]/format"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.weights[].quantization"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "weights[].quantization"
+source_type = "string"
+target_path = "/reference_metadata/weights[]/quantization"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks"
+source_type = "array"
+target_path = "/reference_metadata/benchmarks"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[]"
+source_type = "object"
+target_path = "/reference_metadata/benchmarks[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].name"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].name"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/name"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].score"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].score"
+source_type = "number_or_string"
+target_path = "/reference_metadata/benchmarks[]/score"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].metric"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].metric"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/metric"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].harness"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].harness"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/harness"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].variant"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].variant"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/variant"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].dataset"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].dataset"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/dataset"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].version"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].version"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/version"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].source"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].source"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/source"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "model.benchmarks[].date"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "model"
+source_path = "benchmarks[].date"
+source_type = "string"
+target_path = "/reference_metadata/benchmarks[]/date"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.name"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "name"
+source_type = "string"
+target_path = "/identity/name"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.env"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "env"
+source_type = "array"
+target_path = "/reference_metadata/env"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.env[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "env[]"
+source_type = "string"
+target_path = "/reference_metadata/env[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.npm"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "npm"
+source_type = "string"
+target_path = "/reference_metadata/npm"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.api"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "api"
+source_type = "string"
+target_path = "/connection_suggestions/base_url"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider.doc"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider"
+source_path = "doc"
+source_type = "string"
+target_path = "/reference_metadata/doc"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.name"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "name"
+source_type = "string"
+target_path = "/identity/name"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.description"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "description"
+source_type = "string"
+target_path = "/identity/description"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.family"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "family"
+source_type = "string"
+target_path = "/identity/family"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.attachment"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "attachment"
+source_type = "boolean"
+target_path = "/reference_metadata/attachment"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning"
+source_type = "boolean"
+target_path = "/reasoning/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.tool_call"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "tool_call"
+source_type = "boolean"
+target_path = "/tools/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.structured_output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "structured_output"
+source_type = "boolean"
+target_path = "/structured_output/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.temperature"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "temperature"
+source_type = "boolean"
+target_path = "/sampling/temperature/status"
+transform_ref = "boolean_capability_v1"
+missing_policy = "unknown"
+special_value_policy = "strict_boolean"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.open_weights"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "open_weights"
+source_type = "boolean"
+target_path = "/reference_metadata/open_weights"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.knowledge"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "knowledge"
+source_type = "string"
+target_path = "/reference_metadata/knowledge"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.release_date"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "release_date"
+source_type = "string"
+target_path = "/reference_metadata/release_date"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.last_updated"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "last_updated"
+source_type = "string"
+target_path = "/reference_metadata/last_updated"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.modalities"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "modalities"
+source_type = "object"
+target_path = "/modalities"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.modalities.input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "modalities.input"
+source_type = "array"
+target_path = "/modalities/input"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.modalities.input[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "modalities.input[]"
+source_type = "string"
+target_path = "/modalities/input[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.modalities.output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "modalities.output"
+source_type = "array"
+target_path = "/modalities/output"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.modalities.output[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "modalities.output[]"
+source_type = "string"
+target_path = "/modalities/output[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.limit"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "limit"
+source_type = "object"
+target_path = "/reference_metadata/limit"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.limit.context"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "limit.context"
+source_type = "integer"
+target_path = "/context/combined_window"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.limit.input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "limit.input"
+source_type = "integer"
+target_path = "/context/input_limit"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.limit.output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "limit.output"
+source_type = "integer"
+target_path = "/context/output_limit"
+transform_ref = "zero_unknown_tokens_v1"
+missing_policy = "unknown"
+special_value_policy = "zero_is_unknown"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options"
+source_type = "array"
+target_path = "/reasoning/control_candidates"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[]"
+source_type = "object"
+target_path = "/reasoning/control_candidates[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[].type"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[].type"
+source_type = "string"
+target_path = "/reasoning/control_candidates[]/type"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[].values"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[].values"
+source_type = "array"
+target_path = "/reasoning/control_candidates[]/values"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[].values[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[].values[]"
+source_type = "string"
+target_path = "/reasoning/control_candidates[]/values[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[].min"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[].min"
+source_type = "integer"
+target_path = "/reasoning/control_candidates[]/min"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.reasoning_options[].max"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "reasoning_options[].max"
+source_type = "integer"
+target_path = "/reasoning/control_candidates[]/max"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "map"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.interleaved"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "interleaved"
+source_type = "boolean"
+target_path = "/reference_metadata/interleaved"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.interleaved.field"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "interleaved.field"
+source_type = "string"
+target_path = "/reference_metadata/interleaved/field"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost"
+source_type = "object"
+target_path = "/reference_metadata/cost"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.input"
+source_type = "number"
+target_path = "/reference_metadata/cost/input"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.output"
+source_type = "number"
+target_path = "/reference_metadata/cost/output"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.reasoning"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.reasoning"
+source_type = "number"
+target_path = "/reference_metadata/cost/reasoning"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.cache_read"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.cache_read"
+source_type = "number"
+target_path = "/reference_metadata/cost/cache_read"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.cache_write"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.cache_write"
+source_type = "number"
+target_path = "/reference_metadata/cost/cache_write"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.input_audio"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.input_audio"
+source_type = "number"
+target_path = "/reference_metadata/cost/input_audio"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.output_audio"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.output_audio"
+source_type = "number"
+target_path = "/reference_metadata/cost/output_audio"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers"
+source_type = "array"
+target_path = "/reference_metadata/cost/tiers"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[]"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[]"
+source_type = "object"
+target_path = "/reference_metadata/cost/tiers[]"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].input"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].input"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/input"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].output"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].output"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/output"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].reasoning"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].reasoning"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/reasoning"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].cache_read"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].cache_read"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/cache_read"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].cache_write"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].cache_write"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/cache_write"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].input_audio"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].input_audio"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/input_audio"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].output_audio"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].output_audio"
+source_type = "number"
+target_path = "/reference_metadata/cost/tiers[]/output_audio"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].tier"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].tier"
+source_type = "object"
+target_path = "/reference_metadata/cost/tiers[]/tier"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].tier.type"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].tier.type"
+source_type = "string"
+target_path = "/reference_metadata/cost/tiers[]/tier/type"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.cost.tiers[].tier.size"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "cost.tiers[].tier.size"
+source_type = "integer"
+target_path = "/reference_metadata/cost/tiers[]/tier/size"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"
+
+[[rules]]
+rule_id = "provider_model.status"
+rule_version = 1
+source_schema_ref = "models_dev_authored_v1"
+source_kind = "provider_model"
+source_path = "status"
+source_type = "string"
+target_path = "/reference_metadata/status"
+transform_ref = "identity_v1"
+missing_policy = "omit"
+special_value_policy = "preserve"
+disposition = "reference"
+evidence = "models.dev e69e184 schema.ts; selected authored fields; API bindings separate"

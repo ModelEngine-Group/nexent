@@ -1,0 +1,37 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-RESOURCES
+  name: Jiuwen shared resource execution and trusted outlet onboarding
+  status: active
+  description: M3 resource bridge, lossless core selection and management-side trusted snapshots.
+  business_rules:
+  - rule_id: JIUWEN-RESOURCES-RULE-005
+    description: Smolagents and Jiuwen share common behavior prompts and collaboration policy, and honor explicit
+      latest-request delegation through an authorized child before direct execution; live and restored nested events
+      reflect actual execution without replay or fabricated delegation.
+  - rule_id: JIUWEN-RESOURCES-RULE-001
+    description: Native and text calls share authorized tool/MCP/Skills execution, identity, observations and cleanup.
+      Saved and transient agents pass explicit per-agent Skill snapshots; native controlled Python uses the configured
+      sandbox to generate files without guessed Skill downloads.
+  - rule_id: JIUWEN-RESOURCES-RULE-002
+    description: Core selection preserves saved policies and resource bindings; unsupported capabilities fail explicitly.
+  - rule_id: JIUWEN-RESOURCES-RULE-003
+    description: Management and migration persist trusted versioned snapshots; runtime restores without catalog
+      and rejects stale/cross-tenant profiles.
+  - rule_id: JIUWEN-RESOURCES-RULE-004
+    description: Each child invocation selects its own Core and frozen model outlet/options; A2A uses its configured
+      remote protocol, authenticated context, deadline and cancellation ownership. Concurrent and repeated local
+      Jiuwen invocations share one lifecycle-owned Runner loop while retaining independent task/session/cancellation/observer
+      ownership; cancelling one invocation must not stop unrelated runs.
+  required_test_stages:
+  - D3
+  - D5
+  - D4
+  source:
+    requirement_ids:
+    - JIUWEN-M3-20261015
+    - JIUWEN-SAVED-SKILLS-20261021
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

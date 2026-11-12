@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Standalone Summary Inspector — quick evaluation of compression prompt/schema quality.
 
 Completely independent from test_benchmark.py and the cases/ directory.
-Uses compress_history_offline to compress history and checks whether the
+Uses canonical history-summary inputs and LLMSummary to check whether the
 resulting summary retains key information. No agent runs needed — just
 one LLM call per inspection + text-based checks.
 
@@ -41,8 +42,12 @@ import paths  # noqa: F401 — side-effect: adds sdk/, backend/ to sys.path
 from dotenv import load_dotenv
 load_dotenv()
 
-from nexent.core.agents.context import ContextManagerConfig, compress_history_offline
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.context.config import ContextManagerConfig
+from nexent.core.agents.context.history_compression import HistorySummaryInput
+from nexent.core.agents.context.llm_summary import LLMSummary
+from nexent.core.agents.context.step_renderer import StepRenderer
+from nexent.core.agents.cores.smolagents.context import adapt_context_model
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.openai_llm import OpenAIModel
 
 from eval_utils import eval_text
@@ -175,7 +180,16 @@ def run_inspection(
     print(f"  History: {len(history)} messages -> {len(pairs)} pairs")
 
     # Compress
-    result = compress_history_offline(pairs=pairs, model=model, config=config)
+    summary_input = HistorySummaryInput(None, tuple(pairs), 0).render()
+    generated = LLMSummary(config, StepRenderer()).generate_summary(
+        summary_input, adapt_context_model(model), call_type="history_summary", prompt_type="initial",
+    )
+    result = {
+        "summary": generated.summary_text,
+        "is_fallback": not bool(generated.summary_text),
+        "is_incremental": False,
+        "input_chars": len(summary_input),
+    }
     summary = result.get("summary") or ""
     is_fallback = result.get("is_fallback", False)
     is_incremental = result.get("is_incremental", False)

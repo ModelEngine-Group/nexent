@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from nexent.core.agents.clarification import ClarificationForm
+from nexent.core.agents.contracts.clarification import ClarificationForm
 
 
 def question(options=None):

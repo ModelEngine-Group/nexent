@@ -39,7 +39,7 @@ _MODULE_PATCH_NAMES = [
     'nexent.core.agents.prompt.auxiliary',
     'nexent.core.agents.prompt.meta',
     'nexent.core.agents',
-    'nexent.core.agents.agent_model',
+    'nexent.core.agents.contracts.config',
     'nexent.core.concurrency',
     'nexent.storage',
     'nexent.storage.storage_client_factory',
@@ -108,7 +108,7 @@ sys.modules['nexent.core.agents'] = nexent_core_agents_mock
 prompt_assembly_stub = types.ModuleType('nexent.core.agents.prompt')
 prompt_assembly_stub.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/agents/prompt')]
 sys.modules['nexent.core.agents.prompt'] = prompt_assembly_stub
-sys.modules['nexent.core.agents.agent_model'] = nexent_agent_model_mock
+sys.modules['nexent.core.agents.contracts.config'] = nexent_agent_model_mock
 sys.modules['nexent.storage'] = nexent_storage_mock
 sys.modules['nexent.storage.storage_client_factory'] = nexent_storage_storage_client_factory_mock
 sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock

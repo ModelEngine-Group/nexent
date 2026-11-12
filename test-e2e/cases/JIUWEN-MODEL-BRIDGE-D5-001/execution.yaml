@@ -1,0 +1,20 @@
+schema_version: '1.0'
+case_id: JIUWEN-MODEL-BRIDGE-D5-001
+implementations:
+- framework: pytest
+  file: test_reliability.py
+  selector: test_bridge_
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_bridge_incomplete_response_zero_effects
+  - test_bridge_transient_retry_uses_service_only
+  - test_bridge_cancellation_closes_visible_stream
+  - test_bridge_exhaustion_does_not_multiply_attempts
+  - test_bridge_identical_usage_is_not_retried
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

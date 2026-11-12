@@ -106,6 +106,7 @@ const Cite = defaultComponents.cite as unknown as (props: {
 }) => any;
 
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   h.citation.enabled = false;
   h.aui.message.id = 'msg-1';
   h.aui.message.content = [];
@@ -181,6 +182,10 @@ describe('citation click-highlight feature gate', () => {
     expect(
       panel.container.querySelector('[data-citation-key="a45"]'),
     ).toHaveAttribute('data-citation-selected', 'true');
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'center',
+    });
     fireEvent.click(screen.getByTitle('1'));
     expect(sourceCards()).toHaveLength(20);
     expect(aside()).toHaveAttribute('data-source-page', '1');

@@ -14,7 +14,7 @@ case:
   preconditions:
   - The changed Northbound and runtime services plus their configuration/database dependencies are healthy at the recorded product version.
   - NEXENT_TEST_HOME is outside Git with environment, users, secrets, northbound and model configuration.
-  - The published basic_agent is visible to the northbound key and a configured streaming LLM is reachable.
+  - The published smolagents basic_agent is visible to the northbound key and a configured streaming LLM is reachable.
   test_data:
     modes: [omitted, complete, delta]
     query: A unique per-request marker and a deterministic multi-sentence answer instruction.
@@ -22,7 +22,7 @@ case:
   steps:
   - order: 1
     action: Submit fresh chat requests with mode omitted and explicit complete; capture SSE and the first final_answer while recording conversation_id.
-    expected: Each response is HTTP 200 text/event-stream with exactly one root final_answer containing the entire requested marker-bearing answer; no delta answer is exposed.
+    expected: Each response is HTTP 200 text/event-stream with root model_output_thinking previews marked answer_preview=true and answer_phase=delta before exactly one root final_answer containing the entire requested marker-bearing answer; no final_answer delta is exposed.
   - order: 2
     action: Submit a fresh request with final_answer_mode=delta and collect answer phases through completion.
     expected: The response retains delta events followed by a complete event; the canonical body agrees with finalized history without blindly appending a replacement body.
@@ -32,14 +32,19 @@ case:
   - order: 4
     action: Verify request/conversation headers and clean up conversations created by successful requests.
     expected: Existing headers remain present and all owned conversations are cleaned up.
+  - order: 5
+    action: Compare preview fragments with the complete answer and reload the detailed persisted message units.
+    expected: Preview fragments reconstruct the final answer; the answer is stored once as final_answer, with no answer-preview thinking units or preview metadata persisted. Delta responses contain no preview events.
   expected_results:
   - Omitted and explicit complete modes return the full answer in the first and only root final_answer, matching finalized conversation history.
   - Explicit delta preserves incremental answer phases and canonical final content.
   - Invalid modes return 422 before conversation creation.
   - Successful SSE responses retain conversation_id and X-Request-Id headers; owned test conversations are cleaned up.
+  - Complete-mode root previews precede the final confirmation and reconstruct it; persisted units contain only one canonical answer and no preview copies. Delta emits no marked previews.
   forbidden_side_effects:
   - Do not accept partial, child or duplicate answer events as a successful complete-mode result.
   - Do not start or persist a chat for invalid mode requests.
+  - Do not persist answer previews as thinking or publish child answer previews as root output.
   acceptance:
   - id: AC-COMPLETE
     description: Legacy first-answer consumption receives the complete root result.
@@ -59,6 +64,11 @@ case:
     description: Headers and owned-resource cleanup remain intact.
     steps: [4]
     expected_results: [4]
+  - id: AC-PREVIEW
+    description: Smolagents complete mode streams marked root previews before its unique final answer without duplicate persisted units; delta stays unchanged.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [3]
   contract:
     protocol: HTTP SSE
     request_expectations:

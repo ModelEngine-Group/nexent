@@ -6,7 +6,7 @@ from typing import Optional
 import httpx
 from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
 from contracts.model import ModelConnectStatusEnum
-from management.db.model.repository import get_model_by_display_name, update_model_record
+from management.db.model.repository import get_model_by_display_name
 from management.services.model.adapter import build_adapter_fresh
 from management.services.model.probe import (
     _embedding_url_candidates,
@@ -27,6 +27,13 @@ PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {
 }
 
 EMBEDDING_TYPES = {"embedding", "multi_embedding"}
+
+
+def update_model_record(*args, **kwargs):
+    """Keep health writes synchronized with trusted runtime snapshots."""
+    from management.services.model.runtime_provisioning import update_model_record as persist
+
+    return persist(*args, **kwargs)
 
 
 async def _provider_catalog_connectivity_check(

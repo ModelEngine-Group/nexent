@@ -158,9 +158,16 @@ def test_current_agent_invalid_values_are_not_hidden_by_session_overrides(profil
         merge_runtime_model_parameters(profile, {"parameter_values": values}, {"temperature": 0.1})
 
 
-def test_agent_read_projection_normalizes_only_profile_llm_without_writing_versions(monkeypatch):
+def test_agent_read_projection_normalizes_only_profile_llm_without_writing_versions(monkeypatch, profile):
     from management.services.agent import read
-    records = {1: {"model_type": "llm", "profile_schema_version": 1, "display_name": "LLM"},
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+
+    data = profile.model_dump(mode="json")
+    data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = 1
+    record = encode_resolved_model_profile(profile.__class__.model_validate(data),
+                                           registered_references=model_service_references())
+    records = {1: {**record, "display_name": "LLM"},
                2: {"model_type": "vlm", "display_name": "Vision"}}
     monkeypatch.setattr(read, "get_valid_model_ids", lambda ids, tenant: ids)
     monkeypatch.setattr(read, "resolve_model_record", lambda model_id, *args: records[model_id])

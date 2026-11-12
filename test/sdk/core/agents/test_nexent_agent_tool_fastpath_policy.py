@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run-local tool policy and deferred official-tool registration must agree."""
 
 from contextlib import nullcontext
@@ -7,11 +8,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents import nexent_agent as agent_module
-from nexent.core.agents import sandbox
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.cores.smolagents import agent as agent_module
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 from nexent.core.utils.observer import MessageObserver

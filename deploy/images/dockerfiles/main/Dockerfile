@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 FROM python:3.11-slim AS base
 ARG MIRROR
 ARG APT_MIRROR

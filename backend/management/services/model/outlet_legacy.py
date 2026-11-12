@@ -35,7 +35,7 @@ def create_legacy_llm_outlet(model_data, user_id, tenant_id):
 def update_legacy_llm_outlet(record, changes, user_id, tenant_id):
     """Translate partial old updates using saved rules, without consulting current TOML."""
     from contracts.model import ModelOutletPatchRequest
-    from nexent.core.agents.agent_model import ModelConfig
+    from nexent.core.agents.contracts.config import ModelConfig
     from nexent.core.model_service.profiles.outlet_storage import (
         decode_resolved_model_profile,
     )

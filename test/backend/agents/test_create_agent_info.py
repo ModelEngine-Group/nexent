@@ -217,8 +217,8 @@ class MockAgentVerificationConfig:
         return types.SimpleNamespace(enabled=bool((value or {}).get("enabled", False)))
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
-sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
-    "nexent.core.agents.agent_model",
+sys.modules['nexent.core.agents.contracts.config'] = _create_stub_module(
+    "nexent.core.agents.contracts.config",
     AgentHistory=AgentHistory,
     ModelConfig=MagicMock(),
     AgentConfig=MagicMock(),
@@ -228,8 +228,11 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
 )
-sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
-    "nexent.core.agents.agent_context",
+sys.modules['nexent.core.agents.contracts.run'] = _create_stub_module(
+    "nexent.core.agents.contracts.run", AgentHistory=AgentHistory, AgentRunInfo=MagicMock(),
+)
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
@@ -270,8 +273,8 @@ def _load_stub_prompt_bundle(*, is_manager, language, **kwargs):
 
 _prompt_loader_stub.load_agent_prompt_bundle = _load_stub_prompt_bundle
 sys.modules[_prompt_loader_stub.__name__] = _prompt_loader_stub
-sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
-    "nexent.core.agents.summary_config",
+sys.modules['nexent.core.agents.context.config'] = _create_stub_module(
+    "nexent.core.agents.context.config",
     ContextManagerConfig=MagicMock(),
 )
 sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
@@ -398,13 +401,13 @@ class MockSandboxConfig:
 
 
 sandbox_module = _create_stub_module(
-    "nexent.core.agents.sandbox",
+    "nexent.core.agents.sandbox.config",
     SandboxConfig=MockSandboxConfig,
 )
 nexent_agents_module.sandbox = sandbox_module
 
 nexent_agent_module = _create_stub_module(
-    "nexent.core.agents.nexent_agent",
+    "nexent.core.agents.cores.smolagents.agent",
     get_local_python_authorized_imports=MagicMock(
         return_value=["sdk_default_import"]
     ),
@@ -505,11 +508,11 @@ mock_model_config = MagicMock()
 mock_tool_config = MagicMock()
 mock_agent_run_info = MagicMock()
 
-sys.modules['nexent.core.agents.agent_model'].AgentConfig = mock_agent_config
-sys.modules['nexent.core.agents.agent_model'].ModelConfig = mock_model_config
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = mock_tool_config
-sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
-sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
+sys.modules['nexent.core.agents.contracts.config'].AgentConfig = mock_agent_config
+sys.modules['nexent.core.agents.contracts.config'].ModelConfig = mock_model_config
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = mock_tool_config
+sys.modules['nexent.core.agents.contracts.run'].AgentRunInfo = mock_agent_run_info
+sys.modules['nexent.core.agents.contracts.config'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
 # Stub parallel_executor so that create_agent_info can import ParallelExecutorTool
@@ -877,6 +880,9 @@ class TestGetSkillScriptTools:
         assert "write_skill_file" not in child_names
         run_skill_call = mock_tool_config.call_args_list[0]
         assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+        for call in mock_tool_config.call_args_list[:3]:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+            assert call.kwargs["metadata"] == {"agent_id": 2, "tenant_id": "tenant_1", "version_no": 0}
         from nexent.core.prompts import load_prompt
 
         assert run_skill_call.kwargs["description"] == load_prompt(
@@ -1029,6 +1035,24 @@ class TestGetSkillScriptTools:
         for call in calls[3:]:
             assert call[1]["metadata"] == file_context
             assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
+
+    @pytest.mark.parametrize("snapshot", [None, [{"name": "test_skill", "config_values": {}}]])
+    def test_all_skill_tools_receive_detached_authorization_with_empty_configuration(self, snapshot):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", version_no=13, runtime_skill_snapshot=snapshot)
+        calls = mock_tool_config.call_args_list[:3]
+        for call in calls:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+            assert call.kwargs["metadata"] == {"agent_id": 42, "tenant_id": "tenant", "version_no": 13}
+        calls[0].kwargs["params"]["authorized_skill_names"].append("not_authorized")
+        assert calls[1].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+        assert calls[2].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+
+    def test_explicit_empty_snapshot_does_not_use_saved_skill_bindings(self):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", runtime_skill_snapshot=[])
+        assert [call.kwargs["name"] for call in mock_tool_config.call_args_list] == [
+            "download_from_s3", "upload_to_s3"]
 
 
 class TestDiscoverLangchainTools:
@@ -2614,7 +2638,7 @@ class TestCreateAgentConfig:
 
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
-                    name="test_agent",
+                        name="test_agent",
                     display_name=None,
                     description="test description",
                     prompt_templates=ANY,

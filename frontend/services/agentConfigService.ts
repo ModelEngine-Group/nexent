@@ -1098,6 +1098,7 @@ export const searchAgentInfo = async (
     // convert backend data to frontend format
     const formattedAgent = {
       id: data.agent_id,
+      enable_context_manager: data.enable_context_manager ?? true,
       name: data.name,
       display_name: data.display_name,
       description: data.description,

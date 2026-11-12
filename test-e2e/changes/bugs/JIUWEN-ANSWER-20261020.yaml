@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-ANSWER-20261020
+  change_type: bugfix
+  bug_id: JIUWEN-ANSWER-20261020
+  title: Normalize Jiuwen public answers before stream persistence and history projection
+  description: Filter internal context echoes and normalize explicit final envelopes
+    at the backend output boundary.
+  observed_behavior: Persisted root answers and live UI display completed_action_history
+    JSON plus final_answer tags.
+  expected_behavior: Live, saved and read-projected Jiuwen answers contain only validated
+    user-facing body; malformed boundaries fail safely, tool facts and frontend contracts
+    remain unchanged.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing output runtime and browser Cases checked finality and display
+      but lacked internal context/protocol echo variants.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-REAL-UI-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Fragmented internal context tags never leak; sole final body normalizes and
+      ambiguous final fails without tool execution
+    - Live final and terminal share clean content; history projection preserves source
+      records, user text, legacy messages and structured tool results
+    reason: Isolated parsing boundaries require exhaustive UT; real worker persistence
+      and browser history are distinct higher boundaries.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_answer_boundary.py
+    - test/backend/utils/test_runtime_history_projection.py
+    - test/backend/services/test_conversation_management_service.py::test_history_service_projects_old_jiuwen_answer_without_rewriting_user_or_stored_records
+  notes: Existing runtime-agent-core-factory design.md defines current acceptance.
+    No duplicate D1. OUTPUT D3 and real UI D4 strengthened; real child-docx smoke
+    separately checks artifact and history. Existing unrelated F-111 formal gate blocker
+    retained.

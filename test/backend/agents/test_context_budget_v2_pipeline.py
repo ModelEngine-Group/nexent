@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from threading import Event
 
 import pytest
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.models.capacity_budget import (
     CapacityReservePolicy,
     ContextBudgetCalculator,

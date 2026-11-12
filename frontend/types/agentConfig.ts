@@ -10,6 +10,7 @@ export type AgentConfigUpdate = Partial<
   Pick<
     Agent,
     | "name"
+    | "enable_context_manager"
     | "display_name"
     | "author"
     | "model"

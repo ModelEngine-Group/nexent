@@ -1,10 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise the NexentAgent MCP dispatch path with configured arguments."""
 
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from test.sdk.core.agents.test_nexent_agent import MessageObserver, NexentAgent, ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.utils.observer import MessageObserver
 
 
 def test_mcp_dispatch_applies_parameters_without_mutating_template():

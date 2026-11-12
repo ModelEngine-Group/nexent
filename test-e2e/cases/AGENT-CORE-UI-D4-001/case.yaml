@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: AGENT-CORE-UI-D4-001
+  feature_id: AGENT-CORE-CONFIG
+  requirement_ids:
+  - AGENT-CORE-UI-20261013
+  - JIUWEN-M3-20261015
+  - JIUWEN-M4-20261016
+  - AGENT-CORE-GLOBAL-20261105
+  business_rule_ids:
+  - AGENT-CORE-CONFIG-RULE-001
+  - AGENT-CORE-CONFIG-RULE-002
+  title: Remove per-Agent Core controls while preserving CM and saved resources
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: The deployment Core controls capability presentation independently of saved Agent metadata.
+  preconditions:
+  - A running frontend is reachable; deterministic existing HTTP fixtures isolate Agent data, authorization and
+    model/resource boundaries.
+  test_data:
+    profile: mock
+    locale: zh
+    viewport:
+      width: 1920
+      height: 1080
+  steps:
+  - order: 1
+    action: Open a draft with saved smolagents under a Jiuwen deployment.
+    expected: No Core label, selector or read-only Core field is rendered; unsupported run controls reflect deployment
+      Core and saved resources remain unchanged.
+  - order: 2
+    action: Disable CM, save and reload.
+    expected: Only CM changes and its saved false value reloads; the page still has no per-Agent Core control.
+  - order: 3
+    action: Reject a CM update and retry.
+    expected: The failed update rolls back, retry succeeds, and no request writes agent_core.
+  - order: 4
+    action: Reload under a smolagents deployment and inspect a read-only draft.
+    expected: No per-Agent Core field appears under smolagents either; capability controls follow deployment, while
+      read-only users cannot change CM or resources.
+  expected_results:
+  - No Core label, selector or read-only Core field is rendered; unsupported run controls reflect deployment Core
+    and saved resources remain unchanged.
+  - Only CM changes and its saved false value reloads; the page still has no per-Agent Core control.
+  - The failed update rolls back, retry succeeds, and no request writes agent_core.
+  - No per-Agent Core field appears under smolagents either; capability controls follow deployment, while read-only
+    users cannot change CM or resources.
+  forbidden_side_effects:
+  - No unrelated writes, agent run, loss of resource/policy values or read-only mutations.
+  actor: Authorized Agent development user
+  journey:
+  - Open a draft with saved smolagents under a Jiuwen deployment.
+  - Disable CM, save and reload.
+  - Reject a CM update and retry.
+  - Reload under a smolagents deployment and inspect a read-only draft.
+  final_business_result:
+  - Core shows Jiuwen read-only; unsupported run controls reflect global Core and saved resources are unchanged.
+  - Only the CM setting changes and its saved false value reloads; Core remains read-only Jiuwen.
+  - The failed update rolls back, retry succeeds, and no request writes agent_core.
+  - The system value and capability controls follow deployment; read-only users cannot change CM or resources.
+  failure_evidence:
+  - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
+  acceptance:
+  - id: AC-01
+    description: The deployment Core controls capability presentation independently of saved Agent metadata.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 1

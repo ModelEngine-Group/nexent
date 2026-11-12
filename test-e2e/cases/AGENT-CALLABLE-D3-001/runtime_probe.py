@@ -18,8 +18,10 @@ import docker
 from management.services.model.run_bindings import create_model_config_list
 from final_answers import final_answer_text
 from nexent.core import agent_names
-from nexent.core.agents import a2a_agent_proxy, nexent_agent, sandbox
-from nexent.core.agents.agent_model import AgentConfig, ExternalA2AAgentConfig, ToolConfig
+from nexent.core.agents.resources import a2a as a2a_agent_proxy
+from nexent.core.agents.cores.smolagents import agent as nexent_agent
+from nexent.core.agents.sandbox import execution as sandbox
+from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ToolConfig
 from nexent.core.agents.prompt import AgentPromptBundle, AgentPromptComposer
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 from nexent.core.concurrency.context import _reset_current_thread_manager, _set_current_thread_manager

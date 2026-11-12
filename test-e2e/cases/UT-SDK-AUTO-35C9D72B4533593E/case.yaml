@@ -16,7 +16,7 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 可直接导入 sdk/nexent/core/utils/observer.py 的 ProcessType/MessageObserver/Message/ParseTransformer 与 sdk/nexent/core/agents/nexent_agent.py
+  - 可直接导入 sdk/nexent/core/utils/observer.py 的 ProcessType/MessageObserver/Message/ParseTransformer 与 sdk/nexent/core/agents/cores/smolagents/agent.py
     中的调用链，无需外部服务或本地文件资产。
   test_data:
     legacy_asset_declaration: '- 无额外本地文件资产；测试在进程内构造 MessageObserver 实例与含 ANSI 转义序列的字符串 fixture（如 "\x1b[31m红字\x1b[0m"、OSC 序列

@@ -8,7 +8,7 @@ import pytest
 from contracts.errors.exceptions import ModelOutletValidationError
 from management.services.agent.preparation.inputs import _materialize_runtime_skill_snapshot
 from management.services.agent.preparation.run import apply_root_model_preferences
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from management.services.model.profiles import build_outlet_draft
 from test.backend.services.test_model_profile_service import draft_request
 

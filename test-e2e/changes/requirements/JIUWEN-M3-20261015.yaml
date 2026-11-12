@@ -1,0 +1,72 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-M3-20261015
+  change_type: requirement
+  requirement_id: JIUWEN-M3-20261015
+  title: Jiuwen M3 resources, lossless Core configuration and trusted outlets
+  description: Continue revised Jiuwen SPEC; preserve unsupported bindings explicitly.
+  affected_features:
+    existing:
+    - AGENT-CORE-CONFIG
+    added:
+    - JIUWEN-RESOURCES
+    modified:
+    - AGENT-CORE-CONFIG
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    added:
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-RESOURCES-D5-002
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-RESOURCES-D5-003
+    modified:
+    - AGENT-CORE-UI-D4-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Authorized resource dispatch, schema, hidden identity, async errors and cancellation.
+    - Core round-trip preserves policies and bindings; failed save rolls back.
+    - Management snapshot creation/revision, stale/tenant guards and migration failure
+      isolation.
+    - Child Core factory dispatch, per-agent model snapshot isolation, invocation
+      cleanup, A2A per-call ownership and failure propagation.
+    reason: Existing mapping/parser UT and native-only runtime do not prove text MCP
+      or saved trusted outlets. Add missing UT and runtime evidence without duplicate
+      D1.
+    test_selectors:
+    - test/backend/services/test_model_runtime_provisioning_service.py
+    - test/backend/services/test_model_runtime_snapshot_service.py
+    - test/sdk/core/agents/test_jiuwen_resources.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_jiuwen_history.py
+    - test/sdk/core/agents/test_jiuwen_protocol.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/sdk/core/tools/test_parallel_executor.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_jiuwen_current_task.py
+    - test/backend/services/test_model_management_service.py
+    - test/backend/services/test_model_health_service.py
+    - test/backend/services/test_user_management_service.py
+    - frontend/tests/component/agentCore.test.tsx
+    - test/sdk/core/agents/test_agent_model.py
+    - test/backend/services/test_agent_service.py
+    - test/sdk/core/models/test_capacity_budget.py
+    - test/sdk/core/model_service/test_legacy_configuration_export.py
+    - test/sdk/core/model_service/test_legacy_reasoning_export.py
+    - test/sdk/core/model_service/test_legacy_invocation_options.py
+    - test/sdk/core/agents/test_core_child_dispatch.py
+    - test/backend/agents/test_child_model_binding.py
+    - test/sdk/core/agents/test_subagent_wrapper.py
+    - test/sdk/core/agents/test_subagent_invocation_wrapper.py
+    - test/sdk/core/agents/test_subagent_resource_ownership.py
+    - test/sdk/core/agents/test_a2a_agent_proxy.py
+    - test/sdk/core/agents/test_a2a_active_cancellation.py
+    - test/sdk/core/agents/test_nexent_agent.py
+  notes: 'Remaining M3 collaboration bridge: reuse wrapper/ownership UT; add mixed
+    Core and A2A real protocol D3 and cancellation/recovery D5. No duplicate D1; M4
+    context compaction remains deferred.'

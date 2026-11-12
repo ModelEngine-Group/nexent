@@ -5,8 +5,8 @@
 import pytest
 from pydantic import ValidationError
 
-from nexent.core.agents.clarification import ClarificationForm
-from nexent.core.agents.output_protocol import extract_clarification_form
+from nexent.core.agents.contracts.clarification import ClarificationForm
+from nexent.core.agents.cores.smolagents.output_protocol import extract_clarification_form
 
 
 def question(**overrides):

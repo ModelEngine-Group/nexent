@@ -35,7 +35,7 @@ from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCo
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 
-from management.db.model.repository import create_model_record
+from management.services.model.runtime_provisioning import create_model_record
 from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
 from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
 from management.db.identity.group import query_group_ids_by_user
@@ -51,6 +51,13 @@ from management.services.skill.transfer import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
+
+
+def create_model_record(*args, **kwargs):
+    """Provision trusted snapshots when a tenant receives its initial models."""
+    from management.services.model.runtime_provisioning import create_model_record as persist
+
+    return persist(*args, **kwargs)
 
 
 def get_provider_username(user_id: str, provider: str) -> Optional[str]:

@@ -22,7 +22,7 @@ case:
       stub。'
   steps:
   - order: 1
-    action: 导入被测单元 sdk/nexent/core/models/openai_llm.py 的 OpenAIModel 与 sdk/nexent/core/agents/core_agent.py 的 CoreAgent._provider_overflow_recovery_safe，注入伪造
+    action: 导入被测单元 sdk/nexent/core/models/openai_llm.py 的 OpenAIModel 与 sdk/nexent/core/agents/cores/smolagents/core_agent.py 的 CoreAgent._provider_overflow_recovery_safe，注入伪造
       chat.completions.create 客户端与内存对象，隔离真实 provider 与网络；不调用真实模型。
     expected: 恢复调度：provider 上下文溢出且未收到首 token、context_rebuild 非空时，模型调用 context_rebuild() 一次并以 rebuilt.messages 重新 dispatch；recover_step/recover_final_answer
       返回的 FinalContext.messages 成为下一次调用入参，第二次 dispatch 成功返回最终消息。

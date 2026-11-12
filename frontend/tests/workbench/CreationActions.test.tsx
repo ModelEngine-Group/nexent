@@ -51,6 +51,48 @@ it("running creation actions cannot switch threads", async () => {
   expect(select).not.toHaveBeenCalled();
 });
 
+it("offers draft editing separately and removes the link while running", () => {
+  const props = {
+    canCreateAgent: true,
+    canCreateSkill: true,
+    onSelect: vi.fn(),
+    mode: "agent_create" as const,
+    draftAgentId: 42,
+  };
+  const view = render(<CreationActions {...props} disabled={false} />);
+  expect(screen.getByRole("link", { name: "编辑当前草稿" })).toHaveAttribute(
+    "href",
+    "/zh/agents/42"
+  );
+  expect(screen.queryByText("草稿已生成")).not.toBeInTheDocument();
+  view.rerender(<CreationActions {...props} disabled />);
+  expect(
+    screen.queryByRole("link", { name: "编辑当前草稿" })
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "编辑当前草稿" })).toBeDisabled();
+  view.rerender(
+    <CreationActions {...props} disabled={false} mode="skill_create" />
+  );
+  expect(screen.queryByText("编辑当前草稿")).not.toBeInTheDocument();
+});
+
+it.each([undefined, 0, -1])(
+  "hides a missing or invalid draft %s",
+  (draftAgentId) => {
+    render(
+      <CreationActions
+        canCreateAgent
+        canCreateSkill
+        disabled={false}
+        onSelect={vi.fn()}
+        mode="agent_create"
+        draftAgentId={draftAgentId}
+      />
+    );
+    expect(screen.queryByText("编辑当前草稿")).not.toBeInTheDocument();
+  }
+);
+
 it.each(["agent_create", "skill_create"] as const)(
   "clicking active %s exits but another mode switches",
   async (mode) => {

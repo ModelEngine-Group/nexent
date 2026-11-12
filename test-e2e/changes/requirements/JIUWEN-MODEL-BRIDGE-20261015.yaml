@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-MODEL-BRIDGE-20261015
+  change_type: requirement
+  requirement_id: JIUWEN-MODEL-BRIDGE-20261015
+  title: Implement production Jiuwen ModelService bridge and controlled text protocol
+  description: Implement M1/M2 of the revised runtime-agent-core-factory SPEC; shared
+    model snapshot management remains an upstream prerequisite.
+  affected_features:
+    existing: []
+    added:
+    - JIUWEN-MODEL-BRIDGE
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Message/tool/view mapping, detached snapshot and identity validation, truthful
+      usage and no runtime parameter overrides.
+    - Strict full-block parsing and authorized code validation; ordinary examples,
+      malformed/mixed blocks and unknown controls never execute.
+    - Streaming deltas and complete-message gating, duplicate/missing terminal, normalized
+      errors, cancellation and generator closure.
+    reason: Existing history UT patches the old native HTTP Model and legacy formal
+      runtime has no shared ModelService or text-protocol execution; retain old D1
+      and strengthen appropriate runtime proof, without duplicate new D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_jiuwen_protocol.py
+    - test/sdk/core/agents/test_jiuwen_history.py
+    - test/backend/services/test_model_runtime_snapshot_service.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/sdk/core/agents/test_agent_model.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/sdk/core/model_service/test_http_contracts.py
+    - test/sdk/core/model_service/test_http_sender.py
+    - test/sdk/core/model_service/test_model_service.py
+    - test/sdk/core/model_service/test_openai_chat_adapter.py
+    - test/sdk/core/model_service/test_openai_stream.py
+    - test/sdk/core/model_service/test_outlet_storage.py
+    - test/sdk/core/model_service/test_resource_conversion.py
+  notes: AC-012/014 and relevant AC-018/019 portions only. D2/D4 excluded for unchanged
+    HTTP/UI; D3 tests real transport/loop and D5 tests lifecycle/recovery. No claim
+    of CM/resource/history/display completion.

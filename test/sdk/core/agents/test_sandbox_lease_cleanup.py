@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """A failed lease cleanup cannot terminate a sibling's shared container."""
 
 from concurrent.futures import CancelledError, TimeoutError
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents import sandbox
+from nexent.core.agents.sandbox import execution as sandbox
 from nexent.core.concurrency import RunCancellationScope
 
 

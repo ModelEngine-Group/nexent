@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D5-002
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-003
+  title: Trusted model snapshot migration and transactional management lifecycle
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove the actual PostgreSQL migration, canonical snapshot persistence
+    and stale/tenant guards.
+  preconditions:
+  - Docker and a locally available PostgreSQL image; an isolated disposable database
+    with no production data.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Execute migration, management save and runtime restore against an isolated
+      PostgreSQL database.
+    expected: Schema upgrade is idempotent and preserves legacy model rows; dry-run
+      does not persist and applied provisioning can be repeated safely.
+  - order: 2
+    action: Execute migration, management save and runtime restore against an isolated
+      PostgreSQL database.
+    expected: Management create/update save canonical snapshots atomically with monotonic
+      revisions; rollback leaves both row and profile unchanged. Concurrent saves
+      preserve both edits under the row lock and ordinary saves retain frozen declarations/capabilities
+      without catalog lookup.
+  - order: 3
+    action: Execute migration, management save and runtime restore against an isolated
+      PostgreSQL database.
+    expected: Runtime uses persisted snapshots without catalog lookup, rejects stale/cross-tenant/tampered
+      rows, and a newly accepted turn sees the updated revision.
+  expected_results:
+  - Schema upgrade is idempotent and preserves legacy model rows; dry-run does not
+    persist and applied provisioning can be repeated safely.
+  - Management create/update save canonical snapshots atomically with monotonic revisions;
+    rollback leaves both row and profile unchanged. Concurrent saves preserve both
+    edits under the row lock and ordinary saves retain frozen declarations/capabilities
+    without catalog lookup.
+  - Runtime uses persisted snapshots without catalog lookup, rejects stale/cross-tenant/tampered
+    rows, and a newly accepted turn sees the updated revision.
+  forbidden_side_effects:
+  - No credential in saved snapshot, cross-tenant mutation, partial configuration
+    commit or writes to an existing application database.
+  acceptance:
+  - id: AC-01
+    description: Prove persisted trusted outlet lifecycle and isolation.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  risk_type: DEPLOYMENT
+  risk: Partial model/profile writes or stale migration snapshots route requests incorrectly.
+  condition:
+  - Legacy LLM rows, repeated upgrade/backfill, rejected tenant update and a failed
+    transaction.
+  metrics:
+  - Row count, snapshot revisions, decoded identity and rollback state.
+  thresholds:
+  - Zero data loss or partial writes; no cross-tenant update; snapshot contains no
+    raw credential.
+  recovery_expectations:
+  - Retry succeeds; next turn reads the new snapshot.

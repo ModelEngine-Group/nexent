@@ -51,8 +51,8 @@ async def test_current_source_real_docker_a2a_and_legacy_callable():
                 bundle.add(source, arcname=relative, recursive=False)
         bundle.add(Path(__file__).with_name("runtime_probe.py"), arcname="case/runtime_probe.py")
         bundle.add(repo / "test-e2e/infra/automation/shared/final_answers.py", arcname="case/final_answers.py")
-    for relative in ["sdk/nexent/core/agent_names.py", "sdk/nexent/core/agents/a2a_agent_proxy.py",
-                     "sdk/nexent/core/agents/nexent_agent.py", "sdk/nexent/core/agents/sandbox.py"]:
+    for relative in ["sdk/nexent/core/agent_names.py", "sdk/nexent/core/agents/resources/a2a.py",
+                     "sdk/nexent/core/agents/cores/smolagents/agent.py", "sdk/nexent/core/agents/sandbox.py"]:
         fingerprints[relative] = hashlib.sha256((repo / relative).read_bytes()).hexdigest()
     command(["docker", "cp", str(archive), f"{runtime}:{staged}.tar.gz"])
     command(["docker", "exec", runtime, "python", "-c",

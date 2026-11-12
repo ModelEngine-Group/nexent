@@ -726,6 +726,9 @@ async def update_agent_info_impl(
                     if request.is_main_agent is not None
                     else True,
                     "provide_run_summary": request.provide_run_summary,
+                    "enable_context_manager": request.enable_context_manager
+                    if request.enable_context_manager is not None
+                    else True,
                     "allow_chat_metadata": request.allow_chat_metadata
                     if request.allow_chat_metadata is not None
                     else False,

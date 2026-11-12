@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """User-message additions are rendered from matching SDK locale resources."""
 
 import importlib
@@ -69,7 +71,8 @@ def test_workspace_instructions_are_owned_by_system_section(language, role):
     skills = package.load_prompt(language, f"agent/{role}")["system_sections"]["skill_usage"]
     assert 'run_skill_script(source="workspace")' in skills
     assert "outputs/<" in skills
-    assert "sys.executable -m pip install" in guidance
+    assert 'subprocess.run([sys.executable, "-m", "pip", "install", "python-docx"], check=True)' in guidance
+    assert "shell=True" not in guidance
     delegated = user_context.render_user_context(language, "delegated_workspace", {
         "task": "task", "workspace": "/run/1",
     })

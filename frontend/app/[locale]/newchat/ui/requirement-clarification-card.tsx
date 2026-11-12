@@ -11,6 +11,7 @@ import {
   type ClarificationAnswer,
 } from "@/components/interaction/clarification-card";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { formatNl2AgentActionSummary } from "./nl2agent-action-summary";
 import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import type {
   Nl2AgentCardAction,
@@ -59,10 +60,7 @@ export const RequirementClarificationCard: FC<{
       content: [
         {
           type: "text",
-          text: t(
-            "nl2agent.requirementClarification.submittedSummary",
-            "Requirements submitted"
-          ),
+          text: formatNl2AgentActionSummary(payload.subtype, t),
         },
       ],
       metadata: { custom: { nl2agentCardAction: action } },

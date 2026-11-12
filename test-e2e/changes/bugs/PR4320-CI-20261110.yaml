@@ -1,0 +1,91 @@
+schema_version: '1.0'
+change:
+  change_id: PR4320-CI-20261110
+  change_type: bugfix
+  bug_id: PR4320-CI-20261110
+  title: Repair Jiuwen PR diagnostics and isolated regression compatibility
+  description: Use canonical diagnostic strings, validate explicit usage totals, retain
+    strict deployment parsing and align isolated tests with approved SDK ownership.
+  observed_behavior: CI reports clear-text logging flows, invalid explicit totals
+    are accepted, and isolated suites still depend on removed paths or obsolete prompt
+    ownership.
+  expected_behavior: Only canonical protocol codes reach logging; invalid reported
+    totals are rejected before side effects; approved runtime and security contracts
+    remain tested under canonical paths.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_boundary
+    description: Ordinary string diagnostics do not exercise hostile string representations;
+      combined local collection masked import-time SDK package stubs.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - SDK-MODEL-TRANSPORT
+    - JIUWEN-RESOURCES
+    - AGENT-CORE-CONFIG
+    - JIUWEN-CONTEXT
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-OUTPUT
+    - JIUWEN-RELEASE
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - MODEL-SERVICE-TRANSPORT-D3-001
+    - JIUWEN-RESOURCES-D3-001
+    modified:
+    - JIUWEN-CONTEXT-D3-001
+    - JIUWEN-CONTEXT-D4-001
+    - JIUWEN-CONTEXT-D5-001
+    - JIUWEN-IMAGE-D3-001
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    - JIUWEN-OUTPUT-D4-001
+    - JIUWEN-OUTPUT-D5-001
+    - JIUWEN-RELEASE-D3-001
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-RESOURCES-D5-002
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Canonical allowlisted codes cannot invoke exception-controlled string representations
+      during logging.
+    - Explicit null and non-negative integer totals preserve monitoring compatibility;
+      invalid values fail before metrics or tracker mutations.
+    - Authorized Skills alone enable Skill tool guidance; initial outlet snapshots retain
+      the runtime outlet-only token-length policy across later sampling edits.
+    - Native Runner cancellation cannot bypass session or owned-tool cleanup; preflight,
+      resource registration, timeout ownership and model snapshot boundaries retain assertions.
+    - Deployment Core defaults and rejection remain strict; package, prompt and model
+      snapshot contracts use canonical owners in per-file isolated execution.
+    reason: Strengthen local security and boundary assertions without duplicating
+      UT as new formal Cases; reuse HTTP and resource integration regressions.
+    test_selectors:
+    - test/sdk/core/model_service/test_protocol_diagnostics.py
+    - test/sdk/monitor/test_monitoring_token_totals.py
+    - test/backend/agents/test_global_agent_core.py
+    - test/backend/services/test_model_runtime_provisioning_service.py
+    - test/backend/utils/test_agent_prompt_bundle.py
+    - test/sdk/core/agents/test_jiuwen_native_files.py
+    - test/sdk/core/agents/test_jiuwen_adapter_preflight.py
+    - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/backend/database/test_model_runtime_profile_batch.py
+    - test/sdk/core/agents/test_jiuwen_context.py
+  notes: SPEC runtime-agent-core-factory PR4320 CI section. Header-only formal script
+    changes retain all acceptance contracts/bindings and need static validation, not
+    artificial journey reruns. Existing D3 owns HTTP/process cleanup with self-contained
+    preparation; no new D1 or deployment switch. No workflow, suppression, branch
+    protection or assertion removal. Published consolidated SQL is unchanged; operator
+    approved restoration of develop SQL ownership; ten reintroduced old copies are
+    removed across this fix. Six of the final seven have identical SQL bodies; the
+    activity/source copy is superseded by the documented v2.8.0 simplification.
+    The unmerged runtime_outlet_snapshot column and its migration remain required
+    by the current ORM and legacy write bridge, independently of global Core policy.
+    Additional patch coverage reuses existing suites and the actual profile catalog
+    sentinel in JIUWEN-RESOURCES-D5-002. Three unreferenced duplicate modules are
+    removed in favor of existing owners; models sources and coverage thresholds stay
+    unchanged. PostgreSQL lifecycle, resource fault and HTTP Cases retain their owned
+    loopback/Docker setup and finally cleanup; no shared preparation assets are added.

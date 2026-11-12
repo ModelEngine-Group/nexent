@@ -34,19 +34,14 @@ from management.services.agent.context import (
     build_context_inputs,
 )
 
-from nexent.core.agents.agent_model import (  # noqa: E402
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    ModelConfig,
-    ToolConfig,
-)
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import (
     ContextItemInput,  # noqa: E402
     ContextManagerConfig,  # noqa: E402
 )
 from nexent.core.agents.prompt import AgentPromptComposer  # noqa: E402
-from nexent.core.agents.run_agent import agent_run  # noqa: E402
+from nexent.core.agents.orchestration.entry import agent_run  # noqa: E402
 from nexent.core.utils.observer import MessageObserver  # noqa: E402
 
 

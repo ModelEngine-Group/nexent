@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useState, useMemo, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -174,6 +174,9 @@ function useGuardrailConfigState() {
 export function GuardrailConfigActions() {
   const { t } = useTranslation("common");
   const { config, updateConfig } = useGuardrailConfigState();
+  const { agentCore } = useDeployment();
+  const readOnly = useAgentStore((state) => state.isReadOnly);
+  const disabled = readOnly || (agentCore === "jiuwen" && !config.enabled);
 
   return (
     <Tooltip
@@ -185,6 +188,7 @@ export function GuardrailConfigActions() {
     >
       <Switch
         checked={config.enabled}
+        disabled={disabled}
         onChange={(enabled) => updateConfig({ ...config, enabled })}
         size="small"
       />

@@ -10,7 +10,7 @@ from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import add_repo_to_name, get_model_name_from_config
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from management.services.model.adapter import restore_model_snapshot
 from nexent.core.model_service.compatibility.legacy_config import (legacy_extra_body, legacy_reasoning_budget, legacy_reasoning_effort, legacy_thinking_enabled)
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
@@ -48,9 +48,10 @@ def _resolve_reasoning_capability(
 
 
 
-def create_model_config_from_record(record):
+def create_model_config_from_record(record, tenant_id=None):
     """Build a complete provider binding from one exact tenant model record."""
-    snapshot = restore_model_snapshot(record, record.get("tenant_id"))
+    tenant_id = tenant_id if tenant_id is not None else record.get("tenant_id")
+    snapshot = restore_model_snapshot(record, tenant_id)
     if snapshot is not None:
         return _resolved_model_config(record, snapshot)
     model_name = add_repo_to_name(

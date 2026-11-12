@@ -28,10 +28,13 @@ from management.db.conversation.repository import (  # noqa: F401
     get_latest_assistant_message,
 )
 from management.db.model.repository import get_model_by_model_id
+from management.db.conversation.repository import append_conversation_user_message, resolve_conversation_retry_user
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from management.services.model.text import remove_think_blocks
+from infrastructure.runtime_output import is_runtime_event, project_runtime_history
+from infrastructure.nexent_output import normalize_nexent_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -254,28 +257,29 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist readable user text and any structured clarification response atomically."""
-    user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
+    """Persist the user-side message (one message row only).
 
-    # Strip the locale-specific current-time prefix before persisting so historical
-    # messages do not show the time marker. The prefix is injected by
-    # run_agent_stream for the LLM call only.
-    raw_query = strip_current_time_prefix(request.query)
-
-    conversation_req = MessageRequest(
-        conversation_id=request.conversation_id,
-        message_idx=user_role_count * 2,
-        role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=raw_query)],
-        minio_files=request.minio_files,
-        **({'clarification_response': request.clarification_response}
-           if getattr(request, 'clarification_response', None) is not None else {}),
+    Note: conversation_message_unit_t only stores assistant message content.
+    User messages do not need unit records.
+    """
+    source = MessageSource(getattr(request, "_message_source", MessageSource.CHAT))
+    retry_id = getattr(request, "retry_user_message_id", None)
+    if type(retry_id) is int:
+        message_id, message_index = resolve_conversation_retry_user(
+            request.conversation_id, user_id, retry_id, request.retry_message_index,
+            strip_current_time_prefix(request.query), request.minio_files,
+        )
+        request._runtime_user_message_id = message_id
+        request._runtime_user_message_index = message_index
+        return
+    message_id, message_index = append_conversation_user_message(
+        request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
+        **({"message_source": source} if source != MessageSource.CHAT else {}),
+        **({"clarification_response": request.clarification_response.model_dump(mode="json")}
+           if getattr(request, "clarification_response", None) is not None else {}),
     )
-    save_message(
-        conversation_req, user_id=user_id, tenant_id=tenant_id,
-        message_source=MessageSource(getattr(request, "_message_source", MessageSource.CHAT)),
-    )
+    request._runtime_user_message_id = message_id
+    request._runtime_user_message_index = message_index
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -764,7 +768,12 @@ def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[
     """
     for msg in reversed(message_records):
         if msg.get('status') == 'streaming' and msg.get('role') == MESSAGE_ROLE["ASSISTANT"]:
-            units = msg.get('units') or []
+            raw_units = msg.get('units') or []
+            units, _ = normalize_nexent_history([
+                {**u, "type": u.get("unit_type"), "content": u.get("unit_content", "")}
+                for u in raw_units
+            ], "streaming")
+            units = [{**u, "unit_type": u["type"], "unit_content": u["content"]} for u in units]
             last_unit = units[-1] if units else None
             return {
                 'message_id': msg['message_id'],
@@ -889,6 +898,15 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
             else:
                 # Assistant message: message is an array, need to process search_content_placeholder
+                config = history_data.get("workbench_config")
+                if (history_data.get("agent_system_key") == "nl2skill_main"
+                        or isinstance(config, dict) and config.get("mode") == "skill_create"):
+                    from management.services.skill.stream_parser import project_skill_history_units
+
+                    message_units = project_skill_history_units(message_units)
+                message_content, message_units, invalid_runtime_answer = project_runtime_history(
+                    message_content, message_units
+                )
                 processed_units = []
                 for unit in message_units:
                     unit_id = unit.get('unit_id')
@@ -943,7 +961,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 tool_data = json.loads(unit_content)
                             except (json.JSONDecodeError, TypeError):
                                 tool_data = None
-                            if isinstance(tool_data, dict) and 'content' in tool_data:
+                            if (isinstance(tool_data, dict) and 'content' in tool_data
+                                    and not is_runtime_event(tool_data)):
                                 processed_unit['content'] = tool_data.get('content', '')
                                 processed_unit['tool_name'] = tool_data.get('tool_name')
                                 processed_unit['tool_arguments'] = tool_data.get('tool_arguments')
@@ -959,6 +978,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                         'content': message_content
                     })
 
+                processed_units, public_status = normalize_nexent_history(processed_units, msg.get("status"))
+                if public_status == "failed":
+                    invalid_runtime_answer = True
+
                 message_item = {
                     'role': role,
                     'message': processed_units,
@@ -972,6 +995,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
 
             message_item["status"] = msg.get("status", "completed")
+            if role != MESSAGE_ROLE["USER"] and invalid_runtime_answer:
+                message_item["status"] = "failed"
 
             # Keep the logical message position so clients can distinguish a
             # regenerated branch from a separate turn with identical text.

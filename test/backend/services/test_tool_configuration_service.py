@@ -220,8 +220,8 @@ if memory_pkg is not None:
     nexent_mock.memory = memory_pkg
     if real_memory_service is not None:
         sys.modules["nexent.memory.memory_service"] = real_memory_service
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
+sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
 sys.modules['nexent.core.models'] = _create_package_mock('nexent.core.models')
 
 # Mock nexent.multi_modal module

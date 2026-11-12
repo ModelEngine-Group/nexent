@@ -1981,6 +1981,8 @@ class LLMTokenTracker:
 
     def record_completion(self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Any = ...) -> None:
         """Preserve legacy inferred totals; explicit None means the provider did not report one."""
+        if total_tokens is not ... and total_tokens is not None and (type(total_tokens) is not int or total_tokens < 0):
+            raise ValueError("total_tokens must be a non-negative integer or None")
         if not self.manager.is_enabled:
             return
 

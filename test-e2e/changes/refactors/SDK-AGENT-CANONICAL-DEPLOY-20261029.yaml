@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-CANONICAL-DEPLOY-20261029
+  change_type: refactor
+  title: Deploy canonical Agent SDK paths and verify real assistant journeys
+  description: Rebuild and deploy the current refactored source, verify absence of all
+    removed Agent alias files in source and installed SDK across backend roles, and
+    exercise existing real model resource and browser journeys. Preserve source assistants,
+    history, model directories and all existing runtime contracts.
+  feature_contract_changed: false
+  no_case_change_reason: Existing image continuity, Skills, knowledge retrieval,
+    mixed Core children and browser history contracts already cover this deployment.
+    Reuse fixed scripts; the resource diagnostic selection does not certify the full
+    external MCP Case, whose existing environment blocker remains recorded.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    - JIUWEN-CONTEXT
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-REAL-UI-D4-001
+    - JIUWEN-SKILL-FILES-D4-001
+    - JIUWEN-RESOURCES-D3-003
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Canonical imports own the unique contracts factory Core adapters and sandbox configuration.
+    - Removed modules and legacy Python pickle globals remain unavailable.
+    - Context and resource boundaries retain original isolation and error semantics.
+    reason: Product behavior is unchanged from the verified canonical import migration.
+      Reuse its focused boundary UT and prove installed file sets and actual downstream
+      business outcomes in deployed images rather than adding duplicate unit tests.
+    test_selectors:
+    - test/sdk/core/agents/test_canonical_agent_imports.py
+    - test/sdk/core/agents/test_context_canonical_imports.py
+    - test/sdk/core/agents/test_sandbox_directory_boundaries.py
+    - test/sdk/core/agents/test_context_directory_boundaries.py
+    - test/sdk/core/agents/test_resource_orchestration_boundaries.py
+  notes: Deployment is explicitly authorized by the user. Use a clean source context,
+    preserve image rollback tags and existing full sandbox selection, and do not delete
+    data volumes or modify source assistants. Global generated-asset validation retains
+    the pre-existing missing F-111-RULE-02 blocker. No commit or push is requested.

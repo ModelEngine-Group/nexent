@@ -115,4 +115,3 @@ def test_watcher_capacity_rejects_before_transport_dispatch(setup, manager):
     finally:
         stop.set()
         execution.future.result(timeout=1)
-

@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D3-003
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-RESOURCE-ACCEPTANCE-20261021
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-001
+  - JIUWEN-RESOURCES-RULE-004
+  title: Deployed real Skills external MCP knowledge retrieval and mixed Core child
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove current published configuration and real downstream resource execution
+    through authenticated deployed Agent APIs.
+  preconditions:
+  - Authorized saved Skill assistant and knowledge assistant, enabled registered external
+    MCP service, populated accessible KB with configured embedding, real saved parent/child
+    model outlets and current deployment. The full sandbox with Node and docx must
+    be selected for the docx Skill's JavaScript workflow.
+  test_data:
+    profile: real_smoke
+  steps:
+  - order: 1
+    action: Clone authorized saved Skill and knowledge configurations; create isolated
+      published Jiuwen MCP and smolagents parent fixtures. Pin the parent to the owned
+      published Jiuwen child version and use separate saved model outlets.
+    expected: Source hashes unchanged, tool/Skill/KB permissions retained and immutable
+      child Core/model configuration verified.
+  - order: 2
+    action: Run Jiuwen Skill docx generation, registered external MCP date query and
+      actual configured KB retrieval through deployed authenticated run API; follow
+      up from persisted history.
+    expected: Observed authorized calls and successful results; downloaded docx contains
+      fresh marker, external MCP result contains current date, actual KB result includes
+      indexed file and relevant snippets. Follow-up calls no resource.
+  - order: 3
+    action: Ask the smolagents parent to delegate docx generation to its Jiuwen child;
+      follow up and read persisted conversation records. Clean only owned entities.
+    expected: Balanced nested events, actual Jiuwen step/result and child Skill/Python/upload
+      execution; downloaded child document contains marker; parent returns genuine
+      result, no follow-up replay, original history/config unchanged, cleanup succeeds.
+  expected_results:
+  - Real Skill read and successful workspace JavaScript script execution in the full
+    sandbox generate/upload verified docx; no guessed Skill S3 download or Python
+    fallback conceals a missing Node runtime.
+  - Real registered external MCP completes authorized call and returns current date;
+    no local/mock tool substitutes for remote execution.
+  - Actual allowed knowledge index retrieval returns nonempty indexed file/snippets
+    and grounded answer with intact history.
+  - smolagents parent invokes pinned Jiuwen child with its own model outlet; nested
+    actual file generation and follow-up succeed without replay.
+  - All source configuration/Skills/KB bindings and source history remain unchanged;
+    only owned fixtures are removed.
+  forbidden_side_effects:
+  - No injected results, credential output, source mutation, widened permissions or
+    fabricated success from HTTP200.
+  - No execution of wrong ambiguous MCP tool, replacement of external service with
+    Mock, child Core/model override from parent or historic resource replay.
+  acceptance:
+  - id: AC-01
+    description: Actual Skill and external MCP execution with real saved outlets.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Authorized real knowledge retrieval and persisted follow-up.
+    steps:
+    - 2
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Mixed Core nested effects, independent child configuration and isolated
+      cleanup.
+    steps:
+    - 1
+    - 3
+    expected_results:
+    - 4
+    - 5
+    forbidden_side_effects:
+    - 1
+    - 2
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+    timeout_seconds: 1200
+  integration_boundary:
+  - Deployed management/runtime API, immutable saved agent/outlet/Skill/KB configuration,
+    real model provider, actual registered MCP and ES/embedding, runtime factory and
+    nested Core execution.
+  observations:
+  - Sanitized public events, child runtime identity, real downloaded docx contents,
+    source/history hashes and cleanup.
+  cleanup:
+  - Remove only owned agents/conversations/artifacts and temporary private state.

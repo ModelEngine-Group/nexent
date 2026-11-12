@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
 from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
 

@@ -1,4 +1,5 @@
-"""Unit tests for sdk.nexent.core.agents.plan_repo.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for sdk.nexent.core.agents.cores.smolagents.plan_repo.
 
 PlanRepo is a pure stdlib module: it persists plans to Redis (when a client
 is provided) and always mirrors them to a thread-local in-memory dict as a
@@ -36,8 +37,8 @@ nexent_pkg.core = core_pkg
 core_pkg.agents = agents_pkg
 
 
-MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "plan_repo.py"
-MODULE_NAME = "sdk.nexent.core.agents.plan_repo"
+MODULE_PATH = REPO_ROOT / "sdk/nexent/core/agents/cores/smolagents/plan_repo.py"
+MODULE_NAME = "sdk.nexent.core.agents.cores.smolagents.plan_repo"
 spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
 plan_repo_module = importlib.util.module_from_spec(spec)
 sys.modules[MODULE_NAME] = plan_repo_module

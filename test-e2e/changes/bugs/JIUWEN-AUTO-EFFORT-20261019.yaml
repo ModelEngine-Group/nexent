@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-AUTO-EFFORT-20261019
+  change_type: bugfix
+  bug_id: JIUWEN-AUTO-EFFORT-20261019
+  title: Preserve shared automatic reasoning omission semantics in the Jiuwen model bridge
+  description: Delegate the undeclared automatic effort sentinel to the existing
+    LegacyInvocationOptions resolver while rejecting unsupported explicit effort values.
+  observed_behavior: After configuration-side Core switching, management-normalized
+    reasoning_effort auto fails Jiuwen preflight with MODEL_OUTLET_OVERRIDE_UNDECLARED.
+  expected_behavior: Automatic effort inherits saved policy when no effort rule exists;
+    no undeclared field is emitted, saved profiles remain immutable, and explicit
+    unsupported efforts still fail closed.
+  escaped_stage: D4
+  coverage_gap:
+    type: no_gap
+    description: The existing real-browser Core-switch Case detects the failure.
+      Bridge UT lacked management-normalized auto on a profile without an effort rule;
+      add that isolated regression without a duplicate D1 Case.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-MODEL-BRIDGE, JIUWEN-OUTPUT]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: [JIUWEN-MODEL-BRIDGE-D3-001]
+    modified: [JIUWEN-REAL-UI-D4-001]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Automatic effort without a saved rule uses shared omission semantics for field and legacy extra aliases
+    - Unsupported explicit effort remains rejected and original snapshots stay unchanged
+    reason: The backend bridge validated the inherited sentinel before the shared
+      resolver could apply its established omission rule.
+    test_selectors:
+    - test/backend/services/test_model_runtime_provisioning_service.py
+  notes: Existing runtime-agent-core-factory design.md owns this fix. Reuse the
+    real-model D4 and bridge D3; preserve failures and global F-111 blocker. No catalog
+    inference, provider field injection, model/Core fallback, SQL or retry change.

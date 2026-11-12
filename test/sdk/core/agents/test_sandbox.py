@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit + integration tests for the sandbox factory (session/system dimensions).
 
@@ -40,7 +42,7 @@ SDK_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 def _load_sandbox_module():
     spec = importlib.util.spec_from_file_location(
         "sandbox_under_test",
-        os.path.join(SDK_PATH, "nexent", "core", "agents", "sandbox.py"),
+        os.path.join(SDK_PATH, "nexent", "core", "agents", "sandbox", "execution.py"),
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules["sandbox_under_test"] = module

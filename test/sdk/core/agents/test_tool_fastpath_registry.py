@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Official class identity and trusted sources determine host tool eligibility."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from nexent.core.agents.tool_fastpath import OFFICIAL_FASTPATH_TOOL_CLASSES, official_fastpath_tools
+from nexent.core.agents.cores.smolagents.tool_fastpath import OFFICIAL_FASTPATH_TOOL_CLASSES, official_fastpath_tools
 from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchTool
 from nexent.core.tools.knowledge_base_search_tool import KnowledgeBaseSearchTool
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool

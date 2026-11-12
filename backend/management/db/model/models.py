@@ -84,6 +84,11 @@ class ModelRecord(TableBase):
     extra_params = Column(
         JSONB, doc="Fixed inference params without dedicated columns (key-value pairs constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.")
 
+    runtime_outlet_snapshot = Column(
+        JSONB, nullable=True,
+        comment="Management-owned canonical outlet row plus source fingerprint; NULL requires explicit provisioning. "
+                "Contains no credentials; validated by the shared profile codec, maximum 1 MiB.",
+    )
     # Schema extension only: NULL capability values remain unknown until outlet migration.
     reasoning_supported = Column(Boolean, comment="Reasoning support: true supported, false unsupported, NULL unknown.")
     reasoning_controls = Column(JSONB, comment="Declared reasoning control domains; NULL unknown, empty array no controls.")

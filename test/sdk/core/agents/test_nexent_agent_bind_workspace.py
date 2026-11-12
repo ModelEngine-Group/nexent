@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 from concurrent.futures import CancelledError
@@ -8,9 +10,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel
-from nexent.core.agents.sandbox_workspace import SandboxWorkspace
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel
+from nexent.core.agents.resources.workspace import SandboxWorkspace
 from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
 
 
@@ -180,7 +182,7 @@ def test_bind_probe_checks_each_distinct_container(bind_agent, mocker):
     second = Mock()
     second.container.id = 'second-container'
     bind_agent._sandbox_executors.append(second)
-    probe = mocker.patch('nexent.core.agents.nexent_agent.probe_workspace')
+    probe = mocker.patch('nexent.core.agents.resources.workspace.probe_workspace')
     grant = mocker.patch.object(bind_agent, '_grant_sandbox_output_access')
     bind_agent._push_file_workspace_to_sandbox()
     assert probe.call_count == 2
@@ -211,7 +213,7 @@ def test_direct_retry_cancellation_is_not_wrapped(bind_agent):
 def test_posix_bind_access_grants_permissions_before_probe(bind_agent, mocker):
     container = bind_agent._sandbox_executors[0].container
     grant = mocker.patch.object(bind_agent, '_grant_sandbox_output_access')
-    probe = mocker.patch('nexent.core.agents.nexent_agent.probe_workspace')
+    probe = mocker.patch('nexent.core.agents.resources.workspace.probe_workspace')
     bind_agent._verify_bind_workspace_access([container], PurePosixPath('/host/run'), bind_agent.workspace_mapping)
     grant.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
     probe.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)

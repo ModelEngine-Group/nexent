@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-DELEGATION-20261029
+  change_type: bugfix
+  bug_id: JIUWEN-DELEGATION-20261029
+  title: Honor explicit Jiuwen delegation before direct file execution
+  description: Preserve common orchestration instructions and constrain pending delegation
+    before dispatch; verify actual child files and live/restored common UI.
+  observed_behavior: The generic request to call a child generated a docx through root Python
+    and upload tools without a child event despite a saved worker binding.
+  expected_behavior: Explicit latest-request delegation executes an authorized child;
+    completed and live cards reflect actual child ownership without historical replay.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Prior child UI journey named the callable directly and inspected completion;
+      it did not detect bypass of a generic directive or require live nested visibility.
+  feature_contract_changed: true
+  affected_features:
+    existing: [JIUWEN-OUTPUT]
+    modified: [JIUWEN-RESOURCES]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-RESOURCES-D3-002, JIUWEN-RESOURCES-D5-003]
+    added: [JIUWEN-DELEGATION-D4-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve authorized common orchestration while keeping code-action-only instructions excluded.
+    - Recognize affirmative current directives without promoting negation quotes explanations or history.
+    - Block direct native and text execution or premature final answers until actual authorized delegation.
+    - Bound correction once and retain cancellation deadline schema and child Core isolation.
+    reason: Unit boundaries complement existing controlled runtime and new real-model UI proof.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_delegation.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_subagent_wrapper.py
+  notes: Owning SPEC runtime-agent-core-factory/design.md JD-001 through JD-003.
+    Preserve existing D1 and models directories; no SQL or unrelated UI redesign.

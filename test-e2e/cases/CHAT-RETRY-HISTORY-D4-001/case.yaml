@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: CHAT-RETRY-HISTORY-D4-001
+  feature_id: F-179
+  business_rule_ids: [F-179-RULE-02]
+  title: Real ordinary Agent retry siblings and identical independent questions survive reload
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove both Core retry persistence and branch navigation through the deployed browser and database.
+  preconditions:
+  - Authorized file-assistant source and configured real model; deployed Web runtime and database with machine-local fixture identity.
+  test_data:
+    profile: real_smoke
+    locale: zh
+  steps:
+  - order: 1
+    action: Clone the authorized file assistant and publish each Core in turn; send one question and regenerate twice using the message Refresh action.
+    expected: Three real answers share one persisted user and adjacent assistant index, with a single selected answer and 3/3 shown.
+  - order: 2
+    action: Reload saved history and the page, navigate 1/3 through 3/3, then submit the exact same question as a new message and reload again.
+    expected: Earlier three answers remain selectable; the new identical question has its own boundary and answer and is never collapsed into a fourth retry.
+  - order: 3
+    action: Regenerate a longer third answer in a separate owned conversation, reload while it is running, and return to saved history after completion.
+    expected: Recovery keeps the same persisted third assistant and exactly three siblings, with no orphan or fourth run; only owned fixtures are cleaned.
+  expected_results:
+  - Both smolagents and Jiuwen preserve selectable persisted retries and independent repeated questions.
+  - Streaming recovery retains exact ownership and count without generating another answer.
+  forbidden_side_effects:
+  - No source assistant or source history mutation, fabricated model/tool result, text-based historical merging or credential output.
+  - History load starts no new execution; a resume reconnect is allowed only for an already streaming answer.
+  actor: Authorized Agent user
+  journey:
+  - Generate, retry, reload and switch results on both Cores.
+  final_business_result:
+  - Persisted x/y navigation agrees with live display and normal repeated questions remain independent.
+  failure_evidence:
+  - Browser assertions, persisted IDs and indexes, sanitized request summaries and failure screenshots.
+  acceptance:
+  - id: AC-01
+    description: Completed retry siblings and independent repeated questions survive reload on both Cores.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Running retry recovery preserves three siblings and isolated cleanup.
+    steps: [3]
+    expected_results: [2]
+    forbidden_side_effects: [2]

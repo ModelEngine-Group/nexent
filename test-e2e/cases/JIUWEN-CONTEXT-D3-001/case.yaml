@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-CONTEXT-D3-001
+  feature_id: JIUWEN-CONTEXT
+  requirement_ids:
+  - JIUWEN-M4-20261016
+  business_rule_ids:
+  - JIUWEN-CONTEXT-RULE-001
+  - JIUWEN-CONTEXT-RULE-002
+  title: Persisted Core change and saved CM D3
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Continue persisted conversations after configuration-side Core changes
+    using the saved CM policy.
+  preconditions:
+  - Controlled model HTTP endpoint and installed Jiuwen/smolagents; isolated PostgreSQL
+    for runtime database proof.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run and save historical facts with one Core, prepare the effective immutable
+      configuration for the other Core, and reopen the original conversation.
+    expected: The configured new Core and version consume authorized database facts
+      and preserve original messages, attachments and execution units.
+  - order: 2
+    action: Follow up and reload again across both Core directions, native/text protocols,
+      CM on/off and existing/no checkpoint combinations.
+    expected: Current input occurs once, the historical tool effect occurs only in
+      the original run, and CM generates or reuses checkpoints according to the saved
+      switch.
+  expected_results:
+  - The configured new Core and version consume authorized database facts and preserve
+    original messages, attachments and execution units.
+  - Current input occurs once, the historical tool effect occurs only in the original
+    run, and CM generates or reuses checkpoints according to the saved switch.
+  forbidden_side_effects:
+  - No historical tool replay, second authoritative memory, checkpoint corruption,
+    cross-owner history or duplicate current input.
+  acceptance:
+  - id: AC-01
+    description: Configuration-side Core changes preserve old conversations and saved
+      CM semantics.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  integration_boundary:
+  - Real PostgreSQL history/checkpoint DAL, shared ContextManager, Core factory and
+    real controlled model HTTP.
+  observations:
+  - Provider requests, saved checkpoint coverage, tool effect count, selected Core
+    and cleanup.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and
+    HTTP response.

@@ -689,4 +689,3 @@ class TestModelsDevReasoningResolution:
         assert profile.reasoning_capability.control == "effort"
         assert profile.reasoning_capability.levels == ["low", "high", "max"]
         assert profile.reasoning_capability.source == "models_dev"
-

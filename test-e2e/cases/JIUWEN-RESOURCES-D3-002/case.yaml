@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-RESOURCES-D3-002
+  feature_id: JIUWEN-RESOURCES
+  requirement_ids:
+  - JIUWEN-M3-20261015
+  business_rule_ids:
+  - JIUWEN-RESOURCES-RULE-004
+  title: Mixed Core children and A2A D3
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove configured child dispatch and owned remote execution.
+  preconditions:
+  - Installed Jiuwen and smolagents; controlled local model HTTP/SSE and A2A endpoints.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Run configured children and A2A through the real factory with controlled protocol endpoints. Overlap
+      three roots with three local children each, repeat in native/text mode and stretch the real registration-lock
+      scheduling window.
+    expected: Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote
+      calls contain trusted caller context without parent model overrides. One managed Runner loop serves all calls
+      concurrently; all first-attempt child terminals succeed without extra delegation, foreign invocation events
+      or cross-loop errors.
+  - order: 2
+    action: Complete or cancel/stall the nested execution, then run a fresh invocation.
+    expected: Results and nested observations are balanced; cancellation/deadline closes owned calls and permits
+      recovery without replay or active workers.
+  expected_results:
+  - Each child runs its selected Core, isolated model endpoint/options and authorized resources; remote calls contain
+    trusted caller context without parent model overrides. Repeated concurrent roots retain exactly three successful
+    first-attempt child invocations each on one managed Runner loop.
+  - Results and nested observations are balanced; cancellation/deadline closes owned calls and permits recovery
+    without replay or active workers.
+  forbidden_side_effects:
+  - No parent model/credential/history leakage, unauthorized resources, cross-invocation state, orphan calls or
+    false reclamation.
+  acceptance:
+  - id: AC-01
+    description: Prove runtime boundary and forbidden effects.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 90
+  integration_boundary:
+  - Real factory, mixed Core runtime, model HTTP/SSE and A2A HTTP protocol.
+  observations:
+  - Provider request capture, execution counter, native events and terminal outcome.
+  cleanup:
+  - Release native session/tools and managed threads; close loopback listener and HTTP response.

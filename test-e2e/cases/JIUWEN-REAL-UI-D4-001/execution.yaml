@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: JIUWEN-REAL-UI-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: JIUWEN-REAL-UI-D4-001
+  profiles:
+  - real_smoke
+timeout_seconds: 1800
+acceptance_bindings:
+  AC-01:
+  - JIUWEN-REAL-UI-D4-001
+  AC-02:
+  - JIUWEN-REAL-UI-D4-001
+  AC-03:
+  - JIUWEN-REAL-UI-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

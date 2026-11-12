@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-MCP-NAMES-20261021
+  change_type: bugfix
+  bug_id: JIUWEN-MCP-NAMES-20261021
+  title: Resolve registered MCP normalized names to original remote tool names
+  description: Index unambiguous native MCP tools by both raw and registration-compatible
+    normalized names.
+  observed_behavior: Registered get_current_date cannot match real get-current-date
+    on healthy external MCP and Agent fails before execution.
+  expected_behavior: Exact or normalized authorized names map to original wire names;
+    collisions and missing tools fail closed.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Controlled MCP fixtures used identical raw and saved class names;
+      real external registration-normalization boundary was unproved.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-RESOURCES-D3-003
+    - JIUWEN-RESOURCES-D5-001
+    modified:
+    - JIUWEN-RESOURCES-D3-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Original and registration-compatible normalized names resolve to original wire
+      calls and saved public names.
+    - Ambiguous normalized names, duplicate original names and missing unauthorized
+      tools reject before execution; session resources close.
+    reason: Unit collision and normalization boundaries supplement real protocol and
+      deployed external MCP proof.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_mcp_names.py
+  notes: runtime-agent-core-factory design.md 2026-10-21 confirmed MCP defect. No
+    new D1; existing D3 resource fixture gains real hyphenated raw tool name; real
+    D3-003 and mixed Core/cancellation regression reused. Preserve earlier unrelated
+    user modifications and global F-111 rule validation blocker.
