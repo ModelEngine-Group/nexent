@@ -346,9 +346,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "allow_mcp_header_passthrough": bool(
                 new_agent.allow_mcp_header_passthrough
             ),
-            "strict_mcp_placeholder_resolution": bool(
-                new_agent.strict_mcp_placeholder_resolution
-            ),
             "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,

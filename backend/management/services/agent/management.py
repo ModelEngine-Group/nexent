@@ -352,9 +352,6 @@ async def list_all_agent_info_impl(
                     "allow_mcp_header_passthrough": bool(
                         agent.get("allow_mcp_header_passthrough", False)
                     ),
-                    "strict_mcp_placeholder_resolution": bool(
-                        agent.get("strict_mcp_placeholder_resolution", False)
-                    ),
                     "model_params_override": agent.get("model_params_override"),
                     "enable_protocol_repair_retry": agent.get(
                         "enable_protocol_repair_retry"

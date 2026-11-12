@@ -114,13 +114,6 @@ class AgentInfo(TableBase):
         server_default=text("false"),
         doc="Whether northbound callers may inject per-request HTTP headers into the MCP session via metadata._mcp_headers*",
     )
-    strict_mcp_placeholder_resolution = Column(
-        Boolean,
-        default=False,
-        nullable=False,
-        server_default=text("false"),
-        doc="Whether unresolved ${HeaderName} placeholders in MCP static headers abort the run with 400 (enabled) or fail-closed by dropping the header and continuing (disabled, default)",
-    )
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
     icon_url = Column(String(1024), doc="Object storage key for the agent icon")

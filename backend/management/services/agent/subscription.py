@@ -959,7 +959,7 @@ async def run_agent_stream(
 
     # -------------------------------------------------------------------
     # Phase-1 MCP header passthrough preflight — MUST run BEFORE the
-    # StreamingResponse is committed so AppException (010111 / 010112) surfaces
+    # StreamingResponse is committed so AppException 010111 surfaces
     # as HTTP 400 instead of getting swallowed into an SSE error event later.
     # -------------------------------------------------------------------
     if agent_request.metadata is not None and agent_request.agent_id is not None:

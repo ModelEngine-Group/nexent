@@ -34,7 +34,6 @@ RUN = "run-1"
 def _agent_record(**overrides):
     record = {
         "allow_mcp_header_passthrough": True,
-        "strict_mcp_placeholder_resolution": False,
     }
     record.update(overrides)
     return record
@@ -312,26 +311,6 @@ def test_ut_be_pass_011_unresolved_placeholder_drops_the_whole_header():
     assert names == []
     assert unresolved == ["cookie"]
     assert "${" not in json.dumps(resolved)
-
-
-def test_ut_be_pass_011_strict_mode_raises_placeholder_unresolved(agent_switch):
-    agent_switch["record"] = _agent_record(strict_mcp_placeholder_resolution=True)
-    hosts = [{"url": "http://a/mcp", "headers": {"Cookie": "sid=${Cookie}"}}]
-
-    with pytest.raises(AppException) as exc_info:
-        _apply(hosts, {"_mcp_headers": {"X-Request-Id": "req-1"}})
-
-    assert exc_info.value.error_code == ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED
-    assert exc_info.value.details == {"unresolved_placeholders": ["cookie"]}
-    assert exc_info.value.http_status == 400
-
-
-def test_ut_be_pass_011_lenient_mode_keeps_running_without_the_header(agent_switch):
-    hosts = [{"url": "http://a/mcp", "headers": {"Cookie": "sid=${Cookie}", "X-Keep": "v"}}]
-
-    _apply(hosts, {})
-
-    assert hosts[0]["headers"] == {"X-Keep": "v"}
 
 
 # ---------------------------------------------------------------------------

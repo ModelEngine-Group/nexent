@@ -224,23 +224,15 @@ def validate_mcp_header_passthrough(
 
     This function is **non-mutating** — it never touches ``mcp_host``.  It
     exists so callers that need to fail **before** opening an SSE stream
-    (to surface HTTP 400 + business codes 010111 / 010112 at the northbound
-    entry point) can check early without triggering the full run machinery.
-
-    The two failure modes surface the exact same business codes that
-    :func:`apply_mcp_header_passthrough` uses, so callers get consistent
-    error messages regardless of when they validate.
+    (to surface HTTP 400 + business code 010111 at the northbound entry
+    point) can check early without triggering the full run machinery.
     """
     if not isinstance(mcp_host, list) or not mcp_host:
         return
 
-    strict_mode = bool(
-        agent_record.get("strict_mcp_placeholder_resolution", False)
-    )
-
     mode, passthrough_headers = extract_passthrough_headers(metadata)
 
-    # (a) by_server routing: every URL key must match a configured MCP server.
+    # by_server routing: every URL key must match a configured MCP server.
     if mode == "by_server" and passthrough_headers:
         configured_urls = {
             str(item["url"])
@@ -252,37 +244,6 @@ def validate_mcp_header_passthrough(
             raise AppException(
                 ErrorCode.CHAT_MCP_HEADER_ROUTE_NOT_FOUND,
                 details={"unmatched_server_urls": unmatched},
-            )
-
-    # (b) Strict mode placeholder resolution — needs mcp_host static headers.
-    if strict_mode:
-        passthrough_allowed = bool(
-            agent_record.get("allow_mcp_header_passthrough", False)
-        )
-        unresolved: List[str] = []
-        for item in mcp_host:
-            if not isinstance(item, dict) or "url" not in item:
-                continue
-            server_url = str(item["url"])
-            current_headers = item.get("headers") or {}
-            context_block = (
-                passthrough_headers.get(server_url)
-                if mode == "by_server"
-                else passthrough_headers
-            ) or {}
-            _, _, missing = resolve_placeholders(
-                current_headers,
-                context_block,
-                passthrough_allowed=passthrough_allowed,
-                run_id="preflight",
-                agent_id=int(agent_record.get("agent_id", 0) or 0),
-                server_url=server_url,
-            )
-            unresolved.extend(missing)
-        if unresolved:
-            raise AppException(
-                ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED,
-                details={"unresolved_placeholders": sorted(set(unresolved))},
             )
 
 
@@ -349,9 +310,6 @@ def apply_mcp_header_passthrough(
     passthrough_allowed = bool(
         agent_record.get("allow_mcp_header_passthrough", False)
     )
-    strict_mode = bool(
-        agent_record.get("strict_mcp_placeholder_resolution", False)
-    )
 
     mode, passthrough_headers = extract_passthrough_headers(metadata)
 
@@ -359,8 +317,6 @@ def apply_mcp_header_passthrough(
     # Mutation phase — only starts now.  All validation errors above raised
     # before any call to mcp_host item["headers"] = ... happens.
     # -----------------------------------------------------------------------
-
-    total_unresolved: List[str] = []
 
     for item in mcp_host:
         if not isinstance(item, dict) or "url" not in item:
@@ -377,7 +333,7 @@ def apply_mcp_header_passthrough(
             else passthrough_headers
         ) or {}
 
-        resolved, resolved_names, unresolved = resolve_placeholders(
+        resolved, resolved_names, _unresolved = resolve_placeholders(
             current_headers,
             context_block,
             passthrough_allowed=passthrough_allowed,
@@ -385,7 +341,6 @@ def apply_mcp_header_passthrough(
             agent_id=agent_id,
             server_url=server_url,
         )
-        total_unresolved.extend(unresolved)
 
         # ---- Dynamic injection (static priority merge) ----
         if passthrough_allowed and mode is not None:
@@ -411,14 +366,6 @@ def apply_mcp_header_passthrough(
                 "event=placeholder_resolved placeholders=%s",
                 agent_id, run_id, server_url, sorted(set(resolved_names)),
             )
-
-    # Strict mode — resolved to the same exception that validate_mcp_header_
-    # passthrough raises, so in-stream callers see the same business code.
-    if strict_mode and total_unresolved:
-        raise AppException(
-            ErrorCode.CHAT_MCP_PLACEHOLDER_UNRESOLVED,
-            details={"unresolved_placeholders": sorted(set(total_unresolved))},
-        )
 
     # Audit: caller supplied reserved fields but the agent switch is OFF.
     if not passthrough_allowed and mode is not None:

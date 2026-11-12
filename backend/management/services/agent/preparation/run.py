@@ -110,9 +110,8 @@ async def preflight_mcp_header_passthrough(
     :func:`apply_mcp_header_passthrough` runs *inside* the
     :class:`generate_stream` async generator body, the northbound endpoint has
     already committed to HTTP 200 via :class:`StreamingResponse`, so callers
-    only see an SSE error event, never the HTTP 400 + business codes
-    ``CHAT_MCP_HEADER_ROUTE_NOT_FOUND`` (010111) and
-    ``CHAT_MCP_PLACEHOLDER_UNRESOLVED`` (010112) that the Phase-1 spec
+    only see an SSE error event, never the HTTP 400 + business code
+    ``CHAT_MCP_HEADER_ROUTE_NOT_FOUND`` (010111) that the Phase-1 spec
     promises.
 
     Callers must **invoke this function BEFORE** the northbound route returns
@@ -125,9 +124,9 @@ async def preflight_mcp_header_passthrough(
     Raises
     ------
     AppException
-        010111 (unmatched ``by_server`` URL) or 010112 (strict mode unresolved
-        placeholder) when the caller-supplied metadata cannot be applied.
-        Surface these as HTTP 400 — never swallow them into an SSE error.
+        010111 (unmatched ``by_server`` URL) when the caller-supplied metadata
+        cannot be applied.  Surface this as HTTP 400 — never swallow it into
+        an SSE error.
     """
     from management.services.agent.mcp_passthrough import (
         validate_mcp_header_passthrough,

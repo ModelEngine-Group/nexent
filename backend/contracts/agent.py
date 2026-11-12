@@ -413,10 +413,8 @@ class AgentInfoRequest(BaseModel):
     # NULL means inherit model defaults.
     model_params_override: Optional[Dict[str, Any]] = None
     allow_chat_metadata: Optional[bool] = None
-    # Phase 1 northbound MCP header passthrough per-agent switches.
-    # Both default to False so Phase 1 is opt-in per agent.
+    # Phase 1 northbound MCP header passthrough per-agent switch (opt-in).
     allow_mcp_header_passthrough: Optional[bool] = None
-    strict_mcp_placeholder_resolution: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
@@ -458,7 +456,6 @@ class ExportAndImportAgentInfo(BaseModel):
     provide_run_summary: bool
     allow_chat_metadata: bool = False
     allow_mcp_header_passthrough: bool = False
-    strict_mcp_placeholder_resolution: bool = False
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
