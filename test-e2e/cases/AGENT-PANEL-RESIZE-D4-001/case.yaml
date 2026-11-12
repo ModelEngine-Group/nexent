@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-EDITOR
+case:
+  case_id: AGENT-PANEL-RESIZE-D4-001
+  feature_id: AGENT-EDITOR-WORKFLOWS
+  requirement_ids: [AGENT-PANEL-RESIZE-20261111]
+  business_rule_ids: [AGENT-EDITOR-RULE-008]
+  title: Drag Agent editor panels and restore normal widths after mode changes
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Measure real browser widths after pointer drags and preserve editor state across layout modes.
+  preconditions:
+  - Local frontend is available with isolated controlled authorized tenant APIs and an editable Agent fixture.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Enter the Agent detail editor and drag the NL2Agent boundary right then left.
+    expected: Width changes in each direction and configuration retains at least 800px when space permits; dragging to the maximum at desktop and narrower desktop sizes keeps Publish on the workflow controls row.
+  - order: 2
+    action: Open debug, drag its boundary left then right and beyond both limits, and repeat at a narrower desktop viewport.
+    expected: Debug changes width in both directions and stays within its proportional limits without squeezing configuration out.
+  - order: 3
+    action: Close and reopen panels, enter and exit debug fullscreen and comparison, then inspect outgoing requests.
+    expected: Normal widths and mounted content are retained, hidden or expanded splits cannot resize, and no Agent write or model run occurs.
+  expected_results:
+  - NL2Agent and debug both respond to pointer drags in the real editor layout.
+  - Bounds keep both sides usable when resizing and narrowing the viewport.
+  - Normal widths and content survive layout transitions without business mutations.
+  forbidden_side_effects:
+  - No model run, Agent update, publication or persistent server resource creation.
+  actor: Authorized controlled tenant user
+  journey: [Open Agent editor, Resize NL2Agent, Open debug, Resize debug, Change layout modes, Verify preserved state]
+  final_business_result:
+  - Users allocate editor space to generation, configuration and debugging without losing their work.
+  failure_evidence: [Measured pane widths, browser assertions and sanitized write counts]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Both panes resize in both directions in the real editor.
+    steps: [1, 2]
+    expected_results: [1]
+  - id: AC-02
+    description: Excessive drags and a narrower viewport preserve bounded usable panels.
+    steps: [2]
+    expected_results: [2]
+  - id: AC-03
+    description: Layout transitions retain normal sizes and mounted content with no business writes.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
