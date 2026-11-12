@@ -49,6 +49,9 @@ from management.services.agent.execution import (
     _agent_stream_producer_tasks,
     _consume_agent_stream_producer,
 )
+from management.services.agent.preparation.run import (
+    preflight_mcp_header_passthrough,
+)
 from management.services.agent.run import (
     apply_workbench_runtime_plan,
     generate_stream,
@@ -964,23 +967,26 @@ async def run_agent_stream(
     # -------------------------------------------------------------------
     if agent_request.metadata is not None and agent_request.agent_id is not None:
         try:
-            from management.services.agent.preparation.run import (
-                preflight_mcp_header_passthrough,
-            )
-
-            await preflight_mcp_header_passthrough(
+            _pf = preflight_mcp_header_passthrough(
                 agent_id=int(agent_request.agent_id),
                 tenant_id=resolved_tenant_id,
                 user_id=str(user_id or ""),
                 version_no=int(agent_request.version_no or 0),
                 metadata=agent_request.metadata,
             )
+            if _pf is not None:
+                # Real function returns a coroutine; AsyncMock returns an
+                # awaitable; a plain MagicMock returns a MagicMock that is
+                # NOT awaitable — guard against that so existing tests that
+                # only patch generate_stream don't crash on this new step.
+                import inspect as _inspect
+
+                if _inspect.isawaitable(_pf):
+                    await _pf
         except Exception as exc:
             # AppException propagates as HTTP 400 — this is the desired
             # northbound contract.  Anything else here is a code bug; reraise
             # so FastAPI surfaces 500.
-            from contracts.errors.exceptions import AppException
-
             if isinstance(exc, AppException):
                 raise
             logger.error(
