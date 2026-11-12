@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-RESUME-CACHE-20261112
+  change_type: bugfix
+  bug_id: CHAT-RESUME-CACHE-20261112
+  title: Invalidate live-run history before checking conversation recovery
+  description: Discard history cached during a local run before deciding whether its conversation needs reconnection.
+  observed_behavior: A cached streaming snapshot survives local completion and triggers history import and an unnecessary resume, replacing the completed answer.
+  expected_behavior: Completion invalidates the run's cached detail before recovery reads; completed or failed reads never replace live output, while genuinely disconnected streams remain recoverable.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Resume UT covers cache invalidation at run start but does not repopulate the shared cache during generation or resolve that read after completion.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Discard both pending and settled streaming snapshots cached during generation before the idle recovery check.
+    - Completed detail and failed fresh reads preserve the live answer without history import or reconnection.
+    - Fresh streaming detail still resumes the correct conversation; idle rerenders retain activation-level cache sharing.
+    reason: Frontend hook/cache timing only; no Python, API, deployment or business-contract change. Existing route D4 forbids generation and cannot prove this condition. Strengthen the owning UT with the real loader and history adapter; no duplicate formal Case is needed.
+    test_selectors:
+    - frontend/tests/workbench/ConversationResume.test.tsx
+    - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    - frontend/tests/workbench/ConversationDetails.test.ts
+  notes: >-
+    Design: ../nexent-doc/docs/Developing/chat-conversation-stream-recovery/design.md.
+    Baseline origin/develop 0f3a8135f. Inspected CHAT-SIDEBAR-RULE-010 and
+    RULE-005, CHAT-ROUTE-D4-001 contract/script, existing ConversationResume,
+    ConversationResumeBranch and ConversationDetails tests. The older
+    chat-workbench-session-state SPEC referenced by WB-HISTORY-DETAIL-20261022
+    is unavailable in the local document checkout. D1 adds no distinct proof
+    beyond the focused UT; D2/D3/D5 contracts are unchanged. Browser blanking
+    remains outside the claim of hook-level verification. No formal assets or
+    generated views require changes other than validating this Change record.
