@@ -673,10 +673,9 @@ describe("administrator page and cleanup confirmation", () => {
       next_cursor: null,
     });
     const complete = vi.fn();
-    render(
-      <CleanupDialog tenant="tenant" onClose={vi.fn()} onComplete={complete} />,
-      { wrapper }
-    );
+    render(<CleanupDialog onClose={vi.fn()} onComplete={complete} />, {
+      wrapper,
+    });
     expect(api.cleanup).not.toHaveBeenCalled();
     const days = screen.getByRole("spinbutton", {
       name: "trajectory.beforeDays",

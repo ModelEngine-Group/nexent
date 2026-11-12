@@ -22,9 +22,7 @@ def authorize_capture(identity):
 def create_local_processor(config, metadata_provider):
     """Keep environment reads in the backend configuration module."""
     capturing = config.ENABLE_TELEMETRY and config.MONITORING_PROVIDER == "local_file"
-    maintaining = config.TRAJECTORY_CLEANUP_ENABLED and (
-        config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
-    )
+    maintaining = config.MONITORING_PROVIDER == "local_file" or config.TRAJECTORY_READ_ENABLED
     if not capturing and not maintaining:
         return None
     from .trajectory_processor import LocalTrajectoryProcessor
@@ -71,3 +69,16 @@ def conversation_deleted(identity):
     from management.db.conversation.trajectory_catalog import TrajectoryCatalog
 
     return TrajectoryCatalog().conversation_deleted(identity.conversation_id, identity.owner_user_id)
+
+
+def request_conversation_cleanup(conversation_ids, owner_user_id):
+    """Submit confirmed deletions without doing filesystem work on the HTTP loop."""
+    from contracts.constants import environment as config
+
+    if config.MONITORING_PROVIDER != "local_file" and not config.TRAJECTORY_READ_ENABLED:
+        return True
+    from .bootstrap import local_trajectory_processor
+
+    return local_trajectory_processor is not None and local_trajectory_processor.request_conversation_cleanup(
+        conversation_ids, owner_user_id,
+    )

@@ -6,8 +6,8 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from contracts.conversation import MessageRequest, MessageUnit
 from contracts.agent import WorkbenchSessionConfig
+from contracts.conversation import MessageRequest, MessageUnit
 from management.db.conversation.repository import get_conversation_history
 from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (
@@ -44,8 +44,11 @@ def prepare_creation_history(
     selected_model_id: int | None = None,
     retry_user_message_id: int | None = None,
     retry_message_index: int | None = None,
+    message_receipt: dict[str, int | None] | None = None,
 ) -> tuple[int, int]:
     """Verify the owner and creation mode, then persist the current user turn."""
+    if message_receipt is not None:
+        message_receipt.clear()
     if mode not in _CREATION_MODES:
         raise ValueError("Unsupported Workbench creation mode")
     if conversation_id is None:
@@ -106,13 +109,15 @@ def prepare_creation_history(
                 for item in history["message_records"]
             ):
                 raise ValueError("Creation retry target has no assistant response")
+            if message_receipt is not None:
+                message_receipt["message_id"] = user_record.get("message_id")
             return resolved_id, assistant_index
         next_index = max(
             (int(item["message_index"]) for item in history["message_records"]),
             default=-1,
         ) + 1
 
-    save_message(
+    message_id = save_message(
         MessageRequest(
             conversation_id=resolved_id,
             message_idx=next_index,
@@ -123,6 +128,8 @@ def prepare_creation_history(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if message_receipt is not None:
+        message_receipt["message_id"] = message_id
     return resolved_id, next_index + 1
 
 

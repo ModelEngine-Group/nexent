@@ -342,7 +342,7 @@ def runtime(tmp_path, monkeypatch):
 
     try:
         yield SimpleNamespace(root=directory, store=store, local=local, remote=remote, provider=provider,
-                              manager=manager, run=run, spans=spans, client=cold_client,
+                              manager=manager, threads=threads, run=run, spans=spans, client=cold_client,
                               catalog=catalog, observers=observers, http=scripted_provider,
                               configure=configure, flush_remote=flush_remote, process_client=process_client)
     finally:

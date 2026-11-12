@@ -6812,7 +6812,7 @@
   "trajectory.cleanup": "Clean up traces",
   "trajectory.confirmCleanup": "Confirm cleanup",
   "trajectory.stopCleanup": "Stop subsequent batches",
-  "trajectory.cleanupScope": "All users, agents and conversations of tenant {{tenant}}",
+  "trajectory.cleanupScope": "All users, agents and conversations of the current tenant",
   "trajectory.cleanupWarning": "Delete original traces older than the specified days, independently of list filters. Chat messages remain. Closing stops subsequent batches; completed deletions remain.",
   "trajectory.cleanupContext": "Cleanup uses the authenticated tenant. Select that tenant explicitly to continue",
   "trajectory.beforeDays": "Delete traces older than days (1–3650)",

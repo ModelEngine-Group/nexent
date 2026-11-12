@@ -2,20 +2,12 @@
 
 import { useState } from "react";
 import { DatePicker, Popover, Tag, Tooltip } from "antd";
-import { useQuery } from "@tanstack/react-query";
 import type { ColumnsType } from "antd/es/table";
-import {
-  ChevronRight,
-  Filter,
-  Search,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { ChevronRight, Filter, Search, Trash2 } from "lucide-react";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { useTranslation } from "react-i18next";
-import { getTenant } from "@/services/tenantService";
 import type { User } from "@/types/auth";
 import type {
   DirectoryField,
@@ -68,13 +60,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
     ...paging,
     ...sorting,
   });
-  const tenantDetails = useQuery({
-    queryKey: ["trajectory-fixed-tenant", user.tenantId],
-    queryFn: () => getTenant(user.tenantId!),
-    enabled: user.role === "ADMIN" && !!user.tenantId,
-    retry: false,
-    staleTime: 60_000,
-  });
   const change = (next: TrajectoryFilters) => {
     setFilters(next);
     setPaging((value) => ({ ...value, page: 1 }));
@@ -119,17 +104,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
     records.refresh();
   };
   const tenant = filters.tenant_id;
-  const tenantRecord = records.data?.items.find(
-    (row) => row.tenant_id === user.tenantId
-  );
-  const fixedTenantName =
-    (tenantDetails.data?.tenant_name !== user.tenantId
-      ? tenantDetails.data?.tenant_name
-      : undefined) ||
-    (tenantRecord?.tenant_name !== tenantRecord?.tenant_id
-      ? tenantRecord?.tenant_name
-      : undefined) ||
-    "—";
   const canCleanup = !!tenant && tenant === user.tenantId;
   const sortOrder = (field: RecordsRequest["sort_by"]) =>
     sorting.sort_by === field
@@ -206,9 +180,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
           <span>
             {formatMetric(row.round_count, 0)} {t("trajectory.roundUnit")}
           </span>
-          <small>
-            {t("trajectory.executionCount", { count: row.execution_count })}
-          </small>
         </div>
       ),
     },
@@ -379,12 +350,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
           </p>
         </div>
         <div className="trajectory-page-actions">
-          <span className="trajectory-role">
-            <ShieldCheck size={16} />
-            {t(
-              user.role === "SU" ? "trajectory.superAdmin" : "trajectory.admin"
-            )}
-          </span>
           <Tooltip title={canCleanup ? "" : t("trajectory.cleanupContext")}>
             <span>
               <StandardButton
@@ -402,7 +367,7 @@ export function ObservabilityCenter({ user }: { user: User }) {
         className="trajectory-panel trajectory-filters"
         data-role={user.role}
       >
-        {user.role === "SU" ? (
+        {user.role === "SU" && (
           <label>
             <span>{t("trajectory.tenants")}</span>
             <DirectoryFilter
@@ -411,11 +376,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
               value={tenant}
               onChange={(option) => directoryChange("tenant_id", option)}
             />
-          </label>
-        ) : (
-          <label>
-            <span>{t("trajectory.tenants")}</span>
-            <div className="trajectory-fixed-tenant">{fixedTenantName}</div>
           </label>
         )}
         <label>
@@ -609,7 +569,6 @@ export function ObservabilityCenter({ user }: { user: User }) {
       {cleaning && canCleanup && (
         <CleanupDialog
           key={tenant}
-          tenant={tenant!}
           onClose={() => setCleaning(false)}
           onComplete={refresh}
         />

@@ -14,6 +14,7 @@ import pytest
 from infrastructure.observability.trajectory_runtime import (
     authorize_capture,
     create_local_processor,
+    request_conversation_cleanup,
 )
 from infrastructure.observability.trajectory_store import (
     CaptureIdentity,
@@ -228,11 +229,25 @@ def test_scheduled_cleanup_yields_after_work_budget_and_retries_remaining(
     assert all(event["failed_runs"] == 0 and event["counts_complete"] for event in events)
 
 
-def test_local_provider_keeps_cleanup_when_capture_and_reads_are_disabled(tmp_path):
+def test_local_provider_keeps_deletion_worker_when_capture_reads_and_retention_are_disabled(tmp_path):
     config = configuration(
         tmp_path, MONITORING_PROVIDER="local_file", TRAJECTORY_READ_ENABLED=False,
     )
     assert not config.ENABLE_TELEMETRY
     assert create_local_processor(config, lambda: None) is not None
     config.TRAJECTORY_CLEANUP_ENABLED = False
-    assert create_local_processor(config, lambda: None) is None
+    assert create_local_processor(config, lambda: None) is not None
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_deletion_handoff_uses_lifespan_owned_processor(monkeypatch, present):
+    from contracts.constants import environment as config
+
+    monkeypatch.setattr(config, "MONITORING_PROVIDER", "local_file")
+    processor = SimpleNamespace(request_conversation_cleanup=Mock(return_value=True)) if present else None
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", SimpleNamespace(
+        local_trajectory_processor=processor,
+    ))
+    assert request_conversation_cleanup([123], "owner") is present
+    if processor:
+        processor.request_conversation_cleanup.assert_called_once_with([123], "owner")

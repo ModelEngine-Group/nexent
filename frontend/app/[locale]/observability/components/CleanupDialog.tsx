@@ -10,11 +10,9 @@ import { formatMetric, formatTraceTime } from "@/lib/trajectory";
 import { TrajectoryError } from "./TrajectoryFeedback";
 
 export function CleanupDialog({
-  tenant,
   onClose,
   onComplete,
 }: {
-  tenant: string;
   onClose: () => void;
   onComplete: () => void;
 }) {
@@ -63,7 +61,7 @@ export function CleanupDialog({
         <Alert
           type="warning"
           showIcon
-          title={t("trajectory.cleanupScope", { tenant })}
+          title={t("trajectory.cleanupScope")}
           description={t("trajectory.cleanupWarning")}
         />
         <label>

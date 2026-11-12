@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TRAJECTORY-CREATOR-CAPTURE-20261112
+  change_type: bugfix
+  bug_id: CHAT-TRAJECTORY-CREATOR-CAPTURE-20261112
+  title: 修复配置页和工作台智能体对话创建漏采
+  description: 在创建会话保存后为共享创建流绑定可信采集身份和服务端消息收据，覆盖新建、续聊与重试。
+  observed_behavior: 创建流在会话保存前构造，执行时未绑定用户、租户和最终会话身份，本地处理器跳过根Span。
+  expected_behavior: 按已保存会话采集，根执行者为系统创建助手，业务目标独立保存；消息不重复写入，身份不泄漏且流正确关闭。
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: 现有creator UT只验证历史写入；CAPTURE-D3直接从已绑定SDK上下文启动，未覆盖创建编排到实际运行的采集边界。
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - CHAT-TRAJECTORY
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - CHAT-TRAJECTORY-CAPTURE-D3-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - 配置页与工作台新建、续聊、重试取得最终会话身份及可信消息ID，系统执行者与业务目标分离。
+    - 跨租户/用户运行隔离，消费方上下文恢复，保存或执行失败及取消、关闭正确释放资源，消息保存次数不变。
+    reason: 补齐共享创建编排的身份和流生命周期回归，保留既有历史服务测试；正式D3另验证真实SDK/HTTP/文件边界，不新增重复D1。
+    test_selectors:
+    - test/backend/services/test_creator_trajectory_capture.py
+    - test/backend/services/test_creator_execution.py
+    - test/backend/services/test_creator_turn_failures.py
+    - test/backend/services/test_workbench_creation_history_service.py
+    - test/backend/services/test_workbench_creation_history_coverage.py
+    - test/backend/services/trajectory/test_source_receipts.py
+    - test/backend/services/test_shared_creator_runtime.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_nl2skill_service.py
+    - test/backend/services/test_nl2skill_stream.py
+    - test/backend/app/test_nl2agent_saved_preferences.py
+    - test/backend/app/test_nl2skill_saved_preferences.py
+    - test/backend/app/test_agent_app.py
+  notes: SPEC nexent-doc/docs/Developing/chat-local-file-trajectory/design.md 创建智能体时的采集身份；task CREATE-01/02。Baseline
+    dev/trace 746cc2d45 plus uncommitted conversation deletion changes. Runtime responsibility inherited. D3 owns
+    local HTTP, ThreadManager and private files with teardown; PG remains controlled and full integration acceptance
+    remains user-deferred.

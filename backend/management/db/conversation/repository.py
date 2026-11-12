@@ -1471,7 +1471,7 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
 
     Args:
         conversation_id: Conversation ID (integer)
-        user_id: Reserved parameter for updated_by field
+        user_id: Conversation owner and updated_by value
 
     Returns:
         bool: Whether the operation was successful
@@ -1491,7 +1491,11 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
             .where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
             .values(update_data)
         )
+        if user_id:
+            conversation_stmt = conversation_stmt.where(ConversationRecord.created_by == user_id)
         conversation_result = session.execute(conversation_stmt)
+        if conversation_result.rowcount == 0:
+            return False
 
         # 2. Mark related messages as deleted
         message_stmt = (

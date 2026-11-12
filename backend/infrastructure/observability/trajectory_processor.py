@@ -18,7 +18,7 @@ from .trajectory_audit import cleanup_audit
 from .trajectory_identity import invocation_attributes
 from .trajectory_io import digest, json_chunks
 from .trajectory_otlp import span_request
-from .trajectory_store import CaptureIdentity, business_id, timestamp
+from .trajectory_store import CaptureIdentity, business_id, component, timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
         self.queue_max_bytes = queue_max_bytes
         self.run_queue_max_bytes = run_queue_max_bytes
         self._queue = queue.Queue(maxsize=10000)
+        self._deletions = queue.Queue(maxsize=1000)
         self._lock = threading.RLock()
         self._active = {}
         self._started = {}
@@ -132,6 +133,68 @@ class LocalTrajectoryProcessor(SpanProcessor):
     def request_stop(self):
         self._accepting = False
         self._stop.set()
+
+    def request_conversation_cleanup(self, conversation_ids, owner_user_id):
+        """Queue confirmed deletions independently of retention cleanup enablement."""
+        component(owner_user_id)
+        ids = {business_id(str(value)) for value in conversation_ids}
+        accepted = True
+        with self._lock:
+            if not self._accepting:
+                return False
+            for conversation_id in ids:
+                try:
+                    self._deletions.put_nowait((owner_user_id, conversation_id, 0, 0))
+                except queue.Full:
+                    accepted = False
+        return accepted
+
+    def _delete_conversation_files(self):
+        """One bounded batch per worker tick; PG and file locks remain authoritative."""
+        store = self._maintenance_store
+        if store is None:
+            return
+        try:
+            owner, conversation, after_turn, ready_at = self._deletions.get_nowait()
+        except queue.Empty:
+            return
+        retry = False
+        try:
+            if time.monotonic() < ready_at:
+                retry = True
+                return
+            ready_at = 0
+            deadline = time.monotonic() + 2
+            for identity in store.identities(owner_user_id=owner, conversation_ids=[conversation]):
+                if not self.deleted_conversation_check:
+                    raise RuntimeError("Conversation deletion verification is unavailable")
+                if not self.deleted_conversation_check(identity):
+                    continue
+                for run_id, writer in list(self._writers.items()):
+                    if writer.identity.owner_user_id == owner and writer.identity.conversation_id == conversation:
+                        self._release_denied_writer(run_id)
+                result = {}
+                with cleanup_audit(
+                    source="conversation_deleted", tenant_id=identity.tenant_id,
+                    conversation_id=conversation, actor_id=owner, before_days=None,
+                    cutoff_at=None, counts=result,
+                ):
+                    result.update(store.cleanup(
+                        identity, force_reason="conversation_deleted", after_turn=after_turn,
+                        deadline=deadline,
+                    ))
+                retry = bool(result["pending_runs"] or result["failed_runs"] or result["next_turn"] is not None)
+                after_turn = 0 if result["pending_runs"] or result["failed_runs"] else result["next_turn"] or 0
+        except Exception:  # noqa: BLE001 - Retry filesystem and PG failures without disrupting span processing.
+            retry = True
+            logger.warning("trajectory.conversation_cleanup_deferred", exc_info=False)
+        finally:
+            self._deletions.task_done()
+            if retry:
+                try:
+                    self._deletions.put_nowait((owner, conversation, after_turn, ready_at or time.monotonic() + 1))
+                except queue.Full:
+                    logger.warning("trajectory.conversation_cleanup_queue_full", exc_info=False)
 
     def _enqueue(self, run_id, kind, data, size=0):
         with self._lock:
@@ -452,7 +515,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     except Exception:  # noqa: BLE001 - Another process can own the actual execution file lock.
                         logger.debug("trajectory.maintenance_recovery_deferred", exc_info=False)
             store.reconcile(identity)
-            if self._cleanup_enabled:
+            if self._cleanup_enabled or self.deleted_conversation_check:
                 now = store.clock()
                 cutoff = now - timedelta(days=store.retention_days)
                 result = {}
@@ -461,16 +524,18 @@ class LocalTrajectoryProcessor(SpanProcessor):
                     before_days=store.retention_days, cutoff_at=timestamp(cutoff), counts=result, emit_empty=False,
                 ):
                     deleted = self.deleted_conversation_check(identity) if self.deleted_conversation_check else False
-                    result.update(store.cleanup(
-                        identity,
-                        after_turn=after_turn,
-                        force_reason="conversation_deleted" if deleted else None,
-                        now=now,
-                        cutoff_at=cutoff,
-                        deadline=time.monotonic() + 2,
-                    ))
-                has_more = result["next_turn"] is not None
-                last_turn = result["next_turn"] if has_more else last_turn
+                    if self._cleanup_enabled or deleted:
+                        result.update(store.cleanup(
+                            identity,
+                            after_turn=after_turn,
+                            force_reason="conversation_deleted" if deleted else None,
+                            now=now,
+                            cutoff_at=cutoff,
+                            deadline=time.monotonic() + 2,
+                        ))
+                if result:
+                    has_more = result["next_turn"] is not None
+                    last_turn = result["next_turn"] if has_more else last_turn
             self._maintenance_pending = (identity, last_turn) if has_more else None
 
     def _work(self, cancel_event):
@@ -522,6 +587,7 @@ class LocalTrajectoryProcessor(SpanProcessor):
                         self._snapshot_active()
                         next_snapshot = time.monotonic() + self.flush_interval
                     self._publish_completed()
+                    self._delete_conversation_files()
                     self._maintain()
                 except Exception:  # noqa: BLE001 - Isolate telemetry failures from Agent execution and shutdown.
                     logger.warning("trajectory.storage_flush_failed", exc_info=False)

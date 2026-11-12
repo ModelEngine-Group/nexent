@@ -26,6 +26,10 @@
 
 配置子进程屏蔽本地 dotenv，只保留显式测试环境，从产品环境模块和工厂创建维护器；调用真实维护周期但不启动受管后台线程。1001/101 运行工作负载使用产品写入和归档接口构造，因此包含真实 meta 提交成本，正式执行时需记录准备时间。这些脚本均未执行，不据其存在宣称定时唤醒、端到端延迟或工作负载达标。
 
+## 会话删除清理增补
+
+`test_deleted_conversation_reclaims_fresh_rounds_in_fixed_agent_directory` 验证未过期多轮文件按初始Agent目录清理及重复清理幂等；`test_deleted_conversation_waits_for_other_process_file_lock` 使用独立子进程持锁，验证先标记待删、锁释放后冷打开重试删除。沿用本Case独占目录、canary hash和finally子进程回收，不使用共享资源；两项脚本仅静态收集，完整PG/HTTP/受管运行证明仍按下节暂缓。
+
 ## 尚缺的完整验收断言
 
 AC-02/03 的真实会话删除及聊天/附件生命周期；AC-04 的真实 PG 最近 Agent 分组、聊天定位与旧游标；AC-05 的受管定时线程启停、唤醒与周期触发；AC-06 的真实 PG 跨用户多批行为。已有 QUERY-D2 的固定截止、100 文件 HTTP 批次和缓存过期断言保留复用；其新增 `test_trj_query_content_chunk_rechecks_state_after_physical_read` 先完成实际正文解码，再注入到期、真实本地清理或受控目录撤权，要求当前已读块不作为成功正文返回，后续重试也拒绝。该 HTTP 脚本已静态收集，未运行，PG 权限仍是受控边界。新增文件配额及 2 秒脚本同样尚未运行；完整运行仍需核验协议层合并后的批次和资源清理。跨宿主共享卷语义由 DEPLOYMENT-D5 验证。

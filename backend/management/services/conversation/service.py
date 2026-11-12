@@ -21,6 +21,7 @@ from contracts.agent import AgentRequest
 from contracts.conversation import MessageRequest, MessageUnit
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
+from infrastructure.observability.trajectory_runtime import request_conversation_cleanup
 from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message_id, get_latest_user_message_id, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 # Public read facade consumed by Agent subscriptions; these are intentional re-exports.
 from management.db.conversation.repository import (  # noqa: F401
@@ -682,6 +683,22 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
         raise Exception(str(e))
 
 
+def _request_trajectory_cleanup(conversation_ids, user_id):
+    """Keep committed deletes successful; maintenance retries a missed handoff."""
+    if not conversation_ids:
+        return
+    try:
+        if request_conversation_cleanup(conversation_ids, user_id):
+            return
+    except Exception as error:  # noqa: BLE001 - A telemetry handoff cannot roll back the committed conversation delete.
+        logger.warning(
+            "trajectory.conversation_cleanup_deferred count=%s exception_type=%s",
+            len(conversation_ids), type(error).__name__,
+        )
+        return
+    logger.warning("trajectory.conversation_cleanup_deferred count=%s", len(conversation_ids))
+
+
 def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
     """
     Delete specified conversation
@@ -708,6 +725,7 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
 
+        _request_trajectory_cleanup([conversation_id], user_id)
         return True
     except Exception as e:
         logging.error(f"Failed to delete conversation: {str(e)}")
@@ -749,6 +767,7 @@ def delete_conversations_batch_service(conversation_ids: List[int], user_id: str
             )
 
         deleted_ids = delete_conversations_batch(conversation_ids, user_id)
+        _request_trajectory_cleanup(deleted_ids, user_id)
         deleted_set = set(deleted_ids)
         failed_ids = [cid for cid in conversation_ids if cid not in deleted_set]
 

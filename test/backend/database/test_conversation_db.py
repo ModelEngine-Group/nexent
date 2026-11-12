@@ -514,7 +514,7 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
     ok = delete_conversation(999)
 
     assert ok is False
-    assert session.execute.call_count == 5
+    assert session.execute.call_count == 1
 
 
 # =============================================================================

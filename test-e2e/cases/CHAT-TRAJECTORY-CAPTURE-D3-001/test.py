@@ -426,3 +426,111 @@ def test_capture_independent_process_reads_published_facts_without_runtime_cache
         root = next(n for n in result['nodes'] if n['parent_id'] is None)
         assert root['display_trace_id'] == '123' and root['model_call_count'] == 1
         assert client.get('/trajectory/conversations/123', headers={'Authorization': 'user'}).status_code == 403
+
+
+@pytest.mark.parametrize('workbench', [False, True])
+def test_capture_creator_entrypoints_bind_saved_identity_and_cold_read(runtime, monkeypatch, workbench):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from contracts.agent import NL2AgentRunRequest, SystemAgentRef
+    from contracts.authentication import AuthenticatedIdentity
+    from management.services.conversation import creation_history, creator_execution
+    from nexent.core.agents.agent_model import AgentRunInfo
+    from nexent.core.utils.observer import MessageObserver
+    from nexent.monitor import get_agent_monitoring_context
+    from services import nl2agent_service
+
+    history = {'agent_id': 77, 'target': {'type': 'agent', 'id': 201}, 'message_records': []}
+    saved, run_infos = [], []
+    runtime.catalog.agent_id = '77'
+    monkeypatch.setattr(creator_execution.system_agent_provider, 'get_creator_ref',
+                        lambda *_: SystemAgentRef('shared', 'nl2agent_main', 77, 0))
+    monkeypatch.setattr(creator_execution, 'authorize_target', lambda target, *_: target)
+    monkeypatch.setattr(creator_execution, 'get_conversation_history', lambda *_: history)
+    monkeypatch.setattr(creation_history, 'get_conversation_history', lambda *_: history)
+    monkeypatch.setattr(creation_history, 'create_new_conversation', lambda **kw: (
+        history.update(agent_id=kw['agent_id'], target=kw['target']) or {'conversation_id': 123}))
+    monkeypatch.setattr(creation_history, 'save_message_unit', lambda **kw: None)
+    monkeypatch.setattr('management.services.conversation.model_preferences.read_model_preferences',
+                        lambda *_: {'model_parameter_preferences': {}, 'selected_model_id': None})
+    monkeypatch.setattr(nl2agent_service, 'runtime_thread_manager', runtime.threads)
+
+    def save(message, **kwargs):
+        identity = len(saved) + 10
+        saved.append((message.role, message.message_idx, identity))
+        history['message_records'].append({
+            'role': message.role, 'message_index': message.message_idx, 'message_id': identity,
+            'message_content': message.message[0].content if message.message else '', 'minio_files': None,
+        })
+        return identity
+
+    monkeypatch.setattr(creation_history, 'save_message', save)
+
+    def reply(request, number, emit):
+        emit('<final_answer>created</final_answer>')
+        emit(done=True)
+
+    with runtime.http(reply) as (base, requests):
+        async def build(**kwargs):
+            info = AgentRunInfo(
+                query=kwargs['request'].query, observer=MessageObserver(),
+                agent_config=AgentConfig(name='nl2agent_main', agent_id=77, version_no=0,
+                                         description='Controlled creator', model_name='model', tools=[], max_steps=2),
+                model_config_list=[ModelConfig(cite_name='model', model_name='model', url=base, api_key='synthetic')],
+            )
+            run_infos.append(info)
+            return info
+
+        monkeypatch.setattr(nl2agent_service, 'build_nl2agent_run_info', AsyncMock(side_effect=build))
+
+        async def execute():
+            config = ({'schema_version': 4, 'mode': 'agent_create', 'agent_mounts': [], 'skill_mounts': []}
+                      if workbench else None)
+            before = get_agent_monitoring_context()
+            for turn in range(3):
+                request = NL2AgentRunRequest(
+                    query='build' if turn != 1 else 'edit', agent_id=201,
+                    conversation_id=None if turn == 0 else 123, workbench_config=config,
+                    retry_user_message_id=10 if turn == 2 else None,
+                )
+                stream, conversation = await creator_execution.start_creation_turn(
+                    request, kind='agent', user_id='owner', tenant_id='tenant',
+                    stream_factory=lambda effective, ref: nl2agent_service.create_nl2agent_stream(
+                        effective, 'tenant', 'en', identity=AuthenticatedIdentity('owner', 'tenant'),
+                        system_ref=ref,
+                    ),
+                )
+                assert conversation == 123
+                events = []
+                async for event in stream:
+                    events.append(event)
+                    assert get_agent_monitoring_context() is before
+                assert any('created' in event for event in events)
+                assert get_agent_monitoring_context() is before
+
+        asyncio.run(execute())
+        assert len(requests) == 3
+    assert [role for role, _, _ in saved] == ['user', 'assistant', 'user', 'assistant', 'assistant']
+    assert history['agent_id'] == 77 and history['target'] == {'type': 'agent', 'id': 201}
+    assert all(info.thread_future.done() and info.attempt_outcome == 'completed' for info in run_infos)
+    roots = [span for span in runtime.spans() if span['name'] == 'agent.run']
+    assert len(roots) == 3
+    values = sorted((attrs(span) for span in roots), key=lambda item: int(item['nexent.source_message_id']))
+    assert [item['nexent.source_message_id'] for item in values] == ['10', '10', '12']
+    assert all(str(item['agent.id']) == '77' for item in values)
+    assert all(str(item['nexent.trace_id']) == '123' for item in values)
+    assert all(str(item['agent.version_no']) == '0' for item in values)
+    meta_path = next(runtime.root.rglob('meta.json'))
+    assert meta_path.parent.parts[-4:] == ('tenant', 'owner', '77', '123')
+    meta = json.loads(meta_path.read_text())
+    assert len(meta['runs']) == 3
+    with runtime.client() as client:
+        for run in meta['runs']:
+            result = data(client.get('/trajectory/conversations/123/snapshot',
+                                     params={'trajectory_id': run['trajectory_id']},
+                                     headers={'Authorization': 'admin'}))
+            root = next(node for node in result['nodes'] if node['parent_id'] is None)
+            assert root['agent_version_no'] == 0
+            assert run['root_agent_id'] == '77'
+            assert len([node for node in result['nodes'] if node['kind'] == 'model']) == 1

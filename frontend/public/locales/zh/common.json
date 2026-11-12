@@ -6810,7 +6810,7 @@
   "trajectory.cleanup": "清理轨迹",
   "trajectory.confirmCleanup": "确认清理",
   "trajectory.stopCleanup": "停止后续批次",
-  "trajectory.cleanupScope": "清理租户 {{tenant}} 的全部用户、智能体和会话",
+  "trajectory.cleanupScope": "清理当前租户的全部用户、智能体和会话",
   "trajectory.cleanupWarning": "此操作删除指定天数以前的原始轨迹。范围独立于列表筛选，聊天记录保留。关闭弹窗会停止后续批次，已完成删除保留。",
   "trajectory.cleanupContext": "清理绑定当前登录租户；请明确选择该租户后操作",
   "trajectory.beforeDays": "清理多少天以前（1–3650）",

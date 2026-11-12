@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql
 
+# isort: split
 from management.db.conversation import repository as db
 
 
@@ -73,3 +74,11 @@ def test_batch_delete_locks_owned_live_conversations_in_id_order_before_updates(
     assert "UPDATE nexent.conversation_record_t" in sql(statements[1])
     assert "UPDATE nexent.conversation_message_t" in sql(statements[2])
     assert len(statements) == 6
+
+
+def test_single_delete_filters_owner_before_cascading_children(session):
+    session.execute.return_value.rowcount = 0
+    assert db.delete_conversation(123, "owner") is False
+    session.execute.assert_called_once()
+    statement = sql(session.execute.call_args.args[0])
+    assert "created_by = 'owner'" in statement and "delete_flag = 'N'" in statement

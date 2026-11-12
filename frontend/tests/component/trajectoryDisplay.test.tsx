@@ -269,35 +269,46 @@ describe("admin list display", () => {
         await screen.findByRole("button", { name: "通用智能体" })
       ).toBeVisible();
       if (role === "ADMIN") {
-        expect(await screen.findByText("示例租户")).toBeVisible();
-        expect(tenant).toHaveBeenCalledWith("tenant");
+        expect(screen.queryByText("示例租户")).not.toBeInTheDocument();
+        expect(tenant).not.toHaveBeenCalled();
+        expect(
+          screen.queryByRole("combobox", { name: "trajectory.tenants" })
+        ).not.toBeInTheDocument();
         expect(
           screen.queryByRole("columnheader", { name: "trajectory.tenants" })
         ).not.toBeInTheDocument();
         expect(
           view.container.querySelector(".trajectory-fixed-tenant")
-        ).not.toHaveTextContent("tenant");
+        ).toBeNull();
       } else {
         expect(
           screen.getByRole("columnheader", { name: "trajectory.tenants" })
         ).toBeVisible();
         expect(tenant).not.toHaveBeenCalled();
       }
+      expect(view.container.querySelector(".trajectory-role")).toBeNull();
+      expect(
+        view.container.querySelector(".trajectory-conversation-count small")
+      ).toBeNull();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     }
   );
 
-  it("uses the record tenant name if tenant detail lookup fails", async () => {
-    tenant.mockRejectedValue(new Error("unavailable"));
+  it("keeps tenant scoping after clearing filters without displaying its name", async () => {
     render(
       <ObservabilityCenter
         user={{ id: "admin", role: "ADMIN", tenantId: "tenant" } as User}
       />,
       { wrapper }
     );
-    expect(await screen.findByText("Tenant")).toBeVisible();
     expect(
       await screen.findByRole("button", { name: "Root Agent" })
     ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole("button", { name: "trajectory.clear" })
+    );
+    expect(api.records.mock.calls.at(-1)?.[0].tenant_id).toBe("tenant");
+    expect(screen.queryByText("Tenant")).not.toBeInTheDocument();
+    expect(tenant).not.toHaveBeenCalled();
   });
 });

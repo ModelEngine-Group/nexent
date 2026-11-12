@@ -260,18 +260,24 @@ class TrajectoryFileStore:
         with self._session(identity) as directory:
             return directory.read_json("meta.json")
 
-    def identities(self):
+    def identities(self, *, owner_user_id=None, conversation_ids=None):
         """Enumerate fixed file identities for internal maintenance, never an HTTP listing."""
         with self._root() as root:
             for tenant in os.listdir(root.fd):
                 if tenant.startswith("."):
                     continue
                 with root.child(tenant) as td:
-                    for user in os.listdir(td.fd):
-                        with td.child(user) as ud:
+                    users = [component(owner_user_id)] if owner_user_id is not None else os.listdir(td.fd)
+                    for user in users:
+                        try:
+                            ud = td.child(user)
+                        except FileNotFoundError:
+                            continue
+                        with ud:
                             for agent in os.listdir(ud.fd):
                                 with ud.child(agent) as ad:
-                                    for conversation in os.listdir(ad.fd):
+                                    conversations = conversation_ids if conversation_ids is not None else os.listdir(ad.fd)
+                                    for conversation in conversations:
                                         try:
                                             with ad.child(conversation) as cd:
                                                 meta = cd.read_json("meta.json")
@@ -288,6 +294,8 @@ class TrajectoryFileStore:
                                                 ):
                                                     raise TrajectoryCorrupt("Trajectory directory identity differs")
                                                 yield identity
+                                        except FileNotFoundError:
+                                            continue
                                         except (OSError, ValueError, KeyError, TrajectoryCorrupt, TrajectoryConflict):
                                             logger.warning("trajectory.maintenance_identity_invalid", exc_info=False)
 
@@ -523,16 +531,18 @@ class TrajectoryFileStore:
                         break
                     result["scanned_runs"] += 1
                     last_turn = run["turn_no"]
-                    if not run["finished_at"] or run["publication_no"] is None:
+                    if (not run["finished_at"] or run["publication_no"] is None) and force_reason != "conversation_deleted":
                         result["skipped_active"] += 1
                         continue
-                    expires = min(
-                        parse_time(run["expires_at"]),
-                        parse_time(run["finished_at"]) + timedelta(days=self.retention_days),
-                    )
-                    if timestamp(expires) != run["expires_at"]:
-                        run["expires_at"] = timestamp(expires)
-                        changed = True
+                    expires = None
+                    if run["finished_at"] and run["expires_at"]:
+                        expires = min(
+                            parse_time(run["expires_at"]),
+                            parse_time(run["finished_at"]) + timedelta(days=self.retention_days),
+                        )
+                        if timestamp(expires) != run["expires_at"]:
+                            run["expires_at"] = timestamp(expires)
+                            changed = True
                     eligible = (
                         bool(force_reason)
                         or expires <= now

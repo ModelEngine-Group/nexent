@@ -50,6 +50,9 @@ case:
     action: 重新选择local_file，在smolagents Core的同一会话切换根Agent增加第二轮，核对OTLP属性、文件及DTO中的业务trace、原生Trace/Span、根Agent和UUID，最后清理。 核对tenant/user/首次根Agent/conversation目录与meta.storage_agent_id，覆盖首次根Agent未知后变为已知。
     expected: 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
       物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
+  - order: 6
+    action: 分别从配置页与工作台创建入口启动共享编排，执行新建、后续轮次与合法重试；经真实NL2Agent流、smolagents及HTTP Provider fixture落盘，再冷读会话。PG保存边界受控，断言服务端消息收据和实际执行者。
+    expected: 配置页及工作台的智能体对话创建在保存会话后绑定可信身份，新建/续聊/重试均以系统创建助手为根执行者并按最终会话归档；重试关联原用户消息且不重复保存。实际模型调用次数和聊天结果不因采集改变，创建目标与执行者独立，关闭流恢复上下文并释放资源。
   expected_results:
   - 轨迹按每次物理请求的独立OTLP Span保留最终实际请求、失败片段、安全错误和成功结果；普通聊天只保留成功内容，物理请求次数符合既有重试规则。
   - 按实际Span/Links及业务invocation/attempt/parent关联；失败与停止可见，超过远端预览上限的本地安全正文完整；fragment Events与最终Span按来源/区间归并，一个工具仅算一次，未因采集增加调用或执行已拒绝代码。 根V3与并行子V2分别写入OTLP及冷读DTO，后续同会话草稿0/未知仍独立，列表保持各执行历史根版本，模型/工具为null。
@@ -58,6 +61,7 @@ case:
   - 两种配置均停止新本地轨迹写入，旧归档仍按读取开关访问；otlp目标保留原远端行为，监控关闭时原聊天结果和canary不变。
   - 业务trace_id=str(conversation_id)且在session.id/nexent.trace_id等属性保存，原生traceId仍为实际128位值；轮次/根执行及每个物理attempt独立，子调用归属正确。最近agent_id分组沿现有逻辑更新，打开会话读取全部保留执行；停用区间coverage保守标未采集/未知，资源释放。
     物理会话目录及storage_agent_id保持首次采集值，当前root_agent_id各自保存；未知目录_unknown同样固定，全部执行位于同一meta及目录。
+  - 配置页及工作台的智能体对话创建在保存会话后绑定可信身份，新建/续聊/重试均以系统创建助手为根执行者并按最终会话归档；重试关联原用户消息且不重复保存。实际模型调用次数和聊天结果不因采集改变，创建目标与执行者独立，关闭流恢复上下文并释放资源。
   forbidden_side_effects:
   - 不重复调用模型或业务工具，不把失败 attempt 写回正常聊天。
   - 不修改共享 Provider、租户或其他会话数据。
@@ -97,6 +101,12 @@ case:
     - 5
     expected_results:
     - 5
+  - id: AC-06
+    description: 配置页及工作台的智能体对话创建在保存会话后绑定可信身份，新建/续聊/重试均以系统创建助手为根执行者并按最终会话归档；重试关联原用户消息且不重复保存。实际模型调用次数和聊天结果不因采集改变，创建目标与执行者独立，关闭流恢复上下文并释放资源。
+    steps:
+    - 6
+    expected_results:
+    - 6
   source:
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     acceptance_criteria:

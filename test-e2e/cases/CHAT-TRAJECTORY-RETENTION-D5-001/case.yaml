@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-TRAJECTORY
   requirement_ids:
   - CHAT-LOCAL-TRAJECTORY-20261103
+  - CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
   business_rule_ids:
   - TRJ-RULE-006
   - TRJ-RULE-008
@@ -34,8 +35,8 @@ case:
     action: 推进到到期边界，在清理任务执行前请求正文并启动跨边界下载，再执行分批清理及失败重试。
     expected: 到期立即拒绝新读取/新块发送；meta先撤引用，再整份删除该执行OTLP，派生缓存/内容引用一起失效。终态发布重试仍遵守到期/删除，清理周期不延长可读期。 该执行的全部正文随唯一OTLP文件一起删除，其他执行及原聊天生命周期保持。
   - order: 3
-    action: 删除一个独占会话，再越过 7 天墓碑期；核对聊天正文、聊天附件、未到期与其他租户 canary。
-    expected: 会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
+    action: 分别通过单个/批量删除入口删除独占会话，覆盖关闭定期清理、部分删除成功、PG失败、文件占用/释放、队列满及进程重启补偿；再越过7天墓碑期，核对聊天附件及其他租户/用户/会话canary。
+    expected: 单个及批量删除只对PG确认删除且归属匹配的会话立即提交清理，受管线程删除全部轮次OTLP；关闭定期过期清理仍生效，失败/占用保留待删标记并重试，队列满或重启由巡检补偿；数据库失败和范围外文件保持。会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
   - order: 4
     action: 保留未删除会话，令旧执行正文过期并越过7天墓碑期，再增加今日新运行；清理meta执行清单，查询详情/节点DTO、原正文引用及旧游标，最后清理。 覆盖当前Agent切换、初始Agent已删除且物理目录保持初始Agent ID。
     expected: trace仍按现有会话定位聊天，whole_conversation_trace_complete=false，原始过期正文不可读，新快照不续期旧数据；今日运行仍可读。逐执行墓碑有界回收，meta.json只留无正文归属/覆盖/过期汇总，清理换代旧游标snapshot_reset；30天后仍按现有最近Agent分组找到会话，删除立即撤权且文件最终清理，不写任何PG轨迹列/表。
@@ -52,14 +53,14 @@ case:
   expected_results:
   - expires_at 基于各运行终态+30天；活跃运行不被会话创建时间误判，所有归属可核验。
   - 到期立即拒绝新读取/新块发送；meta先撤引用，再整份删除该执行OTLP，派生缓存/内容引用一起失效。终态发布重试仍遵守到期/删除，清理周期不延长可读期。 该执行的全部正文随唯一OTLP文件一起删除，其他执行及原聊天生命周期保持。
-  - 会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
+  - 单个及批量删除只对PG确认删除且归属匹配的会话立即提交清理，受管线程删除全部轮次OTLP；关闭定期过期清理仍生效，失败/占用保留待删标记并重试，队列满或重启由巡检补偿；数据库失败和范围外文件保持。会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
   - trace仍按现有会话定位聊天，whole_conversation_trace_complete=false，原始过期正文不可读，新快照不续期旧数据；今日运行仍可读。逐执行墓碑有界回收，meta.json只留无正文归属/覆盖/过期汇总，清理换代旧游标snapshot_reset；30天后仍按现有最近Agent分组找到会话，删除立即撤权且文件最终清理，不写任何PG轨迹列/表。
     清理按固定storage_agent_id定位，同会话的未过期运行与稳定会话锁保持有效。
   - 定时策略清理finished_at≤固定cutoff_at的已确认终态；读取取保存/当前期限较早值并原子持久化收紧，后续调大不放宽该值；关闭定时器仍禁止到期正文。已确认删除后墓碑最多额外7天回收，had_manual_cleanup与覆盖可长期解释缺口；活跃/未发布执行和新执行保留。
   - 主动清理可提前回收且不更改定期配置；本轮cutoff_at固定，重复请求幂等；meta先撤引用并记录manual/时间/cleanup_version，旧快照reset、正文410，跨块读复核。成功unlink并fsync后才计删除数量/逻辑字节，pending/failed分别记录；其他租户、新执行、活跃运行、聊天及附件canary保持。
   - 批次互斥，最多检查1000执行/删除100文件或工作2秒后让出；占用/失败留pending或failed且不冒充完成。未确认删除的执行项跨7天仍保留以供重试，文件缺失幂等；物理删除确认后才回收墓碑。清理标记优先于重新发布，实际写入/聊天及全部canary保持，受管worker和测试资产释放。
   forbidden_side_effects:
-  - 不得删除聊天正文、聊天附件、活跃运行或其他租户文件。
+  - 不得删除聊天正文、聊天附件、存续会话的活跃运行或其他租户文件。
   - 不得通过备份或 soft-delete 行继续对外读取过期正文。
   acceptance:
   - id: AC-01
@@ -75,7 +76,7 @@ case:
     expected_results:
     - 2
   - id: AC-03
-    description: 会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
+    description: 单个及批量删除只对PG确认删除且归属匹配的会话立即提交清理，受管线程删除全部轮次OTLP；关闭定期过期清理仍生效，失败/占用保留待删标记并重试，队列满或重启由巡检补偿；数据库失败和范围外文件保持。会话删除立即撤权；过期墓碑有界回收，会话meta.json无正文过期统计支持已过期提示；其余内容和文件校验保持，全部独占资源清理。
     steps:
     - 3
     expected_results:
@@ -113,7 +114,11 @@ case:
     acceptance_criteria:
     - AC-008
     - AC-013
-    blocked_reason: Backend cleanup is implemented, including the scheduled two-second work deadline. File-risk scripts and QUERY-D2 after-read HTTP expiry/cleanup/revocation variants are prepared but unexecuted. Live PG/chat reconciliation and managed timer startup/wakeup remain unimplemented in this Case; no complete execution binding is declared. Full acceptance is deferred by the user.
+    blocked_reason: Backend cleanup is implemented, including the scheduled two-second work deadline. File-risk scripts and
+      QUERY-D2 after-read HTTP expiry/cleanup/revocation variants are prepared but unexecuted. Live PG/chat reconciliation
+      and managed timer startup/wakeup remain unimplemented in this Case; no complete execution binding is declared. Full
+      acceptance is deferred by the user. Conversation-delete queue handoff and retry requirements are added; full API/PG/managed-worker
+      runtime proof remains deferred and is not claimed from UT.
   execution:
     profiles:
     - name: mock

@@ -476,3 +476,29 @@ def test_retention_hard_scan_limit_preserves_all_fresh_files(files):
 
 def test_retention_hard_delete_limit_reports_only_confirmed_files_and_bytes(files):
     LIMITS.prove_delete_limit(files)
+
+
+def test_deleted_conversation_reclaims_fresh_rounds_in_fixed_agent_directory(files):
+    first = files.add()
+    switched = CaptureIdentity("tenant-a", "owner-a", "123", "43")
+    second = files.add(switched)
+    assert first.path.parent == second.path.parent
+    result = files.reopen().cleanup(files.owner, force_reason="conversation_deleted")
+    assert result["deleted_runs"] == 2 and result["pending_runs"] == 0
+    assert not first.path.exists() and not second.path.exists()
+    meta = files.reopen().manifest(files.owner)
+    assert all(run["cleanup_reason"] == "conversation_deleted" for run in meta["runs"])
+    assert files.reopen().cleanup(files.owner, force_reason="conversation_deleted")["deleted_runs"] == 0
+
+
+def test_deleted_conversation_waits_for_other_process_file_lock(files):
+    active = files.add(active=True)
+    active.writer.close()
+    with locked(files, active, "hold_run"):
+        result = files.store.cleanup(files.owner, force_reason="conversation_deleted")
+        assert result["pending_runs"] == 1 and result["deleted_runs"] == 0
+        assert active.path.exists()
+        assert state(files, active)["cleanup_reason"] == "conversation_deleted"
+        assert state(files, active)["file_deleted_at"] is None
+    assert files.reopen().cleanup(files.owner, force_reason="conversation_deleted")["deleted_runs"] == 1
+    assert not active.path.exists()

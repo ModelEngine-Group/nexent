@@ -27,6 +27,7 @@ feature:
   - rule_id: TRJ-RULE-006
     description: OTLP先刷盘，再原子提交meta.json的confirmed_bytes/hash才确认；Span/批次幂等，实际运行文件锁，终态起保留30天并整份删除。
       定期清理开关/天数/周期可配置，管理员可按天数主动清理当前可信租户；统一时间边界、批次互斥、先撤引用后删除及失败幂等重试，活跃执行保持。
+      单个/批量删除会话确认成功后立即向受管文件线程提交定向清理；只清理实际删除会话的全部轮次，失败/占用重试且独立于定期清理开关。
   - rule_id: TRJ-RULE-007
     description: 后端注入导出目标及文件依赖，默认otlp兼容远端预览/采样/过滤，local_file仅写本地且关闭远端导出，默认目录/mnt/nexent-data/trajectory，查询固定30秒，启动自动初始化且无需根UUID，SDK仅接参数，单节点/共享卷验证。
   - rule_id: TRJ-RULE-008
@@ -48,6 +49,7 @@ feature:
     - CHAT-TRAJECTORY-DEPLOYMENT-20261111
     - CHAT-TRAJECTORY-CONVERSATION-20261111
     - CHAT-TRAJECTORY-AUTO-CONTENT-20261112
+    - CHAT-TRAJECTORY-CONVERSATION-DELETE-20261112
     spec_path: nexent-doc/docs/Developing/chat-local-file-trajectory/proposal.md
     notes: Current design uses TRJ-RULE-001 through TRJ-RULE-008. TRJ-RULE-009 is
       historical provenance for retired Cases. Unit contracts stay in UT; preserve

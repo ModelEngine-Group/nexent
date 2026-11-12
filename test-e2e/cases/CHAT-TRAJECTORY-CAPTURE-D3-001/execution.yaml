@@ -23,6 +23,8 @@ acceptance_bindings:
   - test_capture_disabled_and_remote_mode_preserve_historical_files_and_cold_read
   AC-05:
   - test_capture_root_switch_keeps_directory_and_native_context
+  AC-06:
+  - test_capture_creator_entrypoints_bind_saved_identity_and_cold_read
 preparation:
   families: []
   anchors: false
@@ -41,3 +43,6 @@ notes: >-
   live PG schema/sequence/committed-chat reconciliation, backend environment bootstrap
   across processes remain unverified; integration acceptance is deferred by the user. A direct
   script pass is not complete acceptance of AC-01/03/05 or this full Case.
+  The creator regression uses the real shared orchestration and NL2Agent stream, with
+  the AgentRunInfo builder and PG history boundary controlled, then real SDK/HTTP/file
+  capture and cold reads. It owns no additional shared resources; existing teardown applies.
