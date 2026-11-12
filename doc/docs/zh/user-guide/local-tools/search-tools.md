@@ -17,6 +17,7 @@ title: 搜索工具
   - `exa_search`：基于 EXA 的实时网页与图片搜索
   - `tavily_search`：基于 Tavily 的网页与图片搜索
   - `linkup_search`：基于 Linkup 的图文混合搜索
+  - `outcrawl_search`：基于 Outcrawl 的网页搜索，可选返回 Markdown 格式的网页正文
 
 ## 🧰 使用场景示例
 
@@ -102,6 +103,16 @@ title: 搜索工具
   - Tavily：访问 [tavily.com](https://www.tavily.com/) 创建账户，在 Dashboard 获取 Tavily API Key
   - Linkup：在 [linkup.so](https://www.linkup.so/) 注册并于个人中心创建 Linkup API Key
 - 返回标题、URL、摘要，可能附带图片 URL 列表（去重处理）。
+
+### outcrawl_search
+- **配置参数**：
+  - `outcrawl_api_key`：Outcrawl API 密钥
+  - `max_results`：返回结果数量（1 至 20），默认 5
+  - `scrape_content`：是否以 Markdown 格式返回网页正文以替代搜索摘要，默认 False
+- **检索参数**：
+  - `query`：检索问题，必填。
+- API Key 获取：在 [outcrawl.ai](https://outcrawl.ai/) 注册并在控制台创建 Outcrawl API Key
+- 返回标题、URL 与摘要（开启 `scrape_content` 后返回网页 Markdown 正文）。
 
 ## 🛠️ 操作指引
 
