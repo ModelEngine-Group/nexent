@@ -147,7 +147,7 @@ async def test_creator_persistence_keeps_native_terminal_envelope(monkeypatch):
     assert saved.call_args.kwargs["status"] == "completed"
 
 
-def test_public_history_keeps_native_tool_identity_instead_of_legacy_unwrapping(monkeypatch):
+def test_public_history_projects_native_tool_identity_without_changing_stored_event(monkeypatch):
     from management.services.conversation import service
 
     event = {"type": "tool", "schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
@@ -159,7 +159,12 @@ def test_public_history_keeps_native_tool_identity_instead_of_legacy_unwrapping(
     monkeypatch.setattr(service, "get_conversation_history", lambda *_: history)
     message = service.get_conversation_history_service(1, "owner")[0]["message"][0]
     part = next(p for p in message["message"] if p["type"] == "tool")
-    assert json.loads(part["content"]) == event
+    assert part["content"] == ""
+    assert part["tool_name"] == "nl2a_wrapper"
+    assert part["tool_arguments"] == {"agent_id": 42}
+    assert json.loads(part["tool_call_id"]) == ["turn", "", "call"]
+    assert not {"runtime_mode", "schema_version", "agent_core"} & part.keys()
+    assert json.loads(history["message_records"][0]["units"][0]["unit_content"]) == event
 
 
 @pytest.mark.asyncio

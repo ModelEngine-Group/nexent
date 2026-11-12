@@ -481,6 +481,10 @@ async def _stream_agent_chunks(
             for public_frame in await publish_public(frame):
                 yield public_frame
 
+    if streaming_message_id is not None:
+        # Producers and persistence must share the same trusted run-local execution records.
+        agent_run_info.observer.execution_history = execution_history
+
     async def _iter_run_chunks():
         for event in getattr(
             agent_run_info.agent_config,

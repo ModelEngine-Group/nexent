@@ -52,13 +52,16 @@ def test_public_history_restores_legacy_file_wrapper_only_for_creator(mocker, cr
     mocker.patch.object(service, "get_conversation_history", return_value=history)
     public = service.get_conversation_history_service(1, "owner")[0]["message"][0]
     file = next(u for u in public["message"] if u["type"] == "skill_body")
-    restored = json.loads(file["content"])
-    assert restored["content"] == artifact["content"] and history == before
+    assert history == before
     if creator != "ordinary":
+        restored = json.loads(file["content"])
+        assert restored["content"] == artifact["content"]
         assert "runtime_mode" not in restored and "schema_version" not in restored
         assert public["status"] == "completed"
     else:
-        assert restored == artifact
+        # Ordinary history uses the established client projection; stored facts stay native.
+        assert file["content"] == artifact["content"]
+        assert not {"runtime_mode", "schema_version", "agent_core"} & file.keys()
 
 
 @pytest.mark.parametrize("payload", ["broken", "[]", '{"type":"other","runtime_mode":"native_agent"}'])

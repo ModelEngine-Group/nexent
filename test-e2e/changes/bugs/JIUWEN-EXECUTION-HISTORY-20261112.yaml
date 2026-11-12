@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-EXECUTION-HISTORY-20261112
+  change_type: bugfix
+  bug_id: JIUWEN-EXECUTION-HISTORY-20261112
+  title: Restore the run-local execution history handoff after output projection
+  description: Restore the shared observer buffer so registered execution facts bind to real message/unit references.
+  observed_behavior: Backend output normalization removed the observer execution_history assignment; producers have
+    no history and private facts cannot reach the persistence buffer.
+  expected_behavior: For a persisted assistant message, the observer and stream persistence share one trusted run-local
+    ExecutionHistory. Unregistered keys remain private and ignored; failed persistence retains readable buffer data.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: Existing traditional UT reproduces all three lost-handoff failures. Its assertions already cover
+      root/child persistence, private-key rejection and rollback. No new formal component Case is necessary.
+  feature_contract_changed: false
+  affected_features:
+    existing: [JIUWEN-OUTPUT]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Share real run-local execution records with root/child producers and bind actual message/unit indexes.
+    - Keep raw execution facts and untrusted keys out of public SSE; preserve rollback buffer access.
+    reason: Existing isolated stream/persistence tests fail before the fix and pass after restoring the same
+      assignment still present on develop. Adjacent public-history tests assert the established projected format.
+    test_selectors:
+    - test/backend/services/test_agent_execution_history_stream.py
+    - test/backend/services/test_agent_model_attempt_persistence.py
+    - test/backend/agents/test_jiuwen_creator_results.py
+    - test/backend/services/test_nl2skill_history_protocol.py
+  notes: 'SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-timeout-configuration/design.md.
+    Runtime responsibility is inherited from JIUWEN-OUTPUT. This restores the existing private buffer contract;
+    it does not change the public projection, HTTP routes or persisted format. Existing formal output contracts
+    remain unchanged and are not claimed as newly executed acceptance from UT results.'
