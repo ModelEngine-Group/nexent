@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { Button, Tooltip } from "antd";
@@ -33,9 +34,9 @@ export function TopNavbar() {
   const [monitoringStatus, setMonitoringStatus] =
     useState<MonitoringStatus | null>(null);
   const { config } = useGlobalConfigStore();
-  const shouldFetchMonitoringStatus = isSpeedMode || !!user;
+  const shouldFetchMonitoringStatus = !!user;
   const canViewMonitoring = canViewMonitoringDashboard(
-    user?.role,
+    user?.roles ?? user?.role,
     isSpeedMode,
     monitoringStatus?.dashboard_allowed_roles
   );

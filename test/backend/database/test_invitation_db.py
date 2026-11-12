@@ -254,7 +254,7 @@ def test_add_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda db_session=None: mock_ctx)
 
     from unittest.mock import patch
     with patch('management.db.identity.invitation.TenantInvitationCode', return_value=mock_invitation):
@@ -285,7 +285,7 @@ def test_add_invitation_with_group_ids_list(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda db_session=None: mock_ctx)
 
     from unittest.mock import patch
     with patch('management.db.identity.invitation.TenantInvitationCode', return_value=mock_invitation) as mock_constructor:
@@ -306,6 +306,7 @@ def test_add_invitation_with_group_ids_list(monkeypatch, mock_session):
         tenant_id="test_tenant",
         invitation_code="test_code",
         code_type="ADMIN_INVITE",
+        roles=["ADMIN"],
         group_ids="1,2,3",  # Should be converted to comma-separated string
         capacity=5,
         expiry_date="2024-12-31",
@@ -331,7 +332,7 @@ def test_modify_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda db_session=None: mock_ctx)
 
     result = modify_invitation(
         invitation_id=123,
@@ -356,7 +357,7 @@ def test_remove_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda db_session=None: mock_ctx)
 
     result = remove_invitation(invitation_id=123, updated_by="test_user")
 

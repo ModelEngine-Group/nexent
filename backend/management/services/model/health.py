@@ -329,7 +329,7 @@ async def _perform_connectivity_check(
     return connectivity
 
 
-async def check_model_connectivity(display_name: str, tenant_id: str, model_type: str = None) -> dict:
+async def check_model_connectivity(display_name: str, tenant_id: str, model_type: str = None, *, persist_status: bool = True) -> dict:
     """Use one streamed LLM check; retain all other model checks unchanged."""
     model = get_model_by_display_name(display_name, tenant_id=tenant_id, model_type=model_type)
     if model and model.get("model_type") in {"llm", "chat"}:
@@ -337,11 +337,14 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         from management.services.model.profiles import validate_model_outlet
 
         result = await validate_model_outlet(ModelOutletValidationRequest(outlet_id=model["model_id"],
-            expected_revision=model.get("config_revision") or 1), tenant_id)
+            expected_revision=model.get("config_revision") or 1), tenant_id,
+            **({} if persist_status else {"persist_status": False}))
         return {"connectivity": result["ok"], "model_name": model["model_name"],
                 **({"error": result["error"]["category"]} if result["error"] else {})}
     if not model:
         raise LookupError("MODEL_CONFIGURATION_NOT_FOUND")
+    if not persist_status:
+        return await _verify_non_llm_config_connectivity(model)
     return await _check_non_llm_connectivity(display_name, tenant_id, model_type, _model=model)
 
 

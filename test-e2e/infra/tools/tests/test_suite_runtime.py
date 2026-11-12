@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline orchestration tests. Never deploy, notify, or contact product services."""
 import argparse
 from contextlib import contextmanager
@@ -125,18 +127,18 @@ class SuiteTests(unittest.TestCase):
                                                {"hooks": {}, "case_timeout_seconds": 1800}), 0)
             self.assertEqual(observed, [4800])
 
-    def test_notification_refuses_incomplete(self):
+    def test_notification_refuses_nonterminal(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": False})
+            save(directory / "summary.json", {"status": "RUNNING", "execution_complete": False})
             with patch.object(suite_notify, "logged") as send:
-                self.assertEqual(suite_notify.send_report(directory, {}), "INCOMPLETE_NOT_SENT")
+                self.assertEqual(suite_notify.send_report(directory, {}), "NOT_TERMINAL")
                 send.assert_not_called()
 
     def test_notification_deduplicates_uncertain_delivery(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": True})
+            save(directory / "summary.json", {"status": "FAILED", "d6_complete": True, "execution_complete": True})
             with patch.object(suite_notify, "logged", return_value=124) as send:
                 env = {"LARK_CLI": "test-cli", "FEISHU_REPORT_CHAT_ID": "test-chat"}
                 self.assertEqual(suite_notify.send_report(directory, env), "UNKNOWN")
@@ -146,7 +148,7 @@ class SuiteTests(unittest.TestCase):
     def test_notification_sends_once_after_complete_report(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
-            save(directory / "summary.json", {"d6_complete": True, "execution_complete": True})
+            save(directory / "summary.json", {"status": "PASSED", "d6_complete": True, "execution_complete": True})
             with patch.object(suite_notify, "logged", return_value=0) as send:
                 env = {"LARK_CLI": "test-cli", "FEISHU_REPORT_CHAT_ID": "test-chat"}
                 self.assertEqual(suite_notify.send_report(directory, env), "SENT")

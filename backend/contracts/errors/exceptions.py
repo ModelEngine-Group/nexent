@@ -137,6 +137,10 @@ class TokenExpiredError(UnauthorizedError):
     pass
 
 
+class RoleAssignmentConflict(ValueError):
+    """An otherwise valid role change violates a membership invariant."""
+
+
 class ForbiddenError(Exception):
     """Raised when an authenticated user lacks permission."""
 

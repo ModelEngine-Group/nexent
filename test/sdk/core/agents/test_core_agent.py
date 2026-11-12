@@ -4551,3 +4551,45 @@ def test_call_forwards_metadata_to_sub_agent_run():
     assert calls["full_task"] == "summarize"
     assert calls["kwargs"]["additional_args"] == {"metadata": {"session": "abc"}}
     assert answer == "sub-agent-output"
+
+# ---------------------------------------------------------------------------
+# UT-BE-PASS-007 — reserved underscore keys never reach the LLM prompt
+# ---------------------------------------------------------------------------
+
+def test_ut_be_pass_007_strips_top_level_reserved_metadata_keys():
+    metadata = {
+        "_mcp_headers": {"Cookie": "sid=secret"},
+        "project_id": "P001",
+    }
+
+    cleaned = core_agent_module._strip_reserved_metadata_keys(metadata)
+
+    assert cleaned == {"project_id": "P001"}
+    assert metadata["_mcp_headers"] == {"Cookie": "sid=secret"}
+
+
+def test_ut_be_pass_007_strips_nested_reserved_metadata_keys():
+    metadata = {
+        "nested": {
+            "_mcp_headers_by_server": {"http://a/mcp": {"Cookie": "sid=secret"}},
+            "keep": "v",
+        },
+        "items": [{"_secret": 1, "ok": 2}],
+    }
+
+    cleaned = core_agent_module._strip_reserved_metadata_keys(metadata)
+
+    assert cleaned == {"nested": {"keep": "v"}, "items": [{"ok": 2}]}
+
+
+def test_ut_be_pass_007_passthrough_keys_absent_from_serialized_prompt_metadata():
+    metadata = {
+        "project_id": "P001",
+        "_mcp_headers": {"Cookie": "sid=secret"},
+        "_mcp_headers_by_server": {"http://a/mcp": {"X-User-Id": "u1"}},
+    }
+
+    serialized = json.dumps(core_agent_module._strip_reserved_metadata_keys(metadata))
+
+    assert "_mcp_headers" not in serialized
+    assert "sid=secret" not in serialized

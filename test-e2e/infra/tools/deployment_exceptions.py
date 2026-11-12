@@ -254,7 +254,7 @@ class ModeSwitch:
 
 
 def execute_campaign(repo, home, records, settings, *, daily, publish_latest, execute_one, all_records, hook, machine_env,
-                     validation_report=None):
+                     validation_report=None, on_batch_created=None):
     """Run only selected exceptions, restore Local on failure, and finalize once."""
     from report_ownership import enrich
 
@@ -265,6 +265,8 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
     assert_recovered(home, allow_retry=daily)
     directory = home / "runs/repository-daily" / ("deployment-" + now().replace(":", "") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, mode=0o700)
+    if on_batch_created is not None:
+        on_batch_created(directory)
     env = machine_env(home, repo)
     state = {"status": "RUNNING", "started_at": now(), "stages": {f"D{i}": "PENDING" for i in range(7)}}
     provenance = {**fingerprint(repo), "batch_mode": "daily" if daily else "run", "deployment_campaign": True}
@@ -378,7 +380,7 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
                 if current != {key: provenance[key] for key in current}:
                     raise RuntimeError("Source changed before campaign finalization")
     except (Exception, KeyboardInterrupt) as exc:
-        error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        error = "Interrupted" if isinstance(exc, KeyboardInterrupt) else str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
         signal.signal(signal.SIGTERM, old_handler)
         summary = finalize(directory, report_records, rows, error)
@@ -390,14 +392,20 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
     if daily and summary["execution_complete"] and restoration_ok:
         if publish_latest:
-            from suite_publish import publish_latest as publish
             try:
+                from suite_publish import publish_latest as publish
                 publication = publish(directory, home, env)
             except Exception as exc:
                 publication = {"status": "FAILED", "batch_id": directory.name, "error_type": type(exc).__name__}
-                save(home / "state/report-publications" / directory.name / "receipt.json", publication)
-            render_report(directory, report_records, rows, summary, sharing=publication)
-        if settings.get("notify"):
-            from suite_notify import send_report
-            send_report(directory, env)
+                try:
+                    save(home / "state/report-publications" / directory.name / "receipt.json", publication)
+                except OSError:
+                    print("Publication failed; could not save local publication receipt", flush=True)
+            try:
+                render_report(directory, report_records, rows, summary, sharing=publication)
+            except OSError:
+                print("Could not refresh publication status in the finalized report", flush=True)
+    if daily and settings.get("notify"):
+        from suite_notify import send_report
+        send_report(directory, env)
     return 0 if summary["status"] == "PASSED" else 1

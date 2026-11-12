@@ -11,20 +11,41 @@ from typing import (
     Optional,
 )
 
-from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.constants.constants import TOOL_TYPE_MAPPING
+from contracts.constants.constants import (
+    CAN_EDIT_ALL_USER_ROLES,
+    PERMISSION_PRIVATE,
+    PERMISSION_READ,
+    STATUS_PENDING_REVIEW,
+    STATUS_REJECTED,
+    STATUS_SHARED,
+    TOOL_TYPE_MAPPING,
+)
 from contracts.errors.exceptions import ForbiddenError
+from contracts.roles import has_any_role, roles_from_record
 from contracts.tool import ToolSourceEnum
-from management.db.skill import repository as skill_db
 from management.db.a2a.repository import get_server_agent_ids
-from management.db.agent.repository import clear_agent_new_mark, delete_agent_by_id, delete_agent_relationship, is_system_agent, query_agent_info_by_ids, query_agent_list_candidates_by_tenant_id, query_all_agent_info_by_tenant_id, query_sub_agents_id_list, search_agent_id_by_agent_name, search_agent_info_by_agent_id
 from management.db.agent.catalog import list_agent_repository_by_agent_ids
+from management.db.agent.repository import (
+    clear_agent_new_mark,
+    delete_agent_by_id,
+    delete_agent_relationship,
+    is_system_agent,
+    query_agent_info_by_ids,
+    query_agent_list_candidates_by_tenant_id,
+    query_all_agent_info_by_tenant_id,
+    query_sub_agents_id_list,
+    search_agent_id_by_agent_name,
+    search_agent_info_by_agent_id,
+)
 from management.db.agent.version import batch_search_version_names, query_version_list
 from management.db.identity.group import query_group_ids_by_user
-from management.db.tag.repository import TagManagementDB
-from management.db.tool.repository import delete_tools_by_agent_id, search_tools_for_sub_agent
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.skill import repository as skill_db
+from management.db.tag.repository import TagManagementDB
+from management.db.tool.repository import (
+    delete_tools_by_agent_id,
+    search_tools_for_sub_agent,
+)
 from management.services.agent.read import (
     apply_deleted_model_reason,
     apply_duplicate_name_availability_rules,
@@ -35,6 +56,7 @@ from management.services.permission.asset_owner import (
     resolve_agent_list_permission,
 )
 from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.tag.library import TagManagementService
 from management.utils.serialization import convert_string_to_list
 
 logger = logging.getLogger(__name__)
@@ -65,7 +87,6 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
         if is_tenant_owned_agent:
-            from management.services.tag.library import TagManagementService
 
             TagManagementService.cleanup_resource_assignments(
                 tenant_id, "agent", str(agent_id), user_id
@@ -160,7 +181,7 @@ def _order_agents_by_publish_time(
 
 
 async def list_all_agent_info_impl(
-    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None
+    tenant_id: str, user_id: str, agent_ids: Optional[list[int]] = None, *, inventory_read: bool = False
 ) -> list[dict]:
     """
     list all agent info
@@ -177,13 +198,13 @@ async def list_all_agent_info_impl(
     """
     try:
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-        user_role = str(user_tenant_record.get("user_role") or "").upper()
+        user_role = roles_from_record(user_tenant_record)
 
-        can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+        can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
 
         # For DEV/USER, restrict visible agents to those whose group_ids overlap user's groups.
         user_group_ids: set[int] = set()
-        if not can_edit_all:
+        if not (can_edit_all or inventory_read):
             try:
                 user_group_ids = set(query_group_ids_by_user(user_id) or [])
             except Exception as e:
@@ -211,7 +232,7 @@ async def list_all_agent_info_impl(
                 continue
 
             # Apply visibility filter for DEV/USER based on group overlap
-            if not can_edit_all:
+            if not (can_edit_all or inventory_read):
                 agent_group_ids = set(convert_string_to_list(agent.get("group_ids")))
                 ingroup_permission = agent.get("ingroup_permission")
                 is_creator = str(agent.get("created_by")) == str(user_id)
@@ -284,7 +305,7 @@ async def list_all_agent_info_impl(
             first_model_name = agent["model_name"]
 
             # Permission logic (ASSET_OWNER-scoped + non-ASSET_OWNER role => READ_ONLY first):
-            permission = resolve_agent_list_permission(
+            permission = PERMISSION_READ if inventory_read else resolve_agent_list_permission(
                 user_role=user_role,
                 agent=agent,
                 user_id=user_id,
@@ -328,6 +349,9 @@ async def list_all_agent_info_impl(
                     "allow_chat_metadata": bool(
                         agent.get("allow_chat_metadata", False)
                     ),
+                    "allow_mcp_header_passthrough": bool(
+                        agent.get("allow_mcp_header_passthrough", False)
+                    ),
                     "model_params_override": agent.get("model_params_override"),
                     "enable_protocol_repair_retry": agent.get(
                         "enable_protocol_repair_retry"
@@ -364,8 +388,8 @@ async def list_agent_page_impl(
         raise ValueError("created_by and created_by_not cannot be used together")
 
     user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
-    user_role = str(user_tenant_record.get("user_role") or "").upper()
-    can_edit_all = user_role in CAN_EDIT_ALL_USER_ROLES
+    user_role = roles_from_record(user_tenant_record)
+    can_edit_all = has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES)
     user_group_ids: set[int] = set()
     if not can_edit_all:
         try:
@@ -597,13 +621,13 @@ async def list_agent_page_impl(
                 publisher_tenant_id=scope_tenant_id,
             )
             publisher_records = []
-            if scope_tenant_id == caller_tenant_id and user_role == "ADMIN":
+            if scope_tenant_id == caller_tenant_id and has_any_role(user_role, {'ADMIN'}):
                 publisher_records = list_agent_repository_by_agent_ids(
                     scoped_agent_ids,
                     statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),
                     publisher_tenant_id=scope_tenant_id,
                 )
-            elif scope_tenant_id == caller_tenant_id and user_role == "DEV":
+            elif scope_tenant_id == caller_tenant_id and has_any_role(user_role, {'DEV'}):
                 publisher_records = list_agent_repository_by_agent_ids(
                     scoped_agent_ids,
                     statuses=(STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED),

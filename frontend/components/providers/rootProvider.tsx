@@ -4,6 +4,10 @@
 
 import { useEffect, type ReactNode } from "react";
 import { ConfigProvider, App } from "antd";
+import antdEnUs from "antd/locale/en_US";
+import antdZhCn from "antd/locale/zh_CN";
+import "dayjs/locale/zh-cn";
+import { useTranslation } from "react-i18next";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 
@@ -67,11 +71,16 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  * Integrates all necessary providers for the application
  */
 export function RootProvider({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation("common");
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  const antdLocale = language?.startsWith("zh") ? antdZhCn : antdEnUs;
+
   useEffect(() => {
     // Legacy static portals do not inherit the normal provider tree.
     ConfigProvider.config({
       holderRender: (holder) => (
         <ConfigProvider
+          locale={antdLocale}
           theme={NEXENT_THEME}
           button={NEXENT_BUTTON_DEFAULTS}
           select={NEXENT_SELECT_DEFAULTS}
@@ -82,9 +91,10 @@ export function RootProvider({ children }: { children: ReactNode }) {
       ),
     });
     return () => ConfigProvider.config({ holderRender: undefined });
-  }, []);
+  }, [antdLocale]);
   return (
     <ConfigProvider
+      locale={antdLocale}
       theme={NEXENT_THEME}
       button={NEXENT_BUTTON_DEFAULTS}
       select={NEXENT_SELECT_DEFAULTS}

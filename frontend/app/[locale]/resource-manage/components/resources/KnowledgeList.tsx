@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { hasRole } from "@/lib/roles";
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -63,8 +64,10 @@ function getProgressColor(
 
 export default function KnowledgeList({
   tenantId,
+  readOnly = false,
 }: {
   tenantId: string | null;
+  readOnly?: boolean;
 }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
@@ -79,11 +82,11 @@ export default function KnowledgeList({
 
   // Get actual user role from auth context
   const { user } = useAuthorizationContext();
-  const userRole = user?.role ?? "";
+  const userRole = user?.roles ?? user?.role;
   // Only ADMIN can edit per-KB soft quotas
-  const isAdmin = userRole === "ADMIN";
+  const isAdmin = hasRole(userRole, "ADMIN");
   // SU and ADMIN can both manage tenant hard limit
-  const canManageQuota = userRole === "ADMIN" || userRole === "SU";
+  const canManageQuota = hasRole(userRole, "ADMIN") || hasRole(userRole, "SU");
 
   // Fetch groups for group selection
   const { data: groupData } = useGroupList(tenantId);
@@ -537,14 +540,16 @@ export default function KnowledgeList({
         }
         return (
           <div className="flex items-center space-x-2">
-            <Tooltip title={t("common.edit")}>
-              <Button
-                type="text"
-                icon={<Edit className="h-4 w-4" />}
-                onClick={() => openEdit(record)}
-                size="small"
-              />
-            </Tooltip>
+            {!readOnly && (
+              <Tooltip title={t("common.edit")}>
+                <Button
+                  type="text"
+                  icon={<Edit className="h-4 w-4" />}
+                  onClick={() => openEdit(record)}
+                  size="small"
+                />
+              </Tooltip>
+            )}
             <Tooltip title={t("tenantResources.knowledgeBase.viewSummary")}>
               <Button
                 type="text"
@@ -553,46 +558,48 @@ export default function KnowledgeList({
                 size="small"
               />
             </Tooltip>
-            <Tooltip title={t("common.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                loading={previewingKnowledgeId === record.id}
-                disabled={previewingKnowledgeId !== null}
-                onClick={async () => {
-                  // Deletion cascades: the dialog lists the agents that lose
-                  // their binding, plus a fixed notice for conversations.
-                  setPreviewingKnowledgeId(record.id);
-                  try {
-                    const preview =
-                      await knowledgeBaseService.previewBoundAgents(
-                        record.id,
-                        tenantId
-                      );
-                    confirm({
-                      title: t("knowledgeBase.modal.deleteConfirm.title", {
-                        name: record.name,
-                      }),
-                      content: (
-                        <div>
+            {!readOnly && (
+              <Tooltip title={t("common.delete")}>
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 className="h-4 w-4" />}
+                  size="small"
+                  loading={previewingKnowledgeId === record.id}
+                  disabled={previewingKnowledgeId !== null}
+                  onClick={async () => {
+                    // Deletion cascades: the dialog lists the agents that lose
+                    // their binding, plus a fixed notice for conversations.
+                    setPreviewingKnowledgeId(record.id);
+                    try {
+                      const preview =
+                        await knowledgeBaseService.previewBoundAgents(
+                          record.id,
+                          tenantId
+                        );
+                      confirm({
+                        title: t("knowledgeBase.modal.deleteConfirm.title", {
+                          name: record.name,
+                        }),
+                        content: (
                           <div>
-                            {t("knowledgeBase.modal.deleteConfirm.content")}
+                            <div>
+                              {t("knowledgeBase.modal.deleteConfirm.content")}
+                            </div>
+                            <KnowledgeBaseDeleteNotice preview={preview} />
                           </div>
-                          <KnowledgeBaseDeleteNotice preview={preview} />
-                        </div>
-                      ),
-                      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
-                      cancelText: t("common.cancel"),
-                      onOk: () => handleDelete(record.id),
-                    });
-                  } finally {
-                    setPreviewingKnowledgeId(null);
-                  }
-                }}
-              />
-            </Tooltip>
+                        ),
+                        okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
+                        cancelText: t("common.cancel"),
+                        onOk: () => handleDelete(record.id),
+                      });
+                    } finally {
+                      setPreviewingKnowledgeId(null);
+                    }
+                  }}
+                />
+              </Tooltip>
+            )}
           </div>
         );
       },
@@ -699,7 +706,7 @@ export default function KnowledgeList({
                 icon={<SettingOutlined className="h-4 w-4" />}
                 onClick={() => setQuotaModalVisible(true)}
               >
-                {userRole === "SU"
+                {hasRole(userRole, "SU")
                   ? t("quota.allocateStorage", "Allocate Storage")
                   : t("quota.quotaManagement", "Quota Management")}
               </Button>
@@ -726,7 +733,7 @@ export default function KnowledgeList({
           />
 
           {/* Quota modal: SU gets simple tenant allocation; ADMIN gets full quota management */}
-          {userRole === "SU" && (
+          {hasRole(userRole, "SU") && (
             <SuQuotaModal
               open={quotaModalVisible}
               tenantId={tenantId}
@@ -738,7 +745,7 @@ export default function KnowledgeList({
               onUsageChange={handleQuotaUsageChange}
             />
           )}
-          {userRole === "ADMIN" && (
+          {hasRole(userRole, "ADMIN") && (
             <QuotaSettingsModal
               open={quotaModalVisible}
               tenantId={tenantId}

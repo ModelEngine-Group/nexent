@@ -8,6 +8,7 @@ import { SkillDetail } from "@/components/skill/skill-detail";
 import { SkillRepositoryCard } from "../../app/[locale]/skill-space/components/SkillRepositoryCard";
 import RepositoryMcpCard from "../../app/[locale]/mcp-space/components/RepositoryMcpCard";
 import {
+  mapOfficialRepositoryDetail,
   mapMyAgentDetail,
   mapRepositoryAgentDetail,
 } from "@/lib/myAgentDetail";
@@ -149,5 +150,32 @@ describe("platform author presentation", () => {
     );
     expect(detail.author).toBe("Imported Author");
     expect(detail.authorCasUsername).toBeUndefined();
+  });
+
+  it("maps official repository snapshots without requiring a tenant agent version", () => {
+    const detail = mapOfficialRepositoryDetail(
+      {
+        agent_repository_id: 10,
+        name: "official-agent",
+        display_name: "Official Agent",
+        description: "Official description",
+        author: "Nexent",
+        status: "shared",
+        version_label: "Official",
+        model_name: "official-model",
+        tools: ["search"],
+      },
+      ["official"]
+    );
+
+    expect(detail).toMatchObject({
+      title: "Official Agent",
+      modelName: "official-model",
+      tools: ["search"],
+      skills: [],
+      knowledgeBases: [],
+      subAgents: [],
+      tags: ["official"],
+    });
   });
 });
