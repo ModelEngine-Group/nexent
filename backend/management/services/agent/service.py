@@ -767,6 +767,12 @@ async def update_agent_info_impl(
                     "allow_chat_metadata": request.allow_chat_metadata
                     if request.allow_chat_metadata is not None
                     else False,
+                    "allow_mcp_header_passthrough": request.allow_mcp_header_passthrough
+                    if request.allow_mcp_header_passthrough is not None
+                    else False,
+                    "strict_mcp_placeholder_resolution": request.strict_mcp_placeholder_resolution
+                    if request.strict_mcp_placeholder_resolution is not None
+                    else False,
                     "enable_protocol_repair_retry": request.enable_protocol_repair_retry
                     if request.enable_protocol_repair_retry is not None
                     else False,

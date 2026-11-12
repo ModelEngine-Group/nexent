@@ -343,6 +343,12 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
             "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
+            "allow_mcp_header_passthrough": bool(
+                new_agent.allow_mcp_header_passthrough
+            ),
+            "strict_mcp_placeholder_resolution": bool(
+                new_agent.strict_mcp_placeholder_resolution
+            ),
             "enable_protocol_repair_retry": new_agent.enable_protocol_repair_retry,
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,

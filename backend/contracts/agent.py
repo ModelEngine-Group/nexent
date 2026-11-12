@@ -413,6 +413,10 @@ class AgentInfoRequest(BaseModel):
     # NULL means inherit model defaults.
     model_params_override: Optional[Dict[str, Any]] = None
     allow_chat_metadata: Optional[bool] = None
+    # Phase 1 northbound MCP header passthrough per-agent switches.
+    # Both default to False so Phase 1 is opt-in per agent.
+    allow_mcp_header_passthrough: Optional[bool] = None
+    strict_mcp_placeholder_resolution: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None

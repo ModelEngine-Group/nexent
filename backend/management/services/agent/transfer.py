@@ -442,6 +442,12 @@ async def export_agent_by_agent_id(
         is_main_agent=agent_info.get("is_main_agent", True),
         provide_run_summary=agent_info["provide_run_summary"],
         allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
+        allow_mcp_header_passthrough=agent_info.get(
+            "allow_mcp_header_passthrough", False
+        ),
+        strict_mcp_placeholder_resolution=agent_info.get(
+            "strict_mcp_placeholder_resolution", False
+        ),
         enable_protocol_repair_retry=agent_info.get("enable_protocol_repair_retry")
         is True,
         verification_config=agent_info.get("verification_config"),
@@ -620,6 +626,12 @@ async def import_agent_by_agent_id(
             "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
             "provide_run_summary": import_agent_info.provide_run_summary,
             "allow_chat_metadata": import_agent_info.allow_chat_metadata,
+            "allow_mcp_header_passthrough": getattr(
+                import_agent_info, "allow_mcp_header_passthrough", False
+            ),
+            "strict_mcp_placeholder_resolution": getattr(
+                import_agent_info, "strict_mcp_placeholder_resolution", False
+            ),
             "enable_protocol_repair_retry": getattr(
                 import_agent_info, "enable_protocol_repair_retry", False
             ),
