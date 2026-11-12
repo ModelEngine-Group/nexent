@@ -1,54 +1,28 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Compile Agent resources for AgentOS and the temporary in-process fallback."""
+"""Compile serializable Agent resources for AgentOS execution."""
 
 import logging
-import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from contracts.agentos import PreparedConversationScope, TurnModelGeneration
-from contracts.constants.environment import TOKEN
 from contracts.errors.exceptions import RunModelControlsError
 from contracts.tool import ToolParamsRequest
-from backend.http.client import create_httpx_client
 from infrastructure.agent_model_overrides import apply_turn_model_generation, merge_provider_body
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.version import query_current_version_no, update_agent_snapshot
 from management.db.model.repository import get_model_by_model_id
 from management.services.agent.preparation.compiler import create_agent_config
-from management.services.agent.preparation.inputs import (
-    _collect_run_minio_files,
-    _convert_history_with_minio_files,
-    _validate_run_minio_files,
-    join_minio_file_description_to_query,
-)
-from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
-from management.services.agent.tool_identity import resolve_tool_user_context
-from management.services.mcp.addressing import get_tenant_local_mcp_server
-from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.model.run_bindings import create_model_config_list
 from management.services.model.run_budget import _OPERATOR_OVERRIDE_FIELDS
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 if TYPE_CHECKING:
     from management.services.agent.workbench import PreparedWorkbench
-    from nexent.core.agents.agent_model import AgentRunInfo
 
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
-
-class LegacyRunMaterializer(Protocol):
-    def prepare_workspace(
-        self, user_id: str, tenant_id: str, run_id: str, skill_snapshot: list[dict[str, Any]] | None,
-    ) -> tuple[str, list[dict[str, Any]] | None]: ...
-
-    def file_tool_context(
-        self, workspace_path: str, user_id: str, tenant_id: str, run_id: str,
-    ) -> dict[str, Any]: ...
-
-    def __call__(self, **values: Any) -> "AgentRunInfo": ...
-
 
 def _ensure_agent_reasoning_snapshot(
     agent_id: int,
@@ -138,43 +112,21 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
-    export_evaluation: bool = False,
     export_debug_planning: bool = False,
-    resource_versions: dict | None = None,
     prepared_conversation: PreparedConversationScope | None = None,
     prepared_workbench: "PreparedWorkbench | None" = None,
     turn_generation: TurnModelGeneration | None = None,
     authorized_knowledge_tools: dict | None = None,
-    *,
-    legacy_materializer: LegacyRunMaterializer | None = None,
 ):
-    export_resources = export_evaluation or prepared_conversation is not None
-    if not export_resources and legacy_materializer is None:
-        raise ValueError("Legacy run preparation requires a Runtime materializer")
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
 
         validate_selected_record(
             get_model_by_model_id(override_model_id, tenant_id=tenant_id)
         )
-    runtime_file_context = None
-    if export_resources:
-        from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
+    from management.services.agent.preparation.evaluation_snapshot import build_evaluation_input
 
-        try:
-            run_input = build_evaluation_input(query, minio_files, history, user_id, tenant_id)
-        except (TypeError, ValueError):
-            return None
-    else:
-        workspace_run_id = uuid.uuid4().hex
-        workspace_path, runtime_skill_snapshot = legacy_materializer.prepare_workspace(
-            user_id, tenant_id, workspace_run_id, runtime_skill_snapshot,
-        )
-        effective_minio_files = _collect_run_minio_files(minio_files, history)
-        _validate_run_minio_files(effective_minio_files, user_id, tenant_id)
-        runtime_file_context = legacy_materializer.file_tool_context(
-            workspace_path, user_id, tenant_id, workspace_run_id,
-        )
+    run_input = build_evaluation_input(query, minio_files, history, user_id, tenant_id)
 
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
@@ -197,15 +149,9 @@ async def create_agent_run_info(
         version_no=version_no,
     )
 
-    final_query = query if export_resources else await join_minio_file_description_to_query(
-        minio_files=minio_files,
-        query=query,
-        history=history,
-        language=language,
-    )
-    model_versions = {} if export_resources or resource_versions is not None else None
-    model_options = {"versions": model_versions} if model_versions is not None else {}
-    model_list = await create_model_config_list(tenant_id, **model_options)
+    final_query = query
+    model_versions = {}
+    model_list = await create_model_config_list(tenant_id, versions=model_versions)
     create_config_kwargs = {
         "agent_id": agent_id,
         "tenant_id": tenant_id,
@@ -216,10 +162,8 @@ async def create_agent_run_info(
         "version_no": version_no,
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
-        "runtime_file_context": runtime_file_context,
+        "portable_evaluation": True,
     }
-    if export_resources:
-        create_config_kwargs["portable_evaluation"] = True
     if runtime_knowledge_context is not None:
         create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     if authorized_knowledge_tools is not None:
@@ -338,7 +282,7 @@ async def create_agent_run_info(
     else:
         source_model_alias = apply_root_generation_overlay(model_list, agent_config, runtime_generation_config)
 
-    # Retain legacy in-process and Workbench reasoning handling.
+    # Apply Workbench reasoning settings when no turn overlay is present.
     if turn_generation is None and (reasoning_effort is not None or reasoning_budget_tokens is not None):
         from management.services.model.run_controls import overlay_root_model
 
@@ -356,119 +300,31 @@ async def create_agent_run_info(
         index = model_list.index(selected_config)
         model_list[index] = overlay
 
-    if export_resources:
-        from management.services.agent.preparation.evaluation_snapshot import export_snapshot
+    from management.services.agent.preparation.evaluation_snapshot import compile_snapshot
 
-        export_options = {}
-        if turn_generation is not None:
-            export_options.update(turn_generation=turn_generation, source_model_alias=source_model_alias)
-        if export_debug_planning:
-            export_options["allow_debug_planning"] = True
-        if prepared_workbench is not None:
-            from management.services.agent.workbench import compile_runtime_mount_plan
+    export_options = {}
+    if turn_generation is not None:
+        export_options.update(turn_generation=turn_generation, source_model_alias=source_model_alias)
+    if export_debug_planning:
+        export_options["allow_debug_planning"] = True
+    if prepared_workbench is not None:
+        from management.services.agent.workbench import compile_runtime_mount_plan
 
-            if source_model_alias is None:
-                return None
-            agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
-            export_options.update(
-                root_generation=prepared_workbench.config.generation_config,
-                source_model_alias=source_model_alias,
-                workbench_skills=prepared_workbench.plan.root_skills,
-                workbench_knowledge_tools=prepared_workbench.knowledge_tools,
-            )
-            if reasoning_effort is not None or reasoning_budget_tokens is not None:
-                export_options["turn_generation"] = TurnModelGeneration(
-                    reasoning_effort=reasoning_effort, reasoning_budget_tokens=reasoning_budget_tokens,
-                )
-        return export_snapshot(
-            agent_config, model_list, final_query, None, run_input=run_input,
-            tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
-            agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
-            catalog_model_versions=model_versions,
-            **export_options,
+        agent_config = compile_runtime_mount_plan(prepared_workbench.plan, agent_config).root.agent_config
+        export_options.update(
+            root_generation=prepared_workbench.config.generation_config,
+            source_model_alias=source_model_alias,
+            workbench_skills=prepared_workbench.plan.root_skills,
+            workbench_knowledge_tools=prepared_workbench.knowledge_tools,
         )
-
-    if resource_versions is not None:
-        resource_versions.update(agent_id=int(agent_id), agent_version_no=version_no)
-        model_id, revision = model_versions.get(agent_config.model_name, (None, None))
-        if model_id is not None:
-            resource_versions.update(model_id=int(model_id), model_revision=revision)
-
-    remote_mcp_list = await get_remote_mcp_server_list(
-        tenant_id=tenant_id, is_need_auth=True
-    )
-    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
-    remote_mcp_list.append(
-        {
-            "remote_mcp_server_name": "outer-apis",
-            "remote_mcp_server": default_mcp_url,
-            "status": True,
-            "authorization_token": None,
-        }
-    )
-    remote_mcp_dict = {
-        record["remote_mcp_server_name"]: record
-        for record in remote_mcp_list
-        if record["status"]
-    }
-
-    # Filter MCP servers and tools, and build mcp_host with authorization
-    used_mcp_urls = filter_mcp_servers_and_tools(agent_config, remote_mcp_dict)
-
-    # Build mcp_host list with authorization tokens and custom headers
-    mcp_host = []
-    for url in used_mcp_urls:
-        # Find the MCP record for this URL
-        mcp_record = None
-        for record in remote_mcp_list:
-            if record.get("remote_mcp_server") == url and record.get("status"):
-                mcp_record = record
-                break
-
-        if mcp_record:
-            mcp_config = {
-                "url": url,
-                "transport": "sse" if url.endswith("/sse") else "streamable-http",
-            }
-            if url == default_mcp_url:
-                mcp_config["httpx_client_factory"] = create_httpx_client
-                mcp_config["headers"] = {
-                    "X-Tenant-ID": str(tenant_id),
-                    "X-Nexent-Internal-Token": TOKEN,
-                }
-            headers = {}
-            auth_token = mcp_record.get("authorization_token")
-            if auth_token:
-                headers["Authorization"] = auth_token
-            custom_headers = mcp_record.get("custom_headers")
-            if custom_headers and isinstance(custom_headers, dict):
-                headers.update(custom_headers)
-            if headers:
-                mcp_config["headers"] = headers
-            mcp_host.append(mcp_config)
-        else:
-            # Fallback to string format if record not found
-            mcp_host.append(url)
-
-    # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
-    converted_history = _convert_history_with_minio_files(history, language=language)
-
-    return legacy_materializer(
-        query=final_query,
-        model_config_list=model_list,
-        language=language,
-        agent_config=agent_config,
-        mcp_host=mcp_host,
-        history=converted_history,
-        capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
-        context_budget_snapshot=getattr(
-            agent_config,
-            "context_budget_snapshot",
-            None,
-        ),
-        workspace_path=workspace_path,
-        workspace_run_id=workspace_run_id,
-        tenant_id=tenant_id,
-        minio_files=effective_minio_files,
-        user_context=resolve_tool_user_context(agent_config, user_id, tenant_id),
+        if reasoning_effort is not None or reasoning_budget_tokens is not None:
+            export_options["turn_generation"] = TurnModelGeneration(
+                reasoning_effort=reasoning_effort, reasoning_budget_tokens=reasoning_budget_tokens,
+            )
+    return compile_snapshot(
+        agent_config, model_list, final_query, None, run_input=run_input,
+        tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, language=language,
+        agent_model_overrides=model_params_override, prepared_conversation=prepared_conversation,
+        catalog_model_versions=model_versions,
+        **export_options,
     )

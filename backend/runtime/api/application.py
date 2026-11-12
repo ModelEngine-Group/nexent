@@ -6,7 +6,6 @@ import time
 from contextlib import asynccontextmanager
 
 from backend.http.server.app_factory import create_app
-from runtime.agentos.compatibility import create_background_router, create_compatibility_router
 from runtime.agentos.memory import create_memory_store_router
 from runtime.agentos.middleware import AgentOSMiddleware
 from runtime.agentos.model import create_model_router
@@ -15,13 +14,6 @@ from runtime.agentos.prepared_run import create_prepared_run_router
 from runtime.agentos.resume import create_run_lifecycle_router
 from runtime.model.service import ModelService
 from runtime.recovery import recover_streaming_runs, watch_executions
-from runtime.api.agent.execution import (
-    agent_runtime_router as agent_router,
-    run_agentos_tracked_background,
-    run_agentos_compatibility,
-    run_agentos_conversation,
-    stop_agentos_compatibility,
-)
 from infrastructure.rdb.model_records import fail_detecting_models_on_startup, get_model_by_model_id
 from infrastructure.model_adapter import get_adapter_from_config
 from runtime.agentos.debug import stop_agentos_debug
@@ -30,7 +22,6 @@ from runtime.agentos.evaluation import create_evaluation_router
 from runtime.api.voice.streaming import voice_runtime_router as voice_router
 from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from runtime.api.exception_handler import ExceptionHandlerMiddleware
-from runtime.api.identity_routes import is_runtime_service_request
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
@@ -101,7 +92,6 @@ app = create_app(
     description="Runtime APIs",
     lifespan=runtime_lifespan,
     gateway_identity_audience="runtime",
-    internal_runtime_request=is_runtime_service_request,
 )
 if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager
@@ -115,16 +105,10 @@ async def thread_capacity():
 
 app.add_middleware(ExceptionHandlerMiddleware)
 app.add_middleware(AgentOSMiddleware)
-app.include_router(create_compatibility_router(
-    run_agentos_compatibility, stop_agentos_compatibility, conversation_run=run_agentos_conversation,
-    debug_stop=stop_agentos_debug,
-))
-app.include_router(create_background_router(run_agentos_tracked_background))
 
 app.include_router(create_model_router(ModelService(get_model_by_model_id, get_adapter_from_config)))
 app.include_router(create_memory_store_router())
 app.include_router(create_model_administration_router())
-app.include_router(agent_router)
 app.include_router(create_evaluation_router())
 app.include_router(create_run_lifecycle_router())
 app.include_router(create_prepared_run_router())

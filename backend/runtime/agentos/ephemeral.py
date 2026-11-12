@@ -19,7 +19,7 @@ from infrastructure.redis.run_state import runtime_state_service
 from nexent.core.concurrency import ManagedTaskSpec, ThreadCapacityExceeded, ThreadQueueTimedOut, run_blocking
 from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from runtime.adapters.nexent.runner import DeferredAgentRun, agent_run
-from runtime.agentos.compatibility import run_until_disconnect
+from backend.http.server.agentos_lifecycle import run_until_disconnect
 from runtime.agentos.debug import debug_owner
 from runtime.agentos.prepared_evaluation import discard_prepared_workspace, load_prepared_run, prepare_run_snapshot
 from runtime.agentos.prepared_agent_creator import prepare_agent_creator_run

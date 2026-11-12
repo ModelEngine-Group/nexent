@@ -433,7 +433,7 @@ async def test_unexportable_first_turn_never_creates_a_conversation(flow, mocker
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["prepared", "unsupported", "ambiguous", "metadata", "active"])
-async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(mocker, outcome):
+async def test_northbound_dispatch_never_falls_back_to_legacy_execution(mocker, outcome):
     from management.services.agent import conversation_submission
 
     fallback = AsyncMock(return_value=StreamingResponse(iter(())))
@@ -457,22 +457,23 @@ async def test_northbound_dispatch_saves_in_legacy_only_before_agentos_dispatch(
     metadata_request = outcome in {"metadata", "active"}
     request = AgentRequest.model_validate({**PAYLOAD.request, "metadata": {} if metadata_request else None})
 
-    if outcome == "ambiguous":
-        with pytest.raises(RuntimeServiceUnavailableError):
-            await runtime_client.forward_northbound_run(request, *ACTOR, fallback=fallback)
+    if outcome in {"ambiguous", "unsupported"}:
+        from contracts.errors.exceptions import ValidationError
+        with pytest.raises(RuntimeServiceUnavailableError if outcome == "ambiguous" else ValidationError):
+            await runtime_client.forward_northbound_run(request, *ACTOR, )
     else:
-        response = await runtime_client.forward_northbound_run(request, *ACTOR, fallback=fallback)
+        response = await runtime_client.forward_northbound_run(request, *ACTOR, )
         if outcome == "active":
             assert response.status_code == 200 and response.headers["X-Stream-Status"] == "conflict"
             frames = [chunk async for chunk in response.body_iterator]
             assert len(frames) == 1 and frames[0].startswith('data: {"type": "error"')
         else:
-            assert response is (fallback.return_value if outcome == "unsupported" else prepared)
+            assert response is prepared
 
     assert start.await_count == 1
     assert start.await_args.kwargs.get("metadata_from_northbound", False) == metadata_request
-    assert release.await_count == (1 if outcome == "unsupported" else 0)
-    assert fallback.await_count == (1 if outcome == "unsupported" else 0)
+    assert release.await_count == 0
+    fallback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -486,7 +487,7 @@ async def test_northbound_translates_and_closes_legacy_admission_conflict(mocker
     mocker.patch.object(runtime_client, "forward_conversation_run", return_value=runtime_response)
 
     response = await runtime_client.forward_northbound_run(
-        AgentRequest(query="hello", conversation_id=42, agent_id=7), *ACTOR, fallback=AsyncMock(),
+        AgentRequest(query="hello", conversation_id=42, agent_id=7), *ACTOR,
     )
 
     assert response.status_code == 200
@@ -614,7 +615,7 @@ async def test_workbench_stale_revision_rejects_before_runtime(mocker, stale):
 
 
 @pytest.mark.asyncio
-async def test_unsupported_workbench_uses_unchanged_compatibility_request(mocker):
+async def test_workbench_compiler_failure_never_dispatches_legacy_request(mocker):
     from management.services.agent import conversation_submission
 
     payload = CompatibilityConversationRun(request={
@@ -632,9 +633,11 @@ async def test_unsupported_workbench_uses_unchanged_compatibility_request(mocker
         return await dispatch(claimed.model_copy(update={"claimed_run_id": REFERENCE.run_id}), owner, tenant)
 
     mocker.patch.object(conversation_submission, "submit_conversation", side_effect=submit)
-    assert await runtime_client.forward_conversation_run(payload, *ACTOR) is response
-    assert reject.await_args.args[0].claimed_run_id == REFERENCE.run_id
-    client.run_conversation.assert_awaited_once_with(payload.model_copy(update={"preparation": "legacy"}), *ACTOR)
+    from contracts.errors.exceptions import ValidationError
+    with pytest.raises(ValidationError):
+        await runtime_client.forward_conversation_run(payload, *ACTOR)
+    reject.assert_not_awaited()
+    client.run_conversation.assert_not_awaited()
 
 
 @pytest.mark.asyncio

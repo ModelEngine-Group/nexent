@@ -9,7 +9,7 @@ import pytest
 
 from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.agent import AgentRequest
-from contracts.agentos import AgentOperation, CompatibilityOperation
+from contracts.agentos import AgentOperation, PreparedEphemeralRun
 from contracts.constants import environment
 from infrastructure.agentos_identity import ServicePrincipal, verify_call
 from management.services.agent import runtime_client as proxy
@@ -25,6 +25,19 @@ def no_prepared_northbound_turn(monkeypatch):
     from management.services.agent import prepared_turn
 
     monkeypatch.setattr(prepared_turn, "find_pending_turn", AsyncMock(return_value=None))
+
+
+def stream_payload(**fields):
+    return PreparedEphemeralRun.model_validate({
+        "run_id": "a" * 32, "mode": "nexent", "input": {
+            "query": fields.get("query", "hello"),
+            "attachment_refs": [{"name": "report.pdf", "url": "s3://attachments/user-a/report.pdf"}]
+            if fields.get("minio_files") else [],
+        },
+        "runtime_metadata": fields.get("metadata") or {},
+        "resource": {"agent_id": 7, "version_no": 1, "name": "fixture", "description": "test", "prompt_templates": {}},
+        "models": {"llm": {"model_id": 11, "alias": "fixture", "revision": "1"}},
+    })
 
 
 class TrackingStream(httpx.AsyncByteStream):
@@ -68,8 +81,8 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, 
 
     monkeypatch.setattr(proxy, "create_httpx_client", create_client)
 
-    response = await proxy.forward_agent_run(
-        AgentRequest(
+    response = await proxy.forward_creator_run(
+        stream_payload(
             query="hello",
             conversation_id=123,
             agent_id=7,
@@ -88,20 +101,16 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, 
 
     request = captured["request"]
     assert str(request.url) == (
-        "http://runtime:5014/api/internal/agentos/v1/compat/agent/run"
+        "http://runtime:5014/api/internal/agentos/v1/agent/run-ephemeral"
     )
     token = request.headers["authorization"].removeprefix("Bearer ")
-    assert verify_call(token, CompatibilityOperation.RUN, request.content) == ServicePrincipal("user-a", "tenant-a")
-    request_payload = json.loads(request.content)["request"]
-    assert request_payload["agent_id"] == 7
-    assert request_payload["metadata"] == metadata
-    # The real proxy wire payload must not invent a metadata update when absent.
-    assert AgentRequest.model_validate(request_payload).metadata == metadata
-    assert request_payload["minio_files"] == [
-        {
-            "object_name": "attachments/user-a/report.pdf",
-            "presigned_url": "http://minio/report.pdf",
-        }
+    assert verify_call(token, AgentOperation.RUN_EPHEMERAL, request.content) == ServicePrincipal("user-a", "tenant-a")
+    request_payload = json.loads(request.content)
+    assert request_payload["resource"]["agent_id"] == 7
+    assert request_payload["runtime_metadata"] == (metadata or {})
+    assert PreparedEphemeralRun.model_validate(request_payload).runtime_metadata == (metadata or {})
+    assert request_payload["input"]["attachment_refs"] == [
+        {"name": "report.pdf", "url": "s3://attachments/user-a/report.pdf", "presign": False},
     ]
     assert chunks == [b"data: one\n\n", b"data: two\n\n"]
     assert response.headers["cache-control"] == "no-cache"
@@ -120,8 +129,8 @@ async def test_forward_agent_run_maps_timeout(monkeypatch):
     monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
 
     with pytest.raises(RuntimeServiceTimeoutError):
-        await proxy.forward_agent_run(
-            AgentRequest(query="hello"),
+        await proxy.forward_creator_run(
+            stream_payload(query="hello"),
             user_id="user-a",
             tenant_id="tenant-a",
         )
@@ -137,8 +146,8 @@ async def test_forward_agent_run_maps_request_error(monkeypatch):
     monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
 
     with pytest.raises(RuntimeServiceUnavailableError, match="unavailable"):
-        await proxy.forward_agent_run(
-            AgentRequest(query="hello"),
+        await proxy.forward_creator_run(
+            stream_payload(query="hello"),
             user_id="user-a",
             tenant_id="tenant-a",
         )
@@ -156,8 +165,8 @@ async def test_forward_agent_run_closes_client_on_unexpected_error(monkeypatch):
     monkeypatch.setattr(client, "send", raise_unexpected)
 
     with pytest.raises(RuntimeError, match="unexpected"):
-        await proxy.forward_agent_run(
-            AgentRequest(query="hello"),
+        await proxy.forward_creator_run(
+            stream_payload(query="hello"),
             user_id="user-a",
             tenant_id="tenant-a",
         )
@@ -176,8 +185,8 @@ async def test_forward_agent_run_preserves_upstream_error(monkeypatch):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
 
-    response = await proxy.forward_agent_run(
-        AgentRequest(query="hello"),
+    response = await proxy.forward_creator_run(
+        stream_payload(query="hello"),
         user_id="user-a",
         tenant_id="tenant-a",
     )
@@ -199,8 +208,8 @@ async def test_forward_agent_run_closes_upstream_when_consumer_stops(monkeypatch
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
 
-    response = await proxy.forward_agent_run(
-        AgentRequest(query="hello"),
+    response = await proxy.forward_creator_run(
+        stream_payload(query="hello"),
         user_id="user-a",
         tenant_id="tenant-a",
     )
@@ -251,20 +260,15 @@ async def test_forward_agent_stop_returns_json(monkeypatch):
 
     result = await proxy.forward_agent_stop(123, "user-a", "tenant-a")
 
-    assert result == {"message": "stopped"}
-    active, stop = captured
+    assert result["already_stopped"] is True
+    active, = captured
     assert active.url.path == f"/api{AgentOperation.ACTIVE.value}"
     assert json.loads(active.content) == {"conversation_id": 123}
-    assert str(stop.url) == (
-        "http://runtime:5014/api/internal/agentos/v1/compat/agent/stop"
-    )
-    assert stop.method == "POST"
-    assert json.loads(stop.content) == {"conversation_id": 123}
 
 
 @pytest.fixture
 def no_active_northbound_run(monkeypatch):
-    monkeypatch.setattr(proxy.AgentOSClient, "find_active_run", AsyncMock(return_value=None))
+    monkeypatch.setattr(proxy.AgentOSClient, "find_active_run", AsyncMock(return_value="a" * 32))
 
 
 @pytest.mark.asyncio

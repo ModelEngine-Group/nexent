@@ -104,7 +104,7 @@ async def run_background(client, payload, actor):
     request.enable_automation_tool = False
     reference = AgentRunReference(conversation_id=request.conversation_id, run_id=payload.run_id)
     scope = conversation_claim_scope(actor.user_id, actor.tenant_id, "compatibility-background-" + payload.run_id)
-    fingerprint = conversation_request_fingerprint(payload.model_dump(mode="json", exclude={"preparation"}))
+    fingerprint = conversation_request_fingerprint(payload.model_dump(mode="json"))
     try:
         claim = await _io("background-compat-claim", claim_conversation_run, scope, fingerprint,
                           actor.user_id, actor.tenant_id, requested_run_id=payload.run_id)

@@ -26,18 +26,22 @@ acceptance_bindings:
   - test_knowledge_legacy_top_k_over_signed_agentos
   AC-63:
   - test_raw_new_conversation_over_signed_agentos
+  - test_signed_agentos_transport
   AC-62:
   - test_background_management_handoff_over_signed_http
   AC-61:
   - test_raw_model_profile_reaches_sdk_provider_over_signed_http
   AC-60:
   - test_raw_scoped_preparation_over_signed_http
+  - test_signed_agentos_transport
   AC-59:
   - test_raw_northbound_preparation_over_signed_http
+  - test_signed_agentos_transport
   AC-58:
   - test_background_management_handoff_over_signed_http
   AC-57:
   - test_saved_user_compatibility_over_signed_http
+  - test_signed_agentos_transport
   AC-56:
   - test_signed_agentos_transport
   AC-55:

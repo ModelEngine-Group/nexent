@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from contracts.agentos import (
     BODY_KEY, PRINCIPAL_KEY, AgentOperation, EvaluationAgentResult, PreparedEvaluationRun,
 )
-from runtime.agentos.compatibility import run_until_disconnect
+from backend.http.server.agentos_lifecycle import run_until_disconnect
 
 logger = logging.getLogger(__name__)
 

@@ -114,7 +114,7 @@ async def prepare_evaluation_snapshot(request: EvaluationAgentRun, user_id: str,
         agent_id=request.agent_id, minio_files=None, query=request.query, history=history,
         tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
         override_version_no=request.version_no, conversation_id=request.conversation_id,
-        enable_automation_tool=False, export_evaluation=True,
+        enable_automation_tool=False,
     )
 
 
@@ -151,7 +151,7 @@ async def prepare_a2a_snapshot(request: AgentRequest, user_id: str, tenant_id: s
         agent_id=request.agent_id, minio_files=request.minio_files,
         query=prepend_current_time(request.query, None, language="zh"), history=request.history,
         tenant_id=tenant_id, user_id=user_id, allow_memory_search=False, is_debug=True,
-        override_version_no=request.version_no, enable_automation_tool=False, export_evaluation=True,
+        override_version_no=request.version_no, enable_automation_tool=False,
     )
     if snapshot is None:
         return None
@@ -237,7 +237,7 @@ async def _prepare_workbench_debug_snapshot(request, user_id, tenant_id, *, lang
         reasoning_effort=request.reasoning_effort, reasoning_budget_tokens=request.reasoning_budget_tokens,
         context_policy=request.context_policy, enable_automation_tool=False,
         enable_planning=bool(request.enable_plan), export_debug_planning=bool(request.enable_plan),
-        export_evaluation=True, runtime_skill_snapshot=runtime_skill_snapshot(plan),
+        runtime_skill_snapshot=runtime_skill_snapshot(plan),
         runtime_generation_config=generation,
         runtime_sub_agent_mounts=[asdict(child) for child in plan.child_mounts],
         prepared_workbench=PreparedWorkbench(config, plan, 0, 0, knowledge, tools),
@@ -298,7 +298,7 @@ async def prepare_debug_snapshot(
         override_version_no=version, override_model_id=request.model_id,
         tool_params=knowledge.tool_params if knowledge is not None else request.tool_params,
         requested_output_tokens=request.requested_output_tokens, context_policy=request.context_policy,
-        enable_automation_tool=False, enable_planning=bool(request.enable_plan), export_evaluation=True,
+        enable_automation_tool=False, enable_planning=bool(request.enable_plan),
         export_debug_planning=bool(request.enable_plan), turn_generation=_turn_model_generation(request),
         **compile_options,
     )

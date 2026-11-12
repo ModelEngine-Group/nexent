@@ -91,8 +91,10 @@ async def test_recovered_history_must_keep_the_owned_source_boundary(dispatch, m
         assert denied.value.status_code == 404
         dispatch.client.run_tracked_background.assert_not_awaited()
     else:
-        assert await background.dispatch_background(old_payload(), ACTOR) == dispatch.result
-        dispatch.client.run_tracked_background.assert_awaited_once()
+        with pytest.raises(HTTPException) as denied:
+            await background.dispatch_background(old_payload(), ACTOR)
+        assert denied.value.status_code == 422
+        dispatch.client.run_tracked_background.assert_not_awaited()
     assert not dispatch.writes
     dispatch.compile.assert_not_awaited()
     dispatch.client.start_prepared_run.assert_not_awaited()
@@ -117,14 +119,14 @@ async def test_competing_source_pin_cannot_be_overwritten_or_executed(dispatch, 
 
 
 @pytest.mark.asyncio
-async def test_old_background_with_unprovable_source_keeps_explicit_fallback(dispatch, mocker):
+async def test_unprovable_background_source_never_uses_legacy_execution(dispatch, mocker):
     dispatch.record.update(user_message_id=None, generated_prompt=None)
     mocker.patch.object(background.turns, "read_saved_user_turn_head", side_effect=background.turns.PreparedTurnConflict)
-    assert await background.dispatch_background(old_payload(), ACTOR) == dispatch.result
+    with pytest.raises(HTTPException) as denied:
+        await background.dispatch_background(old_payload(), ACTOR)
+    assert denied.value.status_code == 422
     assert dispatch.writes == []
-    dispatch.client.run_tracked_background.assert_awaited_once_with(
-        old_payload().model_copy(update={"preparation": "legacy"}), "actor", "tenant",
-    )
+    dispatch.client.run_tracked_background.assert_not_awaited()
     dispatch.compile.assert_not_awaited()
     dispatch.client.start_prepared_run.assert_not_awaited()
 
@@ -144,8 +146,10 @@ async def test_old_source_scope_and_compatibility_boundaries(dispatch, mocker, r
         assert denied.value.status_code == 404
         dispatch.client.run_tracked_background.assert_not_awaited()
     else:
-        assert await background.dispatch_background(old_payload(), ACTOR) == dispatch.result
-        dispatch.client.run_tracked_background.assert_awaited_once()
+        with pytest.raises(HTTPException) as denied:
+            await background.dispatch_background(old_payload(), ACTOR)
+        assert denied.value.status_code == 422
+        dispatch.client.run_tracked_background.assert_not_awaited()
         if reason == "terminal":
             head.assert_not_called()
     assert dispatch.writes == []
@@ -159,10 +163,10 @@ async def test_same_text_in_a_newer_turn_cannot_replace_the_original_history(dis
     mocker.patch.object(background.turns, "read_saved_user_turn_head", return_value=dispatch.source.return_value)
     source_history.return_value["history"] = []
     payload = old_payload()
-    assert await background.dispatch_background(payload, ACTOR) == dispatch.result
+    with pytest.raises(HTTPException) as denied:
+        await background.dispatch_background(payload, ACTOR)
+    assert denied.value.status_code == 422
     assert dispatch.writes == []
-    dispatch.client.run_tracked_background.assert_awaited_once_with(
-        payload.model_copy(update={"preparation": "legacy"}), "actor", "tenant",
-    )
+    dispatch.client.run_tracked_background.assert_not_awaited()
     dispatch.compile.assert_not_awaited()
     dispatch.client.start_prepared_run.assert_not_awaited()

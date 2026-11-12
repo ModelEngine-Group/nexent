@@ -43,9 +43,7 @@ async def _legacy_background(client, payload, actor):
     prepared = await run_compatible_background(client, payload, actor)
     if prepared is not None:
         return prepared
-    return await client.run_tracked_background(
-        payload.model_copy(update={"preparation": "legacy"}), actor.user_id, actor.tenant_id,
-    )
+    raise HTTPException(status_code=422, detail={"code": "AGENTOS_INVALID_BACKGROUND_SOURCE"})
 
 
 async def dispatch_background(payload: BackgroundRun, actor: ServicePrincipal) -> TrackedBackgroundResult:

@@ -23,6 +23,9 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
+    - Runtime and Management application imports succeed with the peer package denied, and source imports never cross the service boundary.
+    - New Management runs use standard prepared AgentOS execution without legacy start fallback; retired Runtime starts and reverse start dispatch operations have no routes or protocol declarations.
+    - Independent management and runtime build targets honor --version latest and deployment selects separate service images in Compose, Helm and offline packages.
     - A finite production total stream-open deadline cancels header stalls and closes transport once without truncating admitted SSE streams or converting external cancellation into timeout.
     - Catalog Memory aliases retain the original unconfigured SDK behavior and gain no implicit Memory service or actor privileges.
     - Retired evaluation and conversation-scoped background/inspection compatibility operations have no routes or protocol declarations and never dispatch execution.
@@ -159,20 +162,17 @@ change:
     - test/backend/services/test_agent_automation_prepared.py
     - test/backend/services/test_agent_automation_conversation_adapter.py
     - test/backend/app/test_agentos_catalog_system_tools.py
+    - test/backend/app/test_agentos_public_errors.py
+    - test/backend/management/test_agent_runtime_boundaries.py
+    - test/backend/deploy/test_service_image_sources.py
     - test/backend/services/test_agentos_stream_deadline.py
     - test/backend/app/test_agentos_subagent_resources.py
     - test/backend/app/test_agentos_snapshot_diagnostics.py
     - test/backend/app/test_agentos_local_catalog_names.py
-    - test/backend/app/test_agentos_tracked_background.py
-    - test/backend/app/test_agentos_background_handoff.py
-    - test/backend/app/test_agentos_raw_handoff.py
-    - test/backend/services/test_agentos_raw_preparation.py
     - test/backend/services/test_prepared_raw_new_conversation.py
     - test/backend/database/test_prepared_omitted_user.py
     - test/backend/database/test_prepared_background_turn.py
     - test/backend/services/test_agentos_compatibility_background.py
-    - test/backend/services/test_agentos_raw_resources.py
-    - test/backend/services/test_agentos_raw_model_profile.py
     - test/backend/services/test_agentos_background_dispatch.py
     - test/backend/services/test_agentos_background_source_recovery.py
     - test/backend/database/test_prepared_saved_user_head.py
@@ -182,8 +182,6 @@ change:
     - test/backend/services/test_agent_subscription_lifecycle.py
     - test/backend/app/test_conversation_run_app.py
     - test/backend/app/test_agentos_admission.py
-    - test/backend/app/test_agentos_management_dispatch.py
-    - test/backend/app/test_agentos_saved_user.py
     - test/backend/services/test_prepared_saved_turn.py
     - test/backend/database/test_prepared_saved_user.py
     - test/backend/database/test_conversation_projection_receipt.py

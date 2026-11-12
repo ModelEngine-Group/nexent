@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Neutral AgentOS v1 transport and transitional Agent request shapes."""
+"""Neutral AgentOS v1 transport and Management submission request shapes."""
 
 from enum import Enum
 from typing import Annotated, Literal
@@ -19,15 +19,8 @@ RUN_ID_PATTERN = r"^[0-9a-f]{32}$"
 IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 
 
-class CompatibilityOperation(str, Enum):
-    RUN = NAMESPACE + "v1/compat/agent/run"
-    CONVERSATION_RUN = NAMESPACE + "v1/compat/agent/conversation-run"
-    STOP = NAMESPACE + "v1/compat/agent/stop"
-    DEBUG_STOP = NAMESPACE + "v1/compat/agent/debug-stop"
-
-
 class CompatibilityRun(BaseModel):
-    """Carry the current AgentRequest until Runtime accepts resolved resources."""
+    """Carry a public AgentRequest within Management before resource compilation."""
 
     model_config = ConfigDict(extra="forbid")
     request: dict[str, JsonValue]
@@ -39,9 +32,6 @@ class CompatibilityConversationRun(CompatibilityRun):
     timezone: str | None = Field(default=None, max_length=128)
     idempotency_key: str | None = Field(default=None, pattern=IDEMPOTENCY_KEY_PATTERN)
     claimed_run_id: str | None = Field(default=None, pattern=RUN_ID_PATTERN)
-    preparation: Literal["management", "legacy"] | None = Field(
-        default=None, description="Internal migration hop, excluded from the conversation admission fingerprint.",
-    )
     user_message: Literal["new", "saved"] = "new"
     invocation: Literal["northbound"] | None = None
 
@@ -50,8 +40,6 @@ class CompatibilityConversationRun(CompatibilityRun):
         payload = serialize(self)
         if self.claimed_run_id is None:
             payload.pop("claimed_run_id", None)
-        if self.preparation is None:
-            payload.pop("preparation", None)
         if self.user_message == "new":
             payload.pop("user_message", None)
         if self.invocation is None:
@@ -93,7 +81,6 @@ class AgentOperation(str, Enum):
     INSPECT = NAMESPACE + "v1/agent/inspect"
     STOP = NAMESPACE + "v1/agent/stop"
     ACTIVE = NAMESPACE + "v1/agent/active"
-    BACKGROUND = NAMESPACE + "v1/agent/background"
 
 
 class RunSpecModel(BaseModel):
@@ -143,14 +130,6 @@ class AgentActiveRun(RunSpecModel):
 
 class BackgroundRun(CompatibilityRun):
     run_id: str = Field(pattern=RUN_ID_PATTERN)
-    preparation: Literal["management", "legacy"] | None = None
-
-    @model_serializer(mode="wrap")
-    def omit_preparation(self, serialize):
-        payload = serialize(self)
-        if self.preparation is None:
-            payload.pop("preparation", None)
-        return payload
 
 
 class TrackedBackgroundResult(BackgroundAgentResult):
@@ -766,8 +745,6 @@ class WorkbenchSkillMounts(RunSpecModel):
 
 
 class ManagementOperation(str, Enum):
-    CONVERSATION_DISPATCH = NAMESPACE + "v1/agent/dispatch-conversation"
-    BACKGROUND_DISPATCH = NAMESPACE + "v1/agent/dispatch-background"
     AUTOMATION_PROPOSAL = NAMESPACE + "v1/automation/create-proposal"
     MEMORY_STORED = NAMESPACE + "v1/memory/stored"
     NL2AGENT_TOOL = NAMESPACE + "v1/agent/nl2agent/tool"
@@ -779,12 +756,12 @@ MANAGEMENT_OPERATION_PATHS = frozenset(operation.value for operation in Manageme
 
 
 AgentOSOperation = (
-    CompatibilityOperation | AgentOperation | ModelOperation | ModelAdministrationOperation | MemoryOperation
+    AgentOperation | ModelOperation | ModelAdministrationOperation | MemoryOperation
     | ManagementOperation
 )
 OPERATIONS_BY_PATH: dict[str, AgentOSOperation] = {
     operation.value: operation
-    for operations in (CompatibilityOperation, AgentOperation, ModelOperation, ModelAdministrationOperation, MemoryOperation)
+    for operations in (AgentOperation, ModelOperation, ModelAdministrationOperation, MemoryOperation)
     for operation in operations
 }
 

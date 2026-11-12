@@ -288,61 +288,8 @@ async def test_workbench_debug_checks_root_metadata_policy_before_dispatch(mocke
     client.run_conversation.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_legacy_compile_requires_runtime_materializer_before_resource_reads(mocker):
-    load_agent = mocker.patch.object(run, "search_agent_info_by_agent_id")
-
-    with pytest.raises(ValueError, match="requires a Runtime materializer"):
-        await run.create_agent_run_info(7, [], "hello", [], "tenant", "actor")
-
-    load_agent.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_legacy_compile_preserves_values_in_the_runtime_factory(mocker, tmp_path):
-    from nexent.core.agents.agent_model import AgentConfig
-    from runtime.adapters.nexent import factory
-
-    model = create_model_config_from_record(model_record(model_id=11, connect_status="available"))
-    agent = AgentConfig(name="test", description="test", tools=[], model_name=model.cite_name, sandbox_policy={"level": "local"})
-    mocker.patch.object(factory.environment, "AGENT_WORKSPACE_ROOT", str(tmp_path))
-    mocker.patch.object(factory.environment, "MCP_REQUEST_TIMEOUT_SECONDS", 23)
-    mocker.patch.object(run, "_validate_run_minio_files")
-    mocker.patch.object(run, "_ensure_agent_reasoning_snapshot")
-    compile_agent = mocker.patch.object(run, "create_agent_config", return_value=agent)
-    mocker.patch.object(run, "search_agent_info_by_agent_id", return_value={})
-    mocker.patch.object(run, "create_model_config_list", return_value=[model])
-    mocker.patch.object(run, "get_remote_mcp_server_list", return_value=[])
-    mocker.patch.object(run, "get_tenant_local_mcp_server", return_value="http://mcp/mcp")
-    mocker.patch.object(run, "resolve_tool_user_context", return_value={"tenant_id": "tenant"})
-    redis = object()
-    mocker.patch.object(factory, "get_redis_client", return_value=redis)
-    storage = object()
-    storage_client = mocker.patch.object(factory, "get_sandbox_minio_client", return_value=storage)
-
-    prepared = await run.create_agent_run_info(
-        7, [], "hello", [], "tenant", "actor", is_debug=True, legacy_materializer=factory.materialize_legacy_run,
-    )
-
-    assert prepared.query == "hello" and prepared.agent_config is agent
-    assert prepared.model_config_list == [model]
-    assert prepared.user_context == {"tenant_id": "tenant"}
-    assert not prepared.stop_event.is_set()
-    assert prepared.minio_client is storage
-    assert prepared.redis_client is redis
-    assert prepared.mcp_request_timeout_seconds == 23
-    storage_client.assert_called_once_with()
-    workspace = tmp_path / "actor" / prepared.workspace_run_id
-    context = compile_agent.await_args.kwargs["runtime_file_context"]
-    assert context["workspace_path"] == str(workspace)
-    assert context["run_id"] == prepared.workspace_run_id
-    validate = context["validate_url_access"]
-    validate(["/bucket/attachments/actor/file.txt", "https://example.com/file.txt"])
-    with pytest.raises(PermissionError):
-        validate(["s3://bucket/attachments/another-user/file.txt"])
-    assert prepared.workspace_path == str(workspace)
-    assert prepared.sandbox_config.output_dir == str(workspace / "outputs")
-    assert prepared.sandbox_config.extra_kwargs["workspace_root"] == str(tmp_path.resolve())
 
 
 @pytest.mark.asyncio
@@ -934,7 +881,7 @@ async def test_explicit_turn_controls_reject_missing_root_binding_without_legacy
 
     with pytest.raises(RunModelControlsError, match="model_not_available"):
         await run.create_agent_run_info(
-            7, [], "hello", [], "tenant", "actor", is_debug=True, export_evaluation=True,
+            7, [], "hello", [], "tenant", "actor", is_debug=True,
             turn_generation=TurnModelGeneration(settings=WorkbenchGenerationConfig(temperature=0.4)),
         )
 

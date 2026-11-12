@@ -24,9 +24,6 @@ from contracts.agentos import (
     DebugRunReference,
     AgentLegacyResume, AgentResume,
     AgentRunState,
-    CompatibilityConversationRun,
-    CompatibilityOperation,
-    CompatibilityRun,
     CompatibilityStop,
     EvaluationAgentResult,
     MemoryOperation,
@@ -80,17 +77,6 @@ class AgentOSClient:
             raise RuntimeServiceUnavailableError("Internal runtime authentication is not configured") from exc
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         return f"{self.runtime_url}/api{operation.value}", body, headers
-
-    async def run(self, request, user_id, tenant_id):
-        return await self._open_stream(
-            CompatibilityOperation.RUN, CompatibilityRun(request=request), user_id, tenant_id,
-        )
-
-    async def dispatch_conversation(self, request: CompatibilityConversationRun, user_id: str, tenant_id: str):
-        return await self._open_stream(ManagementOperation.CONVERSATION_DISPATCH, request, user_id, tenant_id)
-
-    async def run_conversation(self, request: CompatibilityConversationRun, user_id: str, tenant_id: str):
-        return await self._open_stream(CompatibilityOperation.CONVERSATION_RUN, request, user_id, tenant_id)
 
     async def start_prepared_run(self, payload: PreparedAgentRun, user_id: str, tenant_id: str) -> AgentRunReference:
         result = await self._post_json(AgentOperation.RUN, payload, user_id, tenant_id)
@@ -159,24 +145,6 @@ class AgentOSClient:
             AgentOperation.EVALUATION_CASE, payload, user_id, tenant_id, _STREAM_TIMEOUT,
         )
         return self._validate_result(EvaluationAgentResult, result)
-
-    async def stop(self, conversation_id, user_id, tenant_id):
-        payload = CompatibilityStop(conversation_id=conversation_id)
-        return await self._post_json(CompatibilityOperation.STOP, payload, user_id, tenant_id)
-
-    async def run_tracked_background(self, payload: BackgroundRun, user_id: str, tenant_id: str) -> TrackedBackgroundResult:
-        result = await self._post_json(AgentOperation.BACKGROUND, payload, user_id, tenant_id, _STREAM_TIMEOUT)
-        tracked_result = self._validate_result(TrackedBackgroundResult, result)
-        if tracked_result.run_id != payload.run_id:
-            raise RuntimeServiceUnavailableError("AgentOS returned a different background run ID")
-        return tracked_result
-
-    async def dispatch_background(self, payload: BackgroundRun, user_id: str, tenant_id: str) -> TrackedBackgroundResult:
-        result = await self._post_json(ManagementOperation.BACKGROUND_DISPATCH, payload, user_id, tenant_id, _STREAM_TIMEOUT)
-        tracked = self._validate_result(TrackedBackgroundResult, result)
-        if (tracked.run_id, tracked.conversation_id) != (payload.run_id, payload.request.get("conversation_id")):
-            raise RuntimeServiceUnavailableError("AgentOS returned a different background run")
-        return tracked
 
     async def find_active_run(self, conversation_id: int, user_id: str, tenant_id: str) -> str | None:
         result = await self._post_json(

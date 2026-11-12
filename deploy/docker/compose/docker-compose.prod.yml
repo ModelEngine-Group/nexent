@@ -67,7 +67,7 @@ services:
       - nexent
 
   nexent-config:
-    image: ${NEXENT_MANAGEMENT_IMAGE:-${NEXENT_IMAGE}}
+    image: ${NEXENT_MANAGEMENT_IMAGE:-nexent/nexent-management:latest}
     container_name: nexent-config
     restart: always
     healthcheck:
@@ -109,7 +109,7 @@ services:
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "-m", "backend.http.config_service"]
 
   nexent-runtime:
-    image: ${NEXENT_IMAGE}
+    image: ${NEXENT_RUNTIME_IMAGE:-nexent/nexent-runtime:latest}
     container_name: nexent-runtime
     restart: always
     volumes:

@@ -2,7 +2,6 @@
 """Management AgentOS calls for Agent execution."""
 
 import logging
-from collections.abc import Awaitable, Callable
 
 from anyio import CancelScope
 from fastapi import HTTPException
@@ -80,15 +79,6 @@ async def _run_prepared_debug(client, prepared, user_id, tenant_id):
                     logger.warning("Workbench debug grant will expire run_id=%s", payload.run_id)
 
 
-async def forward_agent_run(
-    agent_request: AgentRequest,
-    user_id: str,
-    tenant_id: str,
-) -> StreamingResponse:
-    """Start an AgentOS compatibility run and relay its SSE response."""
-    return await _agentos_client().run(agent_request.model_dump(mode="json"), user_id, tenant_id)
-
-
 async def forward_creator_run(
     payload: PreparedSkillCreatorRun | PreparedAgentCreatorRun, user_id: str, tenant_id: str,
 ) -> StreamingResponse:
@@ -99,19 +89,16 @@ async def forward_a2a_run(agent_request: AgentRequest, user_id: str, tenant_id: 
     from management.services.agent.preparation.evaluation_snapshot import prepare_a2a_snapshot
 
     snapshot = await prepare_a2a_snapshot(agent_request, user_id, tenant_id)
-    if snapshot is None:
-        return await forward_agent_run(agent_request, user_id, tenant_id)
     response = await _agentos_client().run_ephemeral(snapshot, user_id, tenant_id)
     return present_ephemeral_stream(response, user_id, snapshot.run_id)
 
 
 async def forward_northbound_run(
-    agent_request: AgentRequest, user_id: str, tenant_id: str, *,
-    fallback: Callable[[], Awaitable[StreamingResponse]],
+    agent_request: AgentRequest, user_id: str, tenant_id: str,
 ):
     payload = CompatibilityConversationRun(request=agent_request.model_dump(mode="json"))
     try:
-        response = await forward_conversation_run(payload, user_id, tenant_id, northbound_fallback=fallback)
+        response = await forward_conversation_run(payload, user_id, tenant_id, northbound=True)
     except HTTPException as exc:
         if exc.status_code != 409 or exc.detail != {"code": "AGENTOS_RUN_ALREADY_ACTIVE"}:
             raise
@@ -128,7 +115,7 @@ async def forward_northbound_run(
 
 async def forward_conversation_run(
     payload: CompatibilityConversationRun, user_id: str, tenant_id: str, *,
-    northbound_fallback: Callable[[], Awaitable[StreamingResponse]] | None = None,
+    northbound: bool = False,
 ):
     request = AgentRequest.model_validate(payload.request)
     if payload.resume and (request.is_debug or (request.conversation_id or 0) <= 0):
@@ -159,7 +146,7 @@ async def forward_conversation_run(
             raise prepared_turn.active_turn_conflict() from exc
         if payload.idempotency_key is None:
             payload = payload.model_copy(update={"idempotency_key": f"saved-message-{saved_user.message_id}"})
-    if request.is_debug and not payload.resume and northbound_fallback is None:
+    if request.is_debug and not payload.resume and not northbound:
         from management.services.agent.preparation.evaluation_snapshot import prepare_debug_snapshot
 
         try:
@@ -181,7 +168,7 @@ async def forward_conversation_run(
             return public
 
     conversation_id = request.conversation_id
-    northbound = northbound_fallback is not None or saved_user is not None
+    northbound = northbound or saved_user is not None
     temporary_workbench_claim = request.entrypoint == "workbench" and payload.idempotency_key is None
     candidate = prepared_turn.is_prepared_candidate(payload, request)
 
@@ -195,9 +182,6 @@ async def forward_conversation_run(
             )
             if response is not None:
                 return response
-            if northbound_fallback is not None or temporary_workbench_claim:
-                await prepared_turn.reject_unstaged_turn(claimed, owner, tenant)
-                claimed = payload
         if conversation_id and conversation_id > 0 and not request.is_debug:
             if claimed.resume:
                 response = await prepared_turn.resume_cursorless(conversation_id, owner, tenant, client)
@@ -209,9 +193,7 @@ async def forward_conversation_run(
                 )
             elif await prepared_turn.find_pending_turn(conversation_id, owner, tenant) is not None:
                 raise prepared_turn.active_turn_conflict()
-        if northbound_fallback is not None:
-            return await northbound_fallback()
-        return await client.run_conversation(claimed.model_copy(update={"preparation": "legacy"}), owner, tenant)
+        raise ValidationError("Agent resources could not be prepared for AgentOS")
 
     if candidate or payload.idempotency_key is not None:
         return await submit_conversation(
@@ -239,7 +221,8 @@ async def forward_agent_stop(
     if pending is None:
         run_id = await client.find_active_run(conversation_id, user_id, tenant_id)
         if run_id is None:
-            return await client.stop(conversation_id, user_id, tenant_id)
+            return {"status": "success", "already_stopped": True,
+                    "message": f"no running agent or preprocess tasks found for user_id {user_id}, run_id {conversation_id}"}
         reference = AgentRunReference(run_id=run_id, conversation_id=conversation_id)
     else:
         reference = pending.reference
@@ -281,7 +264,8 @@ async def forward_tracked_background(
     payload = BackgroundRun(run_id=run_id, request=agent_request.model_dump(mode="json"))
     client = _agentos_client()
     try:
-        return await client.run_tracked_background(payload, user_id, tenant_id)
+        from management.services.agent.background import dispatch_background
+        return await dispatch_background(payload, ServicePrincipal(user_id, tenant_id))
     except (RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError) as failure:
         if isinstance(failure, RuntimeUpstreamError) and failure.status_code not in {503, 504}:
             raise

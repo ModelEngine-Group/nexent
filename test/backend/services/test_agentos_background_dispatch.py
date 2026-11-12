@@ -101,17 +101,17 @@ async def test_unknown_background_uses_management_compatibility_before_legacy_ru
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["unknown", "unrecorded", "unsupported"])
-async def test_old_background_requests_keep_one_explicit_legacy_fallback(dispatch, reason):
+async def test_uncompiled_background_never_dispatches_legacy_execution(dispatch, reason):
     if reason == "unknown":
         dispatch.lookup.side_effect = lambda *_args, **_kw: None
     elif reason == "unrecorded":
         dispatch.record["user_message_id"] = None
     else:
         dispatch.compile.return_value = None
-    assert await background.dispatch_background(PAYLOAD, ACTOR) == dispatch.result
-    dispatch.client.run_tracked_background.assert_awaited_once_with(
-        PAYLOAD.model_copy(update={"preparation": "legacy"}), "actor", "tenant",
-    )
+    with pytest.raises(HTTPException) as failure:
+        await background.dispatch_background(PAYLOAD, ACTOR)
+    assert failure.value.status_code == 422
+    dispatch.client.run_tracked_background.assert_not_awaited()
     dispatch.client.start_prepared_run.assert_not_awaited()
     dispatch.project.assert_not_awaited()
     assert dispatch.writes == []
@@ -180,7 +180,8 @@ async def test_lost_background_ack_uses_owned_management_receipt_before_runtime_
         "unavailable": RuntimeServiceUnavailableError("unavailable"),
         "upstream": RuntimeUpstreamError(503, b"unavailable", {}),
     }
-    client = SimpleNamespace(run_tracked_background=AsyncMock(side_effect=errors[failure]), inspect_run=AsyncMock())
+    mocker.patch.object(background, "dispatch_background", side_effect=errors[failure])
+    client = SimpleNamespace(inspect_run=AsyncMock())
     mocker.patch.object(runtime_client, "_agentos_client", return_value=client)
 
     async def inline(_task, function, *args, **kwargs):

@@ -9,7 +9,7 @@ case:
   - AOS-REQ-002
   business_rule_ids:
   - AOS-TRANSPORT-RULE-01
-  title: AgentOS compatibility transport over local HTTP
+  title: "Standard AgentOS transport and retired ingress isolation over local HTTP"
   type: INTEGRATION
   priority: P0
   status: active
@@ -46,17 +46,17 @@ case:
     action: Resume after a scoped event cursor and attempt the same request under a different tenant.
     expected: Replay and live events arrive in order with stable IDs; the other tenant is refused before the journal is opened.
   - order: 7
-    action: Submit an ordinary conversation through the public Management route and the old signed Runtime operation; also request a cursorless resume.
-    expected: Both new-start entrypoints reach Management with the signed actor, locale and timezone before Runtime consumes the claim. An explicit legacy fallback executes once with unchanged SSE and the original run ID. Cursorless resume uses its dedicated signed AgentOS operation.
+    action: "Submit public Management conversations and cursorless resume, then probe retired Runtime starts."
+    expected: "Management claims one standard run with original context. Removed starts return 404 without dispatch or fallback; historical resume remains read-only."
   - order: 8
     action: Submit a signed conversation twice with one idempotency key and then change the request under that key.
-    expected: Management returns the original run ID on retry and 409 on changed input. The execution receives the claimed ID exactly once across the Management handoff and explicit fallback; replaying the consumed execution handoff is rejected before another start.
+    expected: "Retries retain the original claimed run ID and conflicting input returns 409. Only the standard run is started, with no reverse start handoff."
   - order: 9
     action: Inspect and stop a retained run by ID over signed HTTP, then repeat after it reaches a terminal state.
     expected: Only the targeted run receives cancellation; the terminal response and other run are unchanged, and foreign actors receive 404.
   - order: 10
     action: Stop a registered run through the public Management and Northbound paths, and start and cancel an automation run using its persisted execution ID.
-    expected: Management signs the exact Runtime run ID, a cancellation before admission fences that ID, and an unrelated run cannot be stopped. Runtime marks persistent Gateway and Northbound compatibility starts for registration, and legacy stop respects user and tenant ownership.
+    expected: "Management signs the exact run ID. Cancellation fences admission and rejects foreign user or tenant scope. Only standard lifecycle routes remain in Runtime."
   - order: 11
     action: Compile an owned conversation snapshot with an explicit model temperature in Management, submit it signed and reconnect after the first event.
     expected: The exact run ID and metadata revision are retained, duplicate admission is refused, and only the signed owner can receive the remaining observer event and terminal status. Runtime uploads a declared skill file and forwards its object reference. Runtime restores authorized historical turns. Management projects the reference, accepted history checkpoint, ordered units and the terminal answer.
@@ -169,17 +169,17 @@ case:
     action: Submit a public debug request with a client conversation correlation ID and cancel the debug run through the standard AgentOS lifecycle endpoint.
     expected: Management echoes the client ID and Runtime receives only the temporary run ID. The original planning and scoped cancellation behavior is preserved.
   - order: 48
-    action: Submit a signed old Northbound request whose user message is already saved, retry it, and attempt the same operation with a foreign actor.
-    expected: Runtime delegates saved-message selection to Management. The exact actor and message position produce a stable claim and only one execution; a compatibility fallback skips user persistence. Retry returns the existing run and a foreign source is refused before claiming or executing.
+    action: "Probe the retired saved-user start operation in the actual Runtime app with absent and invalid credentials."
+    expected: "The route and registered operation are absent and all probes return 404 without execution. Standard Northbound message ownership remains covered by prepared-turn probes."
   - order: 49
-    action: Send the original fixed-run-ID background request through Runtime and Management, repeat a prepared request and disconnect a waiting request.
-    expected: Both service signatures bind the original actor and run ID. Management keeps the selected model and tool configuration, records projection before Agent.run and owns projection without finalizing the schedule. The explicit old-path fallback executes once. Retry replays the same run, foreign actors are refused and disconnect stops only that run.
+    action: "Invoke Management background orchestration locally and cross standard Runtime AgentOS for execution and cancellation."
+    expected: "Management preserves run ID, model, tools, source and projection without finalizing the schedule. Retry never starts twice; disconnect cancels the exact run. Uncompiled fixtures cannot fall back to legacy execution."
   - order: 50
-    action: Send an original internal debug request through the signed Management handoff, then exercise an unsupported export and an invalid handoff.
-    expected: Management reuses the original preparation policy and configuration. Supported resources execute through AgentOS ephemeral run; unsupported resources retain one explicit fallback with the original query. Debug and correlation headers survive. Original scope denial and invalid invocation combinations cannot execute.
+    action: "Probe the removed raw debug start ingress with the actual Runtime application."
+    expected: "Retired raw starts return 404 without dispatch. Public debug continues through standard ephemeral AgentOS."
   - order: 51
-    action: Send raw native and Workbench debug requests with selected knowledge and an unavailable selection through both services.
-    expected: Management resolves the original policy against one resource tree, exports the same authorized tool map or Workbench plan and emits the original scope/configuration events and warnings before the answer. Other tenants are rejected and debug preparation cannot write conversation history or start legacy execution.
+    action: "Probe removed raw Workbench and native starts, retaining the public debug knowledge probes."
+    expected: "Retired private starts return 404. Public debug retains authorized resources, preparation events and warnings through standard AgentOS."
   - order: 52
     action: Dispatch raw debug requests with and without generation settings through both services and compare real SDK provider requests for the root and a child sharing its catalog model.
     expected: The actual Management compiler and Runtime materializer retain the original effective model configurations. Nonempty generation settings export a root-only binding; legacy reasoning-only requests preserve the shared alias. A loopback provider receives identical JSON requests from the old effective profile and the restored profile, and credentials never enter the AgentOS payload.
@@ -187,8 +187,8 @@ case:
     action: Send a fixed-ID background request whose old RUNNING automation record lacks source metadata, retry it and race the source write with another pin.
     expected: Management confirms an owned existing automation message and matching submitted history and conditionally pins its prompt and ID before compilation, then starts the original run once and resumes its projection on retry. Losing the source comparison returns 409 without compilation, projection or execution and preserves the competing values. Unprovable sources never pin a different turn; only snapshots unavailable to the compatibility preparer retain one explicit legacy fallback.
   - order: 54
-    action: Send an original non-debug internal request without a conversation through signed Management and Runtime endpoints with zero and four prior user turns.
-    expected: Management admits a new conversation with an assistant-only marker at the original history-derived position, executes standard AgentOS once and projects its answer. It preserves the created event, hidden journal controls and original default language; a foreign tenant cannot stage or execute.
+    action: "Probe removed raw new-conversation starts with the actual Runtime application."
+    expected: "No private route or registered operation remains. New public conversations continue through Management prepared-turn admission."
   - order: 55
     action: Export knowledge search with null and string top_k values, cross signed AgentOS and execute the actual SDK tool alongside the legacy effective SDK configuration.
     expected: Both SDK tools issue the same authorized vector query and return the same document-filtered result. The portable compiler retains the original valid-value conversion, keeps credentials local and cannot expand knowledge permissions.
@@ -262,13 +262,13 @@ case:
   - MCP snapshots carry explicit invocation overrides and keep persisted defaults and connection configuration in Runtime.
   - Local search tuning reaches the provider without carrying credentials. A plugin continues to use its invocation arguments.
   - Debug correlation is kept at the public boundary and debug cancellation uses signed Agent.stop.
-  - Saved-user compatibility requests use the original message identity and never execute or persist the user twice.
-  - Background requests retain their original run identity and configuration through the signed Management handoff, recover without a second start and propagate disconnect cancellation.
-  - Raw internal debug requests preserve their original preparation policy, model and tool configuration, metadata, response headers and single execution across signed service boundaries.
-  - Raw knowledge and Workbench debug preparation preserves the original authorized resources, warnings and event order with no history writes, and executes only through AgentOS.
+  - "Retired saved-user start operations have no route or registered protocol and cannot dispatch; standard Northbound preparation preserves message ownership."
+  - "Management owns background preparation locally and uses standard signed Runtime execution, retaining run ID, configuration, projection and disconnect cancellation without a legacy fallback."
+  - "Retired raw debug starts return 404 without dispatch while public debug uses standard ephemeral AgentOS."
+  - "Retired raw native and Workbench starts return 404; public debug preserves scoped knowledge, preparation events and warnings through standard AgentOS."
   - Raw generation settings export without legacy execution and retain original root/child provider request bodies, including the shared model behavior of legacy reasoning-only requests.
   - Old automation records recover the existing source before standard AgentOS execution without appending a user, overwriting a competing source or finalizing the caller's schedule.
-  - Original internal new conversations keep their assistant-only persistence and history-derived index while executing through standard AgentOS.
+  - "Retired raw new-conversation starts have no route or registered operation; current new public conversations retain standard Management admission and projection."
   - Knowledge search preserves legacy top_k conversion across signed AgentOS and the SDK query boundary without entering legacy model initialization.
   - Background execution needs no automation record or inferred user source when Management owns its fixed-ID admission and assistant-only projection.
   - Noncanonical local catalog names retain actual SDK execution and scoped credentials without protocol dispatch collisions.
@@ -386,7 +386,7 @@ case:
     expected_results: [9]
     forbidden_side_effects: [2]
   - id: AC-10
-    description: Public stop, Northbound stop and automation background operations preserve exact run identity across signed HTTP. Persistent compatibility starts opt in to tracked execution.
+    description: "Public and Northbound stop preserve exact run identity and reject foreign scope through standard AgentOS; Runtime exposes no public or compatibility start handlers."
     steps: [10]
     expected_results: [10]
     forbidden_side_effects: [2]
@@ -581,22 +581,22 @@ case:
     expected_results: [48]
     forbidden_side_effects: [1, 2]
   - id: AC-57
-    description: Old signed saved-user starts select the owned source in Management, retain one claim on retry and do not save the user again during fallback.
+    description: "Retired saved-user start operations have no route or registered protocol and cannot dispatch; standard Northbound preparation preserves message ownership."
     steps: [48]
     expected_results: [49]
     forbidden_side_effects: [1, 2]
   - id: AC-58
-    description: Fixed-ID background dispatch crosses Management for preparation and projection while keeping configuration, scope, cancellation and a single execution.
+    description: "Management owns background preparation locally and uses standard signed Runtime execution, retaining run ID, configuration, projection and disconnect cancellation without a legacy fallback."
     steps: [49]
     expected_results: [50]
     forbidden_side_effects: [1, 2]
   - id: AC-59
-    description: Original internal debug requests visit Management with unchanged preparation policy and execute only once through the prepared or explicit compatibility path.
+    description: "Retired raw debug starts return 404 without dispatch while public debug uses standard ephemeral AgentOS."
     steps: [50]
     expected_results: [51]
     forbidden_side_effects: [1, 2]
   - id: AC-60
-    description: Raw native and Workbench knowledge preparation uses the original policy and frozen resources, preserves public preparation events and cannot write history or enter legacy execution for supported snapshots.
+    description: "Retired raw native and Workbench starts return 404; public debug preserves scoped knowledge, preparation events and warnings through standard AgentOS."
     steps: [51]
     expected_results: [52]
     forbidden_side_effects: [1, 2]
@@ -611,7 +611,7 @@ case:
     expected_results: [54]
     forbidden_side_effects: [1, 2]
   - id: AC-63
-    description: Internal new conversations stage assistant-only history and execute standard AgentOS under the original scope, event and index semantics without exposing a new public user-save switch.
+    description: "Retired raw new-conversation starts have no route or registered operation; current new public conversations retain standard Management admission and projection."
     steps: [54]
     expected_results: [55]
     forbidden_side_effects: [1, 2]
