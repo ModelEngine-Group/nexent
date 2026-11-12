@@ -30,6 +30,7 @@ change:
     - test/backend/agents/test_create_agent_info.py
     - test/sdk/core/agents/test_jiuwen_tool_timeouts.py
     - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/sdk/core/agents/test_jiuwen_native_files.py
     - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
     - test/backend/agents/test_jiuwen_creator_results.py
     - test/backend/services/test_agent_execution_history_stream.py

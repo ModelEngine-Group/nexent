@@ -26,7 +26,9 @@ def test_executor_registration_reuses_sandbox_and_keeps_self_out_of_bindings(moc
     executor_result = SimpleNamespace(output="created.docx", logs="written", is_final_answer=False)
     execute = mocker.patch("nexent.core.agents.sandbox.execution._execute_with_tool_context", return_value=executor_result)
     build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor")
-    adapter = JiuwenAdapter(SimpleNamespace(agent_config=SimpleNamespace(name="files")))
+    adapter = JiuwenAdapter(SimpleNamespace(
+        agent_config=SimpleNamespace(name="files"), tool_call_timeout_seconds=900,
+    ))
     adapter.text_protocol = text_mode
     adapter.resources = SimpleNamespace(agent=SimpleNamespace(python_executor=executor))
     adapter.native_agent = SimpleNamespace(ability_manager=Mock())
@@ -37,6 +39,7 @@ def test_executor_registration_reuses_sandbox_and_keeps_self_out_of_bindings(moc
     card, _ = adapter.native_agent.ability_manager.add_ability.call_args.args
     assert card.name == (EXECUTION_TOOL if text_mode else NATIVE_EXECUTION_TOOL)
     assert card.input_params["additionalProperties"] is False
+    assert card.properties["resilience"]["timeout_s"] == 900
     assert handler.call_args.kwargs["lane"] == "sandbox"
     result = json.loads(handler.call_args.args[1]("print('created.docx')"))
     execute.assert_called_once_with(executor, "print('created.docx')")
