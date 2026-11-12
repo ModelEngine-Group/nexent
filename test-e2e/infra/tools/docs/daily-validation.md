@@ -6,13 +6,15 @@ instead of `--generate`; it never rewrites repository assets or silently shrinks
 
 ## Decisions
 
-- Unknown findings, malformed contracts/configuration, duplicate IDs and unsafe
+- Unknown findings, malformed shared contracts/configuration, duplicate IDs and unsafe
   script paths stop the batch. Unsafe recovery journals, active owners/locks and
   pending D5 fault recovery also stop before synchronization. An ordinary failed
   deployment can use the validated Daily redeployment path described below.
 - Explicit `CASE_EXECUTION_MISSING`, `CASE_SCRIPT_MISSING`,
-  `CASE_SELECTOR_MISSING` and `CASE_PREPARATION_MISSING` findings with a known owner retain that Case in the plan
+  `CASE_SELECTOR_MISSING`, `CASE_PREPARATION_MISSING` and `CASE_EXECUTION_INVALID` findings with a known owner retain that Case in the plan
   and produce a BLOCKED receipt without starting its worker.
+  Invalid execution YAML, timeout, preparation or Mock declarations are scoped to
+  that Case. Unsafe script paths and ambiguous script ownership remain fatal.
 - Missing traditional UT references and stale derived reading views are metadata
   warnings, not proof that formal Cases cannot run. Authoritative assets still pass
   all other validation. Daily never claims UT execution from reference validation.
@@ -36,10 +38,22 @@ instead of `--generate`; it never rewrites repository assets or silently shrinks
   dependency failures retain the existing BLOCKED_BY_DEPENDENCY behavior; no
   dependency edges are inferred from titles, Change membership or failure keywords.
 
-The launcher, full-registry selector, worker selection and deployment campaign use
-the same typed policy. The global environment/configuration doctor, clean-source
-and fingerprint gates remain required. Daily recovery is verified before business
-Cases can start.
+The launcher, selector, worker and deployment campaign use the same typed policy.
+Execution checks only common configuration and its dedicated Python interpreter
+before starting the batch. `doctor` (including existing `doctor --live` deployment
+hooks) checks common environment readiness. Explicit `doctor --full` includes
+complete dependency diagnostics;
+an unavailable browser, jsdom dependency or unused business profile does not stop
+independent Cases. Each known Node framework is checked once per execution group,
+and affected Cases receive BLOCKED receipts with the actual prerequisite reason.
+Opaque custom scripts and Python imports report dependency errors in their own
+workers. No dependency failure is counted as PASS.
+
+The parent validates the full registry; each worker inspects only its requested Case.
+Source/configuration fingerprints remain checked before every Case and finalization.
+Dependency/cache directories are pruned before walking the tree, not filtered after
+traversing their contents. This reduces repeated scanning without weakening byte
+change detection. Clean-source and environment-recovery checks remain required.
 
 ## Retrying a failed deployment
 
@@ -51,7 +65,12 @@ Local baseline, previous owner exit and absence of unrelated configuration edits
 Legacy journals require a terminal prior-batch receipt. It saves the old journal
 and current configuration privately under `runtime/daily-recovery/`, then restores
 only the four owned configuration files. Prior reports, original backups and
-business data/volumes remain intact.
+business data/volumes remain intact. Historical business-result files are not
+deployment-recovery authority and may be missing or damaged without blocking a
+validated redeploy. Their original evidence remains untouched. Actual fault journals,
+active locks, validated configuration backups and the prior owner's terminal status
+remain mandatory. The legacy `recovery_cases` catalog field is optional and no longer
+participates in scheduling or Case-reference validation.
 
 The old journal remains pending through synchronization, asset validation and
 doctor. A new deployment campaign then adopts responsibility with its own backup
@@ -77,8 +96,9 @@ python -m pytest -p no:nexent_formal_pytest test-e2e/infra/tools/tests/test_dail
 Default implementation validation checks explicit preparation on every active
 D2-D5 binding; no per-Case opt-in flag is needed. A self-contained proof declares
 empty families after dependency/cleanup analysis. Daily suppresses the worker only
-for a Case missing that declaration; invalid declarations/configuration remain
-fatal. Developer strict validation rejects both types of finding before delivery.
+for the affected Case when that declaration is missing or invalid. Invalid shared
+configuration remains fatal. Developer strict validation rejects both types of
+Case finding before delivery.
 
 ## Fresh execution after synchronization
 

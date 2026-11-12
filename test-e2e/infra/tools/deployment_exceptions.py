@@ -55,11 +55,11 @@ def catalog(repo, records=None):
     value = checked_yaml(path, path.with_suffix(".schema.json"))
     if set(value["cases"].values()) - set(value["profiles"]):
         raise ValueError("Deployment exception references an unknown profile")
-    if set(value["recovery_cases"]) & set(value["cases"]):
-        raise ValueError("Local recovery cannot use deployment exception Cases")
+    # Kept only for readers of older catalog versions; never schedules or gates recovery.
+    value.setdefault("recovery_cases", [])
     if records is not None:
         available = {record["case_id"] for record in records}
-        missing = (set(value["cases"]) | set(value["recovery_cases"])) - available
+        missing = set(value["cases"]) - available
         if missing:
             raise ValueError("Deployment exceptions reference unknown Case IDs: " + ", ".join(sorted(missing)))
     return value

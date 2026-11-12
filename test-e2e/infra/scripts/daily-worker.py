@@ -56,7 +56,7 @@ def execute_locked(repo, home, directory, head, publish_latest=False):
             import suite
             static_assets.apply(home, repo / "test-e2e/infra/assets")
             records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
-            problems = suite.doctor(repo, home, records)
+            problems = suite.doctor(repo, home, records, common_only=True)
             if problems:
                 save(directory / "doctor.json", {"ready": False, "problems": problems})
                 raise RuntimeError("Runtime preflight failed; inspect local doctor.json")

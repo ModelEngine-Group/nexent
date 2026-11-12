@@ -113,14 +113,8 @@ class DailyRetry:
             previous = document(batch / "status.json")
             if previous.get("status") not in {"INCOMPLETE", "FAILED", "PASSED", "COMPLETE"}:
                 raise RuntimeError("Deployment journal has no terminal owner evidence")
-            journal = next((p for p in (batch / "checkpoints/results.jsonl", batch / "results.journal.jsonl")
-                            if p.exists() or p.is_symlink()), None)
-            if journal is not None:
-                for line in plain(journal).read_text(encoding="utf-8").splitlines():
-                    if not isinstance(json.loads(line), dict):
-                        raise ValueError("Invalid previous execution journal")
-            elif previous.get("stages", {}).get("D5", "PENDING") != "PENDING":
-                raise RuntimeError("Previous D5 execution has no recovery evidence")
+            # Historical Case receipts are reporting evidence, not deployment recovery authority.
+            # The active fault lease/marker is checked by prepare_daily_retry before any writes.
             if not isinstance(files, list) or len(files) != 4 or document(backup / "index.json") != {"files": files}:
                 raise ValueError("incomplete backup index")
             originals = {}

@@ -126,7 +126,11 @@ def fingerprint(repo):
     """Pin actual worktree bytes as well as HEAD, excluding generated runtime files."""
     ignored = {"node_modules", "__pycache__", ".pytest_cache", "test-results", "runs", ".playwright-internal"}
     digest = hashlib.sha256()
-    for path in sorted((repo / "test-e2e").rglob("*")):
+    paths = []
+    for directory, children, files in os.walk(repo / "test-e2e"):
+        children[:] = sorted(name for name in children if name not in ignored)
+        paths.extend(Path(directory) / name for name in files)
+    for path in sorted(paths):
         relative = path.relative_to(repo)
         if not path.is_file() or set(relative.parts) & ignored:
             continue

@@ -76,7 +76,7 @@ def config(repo, home):
 
 
 def selection(repo, args, *, daily=False, worker=False):
-    issues, registry = inspect(repo)
+    issues, registry = inspect(repo, case_ids=set(args.case or []) if worker else None)
     if issues and not (daily or worker):
         raise ValueError(f"Invalid test assets: {len(issues)} binding issues")
     records = registry["cases"]
@@ -108,13 +108,17 @@ def selection(repo, args, *, daily=False, worker=False):
     return sorted(result, key=lambda record: (record["stage"], record["case_id"]))
 
 
-def doctor(repo, home, records, *, live=False):
-    problems = static_config_problems(home, records, repo=repo)
+def doctor(repo, home, records, *, live=False, common_only=False):
+    problems = static_config_problems(home, records, repo=repo, common_only=common_only)
     expected_runtime = (home / "runtime/test-venv").resolve()
     if Path(sys.prefix).resolve() != expected_runtime or not test_python(home).is_file():
         problems.append("Run this suite with the dedicated <test-home>/runtime/test-venv Python")
     if sys.version_info[:2] != (3, 11):
         problems.append("Product runtime requires Python 3.11")
+    if common_only:
+        if live and not problems:
+            problems.extend(live_service_problems(home))
+        return sorted(set(problems))
     for project in ("backend", "sdk"):
         data = tomllib.loads((repo / project / "pyproject.toml").read_text(encoding="utf-8"))
         for declaration in data["project"]["dependencies"]:
@@ -129,24 +133,50 @@ def doctor(repo, home, records, *, live=False):
             except importlib.metadata.PackageNotFoundError:
                 problems.append(f"missing {project} dependency: {req.name}")
     frameworks = {record["execution"]["implementations"][0]["framework"] for record in records if record["execution"]}
+    problems.extend(node_runtime_problems(repo, home, frameworks))
+    if live and not problems:
+        problems.extend(live_service_problems(home))
+    return sorted(set(problems))
+
+
+def node_runtime_problems(repo, home, frameworks, *, environment=None):
+    """Check one selected Node toolchain once, without installing dependencies."""
+    problems = []
     if frameworks & {"vitest", "playwright", "custom"}:
         node = shutil.which("node")
         if not node:
             problems.append("Node.js >=22 is required")
         else:
-            version = subprocess.check_output([node, "--version"], text=True).strip()
-            if int(version.lstrip("v").split(".")[0]) < 22:
-                problems.append("Node.js >=22 is required")
+            try:
+                version = subprocess.check_output([node, "--version"], text=True, timeout=10).strip()
+                if int(version.lstrip("v").split(".")[0]) < 22:
+                    problems.append("Node.js >=22 is required")
+            except (OSError, ValueError, subprocess.SubprocessError):
+                problems.append("Cannot verify Node.js >=22")
+        if problems:
+            return problems
     for framework, relative in (
         ("vitest", "d1/frontend/node_modules/vitest/vitest.mjs"),
         ("playwright", "d4/node_modules/playwright/cli.js"),
     ):
         if framework in frameworks and not (repo / "test-e2e/infra/automation" / relative).is_file():
             problems.append(f"missing locked {framework} toolchain")
-    problems.extend(node_toolchain_problems(repo, home, frameworks))
-    if live and not problems:
-        problems.extend(live_service_problems(home))
+    problems.extend(node_toolchain_problems(repo, home, frameworks, environment=environment))
     return sorted(set(problems))
+
+
+def runtime_blocks(repo, home, records, *, environment=None):
+    """Isolate known toolchain failures; opaque custom scripts check their own dependencies."""
+    blocked = {}
+    for framework in ("vitest", "playwright"):
+        selected = [record for record in records if record.get("status") == "active"
+                    and any(item.get("framework") == framework
+                            for item in (record.get("execution") or {}).get("implementations", []))]
+        if selected:
+            problems = node_runtime_problems(repo, home, {framework}, environment=environment)
+            for record in selected if problems else []:
+                blocked.setdefault(record["case_id"], []).extend(problems)
+    return blocked
 
 
 
@@ -427,6 +457,8 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
             for name in ("build", "deploy", "preflight"):
                 execute_hooks(name, settings, repo, home, directory, env)
         state["stages"]["D0"] = "COMPLETE"
+        blocked_runtime = runtime_blocks(repo, home, records, environment=env)
+        save(directory / "d0/runtime-preflight.json", {"blocked_cases": blocked_runtime})
         for stage in STAGES:
             state["stages"][stage] = "RUNNING"
             save(directory / "status.json", state)
@@ -451,6 +483,11 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                         save(directory / "cases" / case_id / "receipt.json", {
                             "case_id": case_id, "stage": record["stage"], "result": row["result"],
                             "cleanup_exit_code": 0, "reused_from": row["reused_from"]})
+                elif case_id in blocked_runtime:
+                    row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
+                           "reason": "; ".join(blocked_runtime[case_id]),
+                           "acceptance_status": "INCOMPLETE", "evidence": [f"cases/{case_id}/receipt.json"]}
+                    save(directory / "cases" / case_id / "receipt.json", row)
                 elif record["status"] != "active" or not record["execution"]:
                     result = {"retired": "RETIRED", "skipped_by_policy": "SKIPPED_BY_POLICY"}.get(record["status"], "BLOCKED")
                     row = {"case_id": case_id, "stage": stage, "result": result, "reason": record["status"], "evidence": []}
@@ -539,6 +576,7 @@ def main(argv=None):
     parser.add_argument("--change")
     parser.add_argument("--execute", action="store_true", help="Actually run tests or install dependencies")
     parser.add_argument("--live", action="store_true", help="Doctor: probe configured local HTTP services")
+    parser.add_argument("--full", action="store_true", help="Doctor: include optional Case dependencies in diagnostics")
     parser.add_argument("--batch-dir", type=Path, help="Existing local batch directory for resume")
     args = parser.parse_args(argv)
     repo, home = repository_root(), args.test_home.resolve()
@@ -564,12 +602,12 @@ def main(argv=None):
                                       "reused": len(resume["rows"]), "remaining": len(records) - len(resume["rows"])},
                                      ensure_ascii=False, indent=2))
                     return 0
-                problems = doctor(repo, home, records)
+                problems = doctor(repo, home, records, common_only=True)
                 if problems:
                     print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
                     return 2
                 return execute(repo, home, records, settings, resume=resume)
-        records = selection(repo, args, daily=args.mode == "daily", worker=args.mode == "worker")
+        records = selection(repo, args, daily=args.mode in {"daily", "doctor"}, worker=args.mode == "worker")
         if args.mode == "worker":
             if not args.batch_dir or len(records) != 1:
                 parser.error("Worker requires one Case and a batch directory")
@@ -579,7 +617,7 @@ def main(argv=None):
             settings = json.loads((directory / "pipeline.json").read_text(encoding="utf-8"))
             return worker(repo, home, records[0], directory / "cases" / records[0]["case_id"], settings)
         if args.mode == "doctor":
-            problems = doctor(repo, home, records, live=args.live)
+            problems = doctor(repo, home, records, live=args.live, common_only=not args.full)
             print(json.dumps({"ready": not problems, "problems": problems}, ensure_ascii=False, indent=2))
             return 2 if problems else 0
         if args.mode == "plan" or not args.execute:
@@ -596,7 +634,7 @@ def main(argv=None):
             return 0
         if args.mode == "daily" and (args.case or args.stage or args.feature or args.change):
             parser.error("Daily must use the full registry; select cases with run")
-        problems = doctor(repo, home, records)
+        problems = doctor(repo, home, records, common_only=True)
         if problems:
             print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
             return 2

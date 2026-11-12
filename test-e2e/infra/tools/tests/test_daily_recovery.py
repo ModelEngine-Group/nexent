@@ -174,6 +174,14 @@ def test_prior_case_outcome_does_not_replace_environment_recovery_checks(abandon
     assert marker.exists() and path.read_bytes() == before
 
 
+def test_prior_d5_result_file_is_not_required_for_environment_redeployment(abandoned):
+    repo, home, batch, marker, _ = abandoned
+    save(batch / "status.json", {"status": "INCOMPLETE", "stages": {"D5": "RUNNING"}})
+    with deployment_lock(repo), recovery.prepare_daily_retry(repo, home, home / "runs/daily-launch/no-results"):
+        assert marker.exists()
+    assert marker.exists() and not (batch / "results.journal.jsonl").exists()
+
+
 def test_dead_parent_without_terminal_batch_receipt_does_not_prove_children_exited(abandoned):
     repo, home, batch, marker, switch = abandoned
     value = json.loads(marker.read_text())
