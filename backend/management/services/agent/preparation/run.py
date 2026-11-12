@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from contracts.constants.environment import (
     AGENT_WORKSPACE_ROOT,
+    DEFAULT_TOOL_CALL_TIMEOUT,
     MCP_REQUEST_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
@@ -16,6 +17,7 @@ from contracts.constants.environment import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
+    RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     TOKEN,
@@ -434,6 +436,8 @@ async def create_agent_run_info(
         agent_config=agent_config,
         mcp_host=mcp_host,
         mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
+        collaboration_timeout_seconds=RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS,
+        tool_call_timeout_seconds=DEFAULT_TOOL_CALL_TIMEOUT,
         history=converted_history,
         mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
         mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,

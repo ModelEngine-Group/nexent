@@ -6,6 +6,8 @@ implementations:
   selector: test_
 timeout_seconds: 180
 acceptance_bindings:
+  AC-02:
+  - test_configured_deadlines_allow_delayed_a2a_completion
   AC-01:
   - test_configured_collaboration
   - test_parallel_roots_and_first_child_attempts_share_a_managed_runner_loop

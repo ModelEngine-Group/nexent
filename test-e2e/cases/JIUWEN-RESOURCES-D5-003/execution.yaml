@@ -6,6 +6,8 @@ implementations:
   selector: test_
 timeout_seconds: 180
 acceptance_bindings:
+  AC-02:
+  - test_configured_outer_deadline_closes_stalled_a2a_and_recovers
   AC-01:
   - test_nested_stop_and_recovery
   - test_cancelled_root_does_not_stop_parallel_root_sessions

@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
-
 from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
@@ -34,7 +33,11 @@ def adapter():
 
 
 def capture_registration(adapter, mocker):
-    mocker.patch("openjiuwen.core.foundation.tool.LocalFunction", side_effect=lambda card, fn: fn)
+    def local_function(card, fn):
+        fn.card = card
+        return fn
+
+    mocker.patch("openjiuwen.core.foundation.tool.LocalFunction", side_effect=local_function)
     handler = mocker.patch.object(adapter, "_business_handler", side_effect=lambda name, fn, **kwargs: fn)
     return handler
 
@@ -74,6 +77,7 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     parallel = mocker.patch.object(adapter, "_bind_parallel_tool")
     executor = mocker.patch.object(adapter, "_bind_text_executor")
     adapter.context_items = []
+    adapter.run_info.tool_call_timeout_seconds = 900
     proxies = [Mock(return_value="first"), Mock(return_value="second")]
     proxy_type = mocker.patch("nexent.core.agents.resources.a2a.ExternalA2AAgentWrapper", side_effect=proxies)
     adapter.prepare()
@@ -86,6 +90,9 @@ def test_prepare_registers_tools_children_and_per_call_a2a_proxies(adapter, mock
     settings = factory.call_args.kwargs
     assert settings["system_prompt"] == "shared instructions" and settings["language"] == "cn"
     assert len(settings["tools"]) == 3 and settings["tool_owner_id"] == adapter.owner_id
+    # Every native business/child/A2A card uses the run's deployment deadline.
+    from openjiuwen.core.single_agent.ability_manager import AbilityManager
+    assert all(AbilityManager._resolve_call_timeout(tool.card) == 900 for tool in settings["tools"])
     for key in ("enable_task_loop", "enable_sys_operation", "enable_read_image_multimodal",
                 "enable_model_anomaly_detection_rail", "enable_tool_resilience_rail", "enable_skill_discovery",
                 "parallel_tool_calls"):
@@ -173,7 +180,10 @@ def test_mcp_connection_uses_only_visible_authorized_tools_and_resolved_deadline
     adapter.run_info.mcp_host = ["http://fixture.invalid/mcp"]
     adapter.run_info.user_context = {"user_id": "captured", "tenant_id": "tenant"}
     collection = MagicMock()
-    collection.__enter__.return_value.tools = [SimpleNamespace(card="owned-card")]
+    from openjiuwen.core.foundation.tool import ToolCard
+    card = ToolCard(name="lookup", description="Remote lookup", properties={"provider": "fixture"})
+    collection.__enter__.return_value.tools = [SimpleNamespace(card=card)]
+    adapter.run_info.tool_call_timeout_seconds = 900
     owner = mocker.patch("nexent.core.agents.cores.jiuwen.mcp.JiuwenMCPCollection", return_value=collection)
     adapter._connect_mcp()
     if not visible:
@@ -185,7 +195,8 @@ def test_mcp_connection_uses_only_visible_authorized_tools_and_resolved_deadline
     assert values["server_parameters"] == adapter.run_info.mcp_host
     assert values["cancellation_scope"] is adapter.scope and values["connect_timeout_seconds"] == 10.0
     adapter.native_agent.ability_manager.add_ability.assert_called_once_with(
-        "owned-card", collection.__enter__.return_value.tools[0])
+        card, collection.__enter__.return_value.tools[0])
+    assert card.properties == {"provider": "fixture", "resilience": {"timeout_s": 900}}
 
 
 @pytest.mark.asyncio

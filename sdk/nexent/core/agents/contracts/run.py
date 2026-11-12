@@ -18,8 +18,11 @@ class AgentHistory(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
-    collaboration_timeout_seconds: float = Field(default=300.0, gt=0,
-        description="Total deadline for a nested collaboration including queue wait")
+    # Hosts inject deployment values; child runs inherit them without SDK environment reads.
+    collaboration_timeout_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False,
+        description="Jiuwen child/A2A queue-plus-execution deadline in seconds, capped by the parent deadline")
+    tool_call_timeout_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False,
+        description="Jiuwen outer tool.invoke deadline in seconds, independent of collaboration/A2A/MCP limits")
     model_service: Optional[Any] = Field(default=None, exclude=True, repr=False)
     model_deadline: Optional[float] = Field(default=None, exclude=True)
     run_result: Optional[Any] = Field(default=None, exclude=True, description="Explicit public runtime result")

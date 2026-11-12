@@ -23,7 +23,10 @@ feature:
       and rejects stale/cross-tenant profiles.
   - rule_id: JIUWEN-RESOURCES-RULE-004
     description: Each child invocation selects its own Core and frozen model outlet/options; A2A uses its configured
-      remote protocol, authenticated context, deadline and cancellation ownership. Concurrent and repeated local
+      remote protocol, authenticated context, deadline and cancellation ownership. Deployment configuration independently
+      controls the collaboration deadline including queue wait and the Jiuwen tool invocation deadline (both default
+      to 300 seconds); the earliest applicable tool, collaboration, A2A request or parent deadline applies.
+      Concurrent and repeated local
       Jiuwen invocations share one lifecycle-owned Runner loop while retaining independent task/session/cancellation/observer
       ownership; cancelling one invocation must not stop unrelated runs.
   required_test_stages:

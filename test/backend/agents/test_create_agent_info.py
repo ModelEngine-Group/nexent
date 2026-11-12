@@ -4633,9 +4633,11 @@ class TestCreateAgentRunInfo:
 
 
     @pytest.mark.asyncio
-    async def test_create_agent_run_info_success(self):
+    async def test_create_agent_run_info_success(self, mocker):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
+        mocker.patch("management.services.agent.preparation.run.RUNTIME_AGENT_COLLABORATION_TIMEOUT_SECONDS", 900)
+        mocker.patch("management.services.agent.preparation.run.DEFAULT_TOOL_CALL_TIMEOUT", 1200)
         with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
                 patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
                 patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
@@ -4685,6 +4687,8 @@ class TestCreateAgentRunInfo:
                     "transport": "streamable-http"
                 }],
                 mcp_request_timeout_seconds=10,
+                collaboration_timeout_seconds=900,
+                tool_call_timeout_seconds=1200,
                 history=[],
                 stop_event="stop_event",
                 mcp_tool_timeout_seconds=ANY,

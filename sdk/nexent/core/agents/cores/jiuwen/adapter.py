@@ -241,7 +241,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.run_info.observer.add_message(self.run_info.agent_config.name, ProcessType.EXECUTION_LOGS, log_text)
 
     def prepare(self):
-        from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
+        from openjiuwen.core.foundation.tool import LocalFunction
         from openjiuwen.core.single_agent import AgentCard
         from openjiuwen.harness.factory import create_deep_agent
 
@@ -271,14 +271,14 @@ class JiuwenAdapter(AgentCoreAdapter):
             self.business_tools[name] = tool
             if name in self.visible_tool_names:
                 native_tools.append(LocalFunction(
-                    ToolCard(name=name, description=config.description or tool.description,
+                    self._tool_card(name=name, description=config.description or tool.description,
                              input_params=_tool_schema(tool.inputs)), self._business_handler(name, tool.forward),
                 ))
         for child in info.agent_config.worker_agents:
             tool = self.resources._create_subagent_definition(child, {})
             self.business_tools[tool.name] = tool
             native_tools.append(LocalFunction(
-                ToolCard(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
+                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
                 self._business_handler(tool.name, tool, lane="control-io"),
             ))
         for external in self.external_agents:
@@ -302,7 +302,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             tool = self.resources._wrap_subagent(definition, external, agent_id=str(external.agent_id))
             self.business_tools[tool.name] = tool
             native_tools.append(LocalFunction(
-                ToolCard(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
+                self._tool_card(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
                 self._business_handler(tool.name, tool.forward, lane="control-io"),
             ))
         # Reuse file/sandbox infrastructure, never construct a smolagents Agent.
@@ -336,7 +336,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             def terminal_only(**_arguments):
                 raise RuntimeError("Clarification escaped the model boundary")
 
-            card = ToolCard(name=self.clarification.name,
+            card = self._tool_card(name=self.clarification.name,
                             description="Ask for essential missing user information and end this turn awaiting input.",
                             input_params=self.clarification.schema)
             self.native_agent.ability_manager.add_ability(card, LocalFunction(card, terminal_only))
@@ -345,6 +345,23 @@ class JiuwenAdapter(AgentCoreAdapter):
             self._bind_parallel_tool()
         if not self.artifact_output:
             self._bind_text_executor()
+
+    def _tool_card(self, **values):
+        """Set the outer invocation limit per run, including A2A exposed as tools."""
+        from openjiuwen.core.foundation.tool import ToolCard
+
+        card = ToolCard(**values)
+        self._set_tool_timeout(card)
+        return card
+
+    def _set_tool_timeout(self, card):
+        """Keep provider metadata while overriding Jiuwen's global 300-second fallback."""
+        properties = dict(card.properties or {})
+        properties["resilience"] = {
+            **properties.get("resilience", {}),
+            "timeout_s": self.run_info.tool_call_timeout_seconds,
+        }
+        card.properties = properties
 
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
@@ -492,7 +509,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                                   clarification=self.clarification)
 
     def _bind_text_executor(self):
-        from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
+        from openjiuwen.core.foundation.tool import LocalFunction
 
         from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
         from nexent.core.agents.sandbox.config import SandboxConfig
@@ -514,7 +531,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                                "is_final_answer": output.is_final_answer}, ensure_ascii=False)
 
         name = EXECUTION_TOOL if self.text_protocol else NATIVE_EXECUTION_TOOL
-        card = ToolCard(name=name, description=(
+        card = self._tool_card(name=name, description=(
             "Execute complete Python in the configured Nexent sandbox and current outputs directory. "
             "Use this to create files following an authorized Skill. Only authorized Nexent tools are bound; "
             "sandbox import, filesystem, network and shell restrictions apply. Return actual output and logs."),
@@ -563,7 +580,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                     runner, on_complete=lambda _result: self.resources._pull_file_workspace_from_sandbox())
 
     def _bind_parallel_tool(self):
-        from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
+        from openjiuwen.core.foundation.tool import LocalFunction
 
         from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
@@ -584,7 +601,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 prepared.append(item)
             return scheduler.forward(prepared, timeout=timeout, max_workers=max_workers)
 
-        card = ToolCard(name="parallel_executor", description="Execute independent authorized resources concurrently.",
+        card = self._tool_card(name="parallel_executor", description="Execute independent authorized resources concurrently.",
                         input_params={"type": "object", "properties": {"tasks": {"type": "array", "maxItems": 16,
                             "items": {"type": "object", "properties": {"tool_name": {"type": "string"},
                                 "arguments": {"type": "object"}, "result_key": {"type": "string"}},
@@ -625,6 +642,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
             )
             for tool in self.mcp.__enter__().tools:
+                self._set_tool_timeout(tool.card)
                 self.native_agent.ability_manager.add_ability(tool.card, tool)
 
     def run(self):

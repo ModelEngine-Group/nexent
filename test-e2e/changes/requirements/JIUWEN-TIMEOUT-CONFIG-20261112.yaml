@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-TIMEOUT-CONFIG-20261112
+  change_type: requirement
+  requirement_id: JIUWEN-TIMEOUT-CONFIG-20261112
+  title: Configure Jiuwen collaboration and tool invocation deadlines
+  description: Pass validated deployment timeouts to SDK run parameters and native ToolCards so A2A calls can exceed
+    the previous fixed 300-second collaboration limit without disabling cancellation.
+  affected_features:
+    existing: []
+    modified: [JIUWEN-RESOURCES]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [JIUWEN-RESOURCES-D3-002, JIUWEN-RESOURCES-D5-003]
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve 300-second defaults and accept independent finite positive deployment overrides.
+    - Reject invalid settings at startup and pass configuration through application preparation into SDK run parameters.
+    - Resolve per-run ToolCard deadlines without changing global Jiuwen state; preserve cancellation and parent deadlines.
+    - Repair stale public-history assertions and restore the shared execution-history handoff exposed by PR4320 CI.
+    reason: Parsing and per-run mapping belong in UT; existing real model/A2A protocol Cases prove runtime completion,
+      timeout cancellation and recovery. No duplicate D1 or unrelated API/browser behavior is introduced.
+    test_selectors:
+    - test/backend/consts/test_jiuwen_timeout_config.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/sdk/core/agents/test_jiuwen_tool_timeouts.py
+    - test/sdk/core/agents/test_jiuwen_adapter_wiring.py
+    - test/sdk/core/agents/test_jiuwen_adapter_lifecycle.py
+    - test/backend/agents/test_jiuwen_creator_results.py
+    - test/backend/services/test_agent_execution_history_stream.py
+    - test/backend/services/test_nl2skill_history_protocol.py
+  notes: 'SPEC: ../nexent-doc/docs/Developing/runtime-agent-core-factory/changes/runtime-jiuwen-timeout-configuration/.
+    JIUWEN-RESOURCES maps to the runtime responsibility domain. Existing UT covers cancellation and parent deadline
+    clipping; it lacks environment mapping and independent per-run tool deadlines. Existing D3/D5 own loopback
+    HTTP/SSE model and A2A endpoints, temporary workspaces, native sessions/tools and ThreadManager workers.
+    Preparation families remain empty because these resources are self-contained; finally closes servers,
+    native resources and workers, and recovery assertions verify release. D2/D4 are unaffected because no public
+    payload or UI changes. CI fixes preserve the established backend public-output projection and private raw facts.'

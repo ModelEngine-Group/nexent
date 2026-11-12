@@ -19,7 +19,7 @@ from nexent.core.utils.observer import MessageObserver
 
 
 @asynccontextmanager
-async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault):
+async def collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay=0):
     state = {"parent": [], "child": [], "remote": [], "closed": False, "errors": [], "handlers": set(), "auth_ok": [], "effects": [], "parent_effects": []}
 
     async def handle(reader, writer):
@@ -40,6 +40,7 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
                 state["closed"] = True
                 return
             if key == "remote":
+                await asyncio.sleep(remote_delay)
                 payload = {"message": {"role": "agent", "parts": [{"text": "CHILD_DONE"}]}}
                 if remote_protocol == "JSONRPC":
                     payload = {"jsonrpc": "2.0", "id": 1, "result": payload}
@@ -114,7 +115,7 @@ async def collaboration_provider(parent_core, child_core, protocol, remote_proto
 
 
 async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwen", protocol="native",
-                            remote_protocol="JSONRPC", fault=None):
+                            remote_protocol="JSONRPC", fault=None, run_timeouts=None, remote_delay=0):
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)
     monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
@@ -133,7 +134,7 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         original_prepare(adapter)
         cards.extend(card.id for card in adapter.native_agent.ability_manager.list())
     monkeypatch.setattr(JiuwenAdapter, "prepare", prepare)
-    async with collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault) as (url, state):
+    async with collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault, remote_delay) as (url, state):
         from nexent.core.agents.cores.smolagents import agent as nexent_agent
         import nexent.core.tools as shared_tool_types
         from smolagents import Tool
@@ -191,9 +192,13 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
                              name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()
-        info = AgentRunInfo(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
+        from runtime.adapters.nexent.factory import build_run_info
+
+        timeouts = {"collaboration_timeout_seconds": 0.4 if fault == "capacity" else 5}
+        timeouts.update(run_timeouts or {})
+        info = build_run_info(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
             model_config_list=[model("/parent", 0.9, "parent-only", 7)], observer=MessageObserver(lang="en"),
-            stop_event=Event(), thread_manager=manager, collaboration_timeout_seconds=0.4 if fault == "capacity" else 5,
+            stop_event=Event(), thread_manager=manager, **timeouts,
             tenant_id="spike-tenant", user_context={"user_id": "trusted"})
         async def cancel():
             while not (state["child"] or state["remote"]):
