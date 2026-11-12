@@ -30,6 +30,7 @@ def terminal_context(directory, summary, *, metadata_directory=None):
 
     state, provenance = snapshot("status.json"), snapshot("provenance.json")
     restoration = snapshot("restoration.json")
+    retry = snapshot("recovery.json")
     status = summary.get("status") or state.get("status") or "UNKNOWN"
     complete = summary.get("execution_complete")
     execution = "完整" if complete is True else "未完成" if complete is False else "未建立执行批次或未记录"
@@ -45,6 +46,8 @@ def terminal_context(directory, summary, *, metadata_directory=None):
         recovery = "Local 配置恢复及恢复用例验证通过"
     elif restoration.get("status") == "RESTORED":
         recovery = "Local 配置已还原；恢复用例未通过或尚未完成，环境可用性未验证"
+    elif retry.get("status") == "PREPARED_FOR_REDEPLOY":
+        recovery = "Local 配置已还原；待重新部署及恢复验证，前批恢复标记仍待处理"
     elif provenance.get("deployment_campaign") or (metadata / "deployment-plan.json").exists():
         recovery = "Local 恢复未完成或未验证，请检查恢复记录；不能认为环境已恢复可用"
     else:

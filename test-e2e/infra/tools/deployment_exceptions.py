@@ -20,6 +20,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from local_preflight import env_file
+from recovery_io import protected_write
 from daily_recovery import configuration_paths, current_retry, pending_retry_allowed
 from suite_runtime import deployment_lock, finalize, fingerprint, now, render_report, save
 
@@ -117,16 +118,6 @@ def patch_env(content, updates):
         else:
             text = text.rstrip("\n") + "\n" + replacement + "\n"
     return text.encode("utf-8")
-
-
-def protected_write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".switch-next")
-    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as output:
-        output.write(content)
-        output.flush()
-        os.fsync(output.fileno())
-    temporary.replace(path)
 
 
 def link_or_copy(source, destination):

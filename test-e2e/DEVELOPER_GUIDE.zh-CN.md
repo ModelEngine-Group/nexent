@@ -109,6 +109,8 @@ uv pip check --python $TestPython
 
 遇到缺失资产或校验冲突时，按命令结果处理；不要拿空文件代替。`doctor` 按所选用例检查实际 jsdom/CSS 依赖导入及对应工具链的无头浏览器启动，`--live` 另外检查服务可达性；这些检查不代表所有账号、模型、业务流程已经通过。离线用例可省略 `--live`，并用 `--case <Case-ID>` 缩小检查范围。
 
+同步 develop 与执行测试使用独立 Python 进程：启动器持续持有 Daily 和仓库部署锁，新执行进程校验同步后的提交、工作区及继承锁，再重新核验恢复上下文。恢复工具不再提前导入部署执行器；异常退出仍保留恢复标记和原始报告。详见 [Daily 进程隔离](infra/tools/docs/daily-validation.md#fresh-execution-after-synchronization)。
+
 ## 3. 收到失败结果后如何修改
 
 先定位失败 Case ID，阅读原批次的报告、用例日志、失败步骤和清理记录，再查看对应 Feature、`case.yaml`、`execution.yaml` 和脚本。记录复现时的产品版本、测试分支和环境差异。

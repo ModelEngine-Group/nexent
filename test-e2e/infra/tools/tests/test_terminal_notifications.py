@@ -26,6 +26,9 @@ campaign_fixture = campaign_module.campaign_fixture
 spec = importlib.util.spec_from_file_location("terminal_daily_launcher", TOOLS.parent / "scripts/daily-launch.py")
 launcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launcher)
+worker_spec = importlib.util.spec_from_file_location("terminal_daily_worker", TOOLS.parent / "scripts/daily-worker.py")
+worker = importlib.util.module_from_spec(worker_spec)
+worker_spec.loader.exec_module(worker)
 ENV = {"LARK_CLI": "offline-cli", "FEISHU_REPORT_CHAT_ID": "offline-chat"}
 
 
@@ -81,6 +84,15 @@ def test_missing_report_still_sends_saved_terminal_reason(tmp_path):
     text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
     assert "详细报告未生成" in text and "Deployment preflight failed" in text
     assert "未记录恢复验证证据" in text
+
+
+def test_prepared_launch_reports_pending_redeployment_instead_of_recovered_environment(tmp_path):
+    receipt(tmp_path, "INCOMPLETE", error="worker could not start")
+    save(tmp_path / "recovery.json", {"status": "PREPARED_FOR_REDEPLOY"})
+    with patch.object(suite_notify, "logged", return_value=0):
+        assert suite_notify.send_report(tmp_path, ENV) == "SENT"
+    text = (tmp_path / "notification-report.md").read_text(encoding="utf-8")
+    assert "待重新部署及恢复验证" in text and "前批恢复标记仍待处理" in text
 
 
 @pytest.mark.parametrize("delivery", [124, RuntimeError("offline transport failure")])
@@ -223,6 +235,7 @@ def test_launcher_reports_preflight_failures_without_product_configuration(tmp_p
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
+    monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
 
     def sync(*args, **kwargs):
         if failure == "signal":
@@ -277,9 +290,15 @@ def test_launcher_uses_explicit_batch_link_or_reports_preparation_failure(tmp_pa
     monkeypatch.setattr(launcher.sys, "executable", str(runtime))
     monkeypatch.setattr(launcher, "deployment_lock", lambda *_: nullcontext())
     monkeypatch.setattr(launcher, "prepare_daily_retry", lambda *_: nullcontext())
+    monkeypatch.setattr(launcher, "notify_terminal", lambda repo, home, directory: suite_notify.notify_launch(directory, home))
     monkeypatch.setattr(launcher, "sync_checkout", lambda *a, **k: "fixed-revision")
     monkeypatch.setattr(launcher, "git", lambda *a, **k: "")
-    monkeypatch.setattr(launcher, "logged", lambda *a, **k: 1 if failure == "validation" else 0)
+    monkeypatch.setattr(worker, "logged", lambda *a, **k: 1 if failure == "validation" else 0)
+    monkeypatch.setattr(worker, "checked_revision", lambda *a: None)
+    monkeypatch.setattr(worker, "inherited_locks", lambda *a: nullcontext())
+    monkeypatch.setattr(worker, "prepare_daily_retry", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(launcher, "run_worker", lambda repo, home, directory, head, publish, locks:
+                        worker.execute(repo, home, directory, head, publish))
     monkeypatch.setattr(static_assets, "apply", lambda *a, **k: None)
     monkeypatch.setattr(suite, "selection", lambda *a, **k: [])
     monkeypatch.setattr(suite, "doctor", lambda *a, **k: ["offline missing browser"] if failure == "doctor" else [])

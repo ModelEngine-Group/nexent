@@ -77,6 +77,47 @@ empty families after dependency/cleanup analysis. Daily suppresses the worker on
 for a Case missing that declaration; invalid declarations/configuration remain
 fatal. Developer strict validation rejects both types of finding before delivery.
 
+## Fresh execution after synchronization
+
+The supervisor retains the test-home Daily lock and checkout deployment lock
+through synchronization and until a fresh `daily-worker.py` interpreter exits.
+An explicitly selected validation branch is allowed through `--branch`; the
+scheduled workflow remains pinned to develop. Branch/ref validation, clean
+checkout, fast-forward-only fetch and exact remote HEAD checks also apply to
+validation branches; selecting one does not disable any execution gate.
+Only the supervisor fetches/fast-forwards. The worker checks the expected HEAD,
+branch, clean checkout and inherited OS lock handles before any execution. There
+is no unlocked handoff and no public skip-lock flag. Nested deployment operations
+reuse the worker's verified lease. Linux shares the held flock descriptors;
+Windows explicitly inherits only the selected handles while the supervisor
+retains its byte locks. The supervisor forwards a catchable interruption and waits
+for the coordinator's recovery/finalization before closing its own locks.
+
+Both execution and notification helpers use the fixed virtual-environment Python,
+with a launch-specific bytecode-cache prefix and bytecode writes disabled. This
+avoids reusing either in-memory modules or timestamp-valid `.pyc` files from the
+previous checkout. The worker never fetches again. Recovery's `protected_write`
+is in independent `recovery_io.py`, so preparing a repair cannot import a cached
+deployment executor before synchronization.
+
+If the supervisor prepared an old Local recovery journal, the worker revalidates
+that journal, receipt, private before-image path and exact restored config bytes,
+then reconstructs its own recovery context without overwriting the original
+backup. Old markers remain until the existing redeploy and recovery-probe gates
+succeed. An exit without a matching terminal launch receipt becomes INCOMPLETE,
+including a zero exit; it never implies successful test execution. A failed
+worker also leaves a redacted traceback in `worker-error.log` when it can save one.
+The fresh notification helper and the worker use the same launch/batch receipts,
+so a supervisor fallback cannot blindly resend a delivered/uncertain message.
+
+Offline process and recovery regressions live in `tests/test_daily_process.py`.
+They include pending recovery with a deliberately cached old executor, real child
+process/lock inheritance, same-size/timestamp stale bytecode, invalid leases,
+source drift, abnormal exit and interruption. They do not build, deploy, send
+messages, clear real markers or execute business Cases. Hard host/process death
+still cannot guarantee in-process notification; Windows supervision assumes the
+supervisor remains alive until its child has finished.
+
 ## Accounting
 
 `asset-validation.json` is saved with the launch and execution batch, including

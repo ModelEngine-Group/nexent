@@ -54,18 +54,17 @@ def test_pending_failed_deployment_allows_launcher_sync_but_keeps_evidence(aband
         calls.append("fetch-latest")
         return "new-revision-with-fix"
 
-    def execute(*args, **kwargs):
+    def execute(repo, home, directory, *args):
         calls.append("redeploy")
         assert marker.exists()
+        state = json.loads((directory / "status.json").read_text())
+        save(directory / "status.json", {**state, "status": "PASSED"})
         return 0
 
     with patch.object(launcher, "__file__", str(repo / "test-e2e/infra/scripts/daily-launch.py")), \
             patch.object(launcher.sys, "executable", str(runtime)), \
             patch.object(launcher, "sync_checkout", side_effect=synchronize), \
-            patch.object(launcher, "git", return_value=""), patch.object(launcher, "logged", return_value=0), \
-            patch("static_assets.apply"), patch.object(suite, "selection", return_value=[]), \
-            patch.object(suite, "doctor", return_value=[]), patch.object(suite, "config", return_value={}), \
-            patch.object(suite, "execute", side_effect=execute):
+            patch.object(launcher, "run_worker", side_effect=execute), patch.object(launcher, "notify_terminal"):
         assert launcher.main(["--test-home", str(home), "--branch", "develop", "--execute"]) == 0
     assert calls == ["fetch-latest", "redeploy"]
     assert marker.read_bytes() == before
@@ -228,7 +227,7 @@ def test_changed_marker_cannot_be_adopted_or_cleared(abandoned):
 def test_partial_configuration_restore_retains_all_before_images(abandoned):
     repo, home, batch, marker, switch = abandoned
     original = marker.read_bytes()
-    write = modes.protected_write
+    write = recovery.protected_write
 
     def failing_write(path, content):
         if path == switch.paths[-1]:
@@ -236,7 +235,7 @@ def test_partial_configuration_restore_retains_all_before_images(abandoned):
         return write(path, content)
 
     launch = home / "runs/daily-launch/write-failure"
-    with deployment_lock(repo), patch.object(modes, "protected_write", side_effect=failing_write), pytest.raises(OSError):
+    with deployment_lock(repo), patch.object(recovery, "protected_write", side_effect=failing_write), pytest.raises(OSError):
         with recovery.prepare_daily_retry(repo, home, launch):
             pass
     archive = home / "runtime/daily-recovery/write-failure"

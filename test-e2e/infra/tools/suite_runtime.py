@@ -73,10 +73,10 @@ def deployment_lock(repo):
         yield
         return
     path = repo / ".git/nexent-e2e-deployment.lock"
-    with BatchLock(path):
+    with BatchLock(path) as lock:
         token = _DEPLOYMENT_LEASE.set((str(path.resolve()), os.getpid()))
         try:
-            yield
+            yield lock
         finally:
             _DEPLOYMENT_LEASE.reset(token)
 
