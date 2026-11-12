@@ -231,9 +231,7 @@ class LegacyChatModel(Model):
             "finish_reason": None, "content_chunk_count": 0, "content_char_count": 0,
             "reasoning_chunk_count": 0, "reasoning_char_count": 0,
             "input_tokens": None, "output_tokens": None,
-            "requested_output_tokens": profile.parameter_values.get(
-                "max_output_tokens", profile.parameter_values.get("max_tokens")
-            ),
+            "requested_output_tokens": None,
             "reasoning_only_budget_exhausted": False,
         }
 
@@ -386,6 +384,7 @@ class LegacyChatModel(Model):
                 )
                 if message.usage.input_tokens is not None and message.usage.output_tokens is not None:
                     result.token_usage = TokenUsage(message.usage.input_tokens, message.usage.output_tokens)
+                result.provider_input_tokens = message.usage.input_tokens
                 result.model_attempt_id = self.last_attempt_id
                 result.model_attempt_number = event.attempt
                 result.model_attempt_commit_deferred = _defer_attempt_commit and not _suppress_attempt_stream

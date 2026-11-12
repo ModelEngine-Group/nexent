@@ -607,9 +607,7 @@ def apply_root_model_preferences(model_list, agent_config, preferences, *, outle
         else:
             resolved = merge_model_preferences(profile, values)
         root = configured.model_copy(deep=True, update={"cite_name": "conversation_root_model_" + uuid.uuid4().hex,
-            "resolved_profile": resolved,
-            "default_output_reserve_tokens": resolved.parameter_values.get("max_output_tokens",
-                configured.default_output_reserve_tokens)})
+            "resolved_profile": resolved})
         model_list.append(root)
         agent_config.model_name = root.cite_name
         return

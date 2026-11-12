@@ -1415,6 +1415,9 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
+            "context.maintenance_phase": getattr(evidence, "maintenance_phase", "prepare"),
+            "context.usage_source": getattr(evidence, "usage_source", "estimated"),
+            "context.calibrated_input_estimate": getattr(evidence, "calibrated_input_estimate", 0),
             "context.effective_input_limit_tokens": getattr(
                 evidence, "effective_input_limit_tokens", 0
             ),

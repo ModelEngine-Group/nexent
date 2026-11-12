@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from threading import Event
 
 import pytest
@@ -61,8 +63,8 @@ def test_typed_v2_snapshot_survives_runtime_models_and_dispatch_assignment():
     model.context_budget_snapshot = run_info.context_budget_snapshot
 
     assert model.context_budget_snapshot is snapshot
-    assert model.context_budget_snapshot.compaction_trigger_threshold_tokens == 11_468
-    assert model.context_budget_snapshot.compaction_target_tokens == 8_601
+    assert model.context_budget_snapshot.compaction_trigger_threshold_tokens == 13_107
+    assert model.context_budget_snapshot.compaction_target_tokens == 9_830
 
 
 def test_monitoring_projection_fails_before_provider_dispatch():

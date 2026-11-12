@@ -1054,6 +1054,8 @@ Additional Args:
     ) -> None:
         """Commit or roll back one successfully streamed model attempt."""
 
+        if message is not None:
+            message.nexent_context_accepted = accepted
         if message is None or not getattr(message, "model_attempt_commit_deferred", False):
             return
         attempt_id = getattr(message, "model_attempt_id", None)
@@ -1426,6 +1428,8 @@ Additional Args:
                 self._emit_history_summary_event()
                 return rebuilt
 
+            self.context_runtime.check_input_capacity(input_messages, self._context_tools(), self.model)
+            self.context_runtime.capture_request(input_messages, self._context_tools(), self.model)
             chat_message: ChatMessage = self.model(
                 input_messages,
                 stop_sequences=stop_sequences,
@@ -2306,6 +2310,17 @@ Additional Args:
                     self._finalize_step(action_step)
                     self._collect_step_metrics(action_step)
                     self.memory.steps.append(action_step)
+                    response = getattr(action_step, "model_output_message", None)
+                    if response is not None and getattr(response, "nexent_context_accepted", False) is True:
+                        maintenance = self.context_runtime.complete_step(
+                            model=self.model, memory=self.memory,
+                            current_run_start_idx=self._history_step_count,
+                            response=response, tools=self._context_tools(),
+                        )
+                        if maintenance is not None and maintenance.maintenance_phase == "post_response":
+                            get_monitoring_manager().record_final_context_evidence(
+                                maintenance, step_number=self.step_number)
+                        self._emit_history_summary_event()
                     yield action_step
                     self.step_number += 1
 
@@ -2511,6 +2526,8 @@ Additional Args:
             model_kwargs: dict[str, Any] = {}
             if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
                 model_kwargs["_defer_attempt_commit"] = True
+            self.context_runtime.check_input_capacity(messages, self._context_tools(), self.model)
+            self.context_runtime.capture_request(messages, self._context_tools(), self.model)
             chat_message = self.model(
                 messages,
                 context_rebuild=(
@@ -2537,6 +2554,7 @@ Additional Args:
             model_output = f"Error in generating final LLM output: {e}"
             self.logger.log(f"Error in final answer generation: {e}", level=LogLevel.ERROR)
 
+        accepted_context_response = None
         if has_meaningful_visible_content(model_output):
             try:
                 classified_output = classify_model_output(
@@ -2546,6 +2564,7 @@ Additional Args:
                     logger=self.logger,
                 )
                 model_output = classified_output.answer
+                accepted_context_response = chat_message
             except ModelOutputProtocolError:
                 model_output = self._controlled_protocol_failure()
         else:
@@ -2567,7 +2586,15 @@ Additional Args:
         final_memory_step.action_output = model_output
 
         self._finalize_step(final_memory_step)
+        final_memory_step.model_output = model_output
+        final_memory_step.model_output_message = accepted_context_response
         self.memory.steps.append(final_memory_step)
+        if accepted_context_response is not None:
+            self.context_runtime.complete_step(
+                model=self.model, memory=self.memory, current_run_start_idx=self._history_step_count,
+                response=accepted_context_response, tools=self._context_tools(),
+            )
+            self._emit_history_summary_event()
 
         return model_output
 

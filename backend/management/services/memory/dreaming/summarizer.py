@@ -62,7 +62,9 @@ class TenantDreamingSummarizer:
             raise RuntimeError("No tenant LLM is configured for Dreaming")
         self.tenant_id = tenant_id
         self.user_id = user_id
-        context_tokens = int(config.get("max_input_tokens") or config.get("context_window_tokens") or 32_000)
+        context_tokens = config.get("context_window_tokens")
+        if type(context_tokens) is not int or context_tokens <= 0:
+            raise ValueError("Dreaming requires a combined model context window")
         self.max_summarization_input_chars = max(20_000, context_tokens * 3)
         self.prompt = _load_prompt()
         self.model = OpenAIModel(

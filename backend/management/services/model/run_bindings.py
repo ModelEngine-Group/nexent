@@ -78,8 +78,6 @@ def create_model_config_from_record(record):
                         max_output_tokens=record.get("max_output_tokens"),
                         max_tokens=record.get("max_tokens"),
                         context_window_tokens=record.get("context_window_tokens"),
-                        max_input_tokens=record.get("max_input_tokens"),
-                        default_output_reserve_tokens=record.get("default_output_reserve_tokens"),
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
                         capability_profile_version=record.get("capability_profile_version"),
@@ -137,9 +135,6 @@ def _resolved_model_config(record, snapshot, cite_name=None):
     """Map one frozen outlet into the existing Agent configuration contract."""
     from management.services.model.outlet_projection import project_saved_outlet
 
-    output_reserve = snapshot.parameter_values.get("max_output_tokens")
-    if output_reserve is None:
-        output_reserve = snapshot.context_configuration.output_reserve_tokens
     return ModelConfig(
         cite_name=cite_name if cite_name is not None else record["display_name"], api_key=record.get("api_key") or "",
         model_name=snapshot.identity.request_model_id, url=snapshot.connection.base_url,
@@ -153,9 +148,7 @@ def _resolved_model_config(record, snapshot, cite_name=None):
                           {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"} else None),
         reasoning_budget_tokens=snapshot.parameter_values.get("reasoning_budget_tokens"),
         context_window_tokens=snapshot.capabilities.context.combined_window,
-        max_input_tokens=snapshot.capabilities.context.input_limit,
         max_output_tokens=snapshot.capabilities.context.output_limit,
-        default_output_reserve_tokens=output_reserve,
         tokenizer_family=snapshot.context_configuration.tokenizer_family,
         capacity_source=snapshot.context_configuration.capacity_source,
         capability_profile_version=snapshot.context_configuration.capability_profile_version,

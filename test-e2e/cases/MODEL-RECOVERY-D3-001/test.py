@@ -95,7 +95,7 @@ def test_recovery_preserves_wire_and_rolls_back_failed_attempt():
         assert requests[0]["thinking"] == {"type": "disabled"}
         assert "enable_thinking" not in requests[0]
         assert requests[0]["temperature"] == 0.7 and requests[0]["top_p"] == 0.9
-        assert requests[0]["max_tokens"] == 512
+        assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"}.intersection(requests[0])
         assert phases(observer) == ["begin", "rollback", "begin", "commit"]
         events = [json.loads(raw) for raw in observer.message_query]
         committed_id = next(event["attempt_id"] for event in events if event.get("phase") == "commit")

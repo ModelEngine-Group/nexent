@@ -26,7 +26,7 @@ from smolagents import Tool
 from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from .capacity_budget import (
-    CallerMaxTokensOverrideForbidden,
+    CallerMaxTokensOverrideForbidden as CallerMaxTokensOverrideForbidden,
     ContextBudgetCapacityMismatch as ContextBudgetCapacityMismatch,
     ContextBudgetSnapshot,
     parse_context_budget_snapshot,
@@ -498,20 +498,6 @@ class OpenAIModel(OpenAIServerModel):
             context_budget_snapshot or self.context_budget_snapshot
         )
 
-        # Bound completion length unless the caller passed their own override
-        # via kwargs (which already landed in completion_kwargs above).
-        # OpenAI wire field stays max_tokens; internal name is max_output_tokens.
-        # When a W2 snapshot is active, its requested_output_tokens is the sole
-        # authority per CM-030 — skip the pre-W2 auto-fill so the dispatch
-        # boundary does not see max_output_tokens masquerading as a caller
-        # override and reject it via CallerMaxTokensOverrideForbidden.
-        if (
-            self.max_output_tokens is not None
-            and "max_tokens" not in completion_kwargs
-            and trusted_budget_snapshot is None
-        ):
-            completion_kwargs["max_tokens"] = self.max_output_tokens
-
         selected_cache_profile = resolve_prompt_cache_profile(
             self.model_factory or "unknown", self.prompt_cache
         )
@@ -788,13 +774,7 @@ class OpenAIModel(OpenAIServerModel):
                         "nonstandard_chunk_count": nonstandard_chunk_count,
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
-                        "requested_output_tokens": (
-                            self._coerce_context_budget_snapshot(
-                                trusted_budget_snapshot
-                            ).requested_output_tokens
-                            if trusted_budget_snapshot is not None
-                            else dispatch_kwargs.get("max_tokens")
-                        ),
+                        "requested_output_tokens": None,
                         "reasoning_only_budget_exhausted": (
                             finish_reason == "length"
                             and reasoning_char_count > 0
@@ -870,6 +850,9 @@ class OpenAIModel(OpenAIServerModel):
                             input_tokens=input_tokens,
                             output_tokens=output_tokens
                         )
+                    message.provider_input_tokens = (
+                        getattr(usage, "prompt_tokens", None) if usage is not None else None
+                    )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
                     message.model_attempt_id = attempt_id
@@ -1138,14 +1121,15 @@ class OpenAIModel(OpenAIServerModel):
                 budget_snapshot=snapshot,
                 capacity_snapshot=capacity_snapshot,
             )
-            trusted_max_tokens = snapshot.requested_output_tokens
-            caller_max_tokens = completion_kwargs.get("max_tokens")
-            if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
-                raise CallerMaxTokensOverrideForbidden(
-                    snapshot_value=trusted_max_tokens,
-                    caller_value=caller_max_tokens,
-                )
-            completion_kwargs["max_tokens"] = trusted_max_tokens
+        # Omission is the OpenAI chat protocol contract, including historical
+        # caller/constructor values and extra_body overrides.
+        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+            completion_kwargs.pop(key, None)
+        if completion_kwargs.get("extra_body"):
+            completion_kwargs["extra_body"] = {
+                key: value for key, value in completion_kwargs["extra_body"].items()
+                if key not in {"max_tokens", "max_completion_tokens", "max_output_tokens"}
+            }
         logger.info(
             "event=chat_completion_create model_id=%s kwargs=%s",
             self.model_id,
@@ -1492,7 +1476,7 @@ class OpenAIModel(OpenAIServerModel):
         return {
             "w2.budget_fingerprint": snapshot.fingerprint,
             "w2.w1_fingerprint": snapshot.w1_fingerprint,
-            "w2.requested_output_tokens": snapshot.requested_output_tokens,
+            "w2.requested_output_tokens": None,
             "w2.output_reserve_source": snapshot.output_reserve_source,
             "context.effective_input_limit_tokens": snapshot.effective_input_limit_tokens,
             "context.compaction_trigger_threshold_tokens": (

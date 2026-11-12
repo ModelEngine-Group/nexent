@@ -122,6 +122,21 @@ class TenantConfigManager:
             return CapacityReservePolicy()
 
         tenant_config = self.load_config(tenant_id)
+        policy_values = {}
+        for key, field in (
+            ("context.remaining_window_ratio", "remaining_window_ratio"),
+            ("context.remaining_window_max_tokens", "remaining_window_max_tokens"),
+            ("context.maintenance_target_multiplier", "maintenance_target_multiplier"),
+        ):
+            value = tenant_config.get(key)
+            if value not in (None, ""):
+                policy_values[field] = value
+        try:
+            base_policy = CapacityReservePolicy(**policy_values)
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise InvalidReservePolicy("Invalid remaining-context maintenance policy") from exc
+        if "remaining_window_ratio" in policy_values:
+            return base_policy
         raw_ratio = tenant_config.get(CONTEXT_COMPACTION_TRIGGER_RATIO_KEY)
         ratio_source = "tenant_config"
         if raw_ratio in (None, ""):
@@ -129,11 +144,12 @@ class TenantConfigManager:
             if raw_ratio not in (None, ""):
                 ratio_source = "legacy_payload"
         if raw_ratio in (None, ""):
-            return CapacityReservePolicy()
+            return base_policy
 
         try:
             ratio = float(str(raw_ratio).strip())
             return CapacityReservePolicy(
+                **policy_values,
                 compaction_trigger_ratio=ratio,
                 compaction_trigger_ratio_source=ratio_source,
             )

@@ -60,6 +60,7 @@ class ContextManager:
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
         self._run_compaction_attempts = 0
+        self._representation_overrides: dict[str, tuple[str, ContextItem]] = {}
 
     def _compaction_trigger_threshold_tokens(self) -> int:
         return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
@@ -86,6 +87,7 @@ class ContextManager:
         self._history_candidate = None
         self._run_compaction_attempts = 0
         self._current_item_cache.clear()
+        self._representation_overrides.clear()
         source = self._item_source(items)
         if fallback_system_prompt and not any(item.type == ContextItemType.SYSTEM for item in source):
             source.append(
@@ -124,6 +126,7 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
+        maintenance: bool = False,
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
@@ -144,7 +147,12 @@ class ContextManager:
             ]
             persisted_items.append(self._history_candidate.as_item())
         current_items = self._project_current_run(memory, current_run_start_idx)
-        items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
+        original_items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
+        items = []
+        for item in original_items:
+            saved = self._representation_overrides.get(item.id)
+            source_fingerprint = self._fingerprint(item.content)
+            items.append(saved[1] if saved is not None and saved[0] == source_fingerprint else item)
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,
             task=task,
@@ -168,7 +176,8 @@ class ContextManager:
             and (
                 force_compaction
                 or (
-                    self.config.effective_input_limit_tokens > 0
+                    maintenance
+                    and self.config.effective_input_limit_tokens > 0
                     and raw_tokens >= self._compaction_trigger_threshold_tokens()
                 )
             )
@@ -225,7 +234,7 @@ class ContextManager:
                     candidate = result.candidate
                     if candidate is None:
                         compaction_stop_reason = "invalid_candidate"
-                        if last_valid is None and result.fallback_turns:
+                        if last_valid is None and result.fallback_turns and not maintenance:
                             fallback_by_id = {item.id: item for item in result.fallback_turns}
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
                         break
@@ -289,6 +298,12 @@ class ContextManager:
                 model=model,
             )
 
+        if maintenance or force_compaction:
+            originals = {item.id: item for item in original_items}
+            for item in final_items:
+                original = originals.get(item.id)
+                if original is not None and item is not original:
+                    self._representation_overrides[item.id] = (self._fingerprint(original.content), item)
         final_items.sort(key=lambda item: item.layout_key)
         rendered = self.build_context_messages(final_items)
         # Stable item messages remain first for KV-cache reuse.
@@ -673,9 +688,17 @@ class ContextManager:
         )
 
     def _message_tokens(self, messages):
-        return max(
-            0, int(sum(len(extract_message_text(message)) for message in messages) / self.config.chars_per_token)
-        )
+        payload = []
+        for message in messages:
+            source = message if isinstance(message, dict) else {
+                key: getattr(message, key, None)
+                for key in ("role", "content", "tool_calls", "tool_call_id", "reasoning_content")
+            }
+            payload.append({key: self._to_json_value(value) for key, value in source.items()
+                            if key in {"role", "content", "tool_calls", "tool_call_id", "reasoning_content"}
+                            and value is not None})
+        return max(0, math.ceil(len(json.dumps(payload, ensure_ascii=False, default=str))
+                                / self.config.chars_per_token))
 
     def _tools_tokens(self, tools):
         return (

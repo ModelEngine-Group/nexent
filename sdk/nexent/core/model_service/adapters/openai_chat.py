@@ -203,6 +203,8 @@ class OpenAIChatAdapter:
             validate_saved_parameter_values(rules, profile.parameter_values)
             bindings = validate_parameter_bindings(rules, parameter_transform_references())
             for key, binding in bindings.items():
+                if key in {"max_tokens", "max_completion_tokens", "max_output_tokens"}:
+                    continue
                 if key in {"temperature", "top_p"} and (
                     getattr(profile.capabilities.sampling, key).status == "unsupported"
                     or profile.parameter_values.get(key) is None
@@ -212,8 +214,12 @@ class OpenAIChatAdapter:
                     _set(body, _tokens(binding["path"]), transform_parameter(binding, profile.parameter_values[key]),
                          binding["path"])
             body = apply_extra_api_parameters(
-                body, profile.extra_api_parameters, parameter_paths=[binding["path"] for binding in bindings.values()]
+                body, [entry for entry in profile.extra_api_parameters
+                       if entry["path"].split("/")[1] not in
+                       {"max_tokens", "max_completion_tokens", "max_output_tokens"}], parameter_paths=[binding["path"] for binding in bindings.values()]
             )
+            for retired_limit in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+                body.pop(retired_limit, None)
             return PreparedHttpRequest(
                 request_id=request.request_id,
                 method=profile.connection_rules.method,

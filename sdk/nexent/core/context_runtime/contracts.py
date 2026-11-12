@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Contracts for the single ContextManager-backed runtime path."""
 from __future__ import annotations
 
@@ -31,6 +33,10 @@ _UNCONFIGURED_RUNTIME_ERROR = "CoreAgent requires a context runtime from the age
 @dataclass(frozen=True)
 class ContextEvidence:
     purpose: str = "step"
+    maintenance_phase: str = "prepare"
+    usage_source: str = "estimated"
+    provider_input_tokens: int | None = None
+    calibrated_input_estimate: int = 0
     selected_item_ids: tuple[str, ...] = ()
     selected_item_types: tuple[str, ...] = ()
     stable_message_count: int = 0
@@ -106,6 +112,15 @@ class ContextRuntime(Protocol):
         request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
         """Return all model messages for the current step."""
+
+    def capture_request(self, messages, tools, model) -> None:
+        """Capture the final outgoing input for accepted-response calibration."""
+
+    def check_input_capacity(self, messages, tools, model) -> int:
+        """Reject an oversized input without invoking normal maintenance."""
+
+    def complete_step(self, *, model, memory, current_run_start_idx, response, tools=None):
+        """Maintain context after the accepted response and its tool results."""
 
     def prepare_final_answer(
         self,

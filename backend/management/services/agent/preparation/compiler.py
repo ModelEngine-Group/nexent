@@ -10,7 +10,7 @@ from contracts.constants.environment import (
     NEXENT_SANDBOX_DEFAULT_LEVEL,
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
-from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import LANGUAGE, MODEL_CONFIG_MAPPING
 from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
@@ -45,7 +45,6 @@ from management.services.memory.providers.service import (
 from management.services.model.resolver import is_model_available
 from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
-    _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
     _resolve_input_budget,
 )
@@ -615,9 +614,8 @@ async def create_agent_config(
         )
     else:
         model_name = "main_model"
-        input_budget = _TOKEN_THRESHOLD_LEGACY_FALLBACK
-        capacity_snapshot = None
-        resolved_capacity_snapshot = None
+        model_info = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+        input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
 
     requested_output_tokens = None
     context_budget_snapshot = _resolve_context_budget(
