@@ -70,6 +70,8 @@ from contracts.model import (
 from contracts.model import CapacitySuggestionRequestFields as CapacitySuggestionFields
 from contracts.roles import has_any_role
 from gateway.authentication.auth import authenticate, get_current_user_id
+from management.utils.managed_read import managed_read
+from contracts.errors.exceptions import ManagementReadBusyError
 from management.db.model.repository import get_model_by_model_id
 from management.services.model.capacity import (
     _record_capacity_suggestion_accept,
@@ -421,7 +423,8 @@ async def suggest_model_capacity(
 
 
 @router.get("/capacity-coverage")
-async def get_model_capacity_coverage(
+@managed_read
+def get_model_capacity_coverage(
     current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION, alternative=INVENTORY_READ)),
 ):
     """Return bare-capacity LLM/VLM coverage for the current tenant.
@@ -1181,6 +1184,8 @@ async def manage_list_models(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ManagementReadBusyError:
+        raise
     except Exception as e:
         logging.error(f"Failed to list models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional
 
 from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED, CAPACITY_VISIBILITY_ENABLED, NEXENT_LITELLM_JSON
 from contracts.model import CapabilityProfileLike, CapacitySuggestionConfidence, CapacitySuggestionFields, CapacitySuggestionMatchKind, CapacitySuggestionResult, ProfileKey
-from management.db.model.repository import get_model_records
+from management.db.model.repository import get_capacity_model_records
 from management.services.model.names import add_repo_to_name
 
 logger = logging.getLogger(__name__)
@@ -688,7 +688,7 @@ def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
             "bare_models": [],
         }
 
-    records = get_model_records(None, tenant_id)
+    records = get_capacity_model_records(CAPACITY_COVERAGE_MODEL_TYPES, tenant_id)
     scoped_records = [
         model
         for model in records

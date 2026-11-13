@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Filesystem path validation shared by SkillManager and backend services."""
 
 import ntpath
@@ -36,8 +38,8 @@ def validate_path_component(value: str) -> str:
     return value
 
 
-def resolve_contained_path(root: str, *parts: str) -> str:
-    """Resolve relative components and reject traversal and escaping symlinks."""
+def _relative_segments(parts: tuple[str, ...]) -> list[str]:
+    """Validate relative components without accessing the filesystem."""
     segments = []
     for part in parts:
         if (
@@ -49,6 +51,12 @@ def resolve_contained_path(root: str, *parts: str) -> str:
         if ".." in components:
             raise UnsafeSkillPathError("Unsafe local skill path")
         segments.extend(component for component in components if component not in {"", "."})
+    return segments
+
+
+def resolve_contained_path(root: str, *parts: str) -> str:
+    """Resolve relative components and reject traversal and escaping symlinks."""
+    segments = _relative_segments(parts)
     root = os.path.realpath(root)
     candidate = os.path.realpath(os.path.join(root, *segments))
     if not _is_same_or_descendant(candidate, root):
@@ -68,3 +76,32 @@ def resolve_skill_path(root: str, name: str, *parts: str, allowed_root: str | No
     if skill_root == root or not _is_same_or_descendant(skill_root, root):
         raise UnsafeSkillPathError("Unsafe local skill path")
     return resolve_contained_path(skill_root, *parts)
+
+
+class SkillPathResolver:
+    """Reuse canonical roots within one operation, never across requests.
+
+    Every skill and final target is still resolved through realpath so changed
+    ancestor or file symlinks cannot escape the captured root.
+    """
+
+    def __init__(self, root: str, *, allowed_root: str | None = None):
+        self.root = os.path.realpath(root)
+        if allowed_root:
+            allowed = os.path.realpath(allowed_root)
+            if not _is_same_or_descendant(self.root, allowed):
+                raise UnsafeSkillRootError("Unsafe local skills directory")
+
+    def resolve_many(self, name: str, relative_paths: list[tuple[str, ...]]) -> list[str]:
+        """Validate one skill and independently resolve each requested target."""
+        validate_path_component(name)
+        skill_root = os.path.realpath(os.path.join(self.root, name))
+        if skill_root == self.root or not _is_same_or_descendant(skill_root, self.root):
+            raise UnsafeSkillPathError("Unsafe local skill path")
+        targets = []
+        for parts in relative_paths:
+            candidate = os.path.realpath(os.path.join(skill_root, *_relative_segments(parts)))
+            if not _is_same_or_descendant(candidate, skill_root):
+                raise UnsafeSkillPathError("Unsafe local skill path")
+            targets.append(candidate)
+        return targets
