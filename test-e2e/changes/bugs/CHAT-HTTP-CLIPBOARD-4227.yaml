@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-HTTP-CLIPBOARD-4227
+  change_type: bugfix
+  bug_id: CHAT-HTTP-CLIPBOARD-4227
+  title: Restore new-chat answer and code copying over HTTP
+  description: Route both copy actions through the shared clipboard writer with exact text and lifecycle-safe feedback. See issue 4227.
+  observed_behavior: Completed answers and code blocks cannot be copied when navigator.clipboard is unavailable on an ordinary HTTP origin; the legacy interface works.
+  expected_behavior: Both actions use the modern API when available and try the textarea fallback otherwise, preserve extracted text and code whitespace, and report actual success or failure.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing clipboard consumers and share-link tests mock the writer; inspected frontend tests and formal assets do not assert new-chat copying without the Clipboard API.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Missing or rejected Clipboard API uses the fallback and preserves requested whitespace; existing callers retain default normalization.
+      - Fallback failure rejects and cleans the temporary element; focus and selection are restored.
+      - Real assistant-ui copy primitives extract answer text, retain empty-message disabling and write exactly once.
+      - Success follows write completion; retries, concurrent clicks, scope changes, unmounting and timers maintain correct feedback.
+    test_selectors:
+      - frontend/tests/component/httpClipboard.test.tsx
+    reason: Focused TypeScript writer, hook and real assistant-ui component regressions cover the changed contracts. Backend and SDK code are unchanged.
+  no_case_change_reason: The new regression belongs in frontend component tests. Existing share-link Cases mock the writer and cover a different contract; duplicating these assertions as a new D1 would add no proof. Browser clipboard behavior is verified separately through synthetic copy/paste checks and deployment acceptance.
+  notes: >-
+    Search covered frontend/tests, test-e2e/features, cases and changes. F-065 describes
+    streaming and citation rendering, FAF-001 describes answer-envelope classification,
+    and V5-UT-FE-032/UT-FE-032 describes share-link selection and clipboard denial.
+    None owns copying answer/code text without navigator.clipboard, so no existing
+    Feature or Case contract is changed. The shared helper retains default normalization
+    for profile, invitations, generic copy buttons and conversation-share consumers.
+    D2/D3 backend and provider paths are unchanged. Browser evidence remains separate
+    from UT and is not registered as execution of a formal Case.
+    Design: ../nexent-doc/docs/Developing/newchat-http-clipboard/design.md.
