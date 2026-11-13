@@ -1,0 +1,241 @@
+.resource-space .resource-card-grid {
+  gap: 16px;
+}
+
+.resource-space[data-resource-type="mcp"] .resource-card-grid,
+.resource-space[data-resource-type="skill"] .resource-card-grid {
+  row-gap: 12px;
+}
+
+.resource-space .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.resource-space .ant-table-wrapper:not(.resource-scroll-table) {
+  overflow-x: auto;
+}
+
+.resource-space .resource-scroll-table {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.resource-scroll-table .ant-table-cell {
+  white-space: nowrap;
+}
+
+.resource-scroll-table .ant-table-cell:not(.ant-table-cell-fix) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-space[data-resource-type="mcp"]
+  .resource-scroll-table
+  .ant-table-thead
+  > tr
+  > th:has(+ th.ant-table-cell-fix-end:not(.ant-table-cell-scrollbar))::before {
+  display: none;
+}
+
+.resource-space[data-resource-type="mcp"]
+  .resource-scroll-table
+  .ant-table-thead
+  > tr
+  > th.ant-table-cell-fix-end:not(.ant-table-cell-scrollbar)::before {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+  top: 50%;
+  width: 1px;
+  height: 14px;
+  transform: translateY(-50%);
+  background: #c9c9c9;
+  content: "";
+}
+
+.resource-repository-pagination .ant-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.resource-repository-pagination .ant-pagination-total-text,
+.resource-scroll-table .ant-pagination-total-text {
+  margin-inline-end: auto;
+}
+
+.resource-repository-content:has(.resource-scroll-table),
+.resource-repository-content div:has(.resource-scroll-table),
+.resource-scroll-table,
+.resource-scroll-table div:has(> .ant-table-body),
+.resource-scroll-table div:has(> .ant-table-container),
+.resource-scroll-table .ant-spin:has(> .ant-spin-container),
+.resource-scroll-table .ant-spin-nested-loading,
+.resource-scroll-table .ant-spin-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.resource-repository-content:has(.resource-scroll-table) {
+  overflow: hidden;
+}
+
+.resource-repository-content:has(.repository-card-scroll) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.resource-repository-content div:has(.resource-scroll-table) {
+  flex: 1 1 auto;
+}
+
+.resource-scroll-table .ant-table-header,
+.resource-scroll-table .ant-table-pagination {
+  flex-shrink: 0;
+}
+
+.resource-scroll-table .ant-table-body {
+  min-height: 0;
+}
+
+.mcp-edit-code {
+  max-height: 61.8cqw;
+  overscroll-behavior-x: contain;
+}
+
+.mcp-edit-code[data-overflow-y] {
+  overscroll-behavior-y: contain;
+}
+
+:root
+  :is(
+    .repository-detail-body.mcp-edit-drawer-body,
+    .mcp-edit-drawer-body .mcp-edit-code
+  ) {
+  --scrollbar-visible-thumb: transparent;
+  --scrollbar-thumb-hover: var(--scrollbar-visible-thumb);
+  scrollbar-color: var(--scrollbar-visible-thumb) transparent !important;
+  scrollbar-width: thin;
+}
+
+.mcp-edit-drawer-body:hover:not(:has(.mcp-edit-code[data-overflow-y]:hover)),
+.mcp-edit-drawer-body .mcp-edit-code:hover {
+  --scrollbar-visible-thumb: #969696;
+}
+
+.mcp-mine .resource-scroll-table .ant-table-container {
+  max-height: 500px;
+}
+
+.auto-hide-scrollbars
+  .resource-scroll-table
+  :is(.ant-table-content, .ant-table-body) {
+  --scrollbar-visible-thumb: var(--scrollbar-thumb);
+}
+
+@supports selector(::-webkit-scrollbar) {
+  :root
+    :is(
+      .repository-detail-body.mcp-edit-drawer-body,
+      .mcp-edit-drawer-body .mcp-edit-code
+    ) {
+    scrollbar-width: auto;
+    scrollbar-color: auto !important;
+  }
+
+  .mcp-edit-drawer-body::-webkit-scrollbar-thumb,
+  .mcp-edit-drawer-body .mcp-edit-code::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-visible-thumb);
+  }
+
+  .mcp-edit-code::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .mcp-edit-code::-webkit-scrollbar-thumb {
+    border: 0;
+  }
+
+  .resource-scroll-table {
+    --resource-table-scrollbar-size: 4px;
+  }
+
+  :is(.repository-card-body, .repository-detail-body) {
+    scrollbar-width: auto;
+    scrollbar-color: auto !important;
+  }
+
+  :is(.repository-card-body, .repository-detail-body)::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  :is(.repository-card-body, .repository-detail-body)::-webkit-scrollbar-thumb {
+    border: 0;
+  }
+
+  .resource-scroll-table :is(.ant-table-content, .ant-table-body) {
+    scrollbar-width: auto;
+    scrollbar-color: auto !important;
+  }
+
+  .resource-scroll-table
+    :is(.ant-table-content, .ant-table-body)::-webkit-scrollbar {
+    height: var(--resource-table-scrollbar-size);
+    width: var(--resource-table-scrollbar-size);
+  }
+
+  /* Match the fixed header gutter to the table body's custom scrollbar. */
+  .resource-space
+    .resource-scroll-table
+    .ant-table-header
+    table:has(.ant-table-cell-scrollbar)
+    > colgroup
+    > col:last-child {
+    width: var(--resource-table-scrollbar-size) !important;
+  }
+
+  .resource-space
+    .resource-scroll-table
+    .ant-table-header
+    th.ant-table-cell-fix-end:has(+ .ant-table-cell-scrollbar) {
+    inset-inline-end: var(--resource-table-scrollbar-size) !important;
+  }
+
+  .resource-scroll-table
+    :is(.ant-table-content, .ant-table-body)::-webkit-scrollbar-thumb {
+    border: 0;
+  }
+}
+.resource-space {
+  background: #fff;
+}
+
+.resource-review-table .ant-table-thead > tr > th {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.resource-review-table .ant-table-tbody > tr > td {
+  border-bottom-color: #f3f3f3;
+}
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf")
+    format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Medium.ttf")
+    format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}

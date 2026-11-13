@@ -22,6 +22,7 @@ from contracts.errors.exceptions import (
     UnauthorizedError,
 )
 from contracts.roles import has_any_role, roles_from_record
+from management.db.repository_transactions import repository_transaction
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.mcp import remote as remote_mcp_db
@@ -150,6 +151,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
             shared_fields = None
     return {
         "communityId": row.get("market_id"),
+        "publishedAt": row["published_at"].isoformat() if row.get("published_at") else None,
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
         "sourceMcpId": source_mcp_id,
@@ -245,6 +247,7 @@ async def list_community_mcp_services(
     cursor: str | None = None,
     page: int | None = None,
     limit: int = 30,
+    sort_by_published_time: bool = False,
 ) -> Dict[str, Any]:
     """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
     user_role = _get_user_role(user_id)
@@ -265,6 +268,8 @@ async def list_community_mcp_services(
         user_id=user_id if not has_any_role(user_role, CAN_EDIT_ALL_USER_ROLES) else None,
         user_group_ids=user_group_ids,
     )
+    if sort_by_published_time:
+        list_kwargs["sort_by_published_time"] = True
     if page is not None:
         list_kwargs["page"] = page
     db_result = get_mcp_market_records(**list_kwargs)
@@ -342,7 +347,7 @@ def _handle_mcp_review_status_notifications(
         create_repository_review_notification(
             resource_type=RESOURCE_TYPE_MCP_REPOSITORY,
             review_status=new_status,
-            receiver_user_id=record["user_id"],
+            receiver_user_id=record.get("submitted_user_id") or record["user_id"],
             details=_mcp_notification_details(
                 name=record.get("mcp_name"),
                 market_id=market_id,
@@ -354,7 +359,7 @@ def _handle_mcp_review_status_notifications(
             created_by=user_id,
         )
 
-    if current_status == STATUS_PENDING_REVIEW:
+    if current_status == STATUS_PENDING_REVIEW and new_status != STATUS_PENDING_REVIEW:
         deactivate_notifications(
             event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
             resource_type=RESOURCE_TYPE_MCP_REPOSITORY,
@@ -363,6 +368,7 @@ def _handle_mcp_review_status_notifications(
         )
 
 
+@repository_transaction
 async def publish_community_mcp_service(
     *,
     tenant_id: str,
@@ -377,12 +383,13 @@ async def publish_community_mcp_service(
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
     content: str | None = None,
-) -> int:
+) -> dict:
     """Submit a local MCP service for review.
 
-    Creates a market record with status=pending_review directly (no separate review table).
-    Returns the new market_id.
+    Stores a frozen review application without creating a marketplace record.
     """
+    from management.db.repository_transactions import current_repository_session, lock_repository_source
+    lock_repository_source(current_repository_session(), "mcp", tenant_id, mcp_id)
     source_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not source_record:
         raise McpNotFoundError("MCP record not found")
@@ -407,61 +414,24 @@ async def publish_community_mcp_service(
     community_transport_type = "container" if final_config_json is not None else "url"
 
     # Check name uniqueness among shared records only
-    if check_mcp_market_name_exists(final_name, tenant_id):
+    if check_mcp_market_name_exists(final_name, tenant_id, exclude_source_mcp_id=mcp_id):
         raise McpNameConflictError(f"MCP name '{final_name}' already exists in the community market")
 
-    market_id = create_mcp_market_record(
-        mcp_data={
-            "mcp_name": final_name,
-            "source_mcp_id": mcp_id,
-            "mcp_server": final_mcp_server,
-            "registry_json": source_registry_json,
-            "transport_type": source_record.get("transport_type") or community_transport_type,
-            "config_json": final_config_json,
-            "review_status": STATUS_PENDING_REVIEW,
-            "submitted_by": _resolve_user_email(user_id),
-            "tags": final_tags,
-            "description": final_description,
-            "content": content,
-            "group_ids": convert_list_to_string(group_ids) if group_ids else None,
-            "ingroup_permission": ingroup_permission,
-            "shared_fields": shared_fields,
-            "container_port": source_record.get("container_port"),
-        },
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
-
-    # Update shared_fields on the source MCP record
-    if shared_fields is not None:
-        update_mcp_record_manage_fields_by_id(
-            mcp_id=mcp_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=source_record.get("mcp_name", ""),
-            server_url=source_record.get("mcp_server", ""),
-            description=source_record.get("description") or "",
-            tags=source_record.get("tags"),
-            source=source_record.get("source") or "local",
-            authorization_token=source_record.get("authorization_token"),
-            custom_headers=source_record.get("custom_headers"),
-            config_json=source_record.get("config_json"),
-            market_id=source_record.get("market_id"),
-            shared_fields=shared_fields,
-        )
-
-    _create_mcp_pending_review_notification(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        market_id=market_id,
-        name=final_name,
-        source_mcp_id=mcp_id,
-        content=content,
-    )
-
-    return market_id
+    from management.services.repository.reviews import save_submission
+    role = _get_user_role(user_id)
+    payload = {
+        "mcp_name": final_name, "source_mcp_id": mcp_id, "mcp_server": final_mcp_server,
+        "registry_json": source_registry_json, "transport_type": source_record.get("transport_type") or community_transport_type,
+        "config_json": final_config_json, "submitted_by": _resolve_user_email(user_id),
+        "tags": final_tags, "description": final_description, "content": content,
+        "group_ids": convert_list_to_string(group_ids) if group_ids else None,
+        "ingroup_permission": ingroup_permission or "READ_ONLY", "shared_fields": shared_fields,
+        "source": "community",
+    }
+    return save_submission("mcp", mcp_id, tenant_id, user_id, role, payload)
 
 
+@repository_transaction
 async def update_community_mcp_service(
     *,
     tenant_id: str,
@@ -484,6 +454,11 @@ async def update_community_mcp_service(
     if not current:
         raise McpNotFoundError("Market MCP record not found")
 
+    user_role = _get_user_role(user_id)
+    if (not has_any_role(user_role, {"ADMIN", "DEV"}) or current.get("tenant_id") != tenant_id
+            or (not has_any_role(user_role, {"ADMIN"}) and current.get("user_id") != user_id)):
+        raise UnauthorizedError("Not authorized to update this marketplace listing")
+
     existing_config_json = (
         current.get("config_json") if isinstance(current.get("config_json"), dict) else None
     )
@@ -503,66 +478,31 @@ async def update_community_mcp_service(
 
     final_name = name if name is not None else current.get("mcp_name")
     final_content = content if content is not None else current.get("content")
+    submission_description = content if content is not None else current.get("submit_description")
+    supplied = {"mcp_name": name, "description": description, "tags": tags,
+                "registry_json": registry_json, "config_json": config_json, "mcp_server": mcp_server,
+                "transport_type": next_transport_type, "ingroup_permission": ingroup_permission,
+                "shared_fields": shared_fields}
+    if group_ids:
+        supplied["group_ids"] = convert_list_to_string(group_ids)
+    changed = any(value is not None and value != current.get(field) for field, value in supplied.items())
+    if content is not None:
+        changed = changed or (content.strip() or None) != current.get("submit_description")
 
-    # Update fields
-    update_mcp_market_record(
-        market_id=market_id,
-        user_id=user_id,
-        mcp_name=name,
-        description=description,
-        tags=tags,
-        registry_json=next_registry_json,
-        mcp_server=mcp_server,
-        config_json=next_config_json,
-        transport_type=next_transport_type,
-        group_ids=convert_list_to_string(group_ids) if group_ids else None,
-        ingroup_permission=ingroup_permission,
-        shared_fields=shared_fields,
-        content=content,
-    )
-
-    # Set back to pending_review for re-approval
-    update_mcp_market_status(
-        market_id=market_id,
-        user_id=user_id,
-        review_status=STATUS_PENDING_REVIEW,
-        submitted_by=_resolve_user_email(user_id),
-    )
-
-    # Update shared_fields on the source MCP record
-    if shared_fields is not None and current.get("source_mcp_id"):
-        update_mcp_record_manage_fields_by_id(
-            mcp_id=current["source_mcp_id"],
-            tenant_id=tenant_id,
-            user_id=user_id,
-            name=current.get("mcp_name") or "",
-            server_url=current.get("mcp_server") or "",
-            description=current.get("description") or "",
-            tags=current.get("tags"),
-            source="local",
-            authorization_token=None,
-            custom_headers=None,
-            config_json=current.get("config_json"),
-            market_id=market_id,
-            shared_fields=shared_fields,
-        )
-
-    deactivate_notifications(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_MCP_REPOSITORY,
-        unique_id=market_id,
-        updated_by=user_id,
-    )
-    _create_mcp_pending_review_notification(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        market_id=market_id,
-        name=final_name,
-        source_mcp_id=current.get("source_mcp_id"),
-        content=final_content,
-    )
+    from management.services.repository.reviews import save_submission
+    payload = {field: current.get(field) for field in (
+        "mcp_name", "description", "tags", "registry_json", "config_json", "mcp_server",
+        "transport_type", "ingroup_permission", "shared_fields", "group_ids", "source_mcp_id", "source")}
+    payload.update({field: value for field, value in supplied.items() if value is not None})
+    payload["content"] = content or ""
+    payload["submitted_by"] = _resolve_user_email(user_id)
+    if current.get("source_mcp_id") is None:
+        raise ValueError("Source MCP is required for submission")
+    return save_submission("mcp", current["source_mcp_id"], tenant_id, user_id, user_role,
+                           payload, repository_id=market_id)
 
 
+@repository_transaction
 async def change_mcp_market_status(
     *,
     tenant_id: str,
@@ -596,6 +536,20 @@ async def change_mcp_market_status(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+
+    from management.services.repository.reviews import decide_legacy_review, save_submission
+    if new_status in (STATUS_SHARED, STATUS_REJECTED):
+        return decide_legacy_review("mcp", market_id, user_id, tenant_id, user_role, new_status, content)
+    if new_status == STATUS_PENDING_REVIEW:
+        if current.get("source_mcp_id") is None:
+            raise ValueError("Source MCP is required for submission")
+        payload = {field: current.get(field) for field in (
+            "mcp_name", "description", "tags", "registry_json", "config_json", "mcp_server",
+            "transport_type", "ingroup_permission", "shared_fields", "group_ids", "source_mcp_id", "source")}
+        payload["content"] = content or ""
+        payload["submitted_by"] = _resolve_user_email(user_id)
+        return save_submission("mcp", current["source_mcp_id"], tenant_id, user_id, user_role,
+                               payload, repository_id=market_id)
 
     update_mcp_market_status(
         market_id=market_id,
@@ -678,6 +632,9 @@ async def delete_community_mcp_service(
     current = get_mcp_market_record_by_id(market_id=market_id)
     if not current:
         raise McpNotFoundError("Market MCP record not found")
+
+    if current.get("tenant_id") != tenant_id or current.get("user_id") != user_id:
+        raise UnauthorizedError("You can only delete your own MCP listings")
 
     delete_mcp_market_record_by_id(market_id=market_id, user_id=user_id)
     clear_mcp_record_market_id(

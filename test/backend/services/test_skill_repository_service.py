@@ -289,94 +289,59 @@ def _repository_record(
 
 
 def test_create_skill_repository_listing_inserts_new_record():
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = None
-    record = _repository_record(status="pending_review")
-    record["content"] = "please review"
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = record
-
-    result = srs.create_skill_repository_listing_impl(
-        skill_id=10,
-        tenant_id="tenant-1",
-        user_id="user-1",
-        card_fields={"icon": "skill", "tags": ["tag"], "content": "please review"},
-    )
-
-    assert result["skill_repository_id"] == 1
-    assert result["is_updated"] is False
-    assert result["content"] == "please review"
-    _skill_repo_db_mock.insert_skill_repository_record.assert_called_once()
-    srs.create_repository_pending_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        tenant_id="tenant-1",
-        unique_id=1,
-        details={
-            "name": "Skill A",
-            "skill_repository_id": 1,
-            "skill_id": 10,
-            "content": "please review",
-        },
-        created_by="user-1",
-    )
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1", card_fields={"content": "note"})
+    assert result == {"review_id": "41", "repository_id": None}
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
+    _skill_repo_db_mock.reset_skill_repository_status.assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("skill", 10, "tenant-1", "user-1")
+    assert service.save_submission.call_args.args[5]["content"] == "note"
+    assert service.save_submission.call_args.args[5]["skill_zip_base64"]
 
 
 def test_create_skill_repository_listing_updates_existing_record():
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = (
-        _repository_record(status="rejected")
-    )
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="pending_review")
-    )
-
-    result = srs.create_skill_repository_listing_impl(
-        skill_id=10,
-        tenant_id="tenant-1",
-        user_id="user-1",
-    )
-
-    assert result["is_updated"] is True
-    _skill_repo_db_mock.update_skill_repository_by_id.assert_called_once()
-    srs.create_repository_pending_review_notification.assert_called_once()
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1", card_fields={"content": "note"})
+    assert result == {"review_id": "41", "repository_id": None}
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
+    _skill_repo_db_mock.reset_skill_repository_status.assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("skill", 10, "tenant-1", "user-1")
+    assert service.save_submission.call_args.args[5]["content"] == "note"
+    assert service.save_submission.call_args.args[5]["skill_zip_base64"]
 
 
 def test_create_skill_repository_listing_does_not_repeat_pending_notification():
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = (
-        _repository_record(status="pending_review")
-    )
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="pending_review")
-    )
-
-    result = srs.create_skill_repository_listing_impl(
-        skill_id=10,
-        tenant_id="tenant-1",
-        user_id="user-1",
-    )
-
-    assert result["is_updated"] is True
-    _skill_repo_db_mock.update_skill_repository_by_id.assert_called_once()
-    srs.create_repository_pending_review_notification.assert_not_called()
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1", card_fields={"content": "note"})
+    assert result == {"review_id": "41", "repository_id": None}
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
+    _skill_repo_db_mock.reset_skill_repository_status.assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("skill", 10, "tenant-1", "user-1")
+    assert service.save_submission.call_args.args[5]["content"] == "note"
+    assert service.save_submission.call_args.args[5]["skill_zip_base64"]
 
 
 def test_create_skill_repository_listing_does_not_overwrite_shared_record():
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.side_effect = [None, None]
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="pending_review")
-    )
-
-    result = srs.create_skill_repository_listing_impl(
-        skill_id=10,
-        tenant_id="tenant-1",
-        user_id="user-1",
-    )
-
-    assert result["is_updated"] is False
-    _skill_repo_db_mock.insert_skill_repository_record.assert_called_once()
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1", card_fields={"content": "note"})
+    assert result == {"review_id": "41", "repository_id": None}
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
     _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
-    requested_statuses = [
-        call.kwargs["statuses"]
-        for call in _skill_repo_db_mock.get_skill_repository_by_skill_id.call_args_list
-    ]
-    assert requested_statuses == [["pending_review"], ["rejected"]]
+    _skill_repo_db_mock.reset_skill_repository_status.assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("skill", 10, "tenant-1", "user-1")
+    assert service.save_submission.call_args.args[5]["content"] == "note"
+    assert service.save_submission.call_args.args[5]["skill_zip_base64"]
 
 
 def test_create_skill_repository_listing_rejects_non_owner_dev():
@@ -398,121 +363,42 @@ def test_create_skill_repository_listing_rejects_non_owner_dev():
 
 
 def test_update_status_admin_approves_pending_review():
-    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
-        "user_role": "ADMIN",
-        "user_email": "admin@example.com",
-    }
-    shared = _repository_record(status="shared")
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
-        _repository_record(status="pending_review"),
-        shared,
-    ]
-
-    result = srs.update_skill_repository_status_impl(
-        skill_repository_id=1,
-        status="shared",
-        user_id="admin-1",
-        tenant_id="tenant-1",
-        content="looks good",
-    )
-
-    assert result["status"] == "shared"
-    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
-    call_kwargs = _skill_repo_db_mock.update_skill_repository_status_by_id.call_args.kwargs
-    assert call_kwargs["content"] == "looks good"
-    _skill_repo_db_mock.reset_skill_repository_status.assert_called_once_with(
-        repository_id=1,
-        skill_id=10,
-        status="shared",
-        publisher_tenant_id="tenant-1",
-    )
-    srs.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        review_status="shared",
-        receiver_user_id="user-1",
-        details={
-            "name": "Skill A",
-            "skill_repository_id": 1,
-            "skill_id": 10,
-            "content": "looks good",
-        },
-        tenant_id="tenant-1",
-        unique_id=1,
-        created_by="admin-1",
-    )
-    srs.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        unique_id=1,
-        updated_by="admin-1",
-    )
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"user_role": "ADMIN"}
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = _repository_record(status="pending_review")
+    service = types.ModuleType("management.services.repository.reviews")
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="shared",
+            user_id="user-1", tenant_id="tenant-1", content="opinion")
+    assert result["review_id"] == "41"
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "shared", "opinion")
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
 def test_update_status_admin_rejects_pending_review():
-    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
-        "user_role": "ADMIN",
-        "user_email": "admin@example.com",
-    }
-    rejected = _repository_record(status="rejected")
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
-        _repository_record(status="pending_review"),
-        rejected,
-    ]
-
-    result = srs.update_skill_repository_status_impl(
-        skill_repository_id=1,
-        status="rejected",
-        user_id="admin-1",
-        tenant_id="tenant-1",
-        content="needs fixes",
-    )
-
-    assert result["status"] == "rejected"
-    srs.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        review_status="rejected",
-        receiver_user_id="user-1",
-        details={
-            "name": "Skill A",
-            "skill_repository_id": 1,
-            "skill_id": 10,
-            "content": "needs fixes",
-        },
-        tenant_id="tenant-1",
-        unique_id=1,
-        created_by="admin-1",
-    )
-    srs.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-        unique_id=1,
-        updated_by="admin-1",
-    )
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"user_role": "ADMIN"}
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = _repository_record(status="pending_review")
+    service = types.ModuleType("management.services.repository.reviews")
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="rejected",
+            user_id="user-1", tenant_id="tenant-1", content="opinion")
+    assert result["review_id"] == "41"
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "rejected", "opinion")
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
 def test_update_status_admin_approves_without_content():
-    """Approve without review note omits content from notification details."""
-    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
-        "user_role": "ADMIN",
-        "user_email": "admin@example.com",
-    }
-    shared = _repository_record(status="shared")
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
-        _repository_record(status="pending_review"),
-        shared,
-    ]
-
-    result = srs.update_skill_repository_status_impl(
-        skill_repository_id=1,
-        status="shared",
-        user_id="admin-1",
-        tenant_id="tenant-1",
-    )
-
-    assert result["status"] == "shared"
-    details = srs.create_repository_review_notification.call_args.kwargs["details"]
-    assert "content" not in details
-    srs.deactivate_notifications.assert_called_once()
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"user_role": "ADMIN"}
+    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = _repository_record(status="pending_review")
+    service = types.ModuleType("management.services.repository.reviews")
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = srs.update_skill_repository_status_impl(skill_repository_id=1, status="shared",
+            user_id="user-1", tenant_id="tenant-1", content=None)
+    assert result["review_id"] == "41"
+    service.decide_legacy_review.assert_called_once_with("skill", 1, "user-1", "tenant-1", ("ADMIN",), "shared", None)
+    _skill_repo_db_mock.update_skill_repository_status_by_id.assert_not_called()
 
 
 def test_update_status_dev_cannot_approve_review():
@@ -573,7 +459,7 @@ def test_update_status_skill_creator_can_update_admin_listing(initial_status):
     _skill_repo_db_mock.update_skill_repository_status_by_id.assert_called_once()
 
 
-def test_install_skill_from_repository_success_increments_downloads():
+def test_install_skill_from_repository_delegates_atomic_source_and_count():
     create_kwargs = {}
 
     class CapturingSkillService(_SkillServiceMock):
@@ -598,10 +484,9 @@ def test_install_skill_from_repository_success_increments_downloads():
     assert result["name"] == "Skill A Copy"
     assert result["source"] == "repository"
     assert create_kwargs["ingroup_permission"] == "READ_ONLY"
-    _skill_repo_db_mock.increment_skill_repository_downloads.assert_called_once_with(
-        repository_id=1,
-        user_id="user-1",
-    )
+    assert create_kwargs["source_repository_id"] == 1
+    # The import pipeline owns creation/source/count in one transaction.
+    _skill_repo_db_mock.increment_skill_repository_downloads.assert_not_called()
 
 
 def test_install_skill_from_repository_duplicate_is_mapped():
@@ -848,11 +733,10 @@ def test_update_status_validates_input_and_missing_records():
 
 @pytest.mark.parametrize("user_role", ["USER", "user", "OPS", ""])
 def test_skill_repository_access_rejects_ordinary_users(user_role):
-    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {
-        "user_role": user_role,
-    }
-
-    with pytest.raises(ForbiddenError, match="not authorized"):
+    _user_tenant_db_mock.get_user_tenant_by_user_id.return_value = {"user_role": user_role}
+    permission = types.ModuleType("management.db.identity.role_permission")
+    permission.check_role_permission = MagicMock(return_value=False)
+    with patch.dict(sys.modules, {"management.db.identity.role_permission": permission}), pytest.raises(ForbiddenError, match="not authorized"):
         srs.ensure_skill_repository_access("user-1")
 
 
@@ -1082,25 +966,12 @@ def test_export_skill_zip_and_repository_write_failures():
         with pytest.raises(ValueError, match="Failed to export skill ZIP"):
             srs._export_skill_zip_base64(skill_name="Skill A", tenant_id="tenant-1")
 
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = (
-        _repository_record(status="rejected")
-    )
-    _skill_repo_db_mock.update_skill_repository_by_id.return_value = 0
-    with pytest.raises(ValueError, match="Failed to update repository listing"):
-        srs.create_skill_repository_listing_impl(
-            skill_id=10,
-            tenant_id="tenant-1",
-            user_id="user-1",
-        )
-
-    _skill_repo_db_mock.get_skill_repository_by_skill_id.return_value = None
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = None
-    with pytest.raises(ValueError, match="Failed to load repository listing"):
-        srs.create_skill_repository_listing_impl(
-            skill_id=10,
-            tenant_id="tenant-1",
-            user_id="user-1",
-        )
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(side_effect=ValueError("submission failed"))
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), pytest.raises(ValueError, match="submission failed"):
+        srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1")
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
 
 
 def test_status_transition_edges_and_update_failures():
@@ -1137,30 +1008,12 @@ def test_status_transition_edges_and_update_failures():
         "publisher_user_id": "user-1",
     }
 
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.return_value = (
-        _repository_record(status="rejected")
-    )
-    _skill_repo_db_mock.update_skill_repository_status_by_id.return_value = 0
-    with pytest.raises(ValueError, match="Repository listing not found"):
-        srs.update_skill_repository_status_impl(
-            skill_repository_id=1,
-            status="pending_review",
-            user_id="user-1",
-            tenant_id="tenant-1",
-        )
-
-    _skill_repo_db_mock.update_skill_repository_status_by_id.return_value = 1
-    _skill_repo_db_mock.get_skill_repository_by_id_and_publisher.side_effect = [
-        _repository_record(status="rejected"),
-        None,
-    ]
-    with pytest.raises(ValueError, match="Failed to load repository listing"):
-        srs.update_skill_repository_status_impl(
-            skill_repository_id=1,
-            status="pending_review",
-            user_id="user-1",
-            tenant_id="tenant-1",
-        )
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(side_effect=ValueError("submission failed"))
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), pytest.raises(ValueError, match="submission failed"):
+        srs.create_skill_repository_listing_impl(10, "tenant-1", "user-1")
+    _skill_repo_db_mock.insert_skill_repository_record.assert_not_called()
+    _skill_repo_db_mock.update_skill_repository_by_id.assert_not_called()
 
 
 def test_copy_name_and_install_error_edges():
@@ -1246,6 +1099,16 @@ def test_repository_detail_not_found():
 
     with pytest.raises(ValueError, match="Repository listing not found"):
         srs.get_skill_repository_listing_detail_impl(1, "tenant-1")
+
+
+@pytest.fixture(autouse=True)
+def isolate_repository_transaction_boundary(monkeypatch):
+    """Service UT isolates the DB owner; transaction behavior has dedicated tests."""
+    from contextlib import nullcontext
+    import management.db.repository_transactions as transactions
+
+    monkeypatch.setattr(transactions, "repository_unit_of_work", lambda: nullcontext())
+    monkeypatch.setattr(srs, "enrich_repository_identities", lambda *_args: None)
 
 
 @pytest.mark.parametrize("roles,allowed", [(["USER", "DEV", "OPS"], True), (["USER", "OPS"], False)])

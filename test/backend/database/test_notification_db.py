@@ -223,7 +223,11 @@ def test_deactivate_notifications(mock_session):
     )
 
 
-def test_list_notifications_by_user(mock_session):
+@pytest.mark.parametrize("resource_type,review_id,repository_id", [
+    (RESOURCE_TYPE_AGENT_REPOSITORY, None, "501"),
+    ("resource_review", "501", None),
+])
+def test_list_notifications_by_user(mock_session, resource_type, review_id, repository_id):
     recv = MagicMock()
     recv.receiver_id = 11
     recv.notification_id = 101
@@ -232,7 +236,8 @@ def test_list_notifications_by_user(mock_session):
 
     notif = MagicMock()
     notif.event_type = EVENT_TYPE_REPOSITORY_REVIEW_APPROVED
-    notif.resource_type = RESOURCE_TYPE_AGENT_REPOSITORY
+    notif.resource_type = resource_type
+    notif.unique_id = 501
     notif.details = {"name": "Agent"}
     notif.scope = SCOPE_USER
 
@@ -262,7 +267,9 @@ def test_list_notifications_by_user(mock_session):
             "receiver_id": 11,
             "notification_id": 101,
             "event_type": EVENT_TYPE_REPOSITORY_REVIEW_APPROVED,
-            "resource_type": RESOURCE_TYPE_AGENT_REPOSITORY,
+            "resource_type": resource_type,
+            "review_id": review_id,
+            "repository_id": repository_id,
             "details": {"name": "Agent"},
             "scope": SCOPE_USER,
             "is_read": False,

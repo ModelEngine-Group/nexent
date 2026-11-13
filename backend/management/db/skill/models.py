@@ -24,9 +24,10 @@ from management.db.base import (
     _PUBLISHER_TENANT_ID_DOC,
     _PUBLISHER_USER_ID_DOC,
 )
+from management.db.repository_review_fields import RepositoryReviewFields
 
 
-class SkillRepository(TableBase):
+class SkillRepository(RepositoryReviewFields, TableBase):
     """
     Skill repository (marketplace) table. Frozen snapshot of a shared skill for installation.
     """
@@ -81,6 +82,10 @@ class SkillInfo(TableBase):
 
     skill_id = Column(Integer, Sequence("ag_skill_info_t_skill_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, autoincrement=True, doc="Skill ID")
+    source_repository_id = Column(
+        BigInteger, nullable=True,
+        comment="Source Skill repository listing ID for an installed copy; NULL when not associated",
+    )
     skill_name = Column(String(100), nullable=False,
                         doc="Skill name, unique among active skills within its tenant scope")
     tenant_id = Column(String(100), nullable=True,

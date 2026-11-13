@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: RESOURCE-CENTER-LIFECYCLE-D5-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_additive_upgrade_and_legacy_protocol_compatibility
+acceptance_bindings:
+  AC-01:
+  - test_additive_upgrade_and_legacy_protocol_compatibility
+  AC-02:
+  - test_additive_upgrade_and_legacy_protocol_compatibility
+  AC-03:
+  - test_additive_upgrade_and_legacy_protocol_compatibility
+  AC-04:
+  - test_additive_upgrade_and_legacy_protocol_compatibility
+notes: No user deployment is changed and no old backend binary rollback is claimed.
+  Migration execution, compatibility smoke and cleanup are real.

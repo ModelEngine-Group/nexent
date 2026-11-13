@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
+import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
 import ResourceDetail from "@/components/resource/ResourceDetail";
+import RepositorySkillDetail from "./RepositorySkillDetail";
 import { mapSkillRepositoryDetail } from "@/lib/skillRepositoryDetail";
 import type { SkillRepositoryListingDetail } from "@/types/skillRepository";
 
@@ -54,19 +56,41 @@ export function SkillDetail({
   onRetry,
 }: SkillDetailProps) {
   const { t } = useTranslation("common");
+  const repositoryLayout =
+    useRepositoryPresentation()?.resourceType === "skill";
   const displayName = useUserDisplayName();
   const view = detail ? mapSkillRepositoryDetail(detail) : null;
+
+  if (repositoryLayout) {
+    return (
+      <RepositorySkillDetail
+        open={open}
+        detail={detail}
+        isLoading={isLoading}
+        isError={isError}
+        isFetching={isFetching}
+        onClose={onClose}
+        onRetry={onRetry}
+      />
+    );
+  }
 
   return (
     <ResourceDetail
       open={open}
       onClose={onClose}
-      width={560}
+      width={repositoryLayout ? 960 : 560}
       className="skill-detail-modal [&_.ant-modal-close]:!z-20 [&_.ant-modal-content]:!overflow-hidden [&_.ant-modal-content]:!rounded-2xl [&_.ant-modal-content]:!p-0"
       bodyStyle={{ padding: 0 }}
     >
       <div className="flex max-h-[min(740px,calc(100dvh-3rem))] flex-col overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4">
+        <div
+          className={
+            repositoryLayout
+              ? "min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-[72px]"
+              : "min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-4 sm:px-4"
+          }
+        >
           {isLoading ? (
             <div className="flex min-h-64 items-center justify-center">
               <Spin size="large" />
@@ -80,6 +104,66 @@ export function SkillDetail({
                 {t("repository.common.retry")}
               </Button>
             </div>
+          ) : view && repositoryLayout ? (
+            <dl className="grid gap-6 text-sm leading-[22px] text-[#191919]">
+              <div className="space-y-2">
+                <dt className="text-[#777777]">
+                  {t("skillManagement.form.name")}
+                </dt>
+                <dd className="break-words">{view.title}</dd>
+              </div>
+              <div className="space-y-2">
+                <dt className="text-[#777777]">
+                  {t("skillManagement.form.source")}
+                </dt>
+                <dd>
+                  {detail?.source === "custom" ||
+                  detail?.source === "repository"
+                    ? t(`skillRepository.source.${detail.source}`)
+                    : detail?.source || "—"}
+                </dd>
+              </div>
+              <div className="space-y-2">
+                <dt className="text-[#777777]">
+                  {t("skillManagement.form.tags")}
+                </dt>
+                <dd className="flex flex-wrap gap-2">
+                  {view.tags.length
+                    ? view.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded bg-[#191919]/5 px-2 text-xs leading-5 text-[#393939]"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    : "—"}
+                </dd>
+              </div>
+              <div className="space-y-2">
+                <dt className="text-[#777777]">
+                  {t("skillManagement.form.description")}
+                </dt>
+                <dd className="whitespace-pre-wrap break-words">
+                  {view.description ||
+                    t("skillRepository.common.noDescription")}
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-4 text-xs text-[#777777]">
+                <span>
+                  {displayName(view.authorCasUsername, view.author || "—")}
+                </span>
+                <span>{t(statusLabelKeys[view.status])}</span>
+                <span className="inline-flex items-center gap-1">
+                  <Download size={14} aria-hidden />
+                  {view.downloads.toLocaleString()}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <CalendarDays size={14} aria-hidden />
+                  {view.updatedAt}
+                </span>
+              </div>
+            </dl>
           ) : view ? (
             <div className={isFetching ? "opacity-70" : undefined}>
               <div className="flex items-start gap-3 pr-6">

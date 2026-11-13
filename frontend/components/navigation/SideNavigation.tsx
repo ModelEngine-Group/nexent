@@ -155,7 +155,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     labelKey: "sidebar.resourceSpace",
     order: 9,
     parentKey: null,
-    isSection: true,
+    isSection: false,
   },
   {
     path: "/agent-space",

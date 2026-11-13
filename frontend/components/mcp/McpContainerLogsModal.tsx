@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { Modal, Button, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
@@ -12,106 +14,97 @@ interface McpContainerLogsModalProps {
   tail?: number;
 }
 
+export function McpContainerLogOutput({
+  open,
+  containerId,
+  tenantId,
+  tail = 100,
+  className = "bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono",
+}: Omit<McpContainerLogsModalProps, "onCancel"> & { className?: string }) {
+  const { t } = useTranslation("common");
+  const [logs, setLogs] = useState("");
+  const [loading, setLoading] = useState(false);
+  const logsRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (logsRef.current)
+      logsRef.current.scrollTop = logsRef.current.scrollHeight;
+  }, [logs]);
+
+  useEffect(() => {
+    if (!open || !containerId) return;
+    const controller = new AbortController();
+    setLogs("");
+    setLoading(true);
+    const stopLoading = () => {
+      if (!controller.signal.aborted) setLoading(false);
+    };
+    void streamMcpContainerLogs(
+      containerId,
+      tail,
+      true,
+      tenantId,
+      (line) => {
+        if (controller.signal.aborted) return;
+        setLogs((previous) => (previous ? `${previous}\n${line}` : line));
+        stopLoading();
+      },
+      (error: Error) => {
+        if (controller.signal.aborted || error.name === "AbortError") return;
+        log.error("Failed to stream container logs", error);
+        setLogs((previous) =>
+          previous
+            ? `${previous}\nError: ${error.message}`
+            : `Error: ${error.message}`
+        );
+        stopLoading();
+      },
+      stopLoading,
+      controller.signal,
+      stopLoading
+    );
+    return () => controller.abort();
+  }, [open, containerId, tail, tenantId]);
+
+  if (!open) return null;
+  return (
+    <Spin
+      spinning={loading && Boolean(containerId)}
+      description={t("mcpConfig.containerLogs.loading")}
+    >
+      <pre ref={logsRef} className={className}>
+        {logs || t("mcpConfig.containerLogs.empty")}
+      </pre>
+    </Spin>
+  );
+}
+
 export default function McpContainerLogsModal({
   open,
   onCancel,
   containerId,
   tenantId,
-  tail = 100,
+  tail,
 }: McpContainerLogsModalProps) {
   const { t } = useTranslation("common");
-  const [logs, setLogs] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(false);
-  const logsRef = useRef<HTMLPreElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Auto-scroll to bottom when new logs arrive
-  useEffect(() => {
-    if (logsRef.current) {
-      logsRef.current.scrollTop = logsRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  // Start streaming logs when modal opens
-  useEffect(() => {
-    if (open && containerId) {
-      // Cancel any existing stream before starting a new one
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-
-      setLogs("");
-      setLoading(true);
-
-      // Start new stream
-      streamMcpContainerLogs(
-        containerId,
-        tail,
-        true, // follow
-        tenantId,
-        (logLine: string) => {
-          setLogs((prev) => {
-            const newLogs = prev ? `${prev}\n${logLine}` : logLine;
-            return newLogs;
-          });
-          setLoading(false);
-        },
-        (error: any) => {
-          // Ignore abort errors
-          if (error.name !== 'AbortError') {
-            log.error("Failed to stream container logs", error);
-            setLogs((prev) => 
-              prev 
-                ? `${prev}\nError: ${error.message}`
-                : `Error: ${error.message}`
-            );
-            setLoading(false);
-          }
-        },
-        () => {
-          setLoading(false);
-        },
-        undefined,
-        () => {
-          setLoading(false);
-        }
-      ).then((controller) => {
-        abortControllerRef.current = controller;
-      });
-    } else if (open) {
-      setLogs("");
-      setLoading(true);
-    }
-
-    // Cleanup when modal closes or component unmounts
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      if (!open) {
-        setLogs("");
-      }
-    };
-  }, [open, containerId, tail, tenantId, t]);
-
   return (
     <Modal
       title={`${t("mcpConfig.containerLogs.title")}${containerId ? ` - ${containerId.substring(0, 12)}` : ""}`}
       open={open}
       onCancel={onCancel}
       width={800}
-      footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
+      footer={[
+        <Button key="close" onClick={onCancel}>
+          {t("mcpConfig.modal.close")}
+        </Button>,
+      ]}
     >
-      <Spin spinning={loading} description={t("mcpConfig.containerLogs.loading")}>
-        <pre
-          ref={logsRef}
-          className="bg-gray-100 p-4 rounded max-h-[500px] overflow-auto whitespace-pre-wrap text-xs font-mono"
-        >
-          {logs || (containerId ? t("mcpConfig.containerLogs.empty") : "")}
-        </pre>
-      </Spin>
+      <McpContainerLogOutput
+        open={open}
+        containerId={containerId}
+        tenantId={tenantId}
+        tail={tail}
+      />
     </Modal>
   );
 }

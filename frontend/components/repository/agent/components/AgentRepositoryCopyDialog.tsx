@@ -1,0 +1,743 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Modal, Radio, Select, Space, Spin, Tag } from "antd";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Cpu,
+  Database,
+  ExternalLink,
+  Plug,
+  RefreshCw,
+  Sparkles,
+  Wrench,
+  X,
+} from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { useTranslation } from "react-i18next";
+import { useModelList } from "@/hooks/model/useModelList";
+import {
+  useImportAgentFromRepository,
+  useRepositoryImportPrecheck,
+} from "@/hooks/agentRepository/useAgentRepositoryListings";
+import {
+  getRepositoryRequirementActivatePath,
+  getRepositoryRequirementReasonLabel,
+  getRepositoryRequirementTypeLabel,
+  getRepositoryRequirementTypeOrder,
+} from "@/lib/agentRepositoryLabels";
+import log from "@/lib/logger";
+import type {
+  AgentRepositoryListingItem,
+  RepositoryImportRequirementItem,
+  RepositoryImportRequirementType,
+} from "@/types/agentRepository";
+
+const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
+  model: Cpu,
+  knowledge_base: Database,
+  mcp: Plug,
+  skill: Sparkles,
+  tool: Wrench,
+};
+
+const SYSTEM_TENANT_ID = "system";
+
+interface AgentRepositoryCopyDialogProps {
+  listing: AgentRepositoryListingItem | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+}
+
+function groupByType(items: RepositoryImportRequirementItem[]) {
+  const order = getRepositoryRequirementTypeOrder();
+  return order
+    .map((type) => ({
+      type,
+      items: items.filter((item) => item.type === type),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+export function AgentRepositoryCopyDialog({
+  listing,
+  open,
+  onOpenChange,
+  onSuccess,
+}: AgentRepositoryCopyDialogProps) {
+  const { t } = useTranslation("common");
+  const { message } = App.useApp();
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale || "zh";
+
+  const [warningDismissed, setWarningDismissed] = useState(false);
+  const [abnormalOpen, setAbnormalOpen] = useState(true);
+  const [availableOpen, setAvailableOpen] = useState(true);
+  const [skillResolutionActions, setSkillResolutionActions] = useState<
+    Record<string, "rename" | "use_existing">
+  >({});
+  const [knowledgeResolutionActions, setKnowledgeResolutionActions] = useState<
+    Record<string, "reuse" | "create_new">
+  >({});
+  const [selectedModelId, setSelectedModelId] = useState<number>();
+  const [selectedEmbeddingModelId, setSelectedEmbeddingModelId] =
+    useState<number>();
+
+  const agentRepositoryId = listing?.agent_repository_id ?? null;
+  const listingTitle =
+    listing?.display_name?.trim() ||
+    listing?.name?.trim() ||
+    t("agentRepository.card.untitled");
+  const isOfficialListing =
+    listing?.is_official === true ||
+    listing?.publisher_tenant_id === SYSTEM_TENANT_ID;
+
+  const {
+    data: precheck,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useRepositoryImportPrecheck(agentRepositoryId, open);
+
+  const importMutation = useImportAgentFromRepository();
+  const { availableLlmModels, models: tenantModels } = useModelList({
+    enabled: open,
+  });
+
+  const abnormalItems = useMemo(
+    () =>
+      precheck?.items.filter(
+        (item) =>
+          !item.available ||
+          (item.type === "knowledge_base" && item.resolution_required)
+      ) ?? [],
+    [precheck]
+  );
+  const availableItems = useMemo(
+    () =>
+      precheck?.items.filter(
+        (item) =>
+          item.available &&
+          !(item.type === "knowledge_base" && item.resolution_required)
+      ) ?? [],
+    [precheck]
+  );
+
+  const skillConflictItems = useMemo(
+    () =>
+      precheck?.items.filter(
+        (item) =>
+          item.type === "skill" && item.reason_code === "skill_duplicate"
+      ) ?? [],
+    [precheck]
+  );
+  const hasSkillConflicts = skillConflictItems.length > 0;
+  const officialKnowledgeItems = useMemo(
+    () =>
+      precheck?.items.filter((item) => item.type === "knowledge_base") ?? [],
+    [precheck]
+  );
+  const hasOfficialKnowledge =
+    isOfficialListing && officialKnowledgeItems.length > 0;
+  const hasExistingOfficialKnowledge = Boolean(
+    hasOfficialKnowledge &&
+    officialKnowledgeItems.every((item) => item.resolution_required === true)
+  );
+  const officialKnowledgeConflictItems = useMemo(
+    () => officialKnowledgeItems.filter((item) => item.resolution_required),
+    [officialKnowledgeItems]
+  );
+  const hasOfficialKnowledgeToCreate = Boolean(
+    hasOfficialKnowledge &&
+    (officialKnowledgeItems.some((item) => !item.resolution_required) ||
+      officialKnowledgeConflictItems.some(
+        (item) => knowledgeResolutionActions[item.name] === "create_new"
+      ))
+  );
+  const availableEmbeddingModels = useMemo(
+    () =>
+      tenantModels.filter(
+        (model) =>
+          (model.type === "embedding" || model.type === "multi_embedding") &&
+          model.connect_status === "available"
+      ),
+    [tenantModels]
+  );
+  const officialEmbeddingModelMissing = Boolean(
+    isOfficialListing &&
+    hasOfficialKnowledge &&
+    hasOfficialKnowledgeToCreate &&
+    availableEmbeddingModels.length === 0
+  );
+
+  useEffect(() => {
+    if (!open || !isOfficialListing) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve the existing modal reset when its external open state changes.
+    setSelectedModelId((current) => current ?? availableLlmModels[0]?.id);
+    if (hasOfficialKnowledgeToCreate) {
+      setSelectedEmbeddingModelId(
+        (current) => current ?? availableEmbeddingModels[0]?.id
+      );
+    } else if (hasExistingOfficialKnowledge) {
+      setSelectedEmbeddingModelId(undefined);
+    }
+  }, [
+    open,
+    isOfficialListing,
+    hasOfficialKnowledge,
+    hasExistingOfficialKnowledge,
+    hasOfficialKnowledgeToCreate,
+    availableLlmModels,
+    availableEmbeddingModels,
+  ]);
+
+  const percent = precheck?.percent ?? 0;
+  const hasAbnormal = precheck?.has_abnormal ?? false;
+
+  const handleOpenActivate = (type: RepositoryImportRequirementType) => {
+    const path = getRepositoryRequirementActivatePath(type);
+    if (!path) {
+      return;
+    }
+    router.push(`/${locale}${path}`);
+  };
+
+  const handleCopy = async () => {
+    if (!agentRepositoryId) {
+      return;
+    }
+
+    const skillResolutions = hasSkillConflicts
+      ? skillConflictItems.map((item) => ({
+          skill_name: item.name,
+          action: (skillResolutionActions[item.name] ?? "rename") as
+            "rename" | "use_existing",
+          ...(skillResolutionActions[item.name] !== "use_existing"
+            ? { new_name: item.suggested_new_name || `${item.name} 副本` }
+            : {}),
+        }))
+      : undefined;
+    const knowledgeBaseResolutions =
+      officialKnowledgeConflictItems.length > 0
+        ? officialKnowledgeConflictItems.map((item) => ({
+            knowledge_name: item.name,
+            action: knowledgeResolutionActions[item.name] ?? "reuse",
+          }))
+        : undefined;
+
+    if (
+      isOfficialListing &&
+      (!selectedModelId ||
+        (hasOfficialKnowledge &&
+          hasOfficialKnowledgeToCreate &&
+          !selectedEmbeddingModelId))
+    ) {
+      message.error(
+        officialEmbeddingModelMissing
+          ? t("ui.localization.embeddingRequiredToCopy")
+          : t("ui.localization.chooseRequiredModels")
+      );
+      return;
+    }
+
+    try {
+      await importMutation.mutateAsync({
+        agentRepositoryId,
+        skillResolutions,
+        modelOptions: isOfficialListing
+          ? {
+              modelIds: selectedModelId
+                ? { [listing.name]: selectedModelId }
+                : undefined,
+              embeddingModelIds:
+                hasOfficialKnowledge &&
+                hasOfficialKnowledgeToCreate &&
+                selectedEmbeddingModelId
+                  ? { [listing.name]: selectedEmbeddingModelId }
+                  : undefined,
+              knowledgeBaseResolutions,
+            }
+          : undefined,
+      });
+      message.success(
+        t("agentRepository.copy.success", { name: listingTitle })
+      );
+      onOpenChange(false);
+      onSuccess?.();
+    } catch (error) {
+      const err = error as Error & {
+        status?: number;
+        detail?: { type?: string; duplicate_skills?: string[] } | string;
+      };
+      const detail =
+        typeof err.detail === "object" && err.detail !== null
+          ? err.detail
+          : null;
+      if (
+        err.status === 409 &&
+        detail?.type === "skill_duplicate" &&
+        Array.isArray(detail.duplicate_skills)
+      ) {
+        message.error(
+          t("agentRepository.copy.skillDuplicate", {
+            names: detail.duplicate_skills.join(", "),
+          })
+        );
+        return;
+      }
+      log.error("Failed to import agent from repository:", error);
+      message.error(t("agentRepository.copy.failed"));
+    }
+  };
+
+  const handleClose = () => {
+    onOpenChange(false);
+    setWarningDismissed(false);
+    setAbnormalOpen(true);
+    setAvailableOpen(true);
+    setSkillResolutionActions({});
+    setKnowledgeResolutionActions({});
+    setSelectedModelId(undefined);
+    setSelectedEmbeddingModelId(undefined);
+  };
+
+  return (
+    <Modal
+      open={open}
+      onCancel={handleClose}
+      title={t("agentRepository.copy.title", { name: listingTitle })}
+      centered
+      width={520}
+      destroyOnHidden
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={handleClose}>{t("common.cancel")}</Button>
+          <Button
+            type="primary"
+            icon={<Copy className="size-4" />}
+            loading={importMutation.isPending}
+            disabled={
+              !precheck || isLoading || isError || officialEmbeddingModelMissing
+            }
+            onClick={handleCopy}
+          >
+            {t("agentRepository.card.copy")}
+          </Button>
+        </div>
+      }
+      styles={{
+        body: { maxHeight: "70vh", overflowY: "auto", paddingTop: 8 },
+      }}
+    >
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Spin />
+        </div>
+      ) : isError ? (
+        <div className="flex flex-col items-center gap-3 py-10 text-center">
+          <p className="text-sm text-slate-500">
+            {t("agentRepository.copy.loadError")}
+          </p>
+          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
+            {t("repository.common.retry")}
+          </Button>
+        </div>
+      ) : precheck ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t("agentRepository.copy.configList")}
+              </span>
+              <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                {t("agentRepository.copy.percent", { percent })}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="flex items-center gap-1 text-xs text-slate-500 transition-colors hover:text-slate-800 dark:hover:text-slate-200"
+            >
+              <RefreshCw className="size-3.5" />
+              {t("agentRepository.copy.refresh")}
+            </button>
+          </div>
+
+          {hasAbnormal && !warningDismissed ? (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <p className="flex-1 leading-relaxed">
+                {t("agentRepository.copy.warning")}
+              </p>
+              <button
+                type="button"
+                onClick={() => setWarningDismissed(true)}
+                aria-label={t("common.close")}
+                className="shrink-0 text-amber-500 hover:text-amber-700"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>
+                {t("agentRepository.copy.availableCount", {
+                  count: availableItems.length,
+                })}
+              </span>
+              <span>
+                {t("agentRepository.copy.pendingCount")}{" "}
+                <span
+                  className={
+                    hasAbnormal ? "font-semibold text-amber-600" : undefined
+                  }
+                >
+                  {abnormalItems.length}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          {hasSkillConflicts ? (
+            <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {t(
+                  "agentRepository.copy.skillDuplicate.title",
+                  "Skill Name Conflict Detected"
+                )}
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {t(
+                  "agentRepository.copy.skillDuplicate.message",
+                  "Choose how to handle each conflicting skill:"
+                )}
+              </p>
+              <div className="space-y-3">
+                {skillConflictItems.map((item) => (
+                  <div
+                    key={item.key}
+                    className="rounded-lg border border-amber-200 bg-white p-3 dark:border-amber-700 dark:bg-slate-800"
+                  >
+                    <div className="mb-2">
+                      <Tag color="orange">{item.name}</Tag>
+                    </div>
+                    <Radio.Group
+                      value={skillResolutionActions[item.name] ?? "rename"}
+                      onChange={(event) => {
+                        setSkillResolutionActions((prev) => ({
+                          ...prev,
+                          [item.name]: event.target.value,
+                        }));
+                      }}
+                    >
+                      <Space direction="vertical" size={8}>
+                        <Radio value="rename">
+                          {t(
+                            "agentRepository.copy.skillDuplicate.rename",
+                            "Install as new skill"
+                          )}
+                          <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                            {t(
+                              "agentRepository.copy.skillDuplicate.renameTarget",
+                              {
+                                name:
+                                  item.suggested_new_name ||
+                                  `${item.name} 副本`,
+                                defaultValue: `New name: ${item.suggested_new_name || `${item.name} 副本`}`,
+                              }
+                            )}
+                          </span>
+                        </Radio>
+                        <Radio value="use_existing">
+                          {t(
+                            "agentRepository.copy.skillDuplicate.useExisting",
+                            "Use existing local skill"
+                          )}
+                        </Radio>
+                      </Space>
+                    </Radio.Group>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {isOfficialListing && officialKnowledgeConflictItems.length > 0 ? (
+            <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {t("ui.localization.knowledgeConflictTitle")}
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {t("ui.localization.knowledgeConflictHelp")}
+              </p>
+              <div className="space-y-3">
+                {officialKnowledgeConflictItems.map((item) => (
+                  <div
+                    key={item.key}
+                    className="rounded-lg border border-amber-200 bg-white p-3 dark:border-amber-700 dark:bg-slate-800"
+                  >
+                    <div className="mb-2">
+                      <Tag color="orange">{item.name}</Tag>
+                    </div>
+                    <Radio.Group
+                      value={knowledgeResolutionActions[item.name] ?? "reuse"}
+                      onChange={(event) => {
+                        setKnowledgeResolutionActions((prev) => ({
+                          ...prev,
+                          [item.name]: event.target.value,
+                        }));
+                      }}
+                    >
+                      <Space direction="vertical" size={8}>
+                        <Radio value="reuse">
+                          {t("ui.localization.reuseKnowledge")}
+                        </Radio>
+                        <Radio value="create_new">
+                          {t("ui.localization.createKnowledge")}
+                          <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                            {t("ui.localization.newName")}
+                            {item.name} {t("ui.localization.copySuffix")}
+                          </span>
+                        </Radio>
+                      </Space>
+                    </Radio.Group>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {isOfficialListing ? (
+            <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                {t("ui.localization.installationModels")}
+              </p>
+              <div className="space-y-2">
+                <label className="block text-xs text-slate-600 dark:text-slate-300">
+                  {t("ui.localization.languageModel")}
+                </label>
+                <Select
+                  className="w-full"
+                  placeholder={t("ui.localization.chooseLanguageModel")}
+                  value={selectedModelId}
+                  onChange={setSelectedModelId}
+                  options={availableLlmModels.map((model) => ({
+                    value: model.id,
+                    label: model.displayName || model.name,
+                  }))}
+                />
+              </div>
+              {hasOfficialKnowledge && hasOfficialKnowledgeToCreate ? (
+                <div className="space-y-2">
+                  <label className="block text-xs text-slate-600 dark:text-slate-300">
+                    {t("ui.localization.embeddingModel")}
+                  </label>
+                  <Select
+                    className="w-full"
+                    placeholder={t("ui.localization.chooseEmbeddingModel")}
+                    value={selectedEmbeddingModelId}
+                    onChange={setSelectedEmbeddingModelId}
+                    options={availableEmbeddingModels.map((model) => ({
+                      value: model.id,
+                      label: model.displayName || model.name,
+                    }))}
+                  />
+                </div>
+              ) : null}
+              {officialEmbeddingModelMissing ? (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  {t("ui.localization.embeddingUnavailable")}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {hasAbnormal ? (
+            <section className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setAbnormalOpen((value) => !value)}
+                className="flex items-center gap-1 text-sm text-slate-900 dark:text-slate-100"
+              >
+                {abnormalOpen ? (
+                  <ChevronDown className="size-4 text-amber-500" />
+                ) : (
+                  <ChevronRight className="size-4 text-amber-500" />
+                )}
+                <span>
+                  {t("agentRepository.copy.abnormalSection", {
+                    count: abnormalItems.length,
+                  })}
+                </span>
+              </button>
+              {abnormalOpen
+                ? groupByType(abnormalItems).map((group) => (
+                    <RequirementTypeGroup
+                      key={`abn-${group.type}`}
+                      type={group.type as RepositoryImportRequirementType}
+                      items={group.items}
+                      status="abnormal"
+                      t={t}
+                      onActivate={() =>
+                        handleOpenActivate(
+                          group.type as RepositoryImportRequirementType
+                        )
+                      }
+                    />
+                  ))
+                : null}
+            </section>
+          ) : null}
+
+          {availableItems.length > 0 ? (
+            <section className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setAvailableOpen((value) => !value)}
+                className="flex items-center gap-1 text-sm text-slate-900 dark:text-slate-100"
+              >
+                {availableOpen ? (
+                  <ChevronDown className="size-4 text-primary" />
+                ) : (
+                  <ChevronRight className="size-4 text-primary" />
+                )}
+                <span>
+                  {t("agentRepository.copy.availableSection", {
+                    count: availableItems.length,
+                  })}
+                </span>
+              </button>
+              {availableOpen
+                ? groupByType(availableItems).map((group) => (
+                    <RequirementTypeGroup
+                      key={`ava-${group.type}`}
+                      type={group.type as RepositoryImportRequirementType}
+                      items={group.items}
+                      status="available"
+                      t={t}
+                    />
+                  ))
+                : null}
+            </section>
+          ) : null}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function RequirementTypeGroup({
+  type,
+  items,
+  status,
+  t,
+  onActivate,
+}: {
+  type: RepositoryImportRequirementType;
+  items: RepositoryImportRequirementItem[];
+  status: "abnormal" | "available";
+  t: ReturnType<typeof useTranslation>["t"];
+  onActivate?: () => void;
+}) {
+  const Icon = TYPE_ICON[type];
+  const abnormal = status === "abnormal";
+  const typeLabel = getRepositoryRequirementTypeLabel(type, t);
+  const activatePath = getRepositoryRequirementActivatePath(type);
+  const hasKnowledgeConflict =
+    type === "knowledge_base" &&
+    items.some((item) => item.resolution_required === true);
+  const hasNameConflict =
+    (type === "knowledge_base" && hasKnowledgeConflict) ||
+    (type === "skill" &&
+      items.some((item) => item.reason_code === "skill_duplicate"));
+  const reasonLabel =
+    hasNameConflict && type === "knowledge_base"
+      ? t(
+          "agentRepository.copy.reason.kb_duplicate",
+          "Knowledge base name conflict"
+        )
+      : hasNameConflict && type === "skill"
+        ? t(
+            "agentRepository.copy.reason.skill_duplicate",
+            "Skill name conflict"
+          )
+        : getRepositoryRequirementReasonLabel(items[0]?.reason_code, t);
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-slate-900 dark:text-slate-100">
+          <Icon className="size-4 text-slate-500" />
+          {typeLabel}
+        </div>
+        {abnormal ? (
+          activatePath && !hasNameConflict ? (
+            <button
+              type="button"
+              onClick={onActivate}
+              className="flex items-center gap-2 text-xs"
+            >
+              <span className="flex items-center gap-1 text-amber-600">
+                <AlertCircle className="size-3.5" />
+                {reasonLabel ||
+                  t("agentRepository.copy.notActivated", { type: typeLabel })}
+              </span>
+              <span className="flex items-center gap-0.5 text-primary hover:underline">
+                {t("agentRepository.copy.activate")}
+                <ExternalLink className="size-3" />
+              </span>
+            </button>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-amber-600">
+              <AlertCircle className="size-3.5" />
+              {reasonLabel || t("agentRepository.copy.unavailable")}
+            </span>
+          )
+        ) : (
+          <span className="flex items-center gap-1 text-xs text-emerald-600">
+            <CheckCircle2 className="size-3.5" />
+            {t("agentRepository.copy.activated")}
+          </span>
+        )}
+      </div>
+
+      <ul className="space-y-2">
+        {items.map((item) => (
+          <li
+            key={item.key}
+            className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/50"
+          >
+            <Icon className="size-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-slate-900 dark:text-slate-100">
+                {item.name}
+              </p>
+              {item.description ? (
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {item.description}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

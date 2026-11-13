@@ -1,0 +1,99 @@
+schema_version: '1.0'
+stage: D2
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-ACCESS-D2-001
+  feature_id: RESOURCE-CENTER-ACCESS
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-ACCESS-RULE-001
+  title: 既有权限机制下的新URL登记与审核范围
+  type: API-IT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: 复用既有身份/角色/URL权限，不新增能力接口；有审核资格沿原范围全量读取，无审核资格仅本人。
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    default_entry_roles:
+    - ADMIN
+    - DEV
+    - SPEED
+    - ASSET_OWNER
+    no_default_entry:
+    - USER
+    - SU
+    policy: 按当前资源类型复用原审核角色与范围；默认入口角色不变，不由新URL权限推导新的决策或跨租户资格。
+  steps:
+  - order: 1
+    action: 只在role_permission_t登记新/resource-space URL，分别以ADMIN/DEV/SPEED/ASSET_OWNER通过既有权限查询读取授权，再检查未登记的USER/SU
+    expected: 既有权限结果包含对应角色的新URL登记；授权用户显示四Tab，ADMIN查询all_authorized，DEV/SPEED/ASSET_OWNER查询mine；未登记角色无入口；不要求新增能力字段或capabilities接口。
+  - order: 2
+    action: 保持新URL授权不变，变更三个旧URL登记；再分别撤销/追加新URL登记，通过现有权限机制重新读取
+    expected: 三个旧URL不影响新URL授权结果；撤销新URL后全部禁用，追加后四Tab均显示；审核范围和决策资格只按既有角色权限规则执行，mine用户无决策，资格不从前端参数推导。
+  - order: 3
+    action: ADMIN和DEV分别查询三类型，传伪造scope/submitter_id，在既有身份权限加载期间切角色/租户
+    expected: 范围只由认证身份及现有角色权限决定，伪造参数400；角色/租户变化清缓存；有审核资格不按提交人过滤，含本人和未知提交人；无审核资格仅匹配本人。
+  expected_results:
+  - 既有权限结果包含对应角色的新URL登记；授权用户显示四Tab，ADMIN查询all_authorized，DEV/SPEED/ASSET_OWNER查询mine；未登记角色无入口；不要求新增能力字段或capabilities接口。
+  - 三个旧URL不影响新URL授权结果；撤销新URL后全部禁用，追加后四Tab均显示；审核范围和决策资格只按既有角色权限规则执行，mine用户无决策，资格不从前端参数推导。
+  - 范围只由认证身份及现有角色权限决定，伪造参数400；角色/租户变化清缓存；有审核资格不按提交人过滤，含本人和未知提交人；无审核资格仅匹配本人。
+  forbidden_side_effects:
+  - 不得运行时读取三个旧URL授权来决定新Tab。
+  - 不得把有审核Tab理解成有决策资格或跨租户读取资格。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-001
+    design_status: Designed; product, script and runtime evidence PENDING.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 既有权限结果包含对应角色的新URL登记；授权用户显示四Tab，ADMIN查询all_authorized，DEV/SPEED/ASSET_OWNER查询mine；未登记角色无入口；不要求新增能力字段或capabilities接口。（SPEC
+      AC-001）
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 三个旧URL不影响新URL授权结果；撤销新URL后全部禁用，追加后四Tab均显示；审核范围和决策资格只按既有角色权限规则执行，mine用户无决策，资格不从前端参数推导。（SPEC AC-001）
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 范围只由认证身份及现有角色权限决定，伪造参数400；角色/租户变化清缓存；有审核资格不按提交人过滤，含本人和未知提交人；无审核资格仅匹配本人。（SPEC AC-001）
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  contract:
+    protocol: HTTP JSON; preserve router prefix
+    request_expectations:
+    - 只在role_permission_t登记新/resource-space URL，分别以ADMIN/DEV/SPEED/ASSET_OWNER通过既有权限查询读取授权，再检查未登记的USER/SU
+    - 保持新URL授权不变，变更三个旧URL登记；再分别撤销/追加新URL登记，通过现有权限机制重新读取
+    - ADMIN和DEV分别查询三类型，传伪造scope/submitter_id，在既有身份权限加载期间切角色/租户
+    response_expectations:
+    - 既有权限结果包含对应角色的新URL登记；授权用户显示四Tab，ADMIN查询all_authorized，DEV/SPEED/ASSET_OWNER查询mine；未登记角色无入口；不要求新增能力字段或capabilities接口。
+    - 三个旧URL不影响新URL授权结果；撤销新URL后全部禁用，追加后四Tab均显示；审核范围和决策资格只按既有角色权限规则执行，mine用户无决策，资格不从前端参数推导。
+    - 范围只由认证身份及现有角色权限决定，伪造参数400；角色/租户变化清缓存；有审核资格不按提交人过滤，含本人和未知提交人；无审核资格仅匹配本人。

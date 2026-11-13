@@ -214,6 +214,10 @@ export interface Agent {
   greeting_message?: string;
   example_questions?: string[];
   icon_url?: string;
+  latest_review?: {
+    review_id: string;
+    status: "pending_review" | "approved" | "rejected";
+  } | null;
   repository_info?: MyAgentRepositoryInfoItem[];
 }
 

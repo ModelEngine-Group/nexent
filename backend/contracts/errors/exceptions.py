@@ -651,5 +651,9 @@ class StorageObjectConflictError(ValueError):
     """Raised when an object identity is already bound to different accounting data."""
 
 
+class ReviewConflictError(Exception):
+    """The submitted review state or revision is no longer current."""
+
+
 class AccountConflictError(Exception):
     """An account email or stable identity conflicts with an existing record."""

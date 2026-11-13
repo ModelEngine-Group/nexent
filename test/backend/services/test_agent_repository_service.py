@@ -1360,90 +1360,34 @@ def test_update_status_su_pending_review_to_shared(mock_status_update_deps):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "SU"}
     record = _repository_record(status="pending_review")
-    deps["get_by_id"].side_effect = [record, {**record, "status": "shared"}]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="shared",
-        user_id="su_user",
-        tenant_id="tenant_a",
-    )
-
-    assert result["status"] == "shared"
-    deps["update_status"].assert_called_once_with(
-        repository_id=1,
-        status="shared",
-        user_id="su_user",
-        filter_publisher_tenant_id="tenant_a",
-        publisher_tenant_id=None,
-        publisher_user_id=None,
-        submitted_by=None,
-        content=None,
-    )
-    deps["reset_status"].assert_called_once_with(
-        agent_repository_id=1,
-        agent_id=10,
-        status="shared",
-        publisher_tenant_id="tenant_a",
-    )
-    ars.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        review_status="shared",
-        receiver_user_id="user_a",
-        details={
-            "name": "Agent One",
-            "agent_repository_id": 1,
-            "agent_id": 10,
-        },
-        tenant_id="tenant_a",
-        unique_id=1,
-        created_by="su_user",
-    )
-    ars.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        unique_id=1,
-        updated_by="su_user",
-    )
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="shared", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_update_status_su_pending_review_to_rejected(mock_status_update_deps):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "SU"}
     record = _repository_record(status="pending_review")
-    deps["get_by_id"].side_effect = [record, {**record, "status": "rejected"}]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="rejected",
-        user_id="su_user",
-        tenant_id="tenant_a",
-        content="needs work",
-    )
-
-    assert result["status"] == "rejected"
-    ars.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        review_status="rejected",
-        receiver_user_id="user_a",
-        details={
-            "name": "Agent One",
-            "agent_repository_id": 1,
-            "agent_id": 10,
-            "content": "needs work",
-        },
-        tenant_id="tenant_a",
-        unique_id=1,
-        created_by="su_user",
-    )
-    ars.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        unique_id=1,
-        updated_by="su_user",
-    )
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="rejected", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_update_status_su_shared_to_not_shared(mock_status_update_deps):
@@ -1498,146 +1442,68 @@ def test_update_status_admin_not_shared_to_pending_review(mock_status_update_dep
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "ADMIN"}
     record = _repository_record(status="not_shared")
-    deps["get_by_id"].side_effect = [record, {**record, "status": "pending_review"}]
-    deps["update_status"].return_value = 1
-
-    with patch_import_object_context(ars, "_resolve_submitter_email", return_value="admin@example.com"):
-        result = ars.update_agent_repository_status_impl(
-            agent_repository_id=1,
-            status="pending_review",
-            user_id="admin_user",
-            tenant_id="tenant_a",
-        )
-
-    assert result["status"] == "pending_review"
-    deps["update_status"].assert_called_once_with(
-        repository_id=1,
-        status="pending_review",
-        user_id="admin_user",
-        filter_publisher_tenant_id="tenant_a",
-        publisher_tenant_id="tenant_a",
-        publisher_user_id="admin_user",
-        submitted_by="admin@example.com",
-        content=None,
-    )
-    deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="pending_review", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("agent", 10, "tenant_a", "user_a")
+    assert service.save_submission.call_args.kwargs["repository_id"] == 1
 
 
 def test_update_status_admin_rejected_to_pending_review(mock_status_update_deps):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "ADMIN"}
     record = _repository_record(status="rejected")
-    deps["get_by_id"].side_effect = [record, {**record, "status": "pending_review"}]
-    deps["update_status"].return_value = 1
-
-    with patch_import_object_context(ars, "_resolve_submitter_email", return_value="admin@example.com"):
-        result = ars.update_agent_repository_status_impl(
-            agent_repository_id=1,
-            status="pending_review",
-            user_id="admin_user",
-            tenant_id="tenant_a",
-        )
-
-    assert result["status"] == "pending_review"
-    deps["update_status"].assert_called_once_with(
-        repository_id=1,
-        status="pending_review",
-        user_id="admin_user",
-        filter_publisher_tenant_id="tenant_a",
-        publisher_tenant_id="tenant_a",
-        publisher_user_id="admin_user",
-        submitted_by="admin@example.com",
-        content=None,
-    )
-    deps["reset_status"].assert_has_calls(_pending_review_reset_calls())
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="pending_review", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    assert service.save_submission.call_args.args[:4] == ("agent", 10, "tenant_a", "user_a")
+    assert service.save_submission.call_args.kwargs["repository_id"] == 1
 
 
 def test_update_status_admin_pending_review_to_shared(mock_status_update_deps):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "ADMIN"}
-    record = _repository_record(
-        status="pending_review",
-        publisher_user_id="other_user",
-    )
-    deps["get_by_id"].side_effect = [record, {**record, "status": "shared"}]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="shared",
-        user_id="admin_user",
-        tenant_id="tenant_a",
-    )
-
-    assert result["status"] == "shared"
-    deps["update_status"].assert_called_once_with(
-        repository_id=1,
-        status="shared",
-        user_id="admin_user",
-        filter_publisher_tenant_id="tenant_a",
-        publisher_tenant_id=None,
-        publisher_user_id=None,
-        submitted_by=None,
-        content=None,
-    )
-    ars.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        review_status="shared",
-        receiver_user_id="other_user",
-        details={
-            "name": "Agent One",
-            "agent_repository_id": 1,
-            "agent_id": 10,
-        },
-        tenant_id="tenant_a",
-        unique_id=1,
-        created_by="admin_user",
-    )
-    ars.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        unique_id=1,
-        updated_by="admin_user",
-    )
+    record = _repository_record(status="pending_review")
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="shared", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_update_status_admin_pending_review_to_rejected(mock_status_update_deps):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "ADMIN"}
-    record = _repository_record(
-        status="pending_review",
-        publisher_user_id="other_user",
-    )
-    deps["get_by_id"].side_effect = [record, {**record, "status": "rejected"}]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="rejected",
-        user_id="admin_user",
-        tenant_id="tenant_a",
-    )
-
-    assert result["status"] == "rejected"
-    ars.create_repository_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        review_status="rejected",
-        receiver_user_id="other_user",
-        details={
-            "name": "Agent One",
-            "agent_repository_id": 1,
-            "agent_id": 10,
-        },
-        tenant_id="tenant_a",
-        unique_id=1,
-        created_by="admin_user",
-    )
-    ars.deactivate_notifications.assert_called_once_with(
-        event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        unique_id=1,
-        updated_by="admin_user",
-    )
+    record = _repository_record(status="pending_review")
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="rejected", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps):
@@ -1737,59 +1603,36 @@ def test_update_status_user_role_rejected(mock_status_update_deps):
 
 def test_update_status_same_status_noop(mock_status_update_deps):
     deps = mock_status_update_deps
+    deps["get_user_role"].return_value = {"user_role": "ADMIN"}
     record = _repository_record(status="shared")
-    deps["get_by_id"].side_effect = [record, record]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="shared",
-        user_id="any_user",
-        tenant_id="tenant_a",
-    )
-
-    assert result["status"] == "shared"
-    deps["get_user_role"].assert_not_called()
-    deps["update_status"].assert_called_once_with(
-        repository_id=1,
-        status="shared",
-        user_id="any_user",
-        filter_publisher_tenant_id="tenant_a",
-        publisher_tenant_id=None,
-        publisher_user_id=None,
-        submitted_by=None,
-        content=None,
-    )
-    deps["reset_status"].assert_called_once_with(
-        agent_repository_id=1,
-        agent_id=10,
-        status="shared",
-        publisher_tenant_id="tenant_a",
-    )
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="shared", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
     deps = mock_status_update_deps
-    official_record = _repository_record(
-        status="shared",
-        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
-    )
-    deps["get_by_id"].side_effect = [None, official_record, official_record]
-    deps["update_status"].return_value = 1
-
-    result = ars.update_agent_repository_status_impl(
-        agent_repository_id=1,
-        status="shared",
-        user_id="su_user",
-        tenant_id="tenant_a",
-    )
-
-    assert result["status"] == "shared"
-    assert deps["get_by_id"].call_args_list == [
-        call(1, "tenant_a"),
-        call(1, ars.SYSTEM_TENANT_ID),
-        call(1, "tenant_a"),
-    ]
+    deps["get_user_role"].return_value = {"user_role": "SU"}
+    record = _repository_record(status="shared")
+    deps["get_by_id"].return_value = record
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "status": "pending_review"})
+    service.decide_legacy_review = MagicMock(return_value={"review_id": "41", "status": "approved"})
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}):
+        result = ars.update_agent_repository_status_impl(agent_repository_id=1, status="shared", user_id="user_a", tenant_id="tenant_a")
+    assert result["review_id"] == "41"
+    deps["update_status"].assert_not_called()
+    deps["reset_status"].assert_not_called()
+    service.decide_legacy_review.assert_called_once()
+    assert service.decide_legacy_review.call_args.args[0:2] == ("agent", 1)
 
 
 def test_check_repository_import_precheck_rejects_snapshotless_listing():
@@ -2160,209 +2003,59 @@ async def test_build_repository_data_from_agent_sets_submitted_by():
 
 @pytest.mark.asyncio
 async def test_create_agent_repository_listing_impl_success():
-    agent_info_json = {
-        "agent_id": 1,
-        "agent_info": {"1": {"agent_id": 1, "name": "agent_one"}},
-        "mcp_info": [],
-        "skills": None,
-    }
-    with patch_import_object_context(
-        ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch_import_object_context(
-        ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch_import_object_context(
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    payload = {"agent_id": 1, "version_no": 1, "name": "frozen", "status": "pending_review",
+               "agent_info_json": {"agent_id": 1, "agent_info": {}, "mcp_info": []}}
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), patch_import_object_context(
+        ars, "_build_repository_data_from_agent", new_callable=AsyncMock, return_value=payload
+    ), patch_import_object_context(ars, "get_user_tenant_by_user_id", return_value={"user_role": "ADMIN"}), patch_import_object_context(
         ars, "insert_agent_repository_record"
-    ) as mock_insert, patch_import_object_context(
-        ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch_import_object_context(
-        ars, "reset_agent_repository_status"
-    ) as mock_reset_status:
-        mock_build_data.return_value = {
-            "agent_id": 1,
-            "version_no": 1,
-            "name": "agent_one",
-            "agent_info_json": agent_info_json,
-            "status": "pending_review",
-            "icon_url": None,
-            "tags": ["营销"],
-        }
-        mock_get_by_agent_id.return_value = None
-        mock_insert.return_value = 42
-        mock_get_by_id.return_value = {
-            "agent_repository_id": 42,
-            "agent_id": 1,
-            "name": "agent_one",
-            "display_name": "Agent One",
-            "content": "please review",
-            "agent_info_json": agent_info_json,
-            "version_no": 1,
-            "status": "pending_review",
-            "tags": [],
-        }
-
-        result = await ars.create_agent_repository_listing_impl(
-            agent_id=1,
-            tenant_id="tenant_a",
-            user_id="user_a",
-            version_no=1,
-        )
-
-    assert result["agent_repository_id"] == 42
-    assert result["agent_info_json"] == agent_info_json
-    assert result["is_updated"] is False
-    mock_insert.assert_called_once()
-    mock_get_by_agent_id.assert_called_once_with(
-        1,
-        1,
-        publisher_tenant_id="tenant_a",
-    )
-    mock_reset_status.assert_has_calls(
-        _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
-    )
-    ars.create_repository_pending_review_notification.assert_called_once_with(
-        resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
-        tenant_id="tenant_a",
-        unique_id=42,
-        details={
-            "name": "Agent One",
-            "agent_repository_id": 42,
-            "agent_id": 1,
-            "content": "please review",
-        },
-        created_by="user_a",
-    )
+    ) as insert, patch_import_object_context(ars, "update_agent_repository_by_id") as update:
+        result = await ars.create_agent_repository_listing_impl(1, "tenant_a", "user_a", 1)
+    assert result == {"review_id": "41", "repository_id": None}
+    insert.assert_not_called()
+    update.assert_not_called()
+    assert service.save_submission.call_args.kwargs["version_no"] == 1
+    assert service.save_submission.call_args.args[5]["agent_info_json"] == payload["agent_info_json"]
 
 
 @pytest.mark.asyncio
 async def test_create_agent_repository_listing_impl_updates_existing():
-    agent_info_json = {
-        "agent_id": 1,
-        "agent_info": {"1": {"agent_id": 1, "name": "agent_one"}},
-        "mcp_info": [],
-        "skills": None,
-    }
-    with patch_import_object_context(
-        ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch_import_object_context(
-        ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch_import_object_context(
-        ars, "update_agent_repository_by_id"
-    ) as mock_update_by_id, patch_import_object_context(
-        ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch_import_object_context(
-        ars, "reset_agent_repository_status"
-    ) as mock_reset_status:
-        mock_build_data.return_value = {
-            "agent_id": 1,
-            "version_no": 2,
-            "name": "agent_one",
-            "agent_info_json": agent_info_json,
-            "status": "pending_review",
-            "icon_url": None,
-            "tags": ["营销"],
-            "tool_count": 3,
-        }
-        mock_get_by_agent_id.return_value = {"agent_repository_id": 42}
-        mock_update_by_id.return_value = 1
-        mock_get_by_id.return_value = {
-            "agent_repository_id": 42,
-            "agent_id": 1,
-            "name": "agent_one",
-            "agent_info_json": agent_info_json,
-            "version_no": 2,
-            "status": "pending_review",
-            "tags": [],
-        }
-
-        result = await ars.create_agent_repository_listing_impl(
-            agent_id=1,
-            tenant_id="tenant_a",
-            user_id="user_a",
-            version_no=2,
-        )
-
-    assert result["agent_repository_id"] == 42
-    assert result["is_updated"] is True
-    mock_get_by_agent_id.assert_called_once_with(
-        1,
-        2,
-        publisher_tenant_id="tenant_a",
-    )
-    mock_update_by_id.assert_called_once_with(
-        repository_id=42,
-        publisher_tenant_id="tenant_a",
-        user_id="user_a",
-        updates={
-            "status": "pending_review",
-            "content": "",
-            "icon_url": None,
-            "tags": ["营销"],
-            "tool_count": 3,
-        },
-    )
-    mock_reset_status.assert_has_calls(
-        _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
-    )
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    payload = {"agent_id": 1, "version_no": 1, "name": "frozen", "status": "pending_review",
+               "agent_info_json": {"agent_id": 1, "agent_info": {}, "mcp_info": []}}
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), patch_import_object_context(
+        ars, "_build_repository_data_from_agent", new_callable=AsyncMock, return_value=payload
+    ), patch_import_object_context(ars, "get_user_tenant_by_user_id", return_value={"user_role": "ADMIN"}), patch_import_object_context(
+        ars, "insert_agent_repository_record"
+    ) as insert, patch_import_object_context(ars, "update_agent_repository_by_id") as update:
+        result = await ars.create_agent_repository_listing_impl(1, "tenant_a", "user_a", 1)
+    assert result == {"review_id": "41", "repository_id": None}
+    insert.assert_not_called()
+    update.assert_not_called()
+    assert service.save_submission.call_args.kwargs["version_no"] == 1
+    assert service.save_submission.call_args.args[5]["agent_info_json"] == payload["agent_info_json"]
 
 
 @pytest.mark.asyncio
 async def test_create_agent_repository_listing_impl_accepts_draft_version():
-    agent_info_json = {
-        "agent_id": 1,
-        "agent_info": {"1": {"agent_id": 1, "name": "agent_one"}},
-        "mcp_info": [],
-        "skills": None,
-    }
-    with patch_import_object_context(
-        ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch_import_object_context(
-        ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch_import_object_context(
+    service = types.ModuleType("management.services.repository.reviews")
+    service.save_submission = MagicMock(return_value={"review_id": "41", "repository_id": None})
+    payload = {"agent_id": 1, "version_no": 0, "name": "frozen", "status": "pending_review",
+               "agent_info_json": {"agent_id": 1, "agent_info": {}, "mcp_info": []}}
+    with patch.dict(sys.modules, {"management.services.repository.reviews": service}), patch_import_object_context(
+        ars, "_build_repository_data_from_agent", new_callable=AsyncMock, return_value=payload
+    ), patch_import_object_context(ars, "get_user_tenant_by_user_id", return_value={"user_role": "ADMIN"}), patch_import_object_context(
         ars, "insert_agent_repository_record"
-    ) as mock_insert, patch_import_object_context(
-        ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch_import_object_context(
-        ars, "reset_agent_repository_status"
-    ) as mock_reset_status:
-        mock_build_data.return_value = {
-            "agent_id": 1,
-            "version_no": 0,
-            "name": "agent_one",
-            "agent_info_json": agent_info_json,
-            "status": "pending_review",
-            "icon_url": None,
-            "tags": ["营销"],
-        }
-        mock_get_by_agent_id.return_value = None
-        mock_insert.return_value = 42
-        mock_get_by_id.return_value = {
-            "agent_repository_id": 42,
-            "agent_id": 1,
-            "name": "agent_one",
-            "agent_info_json": agent_info_json,
-            "version_no": 0,
-            "status": "pending_review",
-            "tags": [],
-        }
-
-        result = await ars.create_agent_repository_listing_impl(
-            agent_id=1,
-            tenant_id="tenant_a",
-            user_id="user_a",
-            version_no=0,
-        )
-
-    assert result["agent_repository_id"] == 42
-    assert result["version_no"] == 0
-    mock_build_data.assert_awaited_once_with(1, "tenant_a", "user_a", 0, card_fields=None)
-    mock_get_by_agent_id.assert_called_once_with(
-        1,
-        0,
-        publisher_tenant_id="tenant_a",
-    )
-    mock_reset_status.assert_has_calls(
-        _pending_review_reset_calls(agent_repository_id=42, agent_id=1)
-    )
+    ) as insert, patch_import_object_context(ars, "update_agent_repository_by_id") as update:
+        result = await ars.create_agent_repository_listing_impl(1, "tenant_a", "user_a", 0)
+    assert result == {"review_id": "41", "repository_id": None}
+    insert.assert_not_called()
+    update.assert_not_called()
+    assert service.save_submission.call_args.kwargs["version_no"] == 0
+    assert service.save_submission.call_args.args[5]["agent_info_json"] == payload["agent_info_json"]
 
 
 @pytest.mark.asyncio
@@ -2648,6 +2341,30 @@ def test_list_repository_listings_returns_agent_level_download_totals():
 
     mock_sum.assert_called_once_with([10])
     assert result["items"][0]["downloads"] == 7
+
+
+def test_list_repository_listings_sorts_by_displayed_copies_before_pagination():
+    records = [
+        _repository_record(agent_repository_id=1, agent_id=10),
+        _repository_record(agent_repository_id=2, agent_id=20),
+        _repository_record(agent_repository_id=3, agent_id=30),
+        _repository_record(agent_repository_id=4, agent_id=40),
+    ]
+
+    with patch_import_object_context(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch_import_object_context(
+        ars, "sum_agent_repository_downloads_by_agent_ids", return_value={20: 7, 30: 7}
+    ):
+        first_page = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", page_size=2, sort_by_downloads=True
+        )
+        second_page = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", page=2, page_size=2, sort_by_downloads=True
+        )
+
+    assert [(item["agent_id"], item["downloads"]) for item in first_page["items"]] == [(30, 7), (20, 7)]
+    assert [(item["agent_id"], item["downloads"]) for item in second_page["items"]] == [(40, 0), (10, 0)]
 
 
 def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
@@ -3069,3 +2786,14 @@ async def test_import_agent_from_repository_defaults_skill_resolutions_to_none()
     mock_import.assert_called_once()
     call_kwargs = mock_import.call_args[1]
     assert call_kwargs["skill_resolutions"] is None
+
+
+@pytest.fixture(autouse=True)
+def isolate_repository_transaction_boundary(monkeypatch):
+    """Service UT isolates the DB owner; transaction behavior has dedicated tests."""
+    from contextlib import nullcontext
+    import management.db.repository_transactions as transactions
+
+    monkeypatch.setattr(transactions, "repository_unit_of_work", lambda: nullcontext())
+    import management.services.repository.agent.publishing as publishing
+    monkeypatch.setattr(publishing, "repository_unit_of_work", lambda: nullcontext())

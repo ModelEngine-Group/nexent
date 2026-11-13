@@ -23,8 +23,8 @@ vi.mock("@/hooks/useConfirmModal", () => ({
 }));
 vi.mock("@/hooks/agent/useAgentList", () => {
   const agents = [
-    { agent_id: 1, name: "Created", permission: "EDIT" },
-    { agent_id: 2, name: "Shared", permission: "READ_ONLY" },
+    { id: "1", name: "Created", permission: "EDIT" },
+    { id: "2", name: "Shared", permission: "READ_ONLY" },
   ];
   return {
     useAgentList: vi.fn(() => ({
@@ -60,16 +60,25 @@ vi.mock("@/hooks/agent/useAgentVersionDetail", () => ({
 vi.mock("@/components/agent/CreateAgentModal", () => ({ default: () => null }));
 vi.mock("@/components/agent/agent-detail", () => ({ AgentDetail: () => null }));
 vi.mock("@/components/tag/TagFilterPopover", () => ({ default: () => null }));
-vi.mock("@/app/agent-space/components/AgentUsageGuideModal", () => ({
-  AgentUsageGuideModal: () => null,
-}));
-vi.mock("@/app/agent-space/components/MineApplyListingModal", () => ({
-  MineApplyListingModal: () => null,
-}));
-vi.mock("@/app/agent-space/components/MineReviewStatusModal", () => ({
-  MineReviewStatusModal: () => null,
-}));
-vi.mock("@/app/agent-space/components/MyAgentCard", () => ({
+vi.mock(
+  "@/components/repository/agent/components/AgentUsageGuideModal",
+  () => ({
+    AgentUsageGuideModal: () => null,
+  })
+);
+vi.mock(
+  "@/components/repository/agent/components/MineApplyListingModal",
+  () => ({
+    MineApplyListingModal: () => null,
+  })
+);
+vi.mock(
+  "@/components/repository/agent/components/MineReviewStatusModal",
+  () => ({
+    MineReviewStatusModal: () => null,
+  })
+);
+vi.mock("@/components/repository/agent/components/MyAgentCard", () => ({
   MyAgentCard: ({ agent }: { agent: { name: string } }) => (
     <div>{agent.name}</div>
   ),
@@ -93,7 +102,7 @@ describe("mine ownership controls", () => {
     }
     expect(screen.getByText("Created")).toBeVisible();
     expect(screen.getByText("Shared")).toBeVisible();
-    fireEvent.click(screen.getByTitle("2"));
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
     await waitFor(() =>
       expect(vi.mocked(useAgentList).mock.lastCall?.[0]).toMatchObject({
         page: 2,

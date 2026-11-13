@@ -49,6 +49,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
       const formattedData = (data.remote_mcp_server_list || []).map((server: any) => {
         return {
           service_name: server.remote_mcp_server_name,
+          author_display_name: server.author_display_name,
           mcp_url: server.remote_mcp_server,
           status: server.status || false,
           permission: server.permission,

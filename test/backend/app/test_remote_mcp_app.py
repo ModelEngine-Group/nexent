@@ -7,6 +7,7 @@ list, healthcheck, port management, enable/disable, and container operations.
 """
 
 import sys
+import pytest
 import os
 import types
 import importlib.machinery
@@ -1028,3 +1029,11 @@ class TestMcpAuditEntries:
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
+
+
+@pytest.fixture(autouse=True)
+def isolate_latest_review_projection(monkeypatch):
+    """Keep API unit tests isolated from the new application-summary database query."""
+    module = types.ModuleType("management.services.repository.reviews")
+    module.attach_latest_reviews = MagicMock()
+    monkeypatch.setitem(sys.modules, "management.services.repository.reviews", module)

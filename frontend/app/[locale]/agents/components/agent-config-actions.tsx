@@ -5,8 +5,8 @@
 import { useState } from "react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
-import { App, Button, Dropdown, Modal, Tooltip, type MenuProps } from "antd";
-
+import { App, Button, Dropdown, Modal, Tooltip } from "antd";
+import type { MenuProps } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Copy,
@@ -15,8 +15,11 @@ import {
   GitBranch,
   MoreHorizontal,
   Network,
-  Share2,
   LineChart,
+  Share2,
+  ClipboardCheck,
+  Send,
+  Settings2,
   Trash2,
 } from "lucide-react";
 
@@ -31,34 +34,37 @@ import {
   deleteAgent,
   exportAgent,
   generateUniqueCopyName,
-  normalizeTags,
   searchAgentInfo,
   updateAgentInfo,
   updateToolConfig,
 } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
-import type { Agent } from "@/types/agentConfig";
-import type {
-  AgentRepositoryListingCreatePayload,
-  MyEditableAgentItem,
-} from "@/types/agentRepository";
-import { isCurrentVersionListed } from "@/lib/agentRepositoryMine";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { RESOURCE_REPOSITORY_PERMISSION_ROUTE } from "@/const/resourceRepository";
+import { buildResourceRepositoryHref } from "@/lib/resourceRepositoryRoutes";
+import { getAgentUsageGuideAccess } from "@/lib/agentUsageGuide";
 import { useCreateAgentRepositoryListing } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { AgentApplyListingModal } from "@/components/agent/AgentApplyListingModal";
+import { MineApplyListingModal } from "@/components/repository/agent/components/MineApplyListingModal";
+import { AgentUsageGuideModal } from "@/components/repository/agent/components/AgentUsageGuideModal";
+import type { Agent } from "@/types/agentConfig";
 
 export default function AgentConfigActions({
-  agent,
   agentId: agentIdProp,
   agentName: agentNameProp,
+  agent,
   readOnly,
   variant = "buttons",
+  onConfigure,
+  onPublish,
   onManageVersions,
 }: {
-  agent?: Agent;
   agentId?: number | null;
   agentName?: string;
+  agent?: Agent;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
+  onConfigure?: (agentId: number) => void;
+  onPublish?: (agentId: number) => void;
   onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -71,6 +77,7 @@ export default function AgentConfigActions({
     agentId?: string;
     locale?: string;
   }>();
+  const { canAccessRoute } = useAuthorizationContext();
   const storeAgentId = useAgentStore((state) => state.agentId);
   const agentId = agentIdProp ?? storeAgentId;
   const editedAgent = useAgentStore((state) => state.editedAgent);
@@ -82,45 +89,28 @@ export default function AgentConfigActions({
   const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
-  const [listingTarget, setListingTarget] =
-    useState<MyEditableAgentItem | null>(null);
+  const [repositoryDialog, setRepositoryDialog] = useState<
+    "apply" | "guide" | null
+  >(null);
   const createListing = useCreateAgentRepositoryListing();
-  const listingAgent: MyEditableAgentItem | null =
+  const versionNo = agent?.current_version_no ?? 0;
+  const canAccessRepository = canAccessRoute(
+    RESOURCE_REPOSITORY_PERMISSION_ROUTE
+  );
+  const canApply =
+    canAccessRepository &&
+    !isReadOnly &&
+    versionNo > 0 &&
+    agent?.latest_review?.status !== "pending_review";
+  const repositoryAgent =
     agent && agentId !== null
       ? {
+          ...agent,
           agent_id: agentId,
-          name: agent.display_name || agent.name,
-          description: agent.description,
-          current_version_no: agent.current_version_no,
-          version_label: agent.version_label,
-          icon_url: agent.icon_url,
-          tags: normalizeTags(agent.tags),
-          permission: isReadOnly ? "READ_ONLY" : "EDIT",
+          name: agentName,
           repository_info: agent.repository_info ?? [],
         }
       : null;
-  const canEvaluate = (listingAgent?.current_version_no ?? 0) > 0;
-  const canApplyListing =
-    canEvaluate &&
-    !isReadOnly &&
-    listingAgent !== null &&
-    !isCurrentVersionListed(listingAgent);
-  const submitListing = async (
-    payload: AgentRepositoryListingCreatePayload
-  ) => {
-    if (!listingTarget || createListing.isPending) return;
-    try {
-      await createListing.mutateAsync({
-        agentId: listingTarget.agent_id,
-        versionNo: listingTarget.current_version_no!,
-        payload,
-      });
-      message.success(t("repository.mine.applySuccess"));
-      setListingTarget(null);
-    } catch {
-      message.error(t("repository.mine.applyError"));
-    }
-  };
   const { data: a2aSettingsData, isLoading: isLoadingA2ASettings } = useQuery({
     queryKey: ["a2aServerSettings", agentId],
     queryFn: () => a2aClientService.getServerSettings(agentId!),
@@ -335,32 +325,80 @@ export default function AgentConfigActions({
 
   const disabled = agentId === null;
   const menuItems: NonNullable<MenuProps["items"]> = [];
-  if (agent) {
-    menuItems.push(
-      {
-        key: "listing",
-        icon: <Share2 className="size-3.5" />,
-        label: t("agentConfig.list.listing"),
-        disabled: !canApplyListing || createListing.isPending,
-        onClick: () => {
-          if (canApplyListing) setListingTarget(listingAgent);
-        },
+  if (onConfigure) {
+    menuItems.push({
+      key: "configure",
+      icon: <Settings2 className="size-3.5" />,
+      label: t("agentConfig.list.configure"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onConfigure(agentId);
       },
-      {
+    });
+  }
+  if (onPublish) {
+    menuItems.push({
+      key: "publish",
+      icon: <Send className="size-3.5" />,
+      label: t("agentConfig.list.publish"),
+      disabled: disabled || isReadOnly,
+      onClick: () => {
+        if (agentId !== null) onPublish(agentId);
+      },
+    });
+  }
+  if (onConfigure || onPublish) menuItems.push({ type: "divider" });
+  if (repositoryAgent) {
+    if (canApply) {
+      menuItems.push({
+        key: "applyListing",
+        icon: <Share2 className="size-3.5" />,
+        label: t("agentRepository.mine.menu.apply"),
+        onClick: () => setRepositoryDialog("apply"),
+      });
+    }
+    if (canAccessRepository && repositoryAgent.latest_review) {
+      const reviewId = repositoryAgent.latest_review.review_id;
+      menuItems.push({
+        key: "viewReview",
+        icon: <ClipboardCheck className="size-3.5" />,
+        label: t("resourceCenter.tab.review"),
+        onClick: () =>
+          router.push(
+            buildResourceRepositoryHref(locale || "en", {
+              tab: "review",
+              reviewId,
+            })
+          ),
+      });
+    }
+    if (versionNo > 0 && canAccessRoute("/evaluation")) {
+      menuItems.push({
         key: "evaluate",
         icon: <LineChart className="size-3.5" />,
         label: t("agentRepository.mine.evaluate"),
-        disabled: !canEvaluate,
         onClick: () => {
-          if (canEvaluate && agentId !== null)
-            router.push(
-              `/${locale ?? pathname.split("/")[1]}/evaluation?agent_ids=${encodeURIComponent(JSON.stringify([agentId]))}`
-            );
+          const query = new URLSearchParams({
+            agent_ids: JSON.stringify([repositoryAgent.agent_id]),
+          });
+          router.push(`/${locale || "en"}/evaluation?${query}`);
         },
-      }
-    );
+      });
+    }
+    if (
+      getAgentUsageGuideAccess({
+        currentVersionNo: versionNo,
+        permission: agent?.permission,
+      }).canOpen
+    ) {
+      menuItems.push({
+        key: "usageGuide",
+        icon: <Share2 className="size-3.5" />,
+        label: t("agentRepository.mine.menu.usageGuide"),
+        onClick: () => setRepositoryDialog("guide"),
+      });
+    }
   }
-  if (agent) menuItems.push({ type: "divider" });
   menuItems.push(
     {
       key: "copy",
@@ -428,15 +466,34 @@ export default function AgentConfigActions({
 
   return (
     <>
-      {listingTarget && (
-        <AgentApplyListingModal
+      {repositoryAgent && repositoryDialog === "apply" && canApply && (
+        <MineApplyListingModal
           open
-          agent={listingTarget}
+          agent={repositoryAgent}
           isSubmitting={createListing.isPending}
-          onClose={() => {
-            if (!createListing.isPending) setListingTarget(null);
+          onClose={() => setRepositoryDialog(null)}
+          onSubmit={async (payload) => {
+            try {
+              await createListing.mutateAsync({
+                agentId: repositoryAgent.agent_id,
+                versionNo,
+                payload,
+              });
+              message.success(t("repository.mine.applySuccess"));
+              setRepositoryDialog(null);
+            } catch {
+              message.error(t("repository.mine.applyError"));
+            }
           }}
-          onSubmit={submitListing}
+        />
+      )}
+      {repositoryAgent && repositoryDialog === "guide" && (
+        <AgentUsageGuideModal
+          open
+          agent={repositoryAgent}
+          locale={locale || "en"}
+          canAccessApiKeys={canAccessRoute("/users")}
+          onClose={() => setRepositoryDialog(null)}
         />
       )}
       {variant === "table" ? (

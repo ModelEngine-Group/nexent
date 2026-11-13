@@ -23,6 +23,9 @@ from management.services.repository.mcp.service import (
     delete_community_mcp_service,
 )
 from management.db.mcp.market import increment_mcp_market_download_count
+from contracts.errors.exceptions import ForbiddenError
+from contracts.tool import McpBatchDeleteRequest
+from management.services.mcp.service import delete_mcp_service
 from management.services.monitor.audit import record_security_event
 from gateway.authentication.auth import get_current_user_info
 
@@ -53,6 +56,8 @@ async def list_community_mcp_services_api(
             cursor=query.cursor,
             limit=query.limit,
         )
+        if query.sort_by_published_time:
+            list_kwargs["sort_by_published_time"] = True
         if query.page is not None:
             list_kwargs["page"] = query.page
         data = await list_community_mcp_services(**list_kwargs)
@@ -183,7 +188,7 @@ async def publish_community_mcp_service_api(
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": {"market_id": market_id}},
+            content={"status": "success", "data": market_id},
         )
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
@@ -245,6 +250,44 @@ async def update_community_mcp_service_legacy_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Failed to update MCP community service",
         )
+
+
+@router.post("/batch_delete")
+async def batch_delete_mcp_services_api(
+    payload: McpBatchDeleteRequest,
+    authorization: Optional[str] = Header(None),
+    http_request: Request = None,
+):
+    """Delete selected local services and community listings independently."""
+    try:
+        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+
+    results = []
+    for kind, target_id in dict.fromkeys((item.kind, item.id) for item in payload.items):
+        result = {"kind": kind, "id": target_id}
+        try:
+            if kind == "local":
+                await delete_mcp_service(tenant_id=tenant_id, user_id=user_id, mcp_id=target_id)
+            else:
+                await delete_community_mcp_service(tenant_id=tenant_id, user_id=user_id, market_id=target_id)
+        except (McpNotFoundError, ForbiddenError, UnauthorizedError) as exc:
+            results.append({**result, "success": False, "message": str(exc)})
+        except Exception:
+            logger.exception("Failed to batch delete MCP %s %s", kind, target_id)
+            results.append({**result, "success": False, "message": "Failed to delete MCP service"})
+        else:
+            record_security_event(
+                "mcp_delete" if kind == "local" else "mcp_market_delete",
+                request=http_request,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                details={"mcp_id" if kind == "local" else "market_id": target_id},
+            )
+            results.append({**result, "success": True})
+
+    return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success", "data": results})
 
 
 @router.delete("/community/delete")
@@ -371,11 +414,11 @@ async def create_community_mcp_service_api(
             request=http_request,
             user_id=user_id,
             tenant_id=tenant_id,
-            details={"market_id": market_id, "mcp_id": payload.mcp_id, "mcp_server": payload.mcp_server},
+            details={"review_id": market_id.get("review_id"), "mcp_id": payload.mcp_id},
         )
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"status": "success", "data": {"market_id": market_id}},
+            content={"status": "success", "data": market_id},
         )
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))

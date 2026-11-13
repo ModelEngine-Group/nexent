@@ -16,6 +16,8 @@ import { configService } from "@/services/configService";
 import agentRepositoryService from "@/services/agentRepositoryService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
+vi.mock("next/navigation", () => ({ useParams: () => ({ locale: "zh" }) }));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { name?: string }) =>
@@ -31,7 +33,7 @@ vi.mock("@/services/configService", () => ({
 vi.mock("@/services/agentConfigService", () => ({
   fetchPublishedAgentList: vi.fn(),
 }));
-vi.mock("@/app/[locale]/agents/components/a2a/A2AServerSettingsPanel", () => ({
+vi.mock("@/app/agents/components/a2a/A2AServerSettingsPanel", () => ({
   default: ({ endpointId }: { endpointId: string }) => (
     <section aria-label="a2a-settings">{endpointId}</section>
   ),

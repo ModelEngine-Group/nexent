@@ -23,6 +23,7 @@ from management.db.base import (
     _PUBLISHER_USER_ID_DOC,
     _TENANT_ID_DOC,
 )
+from management.db.repository_review_fields import RepositoryReviewFields
 
 
 class McpRecord(TableBase):
@@ -106,7 +107,7 @@ class McpCommunityRecord(TableBase):
     description = Column(Text, doc="Description")
 
 
-class McpMarketRecord(TableBase):
+class McpMarketRecord(RepositoryReviewFields, TableBase):
     """MCP market (community) record — single table covering all listing states."""
 
     __tablename__ = "mcp_market_record_t"

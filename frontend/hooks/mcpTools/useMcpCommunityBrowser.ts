@@ -4,6 +4,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import { useRepositoryQueryState } from "@/hooks/useRepositoryQueryState";
 import {
   fetchCommunityMcpCards,
   fetchCommunityMcpTagStats,
@@ -13,7 +15,7 @@ import type {
   McpTagStat,
   McpTransportFilter,
 } from "@/types/mcpTools";
-import { FILTER_ALL } from "@/const/mcpTools";
+import { FILTER_ALL, McpTransportType } from "@/const/mcpTools";
 import { MCP_SEARCH_DEBOUNCE_MS, MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 export type CommunityTransportFilter = McpTransportFilter;
@@ -34,12 +36,27 @@ const INITIAL_FILTERS: CommunityFilters = {
  * Browsing state (search + filters + offset pagination + tag stats) for the
  * community MCP list.
  */
-export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
-  const [filters, setFilters] = useState<CommunityFilters>(INITIAL_FILTERS);
+export function useMcpCommunityBrowser(
+  enabled: boolean,
+  pageSize = 30,
+  sortByPublished = false
+) {
+  const presentation = useRepositoryPresentation();
+  const [search, setSearch] = useRepositoryQueryState("search", "");
+  const [transport, setTransport] = useRepositoryQueryState<McpTransportFilter>(
+    "transport",
+    FILTER_ALL,
+    [FILTER_ALL, ...Object.values(McpTransportType)]
+  );
+  const [tag, setTag] = useRepositoryQueryState("tag", FILTER_ALL);
+  const filters = useMemo(
+    () => ({ search, transport, tag }),
+    [search, transport, tag]
+  );
   const [debouncedSearch, setDebouncedSearch] = useState(
     INITIAL_FILTERS.search
   );
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useRepositoryQueryState("page", 1);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -50,19 +67,34 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
   }, [filters.search]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset pagination when debounced filters change.
-    setPage(1);
-  }, [debouncedSearch, filters.transport, filters.tag]);
+    if (!presentation) setPage(1);
+  }, [
+    debouncedSearch,
+    filters.transport,
+    filters.tag,
+    sortByPublished,
+    presentation,
+    setPage,
+  ]);
 
+  const queryScope = [
+    ...MCP_TOOLS_QUERY_KEYS.communityList,
+    debouncedSearch,
+    filters.transport,
+    filters.tag,
+    pageSize,
+    sortByPublished,
+  ];
   const query = useQuery({
-    queryKey: [
-      ...MCP_TOOLS_QUERY_KEYS.communityList,
-      debouncedSearch,
-      filters.transport,
-      filters.tag,
-      page,
-      pageSize,
-    ],
+    queryKey: [...queryScope, page],
+    placeholderData: presentation
+      ? (previousData, previousQuery) =>
+          queryScope.every(
+            (value, index) => previousQuery?.queryKey[index] === value
+          )
+            ? previousData
+            : undefined
+      : undefined,
     enabled,
     queryFn: async () => {
       const result = await fetchCommunityMcpCards({
@@ -71,6 +103,7 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
           filters.transport === FILTER_ALL ? undefined : filters.transport,
         tag: filters.tag === FILTER_ALL ? undefined : filters.tag,
         page,
+        ...(sortByPublished ? { sort_by_published_time: true } : {}),
         limit: pageSize,
       });
       return result.data;
@@ -100,33 +133,36 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
   );
 
   useEffect(() => {
-    if (query.data === undefined) return;
+    if (query.data === undefined || query.isPlaceholderData) return;
     const lastPage = Math.max(1, Math.ceil(total / pageSize));
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reconcile pagination with a completed server response.
     if (page > lastPage) setPage(lastPage);
-  }, [page, pageSize, query.data, total]);
+  }, [page, pageSize, query.data, query.isPlaceholderData, total, setPage]);
 
   const hasPrevPage = page > 1;
   const hasNextPage = page * pageSize < total;
   const nextPage = useCallback(() => {
     if (page * pageSize < total) setPage((current) => current + 1);
-  }, [page, pageSize, total]);
+  }, [page, pageSize, total, setPage]);
   const prevPage = useCallback(() => {
     setPage((current) => Math.max(1, current - 1));
-  }, []);
+  }, [setPage]);
 
-  const updateFilter = <K extends keyof CommunityFilters>(
-    key: K,
-    value: CommunityFilters[K]
-  ) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-  };
+  const updateFilter = useCallback(
+    <K extends keyof CommunityFilters>(key: K, value: CommunityFilters[K]) => {
+      if (key === "search") setSearch(String(value));
+      else if (key === "transport") setTransport(value as McpTransportFilter);
+      else setTag(String(value));
+      if (presentation) setPage(1);
+    },
+    [presentation, setSearch, setTransport, setTag, setPage]
+  );
 
+  const loading = query.isLoading || (!presentation && query.isFetching);
   return useMemo(
     () => ({
       services,
       tagStats,
-      loading: query.isLoading || query.isFetching,
+      loading,
       error: query.error,
       filters,
       updateFilter,
@@ -143,8 +179,7 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
     [
       services,
       tagStats,
-      query.isLoading,
-      query.isFetching,
+      loading,
       query.error,
       filters,
       page,
@@ -155,6 +190,8 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
       nextPage,
       prevPage,
       query.refetch,
+      setPage,
+      updateFilter,
     ]
   );
 }

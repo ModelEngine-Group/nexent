@@ -10,6 +10,7 @@ export type AgentRepositoryListingStatus =
   "not_shared" | "pending_review" | "rejected" | "shared";
 
 export interface AgentRepositoryListingItem {
+  published_at?: string | null;
   agent_repository_id: number;
   agent_id?: number;
   name: string;
@@ -60,9 +61,12 @@ export interface AgentRepositoryListingListParams {
   tag?: string;
   /** Request latest-published-first ordering; omitted keeps the default order. */
   sort_by_update_time?: boolean;
+  sort_by_published_time?: boolean;
+  sort_by_downloads?: boolean;
 }
 
 export interface AgentRepositoryListingDetail {
+  published_at?: string | null;
   agent_repository_id: number;
   agent_id?: number | null;
   version_no?: number | null;
@@ -97,6 +101,10 @@ export interface MyAgentRepositoryInfoItem {
 }
 
 export interface MyEditableAgentItem {
+  latest_review?: {
+    review_id: string;
+    status: "pending_review" | "approved" | "rejected";
+  } | null;
   agent_id: number;
   icon_url?: string | null;
   is_available?: boolean;

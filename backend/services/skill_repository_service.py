@@ -6,6 +6,7 @@ import logging
 import math
 import re
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from management.db.repository_transactions import repository_transaction
 
 from contracts.constants.constants import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
@@ -140,6 +141,7 @@ def _to_summary_item(
         "created_at": record.get("created_at") or _serialize_created_at(record.get("create_time")),
         "updated_at": record.get("updated_at") or _serialize_created_at(record.get("update_time")),
         "content": record.get("content"),
+        "published_at": _serialize_created_at(record.get("published_at")),
     }
     if can_take_down is not None:
         item["can_take_down"] = can_take_down
@@ -297,10 +299,14 @@ def _get_user_role(user_id: str) -> str:
 
 
 def ensure_skill_repository_access(user_id: str) -> None:
-    """Reject ordinary users from the Skill Repository API surface."""
+    """Honor role-union access and explicit unified repository grants."""
     user_role = _get_user_role(user_id)
-    if not has_any_role(user_role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"}):
-        raise ForbiddenError("User role USER is not authorized to access Skill Repository")
+    if has_any_role(user_role, {"DEV", "ADMIN", "SU", "ASSET_OWNER"}):
+        return
+    from management.db.identity.role_permission import check_role_permission
+
+    if not check_role_permission(user_role, permission_type="LEFT_NAV_MENU", permission_subtype="/resource-space"):
+        raise ForbiddenError("User is not authorized to access Skill Repository")
 
 
 def _can_publish_skill(
@@ -534,6 +540,7 @@ def _validate_create_payload(repository_data: Dict[str, Any]) -> None:
     _validate_card_fields(repository_data)
 
 
+@repository_transaction
 def create_skill_repository_listing_impl(
     skill_id: int,
     tenant_id: str,
@@ -542,6 +549,8 @@ def create_skill_repository_listing_impl(
     card_fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Create or update a repository listing from the current skill snapshot."""
+    from management.db.repository_transactions import current_repository_session, lock_repository_source
+    lock_repository_source(current_repository_session(), "skill", tenant_id, skill_id)
     repository_data = _build_repository_data_from_skill(
         skill_id,
         tenant_id,
@@ -550,64 +559,8 @@ def create_skill_repository_listing_impl(
     )
     _validate_create_payload(repository_data)
 
-    existing = _find_resubmittable_repository_record(
-        skill_id,
-        tenant_id,
-    )
-    was_pending_review = bool(
-        existing and existing.get("status") == STATUS_PENDING_REVIEW
-    )
-    if not existing:
-        repository_id = insert_skill_repository_record(
-            repository_data=repository_data,
-            publisher_tenant_id=tenant_id,
-            publisher_user_id=user_id,
-        )
-        is_updated = False
-    else:
-        repository_id = int(existing["skill_repository_id"])
-        updates = {
-            key: repository_data[key]
-            for key in _UPDATE_SNAPSHOT_FIELDS
-            if key in repository_data
-        }
-        affected = update_skill_repository_by_id(
-            repository_id=repository_id,
-            publisher_tenant_id=tenant_id,
-            user_id=user_id,
-            updates=updates,
-        )
-        if affected == 0:
-            raise ValueError("Failed to update repository listing")
-        is_updated = True
-
-    _reset_repository_peer_statuses(
-        skill_repository_id=repository_id,
-        skill_id=skill_id,
-        status=STATUS_PENDING_REVIEW,
-        publisher_tenant_id=tenant_id,
-    )
-
-    record = get_skill_repository_by_id_and_publisher(
-        repository_id,
-        tenant_id,
-    )
-    if not record:
-        raise ValueError("Failed to load repository listing after write")
-    if not was_pending_review:
-        create_repository_pending_review_notification(
-            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
-            tenant_id=tenant_id,
-            unique_id=repository_id,
-            details={
-                "name": record.get("name"),
-                "skill_repository_id": repository_id,
-                "skill_id": record.get("skill_id"),
-                "content": record.get("content") or "",
-            },
-            created_by=user_id,
-        )
-    return _to_detail_item(record, is_updated=is_updated)
+    from management.services.repository.reviews import save_submission
+    return save_submission("skill", skill_id, tenant_id, user_id, _get_user_role(user_id), repository_data)
 
 
 def _validate_su_status_transition(
@@ -638,6 +591,8 @@ def _validate_publisher_status_transition(
         owner_user_id = snapshot.get("created_by") or record.get("publisher_user_id")
         if str(owner_user_id) != str(user_id):
             raise ForbiddenError("Not authorized to update this repository listing")
+    if current_status == new_status:
+        return None
     if has_any_role(user_role, {'ADMIN'}) and transition in _ADMIN_REVIEW_STATUS_TRANSITIONS:
         return None
     if transition not in _PUBLISHER_STATUS_TRANSITIONS:
@@ -665,6 +620,8 @@ def _validate_repository_status_transition(
     transition = (current_status, new_status)
 
     if has_any_role(user_role, {'SU'}):
+        if current_status == new_status:
+            return None
         _validate_su_status_transition(transition, current_status, new_status)
         return None
 
@@ -684,6 +641,7 @@ def _validate_repository_status_transition(
     )
 
 
+@repository_transaction
 def update_skill_repository_status_impl(
     *,
     skill_repository_id: int,
@@ -709,18 +667,24 @@ def update_skill_repository_status_impl(
     current_status = record.get("status")
     publisher_updates: Optional[Dict[str, str]] = None
     submitted_by: Optional[str] = None
+    user_role = _get_user_role(user_id)
+    publisher_updates = _validate_repository_status_transition(
+        user_role=user_role,
+        current_status=current_status,
+        new_status=status,
+        record=record,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
     if current_status != status:
-        user_role = _get_user_role(user_id)
-        publisher_updates = _validate_repository_status_transition(
-            user_role=user_role,
-            current_status=current_status,
-            new_status=status,
-            record=record,
-            user_id=user_id,
-            tenant_id=tenant_id,
-        )
         if status == STATUS_PENDING_REVIEW:
             submitted_by = _resolve_submitter_email(user_id)
+
+    if status in (STATUS_SHARED, STATUS_REJECTED):
+        from management.services.repository.reviews import decide_legacy_review
+        return decide_legacy_review("skill", skill_repository_id, user_id, tenant_id, user_role, status, content)
+    if status == STATUS_PENDING_REVIEW:
+        return create_skill_repository_listing_impl(record["skill_id"], tenant_id, user_id, card_fields={"content": content})
 
     rows_affected = update_skill_repository_status_by_id(
         repository_id=skill_repository_id,
@@ -766,6 +730,15 @@ def update_skill_repository_status_impl(
         content=content,
     )
 
+    if status == STATUS_PENDING_REVIEW and (updated.get("submission_revision") or 0) > (record.get("submission_revision") or 0):
+        deactivate_notifications(event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+            resource_type=RESOURCE_TYPE_SKILL_REPOSITORY, unique_id=skill_repository_id, updated_by=user_id)
+        create_repository_pending_review_notification(resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
+            tenant_id=tenant_id, unique_id=skill_repository_id, created_by=user_id,
+            details={"name": updated.get("display_name") or updated.get("name"),
+                     "skill_repository_id": skill_repository_id, "skill_id": updated.get("skill_id"),
+                     "content": updated.get("submit_description") or ""})
+
     enrich_repository_identities([updated], "skill")
     return _to_summary_item(updated)
 
@@ -791,14 +764,14 @@ def _handle_review_status_notifications(
         create_repository_review_notification(
             resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
             review_status=new_status,
-            receiver_user_id=updated["publisher_user_id"],
+            receiver_user_id=updated.get("submitted_user_id") or updated["publisher_user_id"],
             details=details,
             tenant_id=updated.get("publisher_tenant_id"),
             unique_id=skill_repository_id,
             created_by=user_id,
         )
 
-    if current_status == STATUS_PENDING_REVIEW:
+    if current_status == STATUS_PENDING_REVIEW and new_status != STATUS_PENDING_REVIEW:
         deactivate_notifications(
             event_type=EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
             resource_type=RESOURCE_TYPE_SKILL_REPOSITORY,
@@ -876,6 +849,7 @@ def install_skill_from_repository_impl(
             zip_bytes=zip_bytes,
             skill_name=copy_skill_name,
             source="repository",
+            source_repository_id=skill_repository_id,
             user_id=user_id,
             tenant_id=tenant_id,
             ingroup_permission=PERMISSION_READ,
@@ -886,17 +860,6 @@ def install_skill_from_repository_impl(
             duplicate_name = _extract_duplicate_skill_name(message) or copy_skill_name
             raise SkillDuplicateError([duplicate_name]) from exc
         raise
-
-    affected = increment_skill_repository_downloads(
-        repository_id=skill_repository_id,
-        user_id=user_id,
-    )
-    if affected == 0:
-        logger.warning(
-            "Failed to increment skill repository downloads after install "
-            "(skill_repository_id=%s)",
-            skill_repository_id,
-        )
 
     return {
         "skill_id": created_skill.get("skill_id"),
@@ -1110,6 +1073,8 @@ def list_skill_repository_listings_impl(
     tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
     sort_by_update_time: bool = False,
+    include_installations: bool = False,
+    sort_by_published_time: bool = False,
 ) -> Dict[str, Any]:
     """List skill repository listings for the caller tenant with optional filters."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -1137,6 +1102,7 @@ def list_skill_repository_listings_impl(
         )
         skill_ids = [int(skill_id) for skill_id in matched_ids]
 
+    user_role = _get_user_role(user_id)
     result = list_skill_repository_summaries(
         publisher_tenant_id=tenant_id,
         status=status,
@@ -1148,12 +1114,20 @@ def list_skill_repository_listings_impl(
         search=search,
         tag=tag,
         sort_by_update_time=sort_by_update_time,
+        **({"review_user_id": user_id} if user_role != "ADMIN" and status != STATUS_SHARED else {}),
+        **({"sort_by_published_time": True} if sort_by_published_time else {}),
     )
     user_role = _get_user_role(user_id)
     enrich_repository_identities(result.get("items", []), "skill")
+    installation_info = {}
+    if include_installations:
+        from management.services.repository.skill_installations import get_installation_states
+        installation_info = get_installation_states(
+            [record["skill_repository_id"] for record in result.get("items", [])], tenant_id, user_id, user_role)
+
     return {
         "items": [
-            _to_summary_item(
+            {**installation_info.get(str(record["skill_repository_id"]), {}), **_to_summary_item(
                 record,
                 can_take_down=(
                     record.get("status") == STATUS_SHARED
@@ -1165,7 +1139,7 @@ def list_skill_repository_listings_impl(
                         )
                     )
                 ),
-            )
+            )}
             for record in result.get("items", [])
         ],
         "pagination": result.get("pagination"),

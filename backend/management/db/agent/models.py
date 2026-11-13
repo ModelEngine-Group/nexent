@@ -23,6 +23,7 @@ from management.db.base import (
     _PUBLISHER_TENANT_ID_DOC,
     _PUBLISHER_USER_ID_DOC,
 )
+from management.db.repository_review_fields import RepositoryReviewFields
 
 
 class AgentInfo(TableBase):
@@ -165,7 +166,7 @@ class AgentVersion(TableBase):
                     doc="Version status: RELEASED / DISABLED / ARCHIVED")
 
 
-class AgentRepository(TableBase):
+class AgentRepository(RepositoryReviewFields, TableBase):
     """
     Agent repository (marketplace) table. Frozen snapshot of a published agent tree for sharing.
     """

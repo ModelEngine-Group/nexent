@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D4
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-REVIEW-D4-001
+  feature_id: RESOURCE-CENTER-REVIEW
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-REVIEW-RULE-006
+  - RESOURCE-CENTER-REVIEW-RULE-015
+  title: 三类审核失败不丢输入，成功刷新与分页回落
+  type: E2E
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 三类审核失败不丢输入，成功刷新与分页回落
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  - 决策成功场景使用已登记新URL且具有对应decision_types资格的审核者，本人/他人提交均沿用原有操作规则；本人查看场景使用独立mine身份。
+  test_data: {}
+  steps:
+  - order: 1
+    action: 对Agent/Skill/MCP分别打开待审详情输入意见，令decision返回409或500，再重试
+    expected: 三类弹窗均保持输入和错误；未显示成功；409要求刷新当前轮再确认，不能自动以新revision提交旧意图。
+  - order: 2
+    action: 分别在status=all与status=pending_review下处理记录；待审筛选准备末页最后一项，再打开对应仓库和我的视图
+    expected: all保留记录并更新状态/意见/按钮，不无故退页；pending筛选移出记录并重新取total，末页超界才回有效页；相关列表/详情刷新且成功关闭弹窗。
+  - order: 3
+    action: 切换同数值ID不同类型记录及租户，重复打开详情
+    expected: 审核缓存key包含认证用户、当前范围、资源类型、租户和仓库ID；切用户/角色/租户清旧结果，使用现有身份权限加载态，不请求新增能力接口。
+  - order: 4
+    action: 令决策已提交但响应丢失/超时，再点击重试或刷新
+    expected: 先读最新状态和revision；若已处理显示当前结果，不直接自动重放、不冒认一定由本次操作完成；仍pending且轮次匹配时经用户确认才能重试。
+  expected_results:
+  - 三类弹窗均保持输入和错误；未显示成功；409要求刷新当前轮再确认，不能自动以新revision提交旧意图。
+  - all保留记录并更新状态/意见/按钮，不无故退页；pending筛选移出记录并重新取total，末页超界才回有效页；相关列表/详情刷新且成功关闭弹窗。
+  - 审核缓存key包含认证用户、当前范围、资源类型、租户和仓库ID；切用户/角色/租户清旧结果，使用现有身份权限加载态，不请求新增能力接口。
+  - 先读最新状态和revision；若已处理显示当前结果，不直接自动重放、不冒认一定由本次操作完成；仍pending且轮次匹配时经用户确认才能重试。
+  forbidden_side_effects:
+  - 不得吞掉Skill提交异常并关闭确认框。
+  - 不得重放过期意见到新轮次。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-006
+    - AC-015
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 三类弹窗均保持输入和错误；未显示成功；409要求刷新当前轮再确认，不能自动以新revision提交旧意图。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: all保留记录并更新状态/意见/按钮，不无故退页；pending筛选移出记录并重新取total，末页超界才回有效页；相关列表/详情刷新且成功关闭弹窗。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 审核缓存key包含认证用户、当前范围、资源类型、租户和仓库ID；切用户/角色/租户清旧结果，使用现有身份权限加载态，不请求新增能力接口。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 先读最新状态和revision；若已处理显示当前结果，不直接自动重放、不冒认一定由本次操作完成；仍pending且轮次匹配时经用户确认才能重试。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  actor: 具备Case指定能力的租户用户及审核员
+  journey:
+  - 对Agent/Skill/MCP分别打开待审详情输入意见，令decision返回409或500，再重试
+  - 分别在status=all与status=pending_review下处理记录；待审筛选准备末页最后一项，再打开对应仓库和我的视图
+  - 切换同数值ID不同类型记录及租户，重复打开详情
+  - 令决策已提交但响应丢失/超时，再点击重试或刷新
+  final_business_result:
+  - 三类弹窗均保持输入和错误；未显示成功；409要求刷新当前轮再确认，不能自动以新revision提交旧意图。
+  - all保留记录并更新状态/意见/按钮，不无故退页；pending筛选移出记录并重新取total，末页超界才回有效页；相关列表/详情刷新且成功关闭弹窗。
+  - 审核缓存key包含认证用户、当前范围、资源类型、租户和仓库ID；切用户/角色/租户清旧结果，使用现有身份权限加载态，不请求新增能力接口。
+  - 先读最新状态和revision；若已处理显示当前结果，不直接自动重放、不冒认一定由本次操作完成；仍pending且轮次匹配时经用户确认才能重试。
+  failure_evidence:
+  - 脱敏截图、浏览器控制台、网络请求及响应、run_id和实际被测commit；不保存凭据。

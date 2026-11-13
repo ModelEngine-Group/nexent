@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: RESOURCE-CENTER-ACCESS-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_per_type_scopes_and_direct_decision_authorization
+acceptance_bindings:
+  AC-01:
+  - test_per_type_scopes_and_direct_decision_authorization
+  AC-02:
+  - test_per_type_scopes_and_direct_decision_authorization
+  AC-03:
+  - test_per_type_scopes_and_direct_decision_authorization

@@ -87,4 +87,5 @@ from management.db.tag.models import (
 
 from management.db.evaluation.models import AgentEvaluation, AgentEvaluationCase
 
+from management.db.resource_review_model import ResourceReview
 from management.db.identity.models import UserAccount

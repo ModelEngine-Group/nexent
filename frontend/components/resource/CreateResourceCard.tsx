@@ -1,5 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { useRepositoryPresentation } from "@/hooks/useRepositoryPresentation";
+import { Button } from "antd";
 import { Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -15,6 +19,13 @@ export default function CreateResourceCard({
   onClick,
   className,
 }: CreateResourceCardProps) {
+  const presentation = useRepositoryPresentation();
+  if (presentation?.layout === "list")
+    return (
+      <Button icon={<Plus size={16} />} onClick={onClick}>
+        {title}
+      </Button>
+    );
   return (
     <button
       type="button"

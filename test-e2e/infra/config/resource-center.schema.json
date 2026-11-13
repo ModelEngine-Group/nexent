@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "backend_container",
+    "backend_directory",
+    "python",
+    "database_container"
+  ],
+  "properties": {
+    "backend_container": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend_directory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "python": {
+      "type": "string",
+      "minLength": 1
+    },
+    "database_container": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

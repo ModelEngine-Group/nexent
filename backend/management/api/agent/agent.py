@@ -683,7 +683,11 @@ async def list_agent_page_api(
                 kwargs[key] = [TagAssignmentFilter.model_validate(item) for item in parsed]
         if additional_tenant_id:
             kwargs["additional_tenant_id"] = additional_tenant_id
-        return await list_agent_page_impl(**kwargs)
+        result = await list_agent_page_impl(**kwargs)
+        if include_repository_info:
+            from management.services.repository.reviews import attach_latest_reviews
+            attach_latest_reviews(result["items"], "agent", "agent_id", user_id, resolved_tenant_id)
+        return result
     except ValueError as error:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error)) from error
     except Exception as error:

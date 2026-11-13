@@ -21,6 +21,7 @@ from contracts.constants.environment import (
     POSTGRES_USER,
 )
 from management.db.models import TableBase
+from management.db.repository_transactions import current_repository_session
 from nexent.storage.storage_client_factory import (
     MinIOStorageConfig,
     create_storage_client_from_config,
@@ -315,18 +316,20 @@ def get_db_session(db_session=None):
     param db_session: Optional session to use, if None, a new session will be created.
     Provide a transactional scope around a series of operations.
     """
-    session = db_client.session_maker() if db_session is None else db_session
+    shared_session = db_session if db_session is not None else current_repository_session()
+    owns_session = shared_session is None
+    session = db_client.session_maker() if owns_session else shared_session
     try:
         yield session
-        if db_session is None:
+        if owns_session:
             session.commit()
     except Exception as e:
-        if db_session is None:
+        if owns_session:
             session.rollback()
         logger.error(f"Database operation failed: {str(e)}")
         raise e
     finally:
-        if db_session is None:
+        if owns_session:
             session.close()
 
 

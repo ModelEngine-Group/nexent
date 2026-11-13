@@ -121,6 +121,9 @@ def list_agent_repository_listings_impl(
     tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
     sort_by_update_time: bool = False,
+    sort_by_published_time: bool = False,
+    sort_by_downloads: bool = False,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -193,10 +196,29 @@ def list_agent_repository_listings_impl(
         records = [
             record for record in records if tag.strip() in (record.get("tags") or [])
         ]
-    if sort_by_update_time:
+    if not sort_by_downloads and sort_by_published_time:
+        records.sort(key=lambda row: (row.get("published_at") is not None,
+            str(row.get("published_at") or ""), _repository_id_sort_key(row)), reverse=True)
+    elif not sort_by_downloads and sort_by_update_time:
         # Order the merged tenant+official set as one list; ordering only in
         # SQL would interleave the two query blocks incorrectly.
         records = _order_listings_by_publish_time(records)
+    if user_id is not None and _get_user_role(user_id) != "ADMIN":
+        records = [row for row in records if row.get("status") == STATUS_SHARED
+                   or row.get("submitted_user_id") == user_id
+                   or (row.get("status") == STATUS_NOT_SHARED and row.get("publisher_user_id") == user_id)]
+    download_totals = None
+    if sort_by_downloads:
+        download_totals = _get_agent_download_totals(
+            [int(row["agent_id"]) for row in records if row.get("agent_id") is not None]
+        )
+        records.sort(
+            key=lambda row: (
+                download_totals.get(int(row["agent_id"]), 0) if row.get("agent_id") is not None else 0,
+                _repository_id_sort_key(row),
+            ),
+            reverse=True,
+        )
     total = len(records)
     start = (page - 1) * page_size
     paged_records = records[start : start + page_size]
@@ -207,7 +229,8 @@ def list_agent_repository_listings_impl(
         if record.get("agent_id") is not None
     ]
     _apply_agent_main_flags(paged_records)
-    download_totals = _get_agent_download_totals(paged_agent_ids)
+    if download_totals is None:
+        download_totals = _get_agent_download_totals(paged_agent_ids)
     return {
         "items": [
             _to_summary_item(

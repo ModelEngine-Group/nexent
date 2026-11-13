@@ -151,6 +151,18 @@ describe("platform author presentation", () => {
     expect(detail.author).toBe("Imported Author");
     expect(detail.authorCasUsername).toBeUndefined();
   });
+  it("keeps publication time separate from warehouse creation time", () => {
+    const detail = mapRepositoryAgentDetail(version, {
+      created_at: "2025-01-01T00:00:00Z",
+      published_at: "2026-11-05T00:00:00Z",
+    } as AgentRepositoryListingDetail);
+    expect(detail.repositoryInfo?.publishedAt).toBe("2026-11-05T00:00:00Z");
+    expect(detail.repositoryInfo?.createdAt).toBe("2025-01-01T00:00:00Z");
+    const historical = mapRepositoryAgentDetail(version, {
+      created_at: "2025-01-01T00:00:00Z",
+    } as AgentRepositoryListingDetail);
+    expect(historical.repositoryInfo?.publishedAt).toBeNull();
+  });
 
   it("maps official repository snapshots without requiring a tenant agent version", () => {
     const detail = mapOfficialRepositoryDetail(

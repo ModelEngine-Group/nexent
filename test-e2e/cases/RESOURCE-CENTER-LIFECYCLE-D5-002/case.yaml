@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D5
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-LIFECYCLE-D5-002
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-LIFECYCLE-RULE-016
+  title: 隔离数据库增量迁移与旧协议回退兼容
+  type: DEPLOYMENT
+  priority: P0
+  status: blocked
+  automation: automated
+  objective: D5部署边界验证迁移、历史数据和兼容回退；不自动重部署用户环境。
+  preconditions:
+  - 配置专用一次性数据库创建权限及本地兼容后端；先验证迁移和双写，再执行新协议，不执行用户环境重部署。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    environment: 专用一次性PostgreSQL测试库；旧schema来自基线准备资产，目标schema由正式迁移入口按版本发现，不硬编码SQL路径。
+  steps:
+  - order: 1
+    action: 准备三类型旧待审、已上架、驳回和历史Skill，执行正式版本迁移
+    expected: 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+  - order: 2
+    action: 重复执行迁移并核对结构与记录数量
+    expected: 同一历史待审只导入一次；正式脚本不增删旧18列，原仓库内容与ID保留。
+  - order: 3
+    action: 构造来源、创建人、时间或快照缺失及重复同源待审，再执行迁移
+    expected: 异常中止并整体回滚，不出现先删列后丢申请，版本不得记成功。
+  - order: 4
+    action: 核对旧写入者适配、停写备份和前向恢复限制
+    expected: 未适配客户端不切新读；不直接退回只读仓库的旧服务，保留审核数据与备份。
+  expected_results: &id001
+  - 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+  - 同一历史待审只导入一次；正式脚本不增删旧18列，原仓库内容与ID保留。
+  - 异常中止并整体回滚，不出现先删列后丢申请，版本不得记成功。
+  - 未适配客户端不切新读；不直接退回只读仓库的旧服务，保留审核数据与备份。
+  forbidden_side_effects:
+  - 不得绕过审核表提前覆盖仓库内容或修改已完成申请。
+  - 失败事务不得留下仓库半写入或丢失申请数据。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-016
+    design_status: '2026-11-05: independent-review upgrade runner scenario implemented and directly executed on
+      disposable PostgreSQL; dedicated formal-runner environment and complete release-gate evidence remain pending.'
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 仅待审迁入审核表，content/update_time/来源创建人映射正确；已上架和驳回不补造历史，Skill来源列保留。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 同一历史待审只导入一次；正式脚本不增删旧18列，原仓库内容与ID保留。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 异常中止并整体回滚，不出现先删列后丢申请，版本不得记成功。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 未适配客户端不切新读；不直接退回只读仓库的旧服务，保留审核数据与备份。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  risk_type: DEPLOYMENT
+  risk: 增量迁移破坏历史数据或新旧读写发布顺序失配
+  condition:
+  - 由统一准备工具建立一次性旧schema测试库；不得复用开发/生产库。
+  - 本Case不改变应用启动flag或重部署用户栈；若实施需要互斥启动模式，先补deployment-exception和显式恢复选项。
+  metrics:
+  - 历史数据差异条数、schema契约差异数、新旧协议smoke失败数、测试库清理结果
+  thresholds:
+  - 旧表旧列与旧数据保留；新增列类型/nullability/default与设计一致，历史时间/说明/意见及来源为null，revision为0；迁移失败不得登记目标版本为成功。
+  - 旧必需契约仍可读写，新字段不阻塞旧协议；保留新列与兼容后端，不执行drop列式回滚；写入结果可由新读正确读取。
+  - 未确认旧写入者全部升级时新入口不得开放；回退到双写前后端之前必须停止新入口和新语义读取；清理完成。该Case不证明实际旧后端二进制已部署回退。
+  - 新URL登记到原默认角色集合，运行时不依赖旧URL；新增submitted_user_id为VARCHAR(100)可空，历史保持NULL且不回填；普通用户审核中心不显示历史申请，原审核资格用户仍可读，重新提交后本人可见，原“我的”视图不变。
+  recovery_expectations:
+  - 失败只处理一次性测试库，保留诊断，不改用户运行环境；正式发布回退仍需task人工演练证据。
+  observations: *id001

@@ -179,11 +179,13 @@ async def list_agent_repository_listings_api(
     ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     sort_by_update_time: bool = Query(False, description="Sort by repository publish time descending"),
+    sort_by_published_time: bool = Query(False, description="Sort by actual approval time descending"),
+    sort_by_downloads: bool = Query(False, description="Sort by cumulative agent copies descending"),
     authorization: str = Header(None),
 ):
     """List all marketplace repository listings with optional status filter."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         filters = {
             "status": status,
             "agent_id": agent_id,
@@ -191,7 +193,12 @@ async def list_agent_repository_listings_api(
             "page_size": page_size,
             "search": search,
             "sort_by_update_time": sort_by_update_time,
+            "user_id": user_id,
         }
+        if sort_by_published_time:
+            filters["sort_by_published_time"] = True
+        if sort_by_downloads:
+            filters["sort_by_downloads"] = True
         search_predicates = _parse_tag_predicates(search_tag_predicates)
         if search_predicates:
             filters["search_tag_predicates"] = search_predicates
@@ -271,6 +278,8 @@ async def list_my_editable_agents_api(
         if search_predicates:
             filters["search_tag_predicates"] = search_predicates
         result = await list_my_editable_agents_impl(**filters)
+        from management.services.repository.reviews import attach_latest_reviews
+        attach_latest_reviews(result["items"], "agent", "agent_id", user_id, tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized my editable agents access attempt: {str(e)}")

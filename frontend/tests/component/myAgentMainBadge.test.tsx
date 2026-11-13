@@ -7,6 +7,8 @@ import { MyAgentCard } from "../../app/[locale]/agent-space/components/MyAgentCa
 import { fetchPagedAgentList } from "@/services/agentConfigService";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
 
+vi.mock("next/navigation", () => ({ useParams: () => ({ locale: "zh" }) }));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { version?: string }) => {
@@ -24,7 +26,7 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("@/app/[locale]/agent-space/components/MyAgentIcon", () => ({
+vi.mock("@/components/repository/agent/components/MyAgentIcon", () => ({
   MyAgentIcon: () => <div data-testid="agent-icon" />,
 }));
 

@@ -14,6 +14,7 @@ from contracts.constants.environment import (
 from infrastructure.concurrency import config_thread_manager
 from management.api.a2a.a2a_client import router as a2a_client_router
 from management.api.a2a.a2a_server import router as a2a_server_router
+from management.api.repository.reviews import router as repository_reviews_router
 from management.api.agent.agent import agent_config_router as agent_router
 from management.api.agent.agent_repository import agent_repository_router
 from management.api.configuration.config_sync import router as config_sync_router
@@ -160,6 +161,7 @@ async def thread_capacity():
     return config_thread_manager.snapshot()
 
 
+app.include_router(repository_reviews_router)
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
 app.include_router(agent_router)

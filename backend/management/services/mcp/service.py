@@ -35,7 +35,7 @@ from contracts.roles import has_any_role, roles_from_record
 from contracts.tool import MCPConfigRequest
 from infrastructure.http.client import create_httpx_client
 from management.db.identity.group import query_group_ids_by_user
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.identity.user_tenant import get_user_email_map, get_user_tenant_by_user_id
 from management.db.mcp.market import (
     get_mcp_market_record_by_source_mcp_id,
     update_mcp_market_record,
@@ -494,6 +494,14 @@ async def delete_mcp_service(
     current_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not current_record:
         raise McpNotFoundError("MCP record not found")
+    from contracts.errors.exceptions import ForbiddenError
+    from management.services.mcp.permission import can_edit_mcp_record
+
+    identity = get_user_tenant_by_user_id(user_id) or {}
+    groups = query_group_ids_by_user(user_id) or []
+    if not can_edit_mcp_record(current_record, user_id, identity.get("user_role", ""), groups):
+        raise ForbiddenError("MCP service is read-only")
+
     container_id = current_record.get("container_id")
     if container_id:
         try:
@@ -577,6 +585,8 @@ async def get_remote_mcp_server_list(
     tenant_id: str,
     user_id: str | None = None,
     is_need_auth: bool = True,
+    *,
+    include_author: bool = False,
 ) -> list[dict]:
     """Get list of remote MCP servers with full details.
 
@@ -584,6 +594,7 @@ async def get_remote_mcp_server_list(
         tenant_id: Tenant ID
         user_id: User ID for permission checking
         is_need_auth: Whether to include authorization tokens
+        include_author: Whether to include the creator's display name
 
     Returns:
         List of MCP server records with all fields including container_id, description,
@@ -631,6 +642,20 @@ async def get_remote_mcp_server_list(
             f"total={len(mcp_records)}, filtered={len(filtered_records)}"
         )
         mcp_records = filtered_records
+
+    author_emails = {}
+    if include_author:
+        creator_ids = {
+            record.get("created_by") or record.get("user_id")
+            for record in mcp_records
+        }
+        author_emails = get_user_email_map([creator_id for creator_id in creator_ids if creator_id])
+
+    market_ids = list({record["market_id"] for record in mcp_records if record.get("market_id") is not None})
+    shared_market_ids = set()
+    if market_ids:
+        from management.db.mcp.market import get_shared_mcp_market_ids
+        shared_market_ids = get_shared_mcp_market_ids(market_ids)
 
     container_status_map = {}
     try:
@@ -703,7 +728,7 @@ async def get_remote_mcp_server_list(
             "registry_json": record.get("registry_json"),
             "config_json": record.get("config_json"),
             "market_id": record.get("market_id"),
-            "is_listed_in_repository": record.get("market_id") is not None,
+            "is_listed_in_repository": record.get("market_id") in shared_market_ids,
             "container_status": container_status,
             "group_ids": record.get("group_ids"),
             "ingroup_permission": record.get("ingroup_permission"),
@@ -712,6 +737,8 @@ async def get_remote_mcp_server_list(
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")
             record_dict["custom_headers"] = record.get("custom_headers")
+        if include_author:
+            record_dict["author_display_name"] = author_emails.get(created_by)
         mcp_records_list.append(record_dict)
     return mcp_records_list
 

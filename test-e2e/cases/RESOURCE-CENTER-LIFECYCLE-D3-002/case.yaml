@@ -1,0 +1,106 @@
+schema_version: '1.0'
+stage: D3
+module: RESOURCE-CENTER
+case:
+  case_id: RESOURCE-CENTER-LIFECYCLE-D3-002
+  feature_id: RESOURCE-CENTER-LIFECYCLE
+  requirement_ids:
+  - RESOURCE-CENTER-REQ-20261031
+  business_rule_ids:
+  - RESOURCE-CENTER-LIFECYCLE-RULE-010
+  title: 已迁移环境中新旧协议写入与旧客户端兼容
+  type: INTEGRATION
+  priority: P1
+  status: blocked
+  automation: automated
+  objective: 真实服务和数据库验证双写协议，不在D3执行或断言schema迁移。
+  preconditions:
+  - BLOCKED：目标功能尚未实施；接口、增量迁移、固定脚本和case-local execution绑定是执行前置条件。
+  - 在仓库外的隔离测试环境准备run_id及独立租户；禁止使用生产数据或记录密钥。
+  - 使用真实产品鉴权、服务和持久层；外部依赖使用受控fixture；不要求真实模型调用。
+  test_data:
+    database: 由统一环境准备工具提供已迁移的隔离数据库；Case不引用具体SQL文件或执行迁移。
+  steps:
+  - order: 1
+    action: 三类型通过旧申请和MCP修改入口提交
+    expected: 全部走共享服务，只写申请快照，原已上架内容保持可用。
+  - order: 2
+    action: 旧审核入口按仓库ID处理唯一待审申请
+    expected: 与新review_id入口落入同一事务，完成结果和发布一致。
+  - order: 3
+    action: 旧请求无匹配或存在多个授权申请
+    expected: 明确冲突且不写仓库、不覆盖审核结果，不按最近一条猜测。
+  - order: 4
+    action: 三类型通过旧申请和MCP修改入口提交
+    expected: 全部走共享服务，只写申请快照，原已上架内容保持可用。
+  expected_results:
+  - 全部走共享服务，只写申请快照，原已上架内容保持可用。
+  - 与新review_id入口落入同一事务，完成结果和发布一致。
+  - 明确冲突且不写仓库、不覆盖审核结果，不按最近一条猜测。
+  - 全部走共享服务，只写申请快照，原已上架内容保持可用。
+  forbidden_side_effects:
+  - 不得绕过审核表提前覆盖仓库内容或修改已完成申请。
+  - 失败事务不得留下仓库半写入或丢失申请数据。
+  tags:
+  - resource-center
+  - design-only
+  source:
+    spec_path: ../nexent-doc/docs/Developing/rsc-unified-resource-repository/proposal.md
+    acceptance_ids:
+    - AC-010
+    design_status: 2026-11-04 contract revised for independent submissions; legacy fixed scripts require adaptation
+      and runtime re-execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 300
+  acceptance:
+  - id: AC-01
+    description: 全部走共享服务，只写申请快照，原已上架内容保持可用。
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: 与新review_id入口落入同一事务，完成结果和发布一致。
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 明确冲突且不写仓库、不覆盖审核结果，不按最近一条猜测。
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 全部走共享服务，只写申请快照，原已上架内容保持可用。
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  integration_boundary:
+  - HTTP → real service/adapters → migrated PostgreSQL; repository snapshots and local Skill relations are real.
+  - Use sandbox storage for Skill archives and record notification enqueue after commit; no substituted database
+    or repository adapters.
+  observations:
+  - 旧请求与响应契约保持，长内容不截断；新时间/意见字段按实际动作维护且revision一致。
+  - 所有写入者共用受控事务与新字段维护，无旁路漏写；旧无revision请求的跨轮ABA限制明确保留。
+  - 旧必需字段可解析；新读取不推断历史时间/意见；旧协议回归仍可执行，但不把本Case当作旧后端二进制回退验收。
+  - 旧协议payload/响应形状保持；无审核资格仅本人，有资格保持原范围含本人；旧接口不绕过现有权限，也不新增禁止自审。普通共享列表与我的视图保留各自业务范围。
+  cleanup:
+  - 按run_id清理本Case创建的仓库记录、源资源、归档及通知；不触及基线资源。
+  - 保存脱敏请求、逐步DB断言和清理结果；清理失败不得报告PASS。
