@@ -49,13 +49,19 @@ feature:
       default to 10 with exactly 10/20/50, tag management is absent, and AIDP string KDS scope, per-scene local identities
       and persistence remain intact.
   - rule_id: WB-CONTROLS-RULE-007
-    description: Workbench shows unified loading until conversation, models, capabilities and resource restoration settle;
-      transient initialization warnings never appear in the composer. Completed empty or failed loads leave loading and expose
-      persistent feedback.
+    description: Workbench renders its conversation and composer independently of model, bootstrap and resource-catalog loading.
+      Candidate Agent, Skill and Knowledge catalogs and their auxiliary metadata load only after the corresponding drawer opens;
+      Repository catalogs load only when that tab is selected. Pending or failed catalogs affect only their drawer. Sending remains
+      blocked until required model, bootstrap and saved resource validation settle, without transient unavailable warnings or draft loss.
+      Saved mounts retain their IDs, pinned versions and configuration when catalogs are unavailable. Skill mount catalogs opt into
+      view=mount, omit full content and tool associations, and retain authorized metadata and configuration forms; full list and
+      runtime resolution contracts remain unchanged.
   required_test_stages:
   - D4
   source:
     requirement_ids:
+    - WB-SKILL-SUMMARY-20261113
+    - WB-RESOURCE-LAZY-20261113
     - WB-CREATION-INTENT-20261103
     - WB-GENERAL-EXAMPLES-20261020
     - WB-MEDICAL-EXAMPLES-20261019

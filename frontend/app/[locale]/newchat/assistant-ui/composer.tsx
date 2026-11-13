@@ -2,9 +2,9 @@
 
 "use client";
 
-
 import {
   useMemo,
+  useEffect,
   useState,
   useSyncExternalStore,
   type FC,
@@ -380,6 +380,11 @@ export const Composer: FC<ComposerProps> = ({
         ? { key: knowledgeAccessKey, open }
         : current
     );
+  const onKnowledgeOpenChange = workbenchPresentation?.onKnowledgeOpenChange;
+  useEffect(() => {
+    onKnowledgeOpenChange?.(knowledgeModalOpen);
+    return () => onKnowledgeOpenChange?.(false);
+  }, [knowledgeModalOpen, onKnowledgeOpenChange]);
   const { data: knowledgeBases = [] } = useComposerKnowledgeBases(
     conversationResources && canSelectKnowledge,
     enableAidpKnowledge
@@ -833,6 +838,17 @@ export const Composer: FC<ComposerProps> = ({
               open={knowledgeModalOpen}
               value={knowledgeScope}
               capabilities={knowledgeCapabilities}
+              onRetryCapabilities={workbenchPresentation?.onKnowledgeRetry}
+              capabilitiesPending={
+                Boolean(
+                  workbenchPresentation?.onKnowledgeOpenChange &&
+                  !knowledgeCapabilities &&
+                  !workbenchPresentation?.knowledgeUnavailable
+                ) || workbenchPresentation?.knowledgePending
+              }
+              capabilitiesUnavailable={
+                workbenchPresentation?.knowledgeUnavailable
+              }
               onCancel={() => setKnowledgeModalOpen(false)}
               onConfirm={async (scope, preview) => {
                 if (!canSelectKnowledge) return;

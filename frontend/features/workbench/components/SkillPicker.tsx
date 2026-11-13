@@ -184,7 +184,7 @@ export function SkillPicker({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void fetchSkillsList()
+    void fetchSkillsList(undefined, "mount")
       .then((items) => {
         if (!cancelled) setSkills(items);
       })
@@ -244,7 +244,7 @@ export function SkillPicker({
       if (operation !== installOperationRef.current) return;
       if (!result.skill_id)
         throw new Error(t("workbench.controls.skillInstallMissingId"));
-      const items = await fetchSkillsList();
+      const items = await fetchSkillsList(undefined, "mount");
       if (operation !== installOperationRef.current) return;
       setSkills(items);
       if (selectedIds.size >= 20) {

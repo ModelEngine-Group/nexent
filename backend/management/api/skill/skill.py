@@ -6,7 +6,7 @@ from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FO
 from contracts.skill import InstallSkillsRequest
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from starlette.responses import JSONResponse
@@ -62,6 +62,9 @@ async def list_skills(
     tenant_id: Optional[str] = Query(None, description="Tenant ID for super admin to query specific tenant's skills"),
     authorization: Optional[str] = Header(None),
     request: Request = None,
+    view: Literal["full", "mount"] = Query(
+        "full", description="Use mount for metadata without Skill content or tool associations"
+    ),
 ) -> JSONResponse:
     """List all available skills for the current tenant (or a specific tenant for super admin)."""
     try:
@@ -70,13 +73,18 @@ async def list_skills(
         inventory_tenant = resource_read_tenant(request, shared=True)
         effective_tenant_id = inventory_tenant or tenant_id or current_tenant_id
         service = SkillService(tenant_id=effective_tenant_id)
+        list_options = {"for_mount": True} if view == "mount" else {}
         if inventory_tenant:
             fields = ("skill_id", "name", "description", "source", "tags", "update_time")
-            skills = [{field: skill.get(field) for field in fields} for skill in service.list_skills()]
+            skills = [
+                {field: skill.get(field) for field in fields}
+                for skill in service.list_skills(**list_options)
+            ]
             return JSONResponse(content={"skills": skills})
         skills = service.list_visible_skills(
             tenant_id=effective_tenant_id,
             user_id=user_id,
+            **list_options,
         )
         return JSONResponse(content={"skills": skills})
     except HTTPException:

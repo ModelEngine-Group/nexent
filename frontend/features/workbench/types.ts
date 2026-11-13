@@ -67,5 +67,9 @@ export interface WorkbenchResourceControls {
 export interface WorkbenchComposerPresentation {
   mode: WorkbenchMode;
   onExitCreation: () => void;
+  onKnowledgeOpenChange?: (open: boolean) => void;
+  onKnowledgeRetry?: () => void;
+  knowledgePending?: boolean;
+  knowledgeUnavailable?: boolean;
   actions: import("react").ReactNode;
 }
